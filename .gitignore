@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Envs
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# uv
+uv.lock        # commit this if you want — leaving uncommitted in v0
+.uv-cache/
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
+.benchmarks/
+.hypothesis/
+bench.json
+
+# Type checkers
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# OPSEC — these MUST NEVER be committed
+identities.toml
+identities/
+*.session
+*.session-journal
+sessions/
+*.age
+*.age.key
+*.key
+secrets/
+.secrets/
+
+# Operational artifacts (data, not code)
+data/
+storage/*.db
+storage/*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+logs/
+traces/
+spans.ndjson*
+
+# Calibration corpora — operator-controlled, not in source
+tests/fixtures/corpora/rutify*
+tests/fixtures/corpora/*.real.jsonl

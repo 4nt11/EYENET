@@ -1,0 +1,44 @@
+name: Nightly
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - name: Full test matrix
+        run: uv run pytest -m ""
+              --cov=eyenet
+              --cov-report=xml
+              --cov-fail-under=95
+      - run: uv run bandit -r eyenet -f json -o bandit.json
+      - run: uv run pip-audit --strict --format json --output pip-audit.json
+      - uses: actions/upload-artifact@v3
+        with:
+          name: nightly-reports
+          path: |
+            bandit.json
+            pip-audit.json
+            coverage.xml
+
+  calibration:
+    runs-on: self-hosted
+    if: ${{ secrets.RUTIFY_CORPUS_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - name: Decrypt labeled corpus
+        run: ./scripts/fetch-corpus.sh
+        env:
+          RUTIFY_CORPUS_KEY: ${{ secrets.RUTIFY_CORPUS_KEY }}
+      - run: uv run pytest -m calibration --no-cov

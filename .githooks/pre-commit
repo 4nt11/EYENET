@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+
+# Activate uv-managed venv if not active and one exists.
+if [[ -z "${VIRTUAL_ENV:-}" ]] && [[ -f .venv/bin/activate ]]; then
+  # shellcheck disable=SC1091
+  . .venv/bin/activate
+fi
+
+require ruff
+require mypy
+require bandit
+require detect-secrets
+require deptry
+require pytest
+
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR)
+PY_STAGED=()
+EYENET_PY=()
+for f in "${STAGED[@]:-}"; do
+  [[ "$f" == *.py ]] && PY_STAGED+=("$f")
+  [[ "$f" == eyenet/*.py || "$f" == eyenet/**/*.py ]] && EYENET_PY+=("$f")
+done
+
+step "ruff format --check (staged)"
+if [[ ${#PY_STAGED[@]} -gt 0 ]]; then
+  ruff format --check "${PY_STAGED[@]}" || abort "ruff format failed — run: ruff format ."
+fi
+ok "format clean"
+
+step "ruff check (staged)"
+if [[ ${#PY_STAGED[@]} -gt 0 ]]; then
+  ruff check "${PY_STAGED[@]}"
+fi
+ok "lint clean"
+
+step "mypy --strict (staged)"
+if [[ ${#PY_STAGED[@]} -gt 0 ]]; then
+  mypy --strict --no-incremental "${PY_STAGED[@]}"
+fi
+ok "types clean"
+
+step "bandit (staged eyenet/*)"
+if [[ ${#EYENET_PY[@]} -gt 0 ]]; then
+  bandit -c pyproject.toml --quiet "${EYENET_PY[@]}"
+fi
+ok "bandit clean"
+
+step "detect-secrets (CRITICAL — identity-pool blobs / age keys must not slip in)"
+if [[ ${#STAGED[@]} -gt 0 ]]; then
+  detect-secrets-hook --baseline .secrets.baseline "${STAGED[@]}"
+fi
+ok "no secrets"
+
+step "deptry"
+deptry eyenet
+ok "deps clean"
+
+step "pytest unit+contract with coverage gate (≥95% + no delta drop)"
+pytest -m "unit or contract" -q \
+  --cov=eyenet \
+  --cov-report=json:coverage.json \
+  --cov-report=term-missing \
+  --cov-fail-under=95 \
+  --no-header \
+  -x
+
+. "$SCRIPT_DIR/lib/coverage.sh"
+coverage_no_drop coverage.json .coverage-baseline
+
+ok "pre-commit OK"

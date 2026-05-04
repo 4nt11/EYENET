@@ -1,0 +1,77 @@
+name: PR
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install uv
+        run: pip install uv
+      - name: Sync env
+        run: uv sync --extra dev
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy --strict eyenet
+      - run: uv run bandit -c pyproject.toml -r eyenet
+      - run: uv run deptry eyenet
+      - run: uv run pip-audit --strict
+
+  test-fast:
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - name: Run unit + integration + contract
+        run: uv run pytest -m "unit or integration or contract"
+              --cov=eyenet
+              --cov-report=xml
+              --cov-report=json:coverage.json
+              --cov-fail-under=95
+      - uses: actions/upload-artifact@v3
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            coverage.json
+
+  test-e2e:
+    runs-on: ubuntu-latest
+    needs: test-fast
+    services:
+      nats:
+        image: nats:2-alpine
+        ports: ["4222:4222", "8222:8222"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - name: Run e2e
+        run: uv run pytest -m e2e -q
+        env:
+          EYENET_NATS_URL: "nats://localhost:4222"
+
+  benchmark:
+    runs-on: ubuntu-latest
+    needs: test-fast
+    continue-on-error: true   # warn-only until baseline exists
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - run: uv run pytest -m benchmark --benchmark-only --benchmark-json=bench.json
+      - uses: actions/upload-artifact@v3
+        with: { name: bench-json, path: bench.json }

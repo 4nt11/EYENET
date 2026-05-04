@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/common.sh"
+
+if [[ -z "${VIRTUAL_ENV:-}" ]] && [[ -f .venv/bin/activate ]]; then
+  # shellcheck disable=SC1091
+  . .venv/bin/activate
+fi
+
+require ruff
+require mypy
+require pytest
+require pip-audit
+
+step "ruff check (full)"
+ruff check eyenet tests
+ok "lint clean"
+
+step "mypy --strict (full)"
+mypy --strict eyenet
+ok "types clean"
+
+step "pytest unit + integration + contract (full coverage gate)"
+pytest -m "unit or integration or contract" -q \
+  --cov=eyenet \
+  --cov-report=json:coverage.json \
+  --cov-report=term-missing \
+  --cov-fail-under=95 \
+  --no-header
+
+. "$SCRIPT_DIR/lib/coverage.sh"
+coverage_no_drop coverage.json .coverage-baseline
+
+step "pip-audit --strict"
+pip-audit --strict
+ok "deps secure"
+
+ok "pre-push OK"
