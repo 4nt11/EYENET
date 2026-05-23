@@ -1,0 +1,22 @@
+# EYENET runtime configuration example.
+# Copy to config.toml and adjust. All values shown are the compiled-in defaults.
+# config.toml is gitignored — never commit credentials or local paths.
+
+[nats]
+url = "nats://127.0.0.1:4222"
+
+[data]
+# Directory for SQLite databases.
+# Default: ~/.local/share/eyenet
+# dir = "/path/to/data"
+
+[linker]
+
+[linker.thresholds]
+# Maximum Hamming distance (in bits) for each comparator.
+# UNCALIBRATED — tightened by Rutify corpus grid in M5.
+function_word_simhash_hamming = 8
+char_ngram_simhash_hamming = 10
+
+[linker.scoring]
+# score = 1 - (distance / threshold), clamped to [0.0, 1.0]
