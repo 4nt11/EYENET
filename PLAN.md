@@ -67,8 +67,10 @@ Plurality exists for two — and only two — reasons:
 A typical small-team deployment is 1–3 collector processes total. The fleet abstraction exists so that *3 doesn't require redesign to become 5*, not so we shard everything.
 
 - **`CollectorBase`** defines the abstract factory; concrete implementations: `TelegramCollector` (v0), `MatrixCollector`, `IRCCollector`, `DiscordCollector`, `ForumCollector` (HTTP-scrape), `RSSCollector`, etc.
-- A **Collector Supervisor** is **deferred** until the fleet exceeds ~3 processes. v0 ships without one — the operator launches collectors manually (systemd units or `nohup`).
+- **Baseline `health() -> CollectorHealth` is required on `CollectorBase` from day one.** The supervisor is deferred (below), but adding `health()` later forces a retrofit on every concrete collector. `CollectorHealth` reports: `state` (one of `starting`, `running`, `cooling`, `rate_limited`, `degraded`, `stopped`), `identity_name`, `last_message_at`, `messages_in_last_hour`, `current_subscriptions` (e.g. group ids it's tailing), `last_error` (nullable). The shape is part of the `contracts/collector.py` interface and tested by the contract test suite.
+- A **Collector Supervisor** is **deferred** until the fleet exceeds ~3 processes. v0 ships without one — the operator launches collectors manually (systemd units or `nohup`). When the supervisor lands, it calls `health()` over the bus (`eyenet.control.collector.{instance_id}.health` request/reply).
 - Collectors emit on `raw.message.{source}.{instance_id}`. The `instance_id` is derived from a hash of the identity, never the identity itself. Subscribers downstream filter on `{source}` (e.g. `raw.message.telegram.>`), not on per-chat granularity.
+- **`instance_id` construction — pinned.** `instance_id = sha256(identity_name + "::" + source_kind).hexdigest()[:8]` (8 hex chars / 32 bits, collision-safe at fleet sizes ≪1000). **No salt.** The same `(identity_name, source_kind)` MUST produce the same `instance_id` on every operator workstation so audit trails correlate across hosts. The formula is documented in the `contracts/collector.py` interface docstring and asserted by a contract test that fixes a known input/output pair. Two collector implementations diverging on this hash silently breaks bus-subject filtering and OPSEC correlation — treat it as a load-bearing constant.
 
 ### 2.2 Sensor fleet
 
@@ -108,39 +110,49 @@ EYENET is **Contract-Driven**. Every inter-service exchange is defined as a vers
 
 ### 4.2 Contract list (v0)
 
-| Contract | Owner | File |
-|---|---|---|
-| `RawMessage` | EYENET | `contracts/raw_message.py` |
-| `Observation` (re-export) | BEHAVE-TEXT | imported |
-| `IdentityLabel` | EYENET | `contracts/identity.py` |
-| `EngagementAuthorization` | EYENET | `contracts/identity.py` |
-| `ProfileCandidate` | EYENET | `contracts/attribution.py` |
-| `ProfileCurrent` | EYENET | `contracts/attribution.py` |
-| `LinkageProposed` | EYENET | `contracts/attribution.py` |
-| `Bus` interface | EYENET | `contracts/bus.py` |
-| `Storage` interface | EYENET | `contracts/storage.py` |
-| `IdentityPool` interface | EYENET | `contracts/identity_pool.py` |
-| `CollectorBase` interface | EYENET | `contracts/collector.py` |
-| `SensorBase` interface | EYENET | `contracts/sensor.py` |
+`Surface` column distinguishes models that ride the bus (`bus`), models that are DB rows but never published (`db`), and models that are both with distinct envelope/row shapes (`bus+db`). DB-only models still need versioned Pydantic schemas (used by storage layer + migrations); they just don't define a NATS subject.
 
-### 4.3 Evidence handling (operator-grade, not consumer-privacy)
+| Contract | Owner | File | Surface |
+|---|---|---|---|
+| `RawMessage` | EYENET | `contracts/raw_message.py` | bus+db |
+| `Observation` (re-export) | BEHAVE-TEXT | imported | bus+db |
+| `IdentityLabel` | EYENET | `contracts/identity.py` | bus+db |
+| `EngagementAuthorization` | EYENET | `contracts/identity.py` | bus+db |
+| `ProfileCandidate` | EYENET | `contracts/attribution.py` | bus |
+| `ProfileCurrent` | EYENET | `contracts/attribution.py` | bus+db (DB row = `Profile`, MODELS §2.4) |
+| `LinkageProposed` | EYENET | `contracts/attribution.py` | bus |
+| `Linkage` | EYENET | `contracts/attribution.py` | db (MODELS §2.5) |
+| `Persona` | EYENET | `contracts/attribution.py` | db (MODELS §2.6) |
+| `Membership` | EYENET | `contracts/social_graph.py` | db (MODELS §2.2) |
+| `InfrastructureArtifact` | EYENET | `contracts/infrastructure.py` | db (MODELS §2.7) |
+| `ActorArtifact` | EYENET | `contracts/infrastructure.py` | db (MODELS §2.8) |
+| `Attachment` | EYENET | `contracts/message.py` | db (MODELS §2.9) |
+| `ActorAliasHistory` | EYENET | `contracts/actor.py` | db (MODELS §2.10) |
+| `GroupSnapshot` | EYENET | `contracts/group.py` | db (MODELS §2.11) |
+| `Case` | EYENET | `contracts/case.py` | db (MODELS §2.15) |
+| `SystemUser` | EYENET | `contracts/system_user.py` | db (MODELS §2.17) |
+| `AuditEvent` / `AuditLog` row | EYENET | `contracts/audit.py` | bus+db (hash-chained, MODELS §2.14) |
+| `SystemLog` row | EYENET | `contracts/syslog.py` | db (MODELS §2.18) |
+| `Bus` interface | EYENET | `contracts/bus.py` | — |
+| `Storage` interface | EYENET | `contracts/storage.py` | — |
+| `IdentityPool` interface | EYENET | `contracts/identity_pool.py` | — |
+| `CollectorBase` interface | EYENET | `contracts/collector.py` | — |
+| `SensorBase` interface | EYENET | `contracts/sensor.py` | — |
 
-EYENET is an **attribution tool for operators**. Stylometric primitives without target/intent context produce a beautifully-engineered paperweight — you'd know *how* an actor writes but not *what* they're trying to attack. So:
+**`/contracts/` is the schema directory, not the bus directory.** The `Surface` column governs whether a NATS `SUBJECT` constant + envelope wrapper is generated for a given model. `Surface=db` models are SQLModel rows accompanied by a Pydantic schema for validation/migrations only — they MUST NOT export a `SUBJECT` symbol or `subject()` helper, and they are NEVER published to the bus. `Surface=bus+db` models export both: a wire envelope shape (subject-bearing) AND a persisted row shape, with shared identifiers but distinct schemas (see §4 of MODELS.md).
 
-- **The message store retains full content.** Body, attachments-meta, quoted/forwarded chains, all of it. Encrypted at rest (age, key in operator's keyring), access-audited.
-- **`evidence_ref` is a dereferenceable handle**, not a privacy fence. Engine, Linker, Graph and the operator UI/CLI **can and should** resolve it to the actual message when context is needed for profiling, linkage scoring, or operator review.
-- **Bus envelopes still carry hashes/aggregates, not bodies** — but only because (a) the bus is high-fanout and bodies don't belong on every subscriber's wire, and (b) `decnet_behave_text.spec.Observation` defines that shape and we don't redefine it. This is a *transport* choice, not a *security* choice. Anything downstream that needs the body fetches it from `MessageStore` by `evidence_ref`.
-- **Actor identifiers are opaque hashes (`actor:<sha256(platform||handle)>`)** for stable cross-service referencing and join keys. The platform handle, display name, and any other actor-side metadata live in the message store and are freely retrievable. This is a join-key convention, not a privacy mechanism.
-- **Audit, don't restrict.** Every dereference of `evidence_ref` outside the Sensor produces an audit event (`eyenet.audit.evidence_access`) carrying `service`, `instance_id`, `operator_id` if applicable, `evidence_ref`, `reason`. Operators can read everything; we just record who looked at what and why.
-- **Targeting/intent context is a first-class observation namespace.** The BEHAVE-TEXT `content.*` group (`targeting_language`, `transactional_language`, `boasting_pattern`, etc.) is exactly the bridge from "how they write" to "what they're after". We index it, profile against it, and graph it. The experimental caveat from BEHAVE-TEXT applies — weight skeptically — but we use it.
+**Contract-test gate:** for every model with `Surface=db`, the contract suite asserts that no `SUBJECT` constant or `subject()` helper is exported from its module. For every model with `Surface=bus` or `bus+db`, it asserts that exactly one `SUBJECT` constant is exported and matches the taxonomy in §3. A future maintainer cannot accidentally publish `Persona` or `Case` to NATS — the build refuses.
 
-### 4.4 What we still don't put on the bus
+### 4.3 Evidence handling — the rule
 
-The constraints that *do* survive are mechanical, not ideological:
+EYENET is operator-grade, not consumer-privacy-minimized. The rule is mechanical:
 
-- Don't publish full message bodies on `actor.observation.text.*` — that subject is shaped by BEHAVE-TEXT's `Observation` envelope and bodies don't fit. Use `evidence_ref`.
-- Don't put the operator's own identity-pool secrets (session files, proxy creds) on the bus, ever. Those live on disk, encrypted, per-collector.
-- Don't put age/encryption keys on the bus. Operator's keyring only.
+- **Bus envelopes carry hashes/aggregates only.** `MessageStore` holds bodies. Transport choice driven by fanout and BEHAVE-TEXT envelope shape — not a privacy fence.
+- **`evidence_ref` is dereferenceable** by Engine, Linker, Graph, operator UI/CLI. Resolve it whenever context is needed.
+- **Every dereference outside the producing Sensor emits `eyenet.audit.evidence_access`** carrying `service`, `instance_id`, `system_user_id` (if applicable), `evidence_ref`, `reason`. Audit, don't restrict.
+- **Actor join keys are opaque hashes** (`actor:<sha256(source_kind||platform_userid)>`, see MODELS §0). Handle/display name live in the message store; freely retrievable.
+- **Never on the bus, ever:** identity-pool secrets (session files, proxy creds), age/encryption keys. Disk-only, encrypted, per-collector.
+- **Targeting/intent context** (`content.targeting_language`, `content.transactional_language`, `content.boasting_pattern`, ...) is a first-class observation namespace. Experimental caveat from BEHAVE-TEXT applies — weight skeptically.
 
 ---
 
@@ -150,9 +162,13 @@ The constraints that *do* survive are mechanical, not ideological:
 
 | Tier | Contents | Backend (v0) | Retention |
 |---|---|---|---|
-| **Hot** | Active corpora, open profiles, recent observations, graph state | SQLite + sqlite-vec | indefinite while open |
+| **Hot** | Active corpora, open profiles, recent observations, graph state | SQLite + sqlite-vec | bound to `Case.state` (see below) |
 | **Cold** | Closed-case messages, historical observations | Compressed NDJSON / Parquet on disk | configurable, default 1 year |
 | **Archived** | Evidence-grade, encrypted (age) | Out-of-band volume | indefinite, manual access |
+
+**Hot → cold trigger.** Hot-tier residency is bound to `Case.state` (MODELS §2.15). When ALL `Case` rows referencing an `actor_id` (via `Case.actor_ids`) have transitioned to `closed`, that actor's messages and observations become eligible for cold-tier migration after a configurable grace period (default 30 days from the latest `Case.closed_at`). Orphan data — actors/messages with no `Case` reference — stays hot until manually archived; we do NOT auto-evict on age alone, because an unreferenced actor may simply not have an investigation opened yet. Migration is **operator-triggered** via CLI; nothing auto-deletes. Reverse migration (cold → hot) is supported when a closed `Case` is reopened.
+
+**Attachment binaries:** v0 default is **OFF** — `Attachment` rows (MODELS §2.9) capture metadata (mime, size, sha256, filename) but the binary is NOT downloaded or stored. Per-`Case` opt-in flips retention on; binaries then land at `<data_dir>/attachments/<sha256[:2]>/<sha256>` with `Attachment.storage_uri` pointing to that path. S3-compatible object storage is post-v0; the path-string field is forward-compatible.
 
 ### 5.2 Storage interface (abstract factory)
 
@@ -166,9 +182,21 @@ The constraints that *do* survive are mechanical, not ideological:
 
 v0 implementation: **all backed by SQLite** in separate database files, one per concern. Migration to Postgres + pgvector + Neo4j when scale forces it; the abstract factory pays for itself there.
 
+**Cross-store join boundaries.** Multiple SQLite files = no cross-database SQL joins. The boundaries (and the application-side join code that crosses them) are:
+- `MessageStore` ↔ `ObservationStore` — joined by `evidence_ref` in app code (Sensor, Engine read paths).
+- `ObservationStore` ↔ `ProfileStore` — joined by `actor_id` in Engine.
+- `ProfileStore` ↔ `GraphStore` — joined by `actor_id` in Linker / Graph upsert.
+- `VectorIndex` keys are `(actor_id, primitive_name)` and dereference into `ObservationStore` for raw values.
+
+All other "joins" are forbidden — if a query needs them, it's a sign two stores should be merged or a denormalized view added.
+
+**`Linkage` table constraint.** Per MODELS §2.5, store the unordered pair as `(actor_a_id, actor_b_id)` with the invariant `actor_a_id < actor_b_id` (lexicographic on UUIDv7). Enforced at the DB layer with a CHECK constraint AND in the contract `__init__` validator. Insertion code MUST sort the pair before write; this prevents duplicate `(A,B)` / `(B,A)` linkage rows.
+
 ### 5.3 Per-actor corpus
 
-Append-only. Each row: `(actor_id, ts, evidence_ref, message_length, language)`. Sensor reads incrementally (cursor by `ts`) so the engine never re-processes the full corpus on update.
+Append-only. Each row: `(actor_id, ts, evidence_ref, message_length, language)`.
+
+**Cursor model — per-primitive, not per-actor.** Sensors track progress in a `CorpusCursor` table (MODELS §2.16) with composite PK `(actor_id, primitive_name)` and fields `(last_processed_msg_ts, last_processed_msg_id)`. Different primitives have different windows (some run per-message, some over rolling N-message windows, some over time-bucketed slices) — they MUST NOT share a single ts cursor or fast primitives will skip messages slow primitives haven't seen. The pair `(ts, msg_id)` disambiguates same-timestamp messages and is the safe restart key.
 
 ---
 
@@ -178,6 +206,13 @@ Append-only. Each row: `(actor_id, ts, evidence_ref, message_length, language)`.
 
 - Pool config: `identities.toml` outside the repo (gitignored, age-encrypted at rest).
 - Each entry: session file path, proxy/Tor circuit ID, device fingerprint hash, cooldown window, last-used timestamp.
+- **Device fingerprint hash — canonical inputs.** `device_fingerprint = sha256(json.dumps(tuple, sort_keys=True))` over the source-specific tuple below. Two collector implementations MUST produce identical hashes for identical identities or OPSEC correlation breaks silently.
+  - `telegram`: `(api_id: int, device_model: str, system_version: str, app_version: str, lang_code: str, system_lang_code: str)`
+  - `matrix`: `(homeserver_url: str, device_id: str, user_agent: str)`
+  - `irc`: `(server: str, nick: str, ident: str, realname: str, client_version: str)`
+  - `discord`: `(client_build_number: int, user_agent: str, super_properties_hash: str)`
+  - `forum` / HTTP-scrape: `(user_agent: str, accept_language: str, tls_fingerprint: str)`
+  - Unknown source kinds MUST register their tuple shape in `contracts/collector.py` before merging a concrete collector.
 - A collector instance **claims** an identity for the duration of its run — rotation mid-session is itself a fingerprint.
 - Identity isolation is enforced by separate working directories per identity; no shared state between collector processes.
 
@@ -370,6 +405,7 @@ This means: **"primitive X is broken"** becomes a one-query investigation — fi
 
 - v0: **100% sampling, full attributes.** Tracing is a developer tool right now.
 - Future: tail-based sampling — keep all traces where `attribution.linkage.proposed` is emitted or any span is errored; sample the rest.
+- **Wire the predicate hook NOW.** A single `should_keep_trace(root_span, span_tree) -> bool` predicate lives in `eyenet.tracing.sampling` and is called by the OTLP exporter before write. v0 default: `return True`. Costs ~30 lines, zero behavior change. When tail-sampling lands, flipping the default is a one-file edit instead of retrofitting every span emitter and exporter wiring.
 
 ---
 
@@ -409,43 +445,90 @@ Every log line:
 
 ### 9.3 Audit log
 
-- Separate stream: `eyenet.audit.{service}` on the bus, persisted to its own NDJSON file with append-only permissions.
-- Audit events: identity pool rotation, manual label application, profile override, archive/delete tier transitions, kill-switch, collector start/stop with which identity.
+- Separate stream: `eyenet.audit.{service}` on the bus, persisted to the `AuditLog` table (MODELS §2.14) AND mirrored to an NDJSON file with `0600` permissions.
+- Audit events: identity pool rotation, manual label application, profile override, archive/delete tier transitions, kill-switch, collector start/stop with which identity, evidence dereference, linkage confirm/reject, case open/close, system_user login / permission change.
+- **Tamper-evidence:** every `AuditLog` row is hash-chained — `prev_hash = sha256(previous_row.self_hash)`, `self_hash = sha256(canonicalized_fields)`. Insertion / deletion / edit breaks the chain on a single forward walk. Cheap, append-only-friendly, no fancy crypto.
+- **Retention:** never auto-pruned. AuditLog is evidence. Only operator-initiated archive transitions a row out of the hot tier, and the chain is preserved across tiers.
 - Audit log is **the** source of truth for "what did an operator do, and when?"
 
 ### 9.4 Log routing
 
-- stdout JSON → systemd-journald (or container runtime).
-- Audit stream → dedicated file with restricted permissions (`0600`).
+- stdout JSON → systemd-journald (or container runtime). Firehose tier — `debug`, `info`, per-message chatter.
+- Audit stream → `AuditLog` table + dedicated NDJSON file, `0600` permissions.
+- Curated operational log → `SystemLog` table (see §9.5).
 - No logs to syslog; no logs to network sinks in v0.
+
+### 9.5 Curated operational log (`SystemLog`)
+
+The journald firehose is for grep + tail. It is NOT operator-queryable from inside the app and it bloats fast. Per MODELS §2.18, EYENET also persists a curated subset of structured events to a `SystemLog` SQLite table — designed for the operator UI/CLI's "show me what's wrong" view.
+
+**What lands in `SystemLog`:**
+- Every `warn` and `error` line.
+- Lifecycle events on a curated allowlist: service start/stop, identity-pool state change, NATS reconnect, contract-version mismatch handled by fallback, kill-switch trigger.
+- Notice-level events deemed operator-visible.
+
+**What does NOT land in `SystemLog`:**
+- `debug` and most `info` lines — journald only.
+- Per-message processing chatter — covered by traces (§8).
+- Audit events — written to `AuditLog` (no double-write).
+
+**Allowlist mechanism:** event names are dotted, lowercase, stable. The allowlist lives in `contracts/syslog.py` as a typed enum/set. Emitting an event whose name is on the allowlist routes it to `SystemLog` *in addition to* journald. Off-allowlist events go to journald only.
+
+**Indexes** (MODELS §2.18): `(service, level, at DESC)` for the operator log view; `(stack_hash, at DESC)` for "show me all instances of this error."
+
+**Retention:** rows older than N days (default 90) move to cold tier per §5.1. `AuditLog` never auto-prunes.
 
 ---
 
 ## 10. Roadmap
 
-### Milestone 0 — Contracts only (no service code)
-- All `contracts/*.py` files written.
-- Contract test suite passing.
-- This document accepted.
+### Milestone 0 — Contracts only (no service code) — ✅ DONE (2026-05-04)
+- ✅ All `contracts/*.py` files written (under `eyenet/contracts/`; layout note: `/contracts/` at repo root in §4.1 became `eyenet/contracts/` to match the scaffolded package).
+- ✅ Companion SQLModel tables under `eyenet/models/` (23 tables, shared `SQLModel.metadata`; per-store engine routing deferred to M1's storage layer).
+- ✅ Contract test suite passing — `pytest -m contract` 46/46 green; default `-m "unit or contract"` 48/48 green.
+- ✅ `decnet-behave-core` + `decnet-behave-text` wired as path-editable via `[tool.uv.sources]`. `Observation` re-exported, not redefined.
+- ✅ Build-gate active: `test_surface_gate.py` refuses Surface=db modules that export `SUBJECT*` and Surface=bus modules that don't.
+- ✅ Pinned constants under contract test: `compute_instance_id` (PLAN §2.1), `device_fingerprint` per-source tuples (PLAN §6.1), `Linkage` `actor_a_id < actor_b_id` invariant, EngagementAuthorization exactly-one-of discriminator, AuditLog hash-chain edit/insert/delete detection.
+- ✅ This document accepted.
 
-### Milestone 1 — Bus + skeleton services
-- NATS factory implementation.
-- Each service starts, subscribes, prints "alive", exits cleanly on signal.
-- OpenTelemetry tracing wired (context propagation).
-- Structured logging in place.
+### Milestone 1 — Bus + skeleton services — ✅ DONE (2026-05-04)
+- ✅ Two `Bus` impls: `NATSBus` (`eyenet/bus/nats.py`) over `nats-py` and `MemoryBus` (`eyenet/bus/memory.py`) for unit/integration tests. Subject matcher (`subjects.py`) handles `*` / `>` wildcards. `BusEnvelopePublisher` enforces `trace_context` on every publish and refuses unknown subjects (PLAN §3 taxonomy).
+- ✅ `SQLiteStorage` aggregate (`eyenet/storage/sqlite.py`) — 8 per-store SQLite files (`messages.db`, `corpus.db`, `observations.db`, `profiles.db`, `vectors.db`, `graph.db`, `audit.db`, `syslog.db`) with WAL + FK pragmas. Cross-store FKs dropped per PLAN §5.2 — boundaries crossed in app code. AuditLog hash-chain enforced inside the write transaction; mirrored to `audit.ndjson` (mode `0600`).
+- ✅ Telemetry (`eyenet/telemetry/`): OTel `init_telemetry`, W3C trace context extract/inject, structlog JSON renderer auto-populating `trace_id`/`span_id`, `should_keep_trace` predicate hook (PLAN §8.6, returns True), `AuditEmitter` for combined bus + persisted audit emit.
+- ✅ `FileIdentityPool` (`eyenet/identity_pool/file.py`) — TOML reader, claim/release/freeze_all state machine, persisted across restarts. `device_fingerprint` per-source schemas pinned (PLAN §6.1).
+- ✅ `ServiceBase` + `run_service` (`eyenet/service/`) — boot order, SIGTERM/SIGINT handlers, `service.start`/`service.stop` audit + syslog. Bus close is caller-owned so co-resident services share one bus.
+- ✅ Five service skeletons: `TelegramCollectorStub` (synthetic envelope producer from JSONL fixture), `SensorSkeleton`, `EngineSkeleton`, `LinkerSkeleton`, `GraphSkeleton`. Each subscribes to its taxonomy entries and logs receipt; no domain logic yet.
+- ✅ CLI commands (`eyenet/cli/main.py`): `collector-run`, `sensor-run`, `engine-run`, `linker-run`, `graph-run`, `panic`. `--memory-bus` flag for dev-loop convenience.
+- ✅ Tests: 98 unit/contract green (`pytest -m "unit or contract"`), 2 integration green (multi-collector + full-fleet over `MemoryBus`), 1 e2e gated on `EYENET_E2E=1` (testcontainers NATS). Mypy strict clean, ruff clean.
+- ✅ Live smoke: `eyenet engine-run --memory-bus` boots, emits chained `service.start`/`service.stop` audit, exits cleanly on SIGTERM.
 
-### Milestone 2 — First Telegram collector + sensors
+### Milestone 2 — First Telegram collector + sensors — ✅ DONE (2026-05-11)
 - One Telegram collector instance with one identity from the pool.
 - Sensors implement stylometric primitives v0.2 (function_word_top50, character_ngram_simhash, distinctive_vocabulary_signature, MATTR).
 - End-to-end: real Telegram channel → observations on bus → SQLite.
+
+**Primitive → `Profile` slot mapping (Engine input contract for M3).** Engine work in M3 cannot start until this table is pinned, because `Profile` summary fields (MODELS §2.4) are populated *from* primitive observations and the recipes consume them downstream:
+
+| Primitive (BEHAVE-TEXT name) | Namespace | Value kind | `Profile` slot |
+|---|---|---|---|
+| `function_word_distribution_top50` | `stylometric` | hash (simhash) | `stylometric_summary.function_word_simhash` |
+| `character_ngram_simhash` | `stylometric` | hash (simhash) | `stylometric_summary.char_ngram_simhash` |
+| `distinctive_vocabulary_signature` | `lexical` | array_str | `lexical_summary.distinctive_vocab` |
+| `MATTR` (moving avg type-token ratio) | `lexical` | numeric | `lexical_summary.mattr` |
+
+Each `Profile.*_summary` slot also stores `last_observation_id` and `derived_from_observation_count` for explainability (MODELS §2.4). New primitives added later append slots; they do NOT rename existing ones (recipe stability).
 
 ### Milestone 2.5 — Multi-collector validation
 - Run two Telegram collectors with two distinct identities concurrently.
 - Validate no cross-talk, no shared state, separate trace lineages, separate audit entries.
 
-### Milestone 3 — Engine + profiles
+### Milestone 3 — Engine + profiles — ✅ DONE (2026-05-13)
 - Profile recipes from `attribution-recipes.md` placeholders, starting with `lurker_or_observer` and `bot_or_automated_poster`.
 - Profile current/candidate flow.
+- Four new primitives: `message_length`, `message_length_variance_class`, `punctuation_style`, `typo_signature`, `conversation_initiation_rate`.
+- Engine: per-observation slot mapping, debounced ProfileCurrent, recipe registry.
+- Integration test: Collector+Sensor+Engine e2e on MemoryBus, two synthetic actors with known role signals.
+- CLI: `eyenet engine` upgraded; `--fixture/--duration/--dump-profiles` smoke mode.
 
 ### Milestone 4 — Linker + graph
 - Hamming-distance linker over function-word and character-ngram simhashes.
@@ -465,7 +548,7 @@ Every log line:
 
 1. **Graph backend final choice:** Neo4j vs ArangoDB vs SQLite-with-edges. v0 uses SQLite-with-edges for zero-ops; revisit at Milestone 4.
 2. **Profile-state representation:** snapshot-per-update vs event-sourced. Leaning event-sourced (audit-friendly), but snapshot is simpler. Decide at Milestone 3.
-3. **Cross-platform actor ID:** how do we generate a stable cross-platform actor ID before linkage runs? Currently `actor:<sha256(platform||handle)>` is per-platform; cross-platform ID is the linker's *output*, not its input.
+3. ~~**Cross-platform actor ID:**~~ **Resolved.** Per-platform `actor_key` (`actor:<sha256(source_kind||platform_userid)>`, MODELS §0) stays the stable join key. Cross-platform identity is **not** a derived `actor_key` — it is a separate `Persona` / `ActorCluster` entity (MODELS §2.6) constructed from confirmed `Linkage` rows (MODELS §2.5). `Persona.member_actor_ids` is the denormalized forward view (cheap reads); `PersonaMembership` (MODELS §2.6a) is the indexed reverse view (`actor_id → persona_id` lookup). Both are rebuildable from the linkage graph. Engine, Linker, and Graph never collapse two per-platform actor_keys into one; they emit/confirm linkages and let `Persona` carry the cluster.
 4. **Collector Supervisor:** deferred — manual launch is fine until the fleet exceeds ~3 collectors. Revisit only if real deployments outgrow that.
 5. **BEHAVE-SHELL fusion:** if a Telegram actor is also observed in a PTY (BEHAVE-SHELL), can the engine fuse both substrates? Out of scope for v0; flagged for v1.
 

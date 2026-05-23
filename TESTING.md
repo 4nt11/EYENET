@@ -107,7 +107,7 @@ testpaths = ["tests"]
 ## 3. Coverage policy
 
 - **Floor:** **95% global** (`--cov-fail-under=95`). Enforced **on every commit** via the pre-commit hook. Below 95% → commit refused.
-- **Coverage delta:** any commit that *lowers* the previous coverage figure is refused regardless of absolute number. The pre-commit hook compares against the last committed coverage figure stored in `.coverage-baseline` (committed JSON: `{"line_rate": 0.9612, "ts": "..."}`). New code must be tested.
+- **Coverage delta:** any commit that *lowers* the previous coverage figure is refused regardless of absolute number. The gate compares against the last committed coverage figure stored in `.coverage-baseline` — committed JSON in the SAME shape as `coverage.json`'s normalized form: `{"percent_covered": 96.12, "ts": "..."}`. The baseline is **read** by pre-commit but only **advanced** by pre-push (see §5.4 for the why). New code must be tested.
 - **Per-package floors** (enforced same way, via `coverage` config):
   - `eyenet/contracts/` → **100%**. These ARE the spec.
   - `eyenet/sensor/primitives/` → **98%**. 20+ primitives, each needs golden + edge inputs.
@@ -188,7 +188,10 @@ step "pytest unit+contract with coverage gate (≥95% + no delta drop)"
 pytest -m "unit or contract" -q --cov=eyenet --cov-report=json:coverage.json \
        --cov-fail-under=95
 . "$(dirname "$0")/lib/coverage.sh"
-coverage_no_drop coverage.json .coverage-baseline
+# pre-commit only READS the baseline — it does not advance it. Advancing the baseline
+# inside pre-commit means `git add`-ing a file mid-commit, which is racy across git
+# versions. The pre-push hook owns baseline advancement (see §5.4).
+coverage_no_drop_readonly coverage.json .coverage-baseline
 
 step "pre-commit OK"
 ```
@@ -211,7 +214,9 @@ pytest -m "unit or integration or contract" -q \
        --cov=eyenet --cov-report=json:coverage.json \
        --cov-fail-under=95
 . "$(dirname "$0")/lib/coverage.sh"
-coverage_no_drop coverage.json .coverage-baseline
+# pre-push owns baseline advancement: stage and amend the baseline file into the
+# commit being pushed. The push is blocked anyway until this returns 0.
+coverage_no_drop_advance coverage.json .coverage-baseline
 
 step "pip-audit --strict"
 pip-audit --strict
@@ -221,29 +226,59 @@ step "pre-push OK"
 
 ### 5.4 `.githooks/lib/coverage.sh`
 
+Both `coverage.json` (pytest-cov output) and `.coverage-baseline` (committed) use the SAME key: `percent_covered` (a percentage, 0–100). Read both with the same accessor — no cross-key drift. The two functions split read-only checking (pre-commit) from baseline-advancement (pre-push):
+
 ```bash
-# coverage_no_drop <coverage.json> <baseline.json>
-# Refuses if the new line_rate is below the baseline by more than 0.0001 (rounding tolerance).
-coverage_no_drop() {
+# _read_pct <json_file>
+# Reads a percent_covered value out of either coverage.json (totals.percent_covered)
+# or .coverage-baseline (top-level percent_covered). Both normalized to [0,100].
+_read_pct() {
+  python - "$1" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+# coverage.json shape: {"totals": {"percent_covered": 96.1, ...}, ...}
+# baseline shape:      {"percent_covered": 96.1, "ts": "..."}
+print(d["totals"]["percent_covered"] if "totals" in d else d["percent_covered"])
+PY
+}
+
+# coverage_no_drop_readonly <coverage.json> <baseline.json>
+# Refuses if the new percent_covered is below the baseline by more than 0.01 (rounding tolerance, in pct).
+# Does NOT touch the baseline file. Used by pre-commit.
+coverage_no_drop_readonly() {
   local cov="$1" base="$2"
-  local new
-  new=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['totals']['percent_covered']/100)" "$cov")
+  local new; new=$(_read_pct "$cov")
   if [[ ! -f "$base" ]]; then
-    echo "{\"line_rate\": $new}" > "$base"
-    git add "$base"
+    echo "no baseline yet — skipping delta check (pre-push will create it)"
     return 0
   fi
-  local old
-  old=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['line_rate'])" "$base")
+  local old; old=$(_read_pct "$base")
   python - "$new" "$old" <<'PY'
 import sys
 new, old = float(sys.argv[1]), float(sys.argv[2])
-if new + 1e-4 < old:
-    print(f"COVERAGE DROP: {old:.4f} -> {new:.4f} — refusing.")
+if new + 0.01 < old:
+    print(f"COVERAGE DROP: {old:.2f}% -> {new:.2f}% — refusing.")
     sys.exit(1)
 PY
-  # Update baseline forward (only when delta gate passes)
-  python -c "import json,sys;json.dump({'line_rate': float(sys.argv[1])}, open(sys.argv[2],'w'))" "$new" "$base"
+}
+
+# coverage_no_drop_advance <coverage.json> <baseline.json>
+# Same gate as the readonly variant, but on success WRITES the new baseline.
+# Used by pre-push only — the index is no longer mutating mid-commit there.
+coverage_no_drop_advance() {
+  local cov="$1" base="$2"
+  coverage_no_drop_readonly "$cov" "$base"
+  local new; new=$(_read_pct "$cov")
+  python - "$new" "$base" <<'PY'
+import json, sys, datetime
+new, path = float(sys.argv[1]), sys.argv[2]
+json.dump(
+    {"percent_covered": new, "ts": datetime.datetime.utcnow().isoformat() + "Z"},
+    open(path, "w"),
+    indent=2,
+)
+PY
+  # The push is blocked until commit succeeds; staging here is safe.
   git add "$base"
 }
 ```
@@ -252,7 +287,7 @@ PY
 
 - Hooks fail closed. Any non-zero exit → commit/push refused.
 - `git commit --no-verify` is the local-only escape hatch; the pre-push hook re-runs the gate, and Gitea Actions runs it AGAIN. So `--no-verify` only buys you a noisy WIP commit.
-- `.coverage-baseline` is committed JSON — every commit that raises coverage advances the baseline; every commit that lowers it is refused. The number ratchets up monotonically.
+- `.coverage-baseline` is committed JSON keyed on `percent_covered` (matches the accessor used against `coverage.json`'s `totals.percent_covered`). Every push that raises coverage advances the baseline (pre-push); every commit that lowers it is refused (pre-commit, read-only). The number ratchets up monotonically.
 - `.secrets.baseline` is committed too. Regenerate carefully when fixtures legitimately add token-shaped strings.
 
 ---
@@ -294,7 +329,7 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -e ".[dev]"
       - run: pytest -m "unit or integration or contract" --cov=eyenet --cov-report=xml --cov-fail-under=95
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with: { name: coverage-xml, path: coverage.xml }
 
   test-e2e:
@@ -324,7 +359,7 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -e ".[dev]"
       - run: pytest -m benchmark --benchmark-only --benchmark-json=bench.json
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with: { name: bench-json, path: bench.json }
 ```
 
@@ -348,7 +383,7 @@ jobs:
       - run: pytest -m "" -q --cov=eyenet --cov-fail-under=95
       - run: bandit -r eyenet -f json -o bandit.json
       - run: pip-audit --strict --format json --output pip-audit.json
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: nightly-reports
           path: |
@@ -372,7 +407,7 @@ jobs:
 
 ### 6.3 Gitea-specific notes
 
-- `actions/checkout@v4`, `actions/setup-python@v5`, `actions/upload-artifact@v3` all run under `act_runner` exactly like GitHub Actions. Gitea proxies them via its actions registry.
+- `actions/checkout@v4`, `actions/setup-python@v5`, `actions/upload-artifact@v4` all run under `act_runner` exactly like GitHub Actions. Gitea proxies them via its actions registry.
 - Self-hosted runner is the right call for EYENET — labeled-corpus material and identity fixtures should not leave operator-controlled infrastructure. Set runner labels accordingly (`runs-on: self-hosted`).
 - `${{ secrets.* }}` works the same as GitHub. Store `RUTIFY_CORPUS_KEY` (age key) and any operator tokens in Gitea repo secrets.
 - The local hooks (§5) and Gitea Actions deliberately overlap — hooks are the developer's gate, Actions are the team's backstop. Either alone is insufficient.

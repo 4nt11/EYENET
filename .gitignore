@@ -55,6 +55,9 @@ sessions/
 *.key
 secrets/
 .secrets/
+# Live operator config — only config.example.toml is tracked.
+config.toml
+config.local.toml
 
 # Operational artifacts (data, not code)
 data/

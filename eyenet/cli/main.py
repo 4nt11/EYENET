@@ -1,16 +1,60 @@
-"""EYENET CLI entrypoint. Real commands land in Milestone 1+."""
+"""EYENET CLI entrypoint."""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+from uuid import UUID
+
 import typer
+from sqlmodel import Session, col, select
 
 from eyenet import __version__
+from eyenet.bus import MemoryBus, NATSBus
+from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.cli.config import LinkerConfig, RuntimeConfig
+from eyenet.collectors.telegram.auth import ensure_session
+from eyenet.collectors.telegram.real import TelegramCollector
+from eyenet.collectors.telegram.stub import TelegramCollectorStub
+from eyenet.contracts._base import TraceContext
+from eyenet.contracts.attribution import (
+    SUBJECT_LINKAGE_CONFIRMED,
+    SUBJECT_LINKAGE_REJECTED,
+    SUBJECT_LINKAGE_SUSPECTED,
+    LinkageConfirmedEnvelope,
+    LinkageRejectedEnvelope,
+    LinkageRow,
+    LinkageSuspectedEnvelope,
+)
+from eyenet.contracts.bus import Bus
+from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
+from eyenet.engine.engine import Engine
+from eyenet.graph.graph import Graph
+from eyenet.identity_pool import FileIdentityPool
+from eyenet.identity_pool.loader import load as load_identities
+from eyenet.linker.linker import Linker
+from eyenet.models import MessageTable
+from eyenet.models._base import new_uuid7
+from eyenet.models.profile import ProfileTable
+from eyenet.sensor.skeleton import SensorSkeleton
+from eyenet.sensor.stylometric import StylometricSensor
+from eyenet.service import ServiceBase, run_service
+from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
+from eyenet.storage.engines import StoreName
+from eyenet.storage.messages import SQLiteMessageStore
 
 app = typer.Typer(
     name="eyenet",
     help="EYENET — Don't look. Observe.",
     no_args_is_help=True,
 )
+
+linkage_app = typer.Typer(name="linkage", help="Manage linkage lifecycle.", no_args_is_help=True)
+app.add_typer(linkage_app, name="linkage")
 
 
 @app.callback()
@@ -21,7 +65,504 @@ def _root() -> None:
 @app.command()
 def version() -> None:
     """Print the EYENET version."""
+
     typer.echo(__version__)
+
+
+# -- helpers ----------------------------------------------------------------
+
+
+async def _connect_bus(cfg: RuntimeConfig) -> Bus:  # pragma: no cover
+    if cfg.use_memory_bus:
+        return MemoryBus()
+    url = cfg.nats_url
+    if not url.startswith("nats://"):
+        url = f"nats://{url}"
+    return await NATSBus.connect(url)
+
+
+def _run(
+    service_factory: object, cfg: RuntimeConfig, *, tick: float = 0.0
+) -> None:  # pragma: no cover
+    async def _main() -> None:
+        bus = await _connect_bus(cfg)
+        storage = SQLiteStorage(cfg.data_dir)
+        try:
+            svc: ServiceBase = service_factory(bus, storage)  # type: ignore[operator]
+            await run_service(svc, tick_interval=tick)
+        finally:
+            await bus.close()
+            await storage.close()
+
+    asyncio.run(_main())
+
+
+async def _seed_fixture(  # pragma: no cover
+    storage: SQLiteStorage,
+    records: list[dict[str, Any]],
+    now: datetime,
+) -> None:
+    """Seed MessageTable rows from fixture records, setting reply_to_msg_id."""
+    messages_engine = storage._engines[StoreName.MESSAGES]
+    store = SQLiteMessageStore(messages_engine)
+
+    with Session(messages_engine) as session:
+        source_id = upsert_source(
+            session, kind=SourceKind.TELEGRAM, display_name="telegram:tg_alpha", created_at=now
+        )
+        group_id = upsert_group(
+            session,
+            source_id=source_id,
+            platform_groupid="-100",
+            kind=GroupKind.CHAT,
+            title="Smoke",
+            seen_at=now,
+        )
+        actor_ids: dict[str, object] = {}
+        for rec in records:
+            ak = rec["actor_key"]
+            if ak not in actor_ids:
+                actor_ids[ak] = upsert_actor(
+                    session,
+                    source_id=source_id,
+                    actor_key=ak,
+                    platform_userid=ak[-8:],
+                    handle=None,
+                    display_name=None,
+                    seen_at=now,
+                )
+        session.commit()
+        committed_source_id = source_id
+        committed_group_id = group_id
+        committed_actor_ids = dict(actor_ids)
+
+    platform_to_uuid: dict[str, object] = {}
+    for rec in records:
+        body = rec.get("body", "")
+        msgid = rec["platform_msgid"]
+        ref = f"telegram:-100:{msgid}"
+        sent_raw = rec.get("sent_at_source")
+        sent = datetime.fromisoformat(sent_raw) if sent_raw else now
+        row = MessageTable(
+            id=new_uuid7(),
+            source_id=committed_source_id,
+            group_id=committed_group_id,
+            actor_id=committed_actor_ids[rec["actor_key"]],  # type: ignore[arg-type]
+            platform_msgid=msgid,
+            evidence_ref=ref,
+            body=body,
+            length_chars=len(body),
+            length_words=len(body.split()),
+            sent_at_source=sent,
+            ingested_at=now,
+        )
+        await store.put_message(row)
+        platform_to_uuid[msgid] = row.id
+
+    with Session(messages_engine) as session:
+        for rec in records:
+            rkey = rec.get("reply_to_platform_msgid")
+            if rkey and rkey in platform_to_uuid:
+                ref = f"telegram:-100:{rec['platform_msgid']}"
+                msg = session.exec(
+                    select(MessageTable).where(MessageTable.evidence_ref == ref)
+                ).first()
+                if msg is not None:
+                    msg.reply_to_msg_id = platform_to_uuid[rkey]  # type: ignore[assignment]
+                    session.add(msg)
+        session.commit()
+
+
+async def _smoke_run(  # pragma: no cover
+    cfg: RuntimeConfig,
+    records: list[dict[str, Any]],
+    fixture: Path,
+    duration: float,
+    dump_profiles: bool,
+) -> None:
+    """Smoke-test mode: Collector+Sensor+Engine against a JSONL fixture."""
+    bus = await _connect_bus(cfg)
+    storage = SQLiteStorage(cfg.data_dir)
+    now = datetime.now(tz=UTC)
+
+    try:
+        await _seed_fixture(storage, records, now)
+
+        identity_cfg = cfg.identities_path
+        if identity_cfg is None:
+            raise typer.BadParameter("--identities required for smoke mode")
+
+        pool = FileIdentityPool(identity_cfg)
+        sensor = StylometricSensor(bus=bus, storage=storage)
+        engine = Engine(bus=bus, storage=storage)
+        collector = TelegramCollectorStub(
+            bus=bus,
+            storage=storage,
+            pool=pool,
+            identity_name="tg_alpha",
+            fixture_path=fixture,
+        )
+
+        sensor_task = asyncio.create_task(run_service(sensor))
+        engine_task = asyncio.create_task(run_service(engine))
+        collector_task = asyncio.create_task(run_service(collector, tick_interval=0.001))
+
+        await asyncio.sleep(duration)
+
+        await collector.shutdown()
+        await sensor.shutdown()
+        await engine.shutdown()
+        await asyncio.gather(sensor_task, engine_task, collector_task)
+
+        if dump_profiles:
+            profiles_engine = storage._engines[StoreName.PROFILES]
+            with Session(profiles_engine) as session:
+                rows = session.exec(
+                    select(ProfileTable)
+                    .where(col(ProfileTable.is_current).is_(True))
+                    .order_by(col(ProfileTable.derived_at))
+                ).all()
+            for row in rows:
+                print(json.dumps(row.model_dump(), default=str))
+
+    finally:
+        await bus.close()
+        await storage.close()
+
+
+def _make_trace_context() -> TraceContext:
+    from eyenet.telemetry.propagation import current_traceparent  # noqa: PLC0415
+
+    tp = current_traceparent()
+    if tp is None:
+        tp = "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
+    return TraceContext(traceparent=tp)
+
+
+# -- service commands -------------------------------------------------------
+
+
+@app.command("collector")
+def collector_run(  # pragma: no cover
+    identity: str = typer.Option(..., "--identity", help="identity name from pool"),
+    collector: str = typer.Option("stub", "--type", help="'stub' or 'telegram'"),
+    fixture: Path | None = typer.Option(None, "--fixture", help="JSONL replay file (stub only)"),
+    backfill: bool = typer.Option(False, "--backfill", help="replay full history oldest-first"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    identities: Path | None = typer.Option(None, "--identities"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus", help="use in-process bus"),
+    tick: float = typer.Option(1.0, "--tick", help="emission interval for stub (s)"),
+) -> None:
+    """Run a collector. Use --type to select the platform (default: stub)."""
+
+    cfg = RuntimeConfig.from_env(
+        data_dir=data_dir,
+        identities_path=identities,
+        nats_url=nats_url,
+        use_memory_bus=memory_bus,
+    )
+    if cfg.identities_path is None:
+        raise typer.BadParameter("identities path is required (--identities or EYENET_IDENTITIES)")
+
+    if collector == "telegram":
+        ident_file = load_identities(cfg.identities_path, check_session_files=False)
+        entries = {e.name: e for e in ident_file.identities}
+        if identity not in entries:
+            raise typer.BadParameter(f"identity {identity!r} not found in identities file")
+        ensure_session(entries[identity])
+
+    pool = FileIdentityPool(cfg.identities_path, check_session_files=(collector != "telegram"))
+
+    if collector == "telegram":
+
+        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+            return TelegramCollector(
+                bus=bus,
+                storage=storage,
+                pool=pool,
+                identity_name=identity,
+                backfill=backfill,
+            )
+
+        _run(_factory, cfg, tick=0.0)
+    else:
+
+        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+            return TelegramCollectorStub(
+                bus=bus,
+                storage=storage,
+                pool=pool,
+                identity_name=identity,
+                fixture_path=fixture,
+            )
+
+        _run(_factory, cfg, tick=tick)
+
+
+@app.command("sensor")
+def sensor_run(  # pragma: no cover
+    profile: str = typer.Option("skeleton", "--profile", help="'skeleton' or 'stylometric'"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Run the sensor."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    if profile == "stylometric":
+        _run(lambda bus, storage: StylometricSensor(bus=bus, storage=storage), cfg)
+    else:
+        _run(lambda bus, storage: SensorSkeleton(bus=bus, storage=storage), cfg)
+
+
+@app.command("engine")
+def engine_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    fixture: Path | None = typer.Option(None, "--fixture", help="JSONL fixture for smoke mode"),
+    duration: float = typer.Option(10.0, "--duration", help="smoke-mode run duration in seconds"),
+    dump_profiles: bool = typer.Option(False, "--dump-profiles", help="print ProfileRow JSON"),
+) -> None:
+    """Run the engine."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+
+    if fixture is not None:
+        records: list[dict[str, object]] = [
+            json.loads(line) for line in fixture.read_text().splitlines() if line.strip()
+        ]
+        asyncio.run(_smoke_run(cfg, records, fixture, duration, dump_profiles))
+    else:
+        _run(lambda bus, storage: Engine(bus=bus, storage=storage), cfg)
+
+
+@app.command("linker")
+def linker_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Run the linker."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    linker_cfg = LinkerConfig()
+    _run(lambda bus, storage: Linker(bus=bus, storage=storage, config=linker_cfg), cfg)
+
+
+@app.command("graph")
+def graph_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Run the graph service."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(lambda bus, storage: Graph(bus=bus, storage=storage), cfg)
+
+
+@app.command("graph-api")
+def graph_api_serve(  # pragma: no cover
+    host: str = typer.Option("127.0.0.1", "--host", help="bind address"),
+    port: int = typer.Option(8765, "--port"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+) -> None:
+    """Serve the read-only graph query API (FastAPI + uvicorn)."""
+
+    import uvicorn  # noqa: PLC0415
+
+    allow_public = os.environ.get("EYENET_QUERY_API_ALLOW_PUBLIC", "0") == "1"
+    if host == "0.0.0.0" and not allow_public:  # noqa: S104  # nosec B104  # pragma: allowlist secret
+        typer.echo(
+            "WARNING: refusing public bind without EYENET_QUERY_API_ALLOW_PUBLIC=1", err=True
+        )
+        raise typer.Exit(code=1)
+    if host != "127.0.0.1":
+        typer.echo(
+            f"WARNING: binding query API to {host} — set only if operator-only network", err=True
+        )
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir)
+    storage = SQLiteStorage(cfg.data_dir)
+
+    from eyenet.query_api.app import create_app  # noqa: PLC0415
+
+    api_app = create_app(storage)
+
+    typer.echo(f"EYENET query API listening on http://{host}:{port}")
+    uvicorn.run(api_app, host=host, port=port, log_level="info")
+
+
+@app.command("panic")
+def panic(  # pragma: no cover
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+) -> None:
+    """Publish `eyenet.control.global.panic` — kill switch (PLAN §6.2)."""
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(nats_url=nats_url)
+        bus = await NATSBus.connect(cfg.nats_url)
+        try:
+            await bus.publish("eyenet.control.global.panic", b"")
+        finally:
+            await bus.close()
+
+    asyncio.run(_main())
+    typer.echo("panic published")
+
+
+# -- linkage subcommands ----------------------------------------------------
+
+
+@linkage_app.command("list")
+def linkage_list(
+    actor_id: UUID | None = typer.Option(None, "--actor", help="filter by actor UUID"),
+    state: str | None = typer.Option(None, "--state", help="filter by state"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    limit: int = typer.Option(50, "--limit"),
+) -> None:
+    """List linkage rows."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir)
+    storage = SQLiteStorage(cfg.data_dir)
+
+    async def _main() -> None:
+        rows = await storage.linkages.list_linkages(actor_id=actor_id, state=state, limit=limit)
+        if not rows:
+            typer.echo("no linkages found")
+            return
+        for row in rows:
+            r = cast("LinkageRow", row)
+            typer.echo(
+                f"{r.id}  {r.actor_a_id}↔{r.actor_b_id}  "
+                f"[{r.state.value}]  method={r.method}  score={r.score:.3f}"
+            )
+        await storage.close()
+
+    asyncio.run(_main())
+
+
+def _decision_command(
+    linkage_id: UUID,
+    decided_by: str,
+    notes: str | None,
+    new_state: LinkageState,
+    subject: str,
+    envelope_cls: type[Any],
+    data_dir: Path | None,
+    nats_url: str | None,
+    memory_bus: bool,
+) -> None:
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+
+    async def _main() -> None:
+        storage = SQLiteStorage(cfg.data_dir)
+        bus = await _connect_bus(cfg)
+        try:
+            row = await storage.linkages.get(linkage_id)
+            if row is None:
+                typer.echo(f"ERROR: linkage {linkage_id} not found", err=True)
+                raise typer.Exit(code=1)
+
+            r = cast("LinkageRow", row)
+
+            await storage.linkages.transition(
+                linkage_id, new_state, decided_by=decided_by, notes=notes
+            )
+
+            publisher = BusEnvelopePublisher(bus)
+            now = datetime.now(tz=UTC)
+            tc = _make_trace_context()
+            env = envelope_cls.from_pair(
+                r.actor_a_id,
+                r.actor_b_id,
+                linkage_id=linkage_id,
+                decided_by=decided_by,
+                decided_at=now,
+                notes=notes,
+                trace_context=tc,
+            )
+            await publisher.publish(subject, env)
+            typer.echo(f"OK: linkage {linkage_id} → {new_state.value} by {decided_by}")
+        finally:
+            await bus.close()
+            await storage.close()
+
+    asyncio.run(_main())
+
+
+@linkage_app.command("suspect")
+def linkage_suspect(
+    linkage_id: UUID = typer.Argument(..., help="linkage UUID"),
+    by: str = typer.Option(..., "--by", help="operator name"),
+    notes: str | None = typer.Option(None, "--notes"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Promote a PROPOSED linkage to SUSPECTED (operator triage)."""
+
+    _decision_command(
+        linkage_id,
+        by,
+        notes,
+        LinkageState.SUSPECTED,
+        SUBJECT_LINKAGE_SUSPECTED,
+        LinkageSuspectedEnvelope,
+        data_dir,
+        nats_url,
+        memory_bus,
+    )
+
+
+@linkage_app.command("confirm")
+def linkage_confirm(
+    linkage_id: UUID = typer.Argument(..., help="linkage UUID"),
+    by: str = typer.Option(..., "--by", help="operator name"),
+    notes: str | None = typer.Option(None, "--notes"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Confirm a PROPOSED or SUSPECTED linkage — drives Persona aggregation."""
+
+    _decision_command(
+        linkage_id,
+        by,
+        notes,
+        LinkageState.CONFIRMED,
+        SUBJECT_LINKAGE_CONFIRMED,
+        LinkageConfirmedEnvelope,
+        data_dir,
+        nats_url,
+        memory_bus,
+    )
+
+
+@linkage_app.command("reject")
+def linkage_reject(
+    linkage_id: UUID = typer.Argument(..., help="linkage UUID"),
+    by: str = typer.Option(..., "--by", help="operator name"),
+    notes: str | None = typer.Option(None, "--notes"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Reject a PROPOSED or SUSPECTED linkage — terminal."""
+
+    _decision_command(
+        linkage_id,
+        by,
+        notes,
+        LinkageState.REJECTED,
+        SUBJECT_LINKAGE_REJECTED,
+        LinkageRejectedEnvelope,
+        data_dir,
+        nats_url,
+        memory_bus,
+    )
 
 
 if __name__ == "__main__":

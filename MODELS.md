@@ -128,11 +128,12 @@ Bus envelope = `decnet_behave_text.spec.Observation` (we don't redefine). DB row
 | `primitive_namespace` | str | `stylometric`, `lexical`, ... |
 | `primitive_name` | str | `function_word_distribution_top50` |
 | `primitive_version` | str | `0.2` |
-| `value_kind` | enum | `hash`, `numeric`, `enum_str`, `array_str` |
+| `value_kind` | enum | `hash`, `numeric`, `enum_str`, `array_str`, `array_numeric` |
 | `value_hash` | str \| None | for `hash` kind |
 | `value_numeric` | float \| None | |
 | `value_enum` | str \| None | |
-| `value_array` | list[str] \| None | as JSON |
+| `value_array` | list[str] \| None | as JSON; for `array_str` kind |
+| `value_array_numeric` | list[float] \| None | as JSON; for `array_numeric` kind (e.g. token-length distributions, per-bucket histograms) |
 | `window_start` / `window_end` | datetime \| None | for window-aggregate observations |
 | `observed_at` | datetime | when sensor computed it |
 | `sensor_instance` | str | for trace correlation |
@@ -167,7 +168,7 @@ Proposed/confirmed actor↔actor link. Source of truth for the cross-platform id
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID PK | |
-| `actor_a_id` / `actor_b_id` | FK | unordered; enforce `a < b` to dedupe |
+| `actor_a_id` / `actor_b_id` | FK | unordered; enforce `a < b` lexicographic on UUIDv7 (= `a` was created first) **for dedup only — carries NO semantic weight**. `a` is NOT "the canonical actor" of the pair |
 | `state` | enum | `proposed`, `confirmed`, `rejected`, `superseded` |
 | `method` | str | `function_word_simhash_hamming`, `handle_match`, `manual`, ... |
 | `score` | float | normalized [0,1] |
@@ -183,8 +184,22 @@ The constructed cross-platform identity. Built from confirmed `Linkage` rows.
 |---|---|---|
 | `id` | UUID PK | |
 | `label` | str \| None | operator-assigned ("RutifyAdminMain") |
-| `member_actor_ids` | list[UUID] | denormalized; rebuildable from linkages |
+| `member_actor_ids` | list[UUID] | **forward view** — denormalized JSON list, cheap to read, rebuildable from linkages. Use this when you have a `persona_id` and want its members. **Do NOT** scan this column to answer "which Persona contains actor X?" — that's what `PersonaMembership` is for. |
 | `created_at` / `updated_at` | datetime | |
+
+### 2.6a `PersonaMembership` — Persona ↔ Actor (reverse-indexable)
+Companion to §2.6. The denormalized JSON list on `Persona` is unindexable in SQLite for reverse lookups (`actor_id → persona_id`). This join table is the indexed reverse view. Both representations are rebuildable from confirmed `Linkage` rows; they MUST be kept in sync by the same transaction that mutates `Persona`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `persona_id` | FK → Persona, composite PK | |
+| `actor_id` | FK → Actor, composite PK | unique — an actor belongs to AT MOST one Persona at a time |
+| `joined_at` | datetime | when this membership was established |
+| `via_linkage_id` | FK → Linkage \| None | the confirmed linkage that placed this actor in the persona; null for operator-manual placement |
+
+**Indexes:** `(actor_id)` for the reverse lookup; `(persona_id)` already covered by composite PK.
+
+**Invariant:** `Persona.member_actor_ids` is the sorted union of `PersonaMembership.actor_id WHERE persona_id = Persona.id`. A periodic consistency check (`tools/persona_audit.py`, post-v0) verifies this; for v0, it's enforced by writing through a single `PersonaStore.add_member()` API.
 
 ### 2.7 `InfrastructureArtifact`
 Wallets, PGP keys, domains, phone numbers, emails, cross-platform handles, onion addresses. The Actor↔Infrastructure relation in the goals.
@@ -261,11 +276,15 @@ Operator records "we are authorized to interact with this actor / in this group"
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID PK | |
-| `actor_id` \| `group_id` | FK (one of) | |
-| `authorized_by` | str | |
+| `subject_kind` | enum | `actor`, `group` — discriminator for the FK |
+| `actor_id` | UUID \| None FK Actor | non-null iff `subject_kind = 'actor'` |
+| `group_id` | UUID \| None FK Group | non-null iff `subject_kind = 'group'` |
+| `authorized_by` | str | system_user id |
 | `authorized_at` | datetime | |
 | `scope` | enum | `observe_only`, `passive_engage`, `active_engage` |
 | `expires_at` | datetime \| None | |
+
+**Mechanism:** Pydantic discriminated union on `subject_kind` for the contract layer; DB-level `CHECK ((actor_id IS NOT NULL) <> (group_id IS NOT NULL))` to enforce exactly-one-of. No nullable union types — explicit columns + check constraint, because SQLite-friendly and migration-friendly.
 
 ### 2.14 `AuditLog`
 The `eyenet.audit.*` stream, persisted. Append-only. Operator-relevant events only — NOT a firehose.
@@ -288,8 +307,8 @@ The `eyenet.audit.*` stream, persisted. Append-only. Operator-relevant events on
 
 **Tamper-evidence:** AuditLog is hash-chained. Each row's `prev_hash` references the previous row's `self_hash`. Breaking the chain (insertion, deletion, edit) is detectable with one walk. Cheap, append-only-friendly, no fancy crypto needed.
 
-### 2.17 `SystemUser`
-The operator(s) of EYENET itself. Multi-user is now in scope — this **conflicts with PLAN.md §12 ("No multi-tenant operator separation")** which needs to be relaxed accordingly. v0 ships with single-user-default but the model supports N from the start (per the "design plural from day one" principle).
+### 2.15 `SystemUser`
+The operator(s) of EYENET itself. Multi-user is in scope per PLAN §12 (revised 2026-05-04). v0 ships with single-user-default but the model supports N from the start (per the "design plural from day one" principle).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -312,7 +331,7 @@ The operator(s) of EYENET itself. Multi-user is now in scope — this **conflict
 
 **Open question:** session/token model. Lean: short-lived JWT signed with operator-keyring key, refresh-token rotation. CLI uses a longer-lived token in the keyring. Decide at the time we build the API surface.
 
-### 2.18 `SystemLog`
+### 2.16 `SystemLog`
 Significant operational events persisted for in-app queryability. **NOT a firehose.** Debug/info chatter stays in stdout/journald per PLAN §9.4 — that's a high-volume stream that doesn't belong in SQLite.
 
 What lands here:
@@ -344,7 +363,7 @@ What does **not** land here:
 
 **Retention:** SystemLog rows older than N days (default 90) move to cold tier per PLAN §5.1. AuditLog never auto-prunes — that's evidence.
 
-### 2.15 `Case`
+### 2.17 `Case`
 Operator's investigation grouping. Drives hot/cold/archived tier transitions per §5.
 
 | Field | Type | Notes |
@@ -356,7 +375,7 @@ Operator's investigation grouping. Drives hot/cold/archived tier transitions per
 | `actor_ids` / `group_ids` | list[UUID] | scope of the case |
 | `notes` | str | |
 
-### 2.16 Internal: `CorpusCursor`
+### 2.18 Internal: `CorpusCursor`
 Sensor's bookmark per actor. Not exposed; here so it isn't forgotten.
 
 | Field | Type | Notes |
@@ -402,6 +421,5 @@ Bus envelopes are **transport optimizations** for high-fanout subjects. DB rows 
 ## 6. What I deliberately did NOT model (yet)
 
 - **Threat indicators / IOCs as first-class** — `InfrastructureArtifact` covers wallets/domains, but full IOC taxonomy (CVE refs, malware family, attack pattern) is its own subsystem. Defer.
-- **Operator users / RBAC** — single-operator assumption in v0 (PLAN §12 non-goals).
 - **Notifications / alerts** — out of v0 scope.
 - **Graph node/edge tables** — the Graph service's internal representation. Lives behind its own abstract factory; not part of the shared model layer.
