@@ -67,6 +67,7 @@ storage/*.db-*
 *.sqlite3
 *.sqlite-shm
 *.sqlite-wal
+.eyenet-init.lock
 logs/
 traces/
 spans.ndjson*

@@ -13,7 +13,9 @@ Each engine is opened with:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import fcntl
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -143,14 +145,36 @@ def create_all_for(store: StoreName, engine: Engine) -> None:
     SQLModel.metadata.create_all(engine, tables=tables)
 
 
+@contextmanager
+def _init_lock(data_dir: Path) -> Iterator[None]:
+    """Hold an exclusive POSIX file lock during first-time schema init.
+
+    Two `eyenet` processes booting against the same empty `data_dir` would
+    otherwise race in SQLAlchemy's `create_all(checkfirst=True)` — both see
+    a missing table, both emit `CREATE TABLE`, the second loses. A blocking
+    `flock(LOCK_EX)` makes the second wait until the first commits; then
+    `checkfirst` no-ops every table.
+    """
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = data_dir / ".eyenet-init.lock"
+    with lock_path.open("w") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 def open_all(data_dir: Path) -> dict[StoreName, Engine]:
     """Open every store's engine under `data_dir/<store>.db` and create tables."""
 
     engines: dict[StoreName, Engine] = {}
-    for store in StoreName:
-        engine = open_engine(data_dir / f"{store.value}.db")
-        create_all_for(store, engine)
-        engines[store] = engine
+    with _init_lock(data_dir):
+        for store in StoreName:
+            engine = open_engine(data_dir / f"{store.value}.db")
+            create_all_for(store, engine)
+            engines[store] = engine
     return engines
 
 
