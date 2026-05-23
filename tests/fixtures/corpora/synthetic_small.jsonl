@@ -1,0 +1,3 @@
+{"actor_key":"actor:0000000000000000000000000000000000000000000000000000000000000001","platform_groupid":"-100","platform_msgid":"1","body":"hello world","sent_at_source":"2026-05-04T10:00:00+00:00"}
+{"actor_key":"actor:0000000000000000000000000000000000000000000000000000000000000001","platform_groupid":"-100","platform_msgid":"2","body":"second message","sent_at_source":"2026-05-04T10:00:30+00:00"}
+{"actor_key":"actor:0000000000000000000000000000000000000000000000000000000000000002","platform_groupid":"-100","platform_msgid":"3","body":"reply from another actor","sent_at_source":"2026-05-04T10:01:00+00:00"}
