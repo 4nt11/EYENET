@@ -40,7 +40,7 @@ def _pool(tmp_path: Path, name: str = "tg_alpha") -> FileIdentityPool:
     session = tmp_path / f"{name}.session"
     session.touch()
     entry = IdentityFileEntry(
-        name=name, source="telegram", session_path=str(session), cooldown_seconds=0
+        name=name, source=SourceKind.TELEGRAM, session_path=str(session), cooldown_seconds=0
     )
     cfg = tmp_path / "identities.toml"
     dump(IdentityFile(identities=[entry]), cfg)

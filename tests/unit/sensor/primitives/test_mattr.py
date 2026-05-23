@@ -13,7 +13,9 @@ _TS = datetime(2026, 5, 1, tzinfo=UTC)
 _MID = UUID("00000000-0000-0000-0000-000000000001")
 
 
-def _corpus(n: int, body: str = "the cat sat on the mat") -> tuple[list, dict]:
+def _corpus(
+    n: int, body: str = "the cat sat on the mat"
+) -> tuple[list[tuple[datetime, UUID, str]], dict[str, str]]:
     corpus = [(_TS, _MID, f"ref:{i}") for i in range(n)]
     bodies = {f"ref:{i}": body for i in range(n)}
     return corpus, bodies
@@ -64,5 +66,5 @@ def test_high_vocab_richness_higher_than_low() -> None:
 @pytest.mark.unit
 def test_empty_bodies_returns_none() -> None:
     corpus = [(_TS, _MID, "ref:0")]
-    bodies: dict = {}
+    bodies: dict[str, str] = {}
     assert compute(corpus=corpus, bodies=bodies) is None

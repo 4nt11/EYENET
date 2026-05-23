@@ -15,7 +15,9 @@ _MID = UUID("00000000-0000-0000-0000-000000000001")
 _LONG_EN = "the quick brown fox jumps over the lazy dog " * 30  # 360 tokens
 
 
-def _corpus_from_body(body: str, n: int = 1) -> tuple[list, dict]:
+def _corpus_from_body(
+    body: str, n: int = 1
+) -> tuple[list[tuple[datetime, UUID, str]], dict[str, str]]:
     corpus = [(_TS, _MID, f"ref:{i}") for i in range(n)]
     bodies = {f"ref:{i}": body for i in range(n)}
     return corpus, bodies

@@ -136,8 +136,8 @@ class TelegramCollector(CollectorSkeleton):
                     # @username string — resolve via API
                     try:
                         entity = await self._client.get_entity(g)
-                        resolved.add(entity.id)  # type: ignore[union-attr]
-                        _log.info("collector.group_resolved", username=g, entity_id=entity.id)  # type: ignore[union-attr]
+                        resolved.add(entity.id)
+                        _log.info("collector.group_resolved", username=g, entity_id=entity.id)
                     except Exception as exc:
                         _log.warning("collector.group_resolve_failed", group=g, error=str(exc))
             if resolved:
