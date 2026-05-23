@@ -1,0 +1,111 @@
+"""TOML loader for `identities.toml`.
+
+PLAN §6.1: pool config lives outside the repo (gitignored, age-encrypted at
+rest in production). The loader's job is to validate the shape and refuse
+to load anything that points at a non-existent session file — silent
+config errors here become collector-launch surprises later.
+"""
+
+from __future__ import annotations
+
+import tomllib
+from datetime import datetime
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from eyenet.contracts.enums import IdentityState, SourceKind
+
+
+class IdentityFileEntry(BaseModel):
+    """One identity row in `identities.toml`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    source: SourceKind
+    session_path: str = ""
+    proxy_uri: str | None = None
+    cooldown_seconds: int = 21_600
+    last_used_at: datetime | None = None
+    state: IdentityState = IdentityState.AVAILABLE
+    notes: str | None = None
+
+    # Telegram-specific (required when source=telegram)
+    telegram_api_id: int | None = None
+    telegram_api_hash: str | None = None
+    # Groups/channels to monitor. Empty list = all dialogs the identity is in.
+    # Accepts @username strings or numeric chat IDs (as strings).
+    monitor_groups: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _default_session_path(self) -> IdentityFileEntry:
+        if not self.session_path:
+            default = Path.home() / ".local" / "share" / "eyenet" / "sessions" / self.name
+            self.session_path = str(default)
+        return self
+
+
+class IdentityFile(BaseModel):
+    """Parsed `identities.toml` shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    identities: list[IdentityFileEntry] = Field(default_factory=list)
+
+
+def load(path: Path, *, check_session_files: bool = True) -> IdentityFile:
+    """Load and validate `identities.toml`."""
+
+    if not path.exists():
+        raise FileNotFoundError(f"identities file not found: {path}")
+    raw = tomllib.loads(path.read_text("utf-8"))
+    parsed = IdentityFile.model_validate(raw)
+    if check_session_files:
+        for entry in parsed.identities:
+            session = Path(entry.session_path)
+            if not session.exists():
+                raise ValueError(f"identity {entry.name!r} session_path missing: {session}")
+    # Disallow duplicate names.
+    seen: set[str] = set()
+    for entry in parsed.identities:
+        if entry.name in seen:
+            raise ValueError(f"duplicate identity name: {entry.name!r}")
+        seen.add(entry.name)
+    return parsed
+
+
+def dump(model: IdentityFile, path: Path) -> None:
+    """Write the file back. Used on `release` for state persistence."""
+
+    lines: list[str] = []
+    for entry in model.identities:
+        lines.append("[[identities]]")
+        lines.append(f"name = {_q(entry.name)}")
+        lines.append(f"source = {_q(entry.source.value)}")
+        lines.append(f"session_path = {_q(entry.session_path)}")
+        if entry.proxy_uri is not None:
+            lines.append(f"proxy_uri = {_q(entry.proxy_uri)}")
+        lines.append(f"cooldown_seconds = {entry.cooldown_seconds}")
+        if entry.last_used_at is not None:
+            lines.append(f"last_used_at = {entry.last_used_at.isoformat()!r}")
+        lines.append(f"state = {_q(entry.state.value)}")
+        if entry.notes is not None:
+            lines.append(f"notes = {_q(entry.notes)}")
+        if entry.telegram_api_id is not None:
+            lines.append(f"telegram_api_id = {entry.telegram_api_id}")
+        if entry.telegram_api_hash is not None:
+            lines.append(f"telegram_api_hash = {_q(entry.telegram_api_hash)}")
+        if entry.monitor_groups:
+            groups_str = ", ".join(f'"{g}"' for g in entry.monitor_groups)
+            lines.append(f"monitor_groups = [{groups_str}]")
+        lines.append("")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _q(s: str) -> str:
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+__all__ = ["IdentityFile", "IdentityFileEntry", "dump", "load"]
