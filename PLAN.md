@@ -530,10 +530,19 @@ Each `Profile.*_summary` slot also stores `last_observation_id` and `derived_fro
 - Integration test: Collector+Sensor+Engine e2e on MemoryBus, two synthetic actors with known role signals.
 - CLI: `eyenet engine` upgraded; `--fixture/--duration/--dump-profiles` smoke mode.
 
-### Milestone 4 — Linker + graph
-- Hamming-distance linker over function-word and character-ngram simhashes.
-- Graph store with typed edges.
-- Query API (read-only) for operator UI later.
+### Milestone 4 — Linker + graph — ✅ DONE (2026-05-22)
+- ✅ Linker (`eyenet/linker/`): Comparator Protocol + REGISTRY (`comparators/_base.py`, `comparators/__init__.py`); two simhash comparators — `function_word_simhash_hamming` (default 8 bits) and `char_ngram_simhash_hamming` (default 10 bits). Both thresholds are **UNCALIBRATED** until M5 Rutify; markers in source point at the handoff. `hamming64(hex_a, hex_b)` in `_distance.py` is the shared distance primitive. The Linker drives the per-comparator VectorIndex upsert + nearest-neighbor probe, emits `attribution.linkage.proposed` per match, and audit-logs each proposal.
+- ✅ Graph service (`eyenet/graph/graph.py`, 291 LOC): subscribes to `attribution.profile.current` (Actor node upsert) and `attribution.linkage.{proposed,suspected,confirmed,rejected}` (LinkedTo edge state machine). On confirm, calls `storage.personas.merge_actors` (union-find), upserts the Persona node + BelongsToPersona edges, and emits `attribution.persona.updated`. Replay-safe — every handler is idempotent.
+- ✅ Query API (`eyenet/query_api/`): read-only FastAPI app, localhost-default with an `EYENET_QUERY_API_ALLOW_PUBLIC=1` gate against accidental public bind. Five GET endpoints: actor summary, actor neighbors (typed-edge filter), persona, linkages, graph/stats. No write endpoints — operator decisions stay CLI + audit-logged.
+- ✅ Storage: `LinkageStore.transition()` enforces the PROPOSED → {SUSPECTED, CONFIRMED, REJECTED} state machine, `(actor_a_id < actor_b_id)` unordered-pair invariant per MODELS §2.5; `SQLitePersonaStore.merge_actors()` handles forward (`Persona.member_actor_ids`) + reverse (`PersonaMembership`) views; `GraphStore.upsert_node` / `upsert_edge` / `neighbors` / `edges_by_type` / `stats` cover the read & write surfaces. Open Question §11.1 resolved — SQLite-with-edges shipped.
+- ✅ CLI: `eyenet linker`, `eyenet graph`, `eyenet graph-api` (`eyenet/cli/main.py:341-395`). All share `--data-dir`/`--nats-url`/`--memory-bus` flags with the M1 service runners. `eyenet panic` (global control subject) covers M4 services via `ServiceBase` inheritance.
+- ✅ Tests: `369 unit/contract green` (`uv run pytest`), M4 integration tests on MemoryBus — `test_linker_e2e.py`, `test_m4_full_pipeline.py`, `test_query_api.py` — and the new `tests/e2e/test_m4_nats_pipeline.py` proving the full propose→confirm→persona walk over real NATS (gated on `EYENET_E2E=1`; either testcontainers `NatsContainer` or `EYENET_NATS_URL` override). Mypy strict clean. Ruff clean. Coverage 89.30%.
+- ✅ Live smoke: `eyenet linker` + `eyenet graph` + `eyenet graph-api` co-resident against running `nats-server -js` on `nats://127.0.0.1:4222`. `GET /graph/stats` returns the zero-state JSON `{"actors":0,"personas":0,"linked_to_edges":0,"belongs_to_persona_edges":0}`. SIGTERM cleanly produces paired `service.start` / `service.stop` audit rows for both services. (Multi-writer concurrent audit-chain interleave under a single shared `audit.db` is an M1-level optimistic-chain limit — not introduced by M4 — and is flagged below as a follow-up.)
+- ✅ Thresholds deliberately UNCALIBRATED; M5 Rutify grid is the next consumer.
+
+**Carries forward to M5:**
+- Calibrate `function_word_simhash_hamming` and `char_ngram_simhash_hamming` thresholds against Rutify, replace `UNCALIBRATED` markers in `comparators/_base.py`.
+- Tighten audit hash-chain under concurrent writers (currently optimistic single-reader-then-write; multiple co-resident services can fork the chain on simultaneous events). Either serialize audit writes via `BEGIN IMMEDIATE` or accept fork-detection semantics and document.
 
 ### Milestone 5 — Calibration on Rutify corpus
 - Calibration test suite green.
@@ -546,8 +555,8 @@ Each `Profile.*_summary` slot also stores `last_observation_id` and `derived_fro
 
 ## 11. Open Questions
 
-1. **Graph backend final choice:** Neo4j vs ArangoDB vs SQLite-with-edges. v0 uses SQLite-with-edges for zero-ops; revisit at Milestone 4.
-2. **Profile-state representation:** snapshot-per-update vs event-sourced. Leaning event-sourced (audit-friendly), but snapshot is simpler. Decide at Milestone 3.
+1. ~~**Graph backend final choice:**~~ **Resolved (M4, 2026-05-22).** SQLite-with-edges shipped via `eyenet/storage/graph.py` + `eyenet/models/graph.py` — `GraphStore` exposes `upsert_node`, `upsert_edge`, `neighbors`, `edges_by_type`, `stats`. Typed `GraphNodeType` (`Actor`, `Persona`) and `GraphEdgeType` (`LinkedTo`, `BelongsToPersona`) drive the relation set. Zero-ops, embedded, no external server. Revisit only if scale forces a move to Neo4j or ArangoDB — the `GraphStore` interface is the swap point.
+2. ~~**Profile-state representation:**~~ **Resolved (M3, 2026-05-13).** Snapshot-per-update with monotonic `version` won. `ProfileTable` (`eyenet/models/profile.py:19-45`) writes a new row per Engine update with `version += 1`; a partial unique index (`ix_profile_one_current_per_actor`, `sqlite_where=is_current=1`) floats `is_current=True` to the newest row and forbids duplicates. Full history is preserved as immutable per-version rows — audit-friendly without a separate event log. `ProfileStore.history(actor_id)` (`eyenet/storage/profiles.py:50`) is `WHERE actor_id=? ORDER BY version asc`. Best of both worlds: snapshot ergonomics, event-sourced retention.
 3. ~~**Cross-platform actor ID:**~~ **Resolved.** Per-platform `actor_key` (`actor:<sha256(source_kind||platform_userid)>`, MODELS §0) stays the stable join key. Cross-platform identity is **not** a derived `actor_key` — it is a separate `Persona` / `ActorCluster` entity (MODELS §2.6) constructed from confirmed `Linkage` rows (MODELS §2.5). `Persona.member_actor_ids` is the denormalized forward view (cheap reads); `PersonaMembership` (MODELS §2.6a) is the indexed reverse view (`actor_id → persona_id` lookup). Both are rebuildable from the linkage graph. Engine, Linker, and Graph never collapse two per-platform actor_keys into one; they emit/confirm linkages and let `Persona` carry the cluster.
 4. **Collector Supervisor:** deferred — manual launch is fine until the fleet exceeds ~3 collectors. Revisit only if real deployments outgrow that.
 5. **BEHAVE-SHELL fusion:** if a Telegram actor is also observed in a PTY (BEHAVE-SHELL), can the engine fuse both substrates? Out of scope for v0; flagged for v1.
