@@ -137,3 +137,30 @@ def test_slot_value_char_ngram() -> None:
     env = _profile_envelope(char_ngram_simhash={"value": "1122334455667788"})
     val = CharNgramSimhashHamming.slot_value(env)
     assert val == "1122334455667788"
+
+
+@pytest.mark.unit
+def test_function_word_slot_language_es() -> None:
+    env = _profile_envelope(function_word_simhash={"value": "deadbeef", "language": "es"})
+    assert FunctionWordSimhashHamming.slot_language(env) == "es"
+
+
+@pytest.mark.unit
+def test_function_word_slot_language_absent_returns_none() -> None:
+    env = _profile_envelope(function_word_simhash={"value": "deadbeef"})
+    assert FunctionWordSimhashHamming.slot_language(env) is None
+
+
+@pytest.mark.unit
+def test_char_ngram_inherits_language_from_function_word() -> None:
+    env = _profile_envelope(
+        function_word_simhash={"value": "deadbeef", "language": "es"},
+        char_ngram_simhash={"value": "1122334455667788"},
+    )
+    assert CharNgramSimhashHamming.slot_language(env) == "es"
+
+
+@pytest.mark.unit
+def test_char_ngram_language_none_when_function_word_missing() -> None:
+    env = _profile_envelope(char_ngram_simhash={"value": "1122334455667788"})
+    assert CharNgramSimhashHamming.slot_language(env) is None

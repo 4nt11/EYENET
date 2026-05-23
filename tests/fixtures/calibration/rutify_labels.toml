@@ -1,0 +1,488 @@
+# EYENET / M5 — Operator labels for the Rutify corpus.
+#
+# Provenance: labels produced by Claude (Opus 4.7) on behalf of the operator
+# under the explicit policy locked 2026-05-22 (see plan §3.4). This is WEAK
+# supervision — Claude-as-labeler is decent for cadence-driven categories
+# (bot, lurker) and shakier on the chatty_member / normal boundary, which is
+# culture-dependent. Notes field is auditable; spot-check the lowest-
+# confidence rows before trusting derived thresholds.
+#
+# Schema is enforced by eyenet/calibration/labels.py. corpus_sha256 pins
+# this set to a specific corpus dump — recipes_grid.py refuses to combine
+# these labels with feature stats from any other corpus.
+
+corpus_id = "rutify-full-2026-05-02"
+corpus_sha256 = "bc0aab18b5278a20c075d1fb67250f3f449e1106517e9b596059b77eceafab71"
+labeled_at = "2026-05-22"
+labeler = "claude-opus-4-7-via-anti"
+
+# --- chatty_member: 200+ msgs, multi-day active presence, varied content ----
+
+[[actor]]
+sender_id = 8478203026
+label = "chatty_member"
+confidence = "high"
+notes = "3322 msgs in 5d; igna; dominant conversational presence, varied init/reply"
+
+[[actor]]
+sender_id = 8505804557
+label = "chatty_member"
+confidence = "high"
+notes = "1528 msgs in 2d; Ignac1o; very high posting rate, init 0.87, short reactive msgs"
+
+[[actor]]
+sender_id = 8340175837
+label = "chatty_member"
+confidence = "high"
+notes = "1297 msgs over 47d; Rossy; long-running active core member, full content variety"
+
+[[actor]]
+sender_id = 7685460825
+label = "chatty_member"
+confidence = "high"
+notes = "807 msgs in <1d; La maravishh; intense bursty contributor, varied subjects"
+
+[[actor]]
+sender_id = 990467957
+label = "chatty_member"
+confidence = "high"
+notes = "749 msgs in 1.4d; sebaImlI; init 0.36 (replies-heavy) but very prolific"
+
+[[actor]]
+sender_id = 8186080947
+label = "chatty_member"
+confidence = "high"
+notes = "555 msgs in <1d; satanswrath; balanced init/reply, varied content"
+
+[[actor]]
+sender_id = 2082950356
+label = "chatty_member"
+confidence = "high"
+notes = "427 msgs in 1d; high init, short reactive msgs"
+
+[[actor]]
+sender_id = 1086480106
+label = "chatty_member"
+confidence = "high"
+notes = "405 msgs in 0.3d; varied tone, mixed init/reply"
+
+[[actor]]
+sender_id = 8299922860
+label = "chatty_member"
+confidence = "high"
+notes = "378 msgs in 0.3d; Benjamin Netanyahu persona; chatty contributor"
+
+[[actor]]
+sender_id = 7929761386
+label = "chatty_member"
+confidence = "high"
+notes = "373 msgs in 0.3d; linlïn; balanced init/reply, distinctive style"
+
+[[actor]]
+sender_id = 7632051754
+label = "chatty_member"
+confidence = "high"
+notes = "365 msgs in 0.5d; Xyzze; high init, varied subjects"
+
+[[actor]]
+sender_id = 8634476092
+label = "chatty_member"
+confidence = "high"
+notes = "364 msgs in 0.4d; very active; mixed init/reply"
+
+[[actor]]
+sender_id = 8798736899
+label = "chatty_member"
+confidence = "medium"
+notes = "358 msgs; 0xPayload; mixed human chat + some automated-looking relay msgs"
+
+[[actor]]
+sender_id = 8785556905
+label = "chatty_member"
+confidence = "high"
+notes = "308 msgs; antiseptic-girl; low init (replies-heavy), longer msgs, distinct voice"
+
+[[actor]]
+sender_id = 5362092598
+label = "chatty_member"
+confidence = "high"
+notes = "268 msgs in 0.9d; very active, high init"
+
+[[actor]]
+sender_id = 6347877524
+label = "chatty_member"
+confidence = "high"
+notes = "267 msgs in 0.4d; lucki; high init, short reactive msgs"
+
+[[actor]]
+sender_id = 662212612
+label = "chatty_member"
+confidence = "high"
+notes = "245 msgs; SysDdOs; technical-content-heavy, longer msgs (avg 44 chars)"
+
+[[actor]]
+sender_id = 8618382783
+label = "chatty_member"
+confidence = "high"
+notes = "235 msgs in 0.1d; high init, very dense burst"
+
+[[actor]]
+sender_id = 7932291077
+label = "chatty_member"
+confidence = "high"
+notes = "217 msgs in 0.9d; lure; varied content"
+
+[[actor]]
+sender_id = 8257427304
+label = "chatty_member"
+confidence = "high"
+notes = "211 msgs in 1d; Anomalyy; longer msgs, technical voice"
+
+[[actor]]
+sender_id = 6556332918
+label = "chatty_member"
+confidence = "medium"
+notes = "195 msgs; kurl; borderline chatty_member / normal — high engagement"
+
+[[actor]]
+sender_id = 5132948519
+label = "chatty_member"
+confidence = "medium"
+notes = "128 msgs; x_x; very init-heavy (0.84), long mean_len 46 — possibly carding spammer pattern"
+
+# --- normal: balanced participants, 50-200 msgs --------------------------
+
+[[actor]]
+sender_id = 1725660613
+label = "normal"
+confidence = "high"
+notes = "176 msgs in 0.9d; v; init 0.50 — textbook normal"
+
+[[actor]]
+sender_id = 5698311809
+label = "normal"
+confidence = "high"
+notes = "165 msgs; MostlySatire; init 0.33 (replies-heavy) but engaged"
+
+[[actor]]
+sender_id = 761722085
+label = "normal"
+confidence = "high"
+notes = "160 msgs in 0.9d; martin; balanced"
+
+[[actor]]
+sender_id = 7627045194
+label = "normal"
+confidence = "high"
+notes = "156 msgs in 0.4d; Agustin Silva; balanced"
+
+[[actor]]
+sender_id = 8248215779
+label = "normal"
+confidence = "high"
+notes = "155 msgs in 0.4d; Sant; balanced"
+
+[[actor]]
+sender_id = 5940636438
+label = "normal"
+confidence = "high"
+notes = "150 msgs in 0.1d; balanced"
+
+[[actor]]
+sender_id = 1563611163
+label = "normal"
+confidence = "high"
+notes = "148 msgs in 0.1d; balanced"
+
+[[actor]]
+sender_id = 1664484329
+label = "normal"
+confidence = "high"
+notes = "144 msgs in 0.4d; Silver Mike; balanced"
+
+[[actor]]
+sender_id = 6375253115
+label = "normal"
+confidence = "high"
+notes = "116 msgs; Argent; balanced"
+
+[[actor]]
+sender_id = 1672011974
+label = "normal"
+confidence = "high"
+notes = "113 msgs in 0.6d; Solvitu.com; balanced"
+
+[[actor]]
+sender_id = 8490616674
+label = "normal"
+confidence = "high"
+notes = "110 msgs in 0.4d; balanced, slightly reply-heavy"
+
+[[actor]]
+sender_id = 1988407636
+label = "normal"
+confidence = "high"
+notes = "107 msgs in 1.5d; marciano; balanced"
+
+[[actor]]
+sender_id = 5431810457
+label = "normal"
+confidence = "high"
+notes = "104 msgs in 0.3d; yy; balanced, slightly reply-heavy"
+
+[[actor]]
+sender_id = 8087475014
+label = "normal"
+confidence = "high"
+notes = "101 msgs in 0d; balanced"
+
+[[actor]]
+sender_id = 733695581
+label = "normal"
+confidence = "medium"
+notes = "96 msgs; init 0.25 — replies-heavy but engaged, not lurker"
+
+[[actor]]
+sender_id = 8033900097
+label = "normal"
+confidence = "high"
+notes = "94 msgs in 0.8d; Inthedarkman; balanced"
+
+[[actor]]
+sender_id = 8537227290
+label = "normal"
+confidence = "medium"
+notes = "88 msgs; Nemia; init 0.27 — replies-heavy"
+
+[[actor]]
+sender_id = 6284140174
+label = "normal"
+confidence = "high"
+notes = "85 msgs in 0.5d; ye; balanced"
+
+[[actor]]
+sender_id = 8567457538
+label = "normal"
+confidence = "high"
+notes = "84 msgs in 0.2d; Kt; init-heavy short burst"
+
+[[actor]]
+sender_id = 1790899812
+label = "normal"
+confidence = "high"
+notes = "83 msgs in 0.1d; replies-heavy active normal"
+
+[[actor]]
+sender_id = 5982857408
+label = "normal"
+confidence = "high"
+notes = "80 msgs in 0.5d; Ignacio; balanced, longer messages"
+
+[[actor]]
+sender_id = 6523363906
+label = "normal"
+confidence = "high"
+notes = "79 msgs in 0d; TheLancy; high init burst"
+
+[[actor]]
+sender_id = 6074848503
+label = "normal"
+confidence = "medium"
+notes = "78 msgs over 7.2d; wooka; init 0.94 but spread over a week — small bursts"
+
+[[actor]]
+sender_id = 5255983519
+label = "normal"
+confidence = "high"
+notes = "78 msgs in 0.2d; Nyxphyr; balanced"
+
+[[actor]]
+sender_id = 1066200647
+label = "normal"
+confidence = "high"
+notes = "74 msgs in 1.9d; strings; balanced"
+
+[[actor]]
+sender_id = 5659381492
+label = "normal"
+confidence = "high"
+notes = "72 msgs in 0.1d; silv lee; balanced"
+
+[[actor]]
+sender_id = 6583511046
+label = "normal"
+confidence = "high"
+notes = "70 msgs in 0.5d; Camilo; balanced"
+
+[[actor]]
+sender_id = 8045093416
+label = "normal"
+confidence = "high"
+notes = "69 msgs in 0.5d; xrmx; balanced"
+
+[[actor]]
+sender_id = 7418550216
+label = "normal"
+confidence = "high"
+notes = "68 msgs in 0.6d; Pato; balanced, longer messages"
+
+[[actor]]
+sender_id = 8481614224
+label = "normal"
+confidence = "high"
+notes = "68 msgs in 0.2d; balanced, longer messages"
+
+[[actor]]
+sender_id = 6660537717
+label = "normal"
+confidence = "high"
+notes = "64 msgs in 0.8d; balanced"
+
+[[actor]]
+sender_id = 1583547345
+label = "normal"
+confidence = "high"
+notes = "64 msgs in 0.1d; Cattt; balanced"
+
+[[actor]]
+sender_id = 7148008201
+label = "normal"
+confidence = "high"
+notes = "64 msgs in 0.3d; Coffeee; balanced, reply-heavy"
+
+[[actor]]
+sender_id = 8783702227
+label = "normal"
+confidence = "high"
+notes = "59 msgs in 0.3d; balanced, longer messages"
+
+[[actor]]
+sender_id = 7971430915
+label = "normal"
+confidence = "high"
+notes = "58 msgs in 2d; b0kita; balanced"
+
+[[actor]]
+sender_id = 5793090328
+label = "normal"
+confidence = "high"
+notes = "58 msgs in 1d; boolean10; balanced, longer mean_len"
+
+[[actor]]
+sender_id = 7870332760
+label = "normal"
+confidence = "high"
+notes = "55 msgs in 0.1d; PARK JIN HYOK persona; balanced"
+
+[[actor]]
+sender_id = 5485690216
+label = "normal"
+confidence = "high"
+notes = "54 msgs in 0.8d; balanced, longer messages"
+
+[[actor]]
+sender_id = 6060480974
+label = "normal"
+confidence = "high"
+notes = "54 msgs in 0.3d; alice; balanced, reply-heavy"
+
+[[actor]]
+sender_id = 7014165775
+label = "normal"
+confidence = "high"
+notes = "51 msgs in 0.1d; balanced"
+
+[[actor]]
+sender_id = 1063632589
+label = "normal"
+confidence = "medium"
+notes = "50 msgs over 16d; ForoGSM; low rate but not quite lurker"
+
+[[actor]]
+sender_id = 7772664581
+label = "normal"
+confidence = "high"
+notes = "50 msgs in 0.3d; balanced"
+
+[[actor]]
+sender_id = 5561155522
+label = "normal"
+confidence = "high"
+notes = "50 msgs in 0.4d; alberto; balanced"
+
+[[actor]]
+sender_id = 5555304377
+label = "normal"
+confidence = "high"
+notes = "50 msgs in 0.1d; badd; high init burst"
+
+[[actor]]
+sender_id = 8449475110
+label = "normal"
+confidence = "medium"
+notes = "165 msgs over 45d; msg/day=3.7 — borderline lurker but msg count high"
+
+[[actor]]
+sender_id = 7818488627
+label = "normal"
+confidence = "medium"
+notes = "132 msgs over 37d; Soyepi; msg/day=3.5 — borderline lurker but msg count high"
+
+# --- lurker: very low msg_per_day over a multi-day span, OR ultra-low init -
+
+[[actor]]
+sender_id = 7390873409
+label = "lurker"
+confidence = "high"
+notes = "88 msgs; StupidUser; init=0.125 — the lowest in the set, almost pure replies"
+
+[[actor]]
+sender_id = 7193747396
+label = "lurker"
+confidence = "high"
+notes = "53 msgs in 0.3d; Rolo; init=0.17 — very low; mostly reactions/replies"
+
+[[actor]]
+sender_id = 8239986530
+label = "lurker"
+confidence = "medium"
+notes = "71 msgs over 46.8d; s/tretinoina; msg/day=1.5 — long-tail occasional presence"
+
+[[actor]]
+sender_id = 5714243844
+label = "lurker"
+confidence = "medium"
+notes = "54 msgs over 44.8d; msg/day=1.2 — long-tail occasional presence"
+
+[[actor]]
+sender_id = 8489411308
+label = "lurker"
+confidence = "medium"
+notes = "53 msgs over 46.8d; Tridable; msg/day=1.1 — long-tail occasional presence"
+
+# --- bot: 1 observed in Rutify corpus -----------------------------------
+#
+# Sub-threshold for the simhash min_messages=50 floor (35 msgs) but the
+# stats row is appended to rutify_actor_stats.csv specifically for recipe
+# calibration. Simhash grid still ignores SangMata via its own MIN_TOKENS
+# gates. See operator decision 2026-05-22 ("Keep floor at 50; add SangMata
+# as a special labeled row").
+#
+# SangMata signature (the recipe's positive example):
+#   init_rate = 1.000        (every msg is a name-change event notification)
+#   length_cv = 0.129        (templated string `User \`X\` changed name…`)
+#   inter_msg_cv = 1.67      (event-driven; NOT clockwork — do not gate on this)
+#   mattr = 0.491            (low lexical diversity vs human cohort min=0.82)
+# Recipe axes locked to init_rate >= 0.95 AND length_cv <= 0.30. MATTR
+# discriminates too but is not part of v0; reserved for future tightening.
+
+[[actor]]
+sender_id = 5422359176
+label = "bot"
+confidence = "high"
+notes = "SangMata_beta_bot; 35 msgs; init_rate=1.000, length_cv=0.129; templated event-driven name-change notifier — every message is `User \\`<id>\\` changed name/username from X to Y`. Only confirmed bot in the corpus that posts text. QuotLyBot (1031952739) has only 4 msgs; too few for reliable stats so excluded from labels."
+
+# --- other potential bots considered but EXCLUDED -----------------------
+# sender_id = 1031952739  (@QuotLyBot)         — 4 text msgs; stats unreliable
+# sender_id = 1324544532  (@bot763, Bot763)    — 0 text msgs
+# sender_id = 785403147   (@BotPrens4, Bot)    — 0 text msgs

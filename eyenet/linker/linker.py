@@ -114,7 +114,21 @@ class Linker(ServiceBase):
             )
             return
 
-        threshold = self._thresholds.for_comparator(comparator.name)
+        slot_lang = comparator.slot_language(envelope)
+        threshold = self._thresholds.for_comparator(comparator.name, slot_lang)
+
+        # Per-language disable sentinel (PLAN §M5 / Rutify 2026-05-22):
+        # the comparator was explicitly disabled for this actor's language
+        # because the primitive is empirically uninformative on this
+        # language/domain combo. Skip the VectorIndex round-trip entirely.
+        if threshold is None:
+            _log.debug(
+                "linker.comparator_disabled_for_language",
+                comparator=comparator.name,
+                language=slot_lang,
+                actor_id=str(actor_id),
+            )
+            return
 
         await self._storage.vector_index.upsert_simhash(actor_id, comparator.primitive_name, value)
 

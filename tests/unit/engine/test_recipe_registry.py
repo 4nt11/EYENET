@@ -17,19 +17,19 @@ _NOW = datetime(2026, 5, 1, tzinfo=UTC)
 
 def _profile(
     init_rate: float | None = None,
-    mattr: float | None = None,
+    length_variance: str | None = None,
 ) -> ProfileRow:
     interaction: dict[str, object] = {}
-    lexical: dict[str, object] = {}
+    stylometric: dict[str, object] = {}
     if init_rate is not None:
         interaction["conversation_initiation_rate"] = {
             "value": init_rate,
             "last_observation_id": str(_UUID),
             "derived_from_observation_count": 50,
         }
-    if mattr is not None:
-        lexical["mattr"] = {
-            "value": mattr,
+    if length_variance is not None:
+        stylometric["message_length_variance_class"] = {
+            "value": length_variance,
             "last_observation_id": str(_UUID),
             "derived_from_observation_count": 50,
         }
@@ -41,17 +41,18 @@ def _profile(
         role_signal=None,
         role_confidence=0.0,
         interaction_summary=interaction,
-        lexical_summary=lexical,
+        stylometric_summary=stylometric,
         derived_at=_NOW,
         derived_from_observation_count=50,
     )
 
 
 @pytest.mark.unit
-def test_registry_has_both_m3_recipes() -> None:
+def test_registry_has_m5_recipes() -> None:
     names = {r.name for r in REGISTRY}
     assert "lurker_or_observer" in names
     assert "bot_or_automated_poster" in names
+    assert "chatty_member" in names
 
 
 @pytest.mark.unit
@@ -72,7 +73,7 @@ def test_pick_winner_returns_lurker_signal() -> None:
 
 @pytest.mark.unit
 def test_pick_winner_returns_bot_signal() -> None:
-    profile = _profile(init_rate=0.99, mattr=0.30)
+    profile = _profile(init_rate=0.99, length_variance="tight")
     result = pick_winner(profile, 50)
     assert result is not None
     signal, _ = result
@@ -82,7 +83,7 @@ def test_pick_winner_returns_bot_signal() -> None:
 @pytest.mark.unit
 def test_pick_winner_returns_none_when_no_match() -> None:
     # Mid-range values match neither recipe
-    profile = _profile(init_rate=0.5, mattr=0.5)
+    profile = _profile(init_rate=0.5, length_variance="varied")
     result = pick_winner(profile, 50)
     assert result is None
 

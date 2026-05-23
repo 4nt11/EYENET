@@ -1,0 +1,178 @@
+{
+  "actor_count_simhash_qualifying": 73,
+  "actor_count_total": 74,
+  "behave_text_version": "0.1.1",
+  "corpus_id": "rutify-full-2026-05-02",
+  "corpus_sha256": "bc0aab18b5278a20c075d1fb67250f3f449e1106517e9b596059b77eceafab71",
+  "eyenet_version": "0.0.0",
+  "generated_at": "2026-05-23T02:59:57Z",
+  "label_counts": {
+    "bot": 1,
+    "chatty_member": 22,
+    "lurker": 5,
+    "normal": 46,
+    "unknown": 0
+  },
+  "labeler": "claude-opus-4-7-via-anti",
+  "min_messages": 50,
+  "notes": [
+    "Simhash linker DISABLED for Spanish (PLAN \u00a7M5): AUC=0.55 / 0.68 cannot support precision >= 0.70 on this corpus. Long-term fix is minhash-with-shingles in BEHAVE-TEXT 0.0.2.",
+    "chatty_member recipe is calibrated (msg_count>=195, P=1.0 R=0.955) but deployment-blocked: required slot temporal_summary.message_count is unmapped in v0.",
+    "lurker_or_observer ships Pattern A only (init_rate <= 0.20); Pattern B (msg_per_day<=2 AND span>=7d) is calibrated but deployment-blocked on temporal_summary primitives."
+  ],
+  "recipes": [
+    {
+      "axes": [
+        {
+          "axes": [
+            {
+              "feature": "init_rate",
+              "op": "<=",
+              "value": 0.2
+            }
+          ]
+        },
+        {
+          "axes": [
+            {
+              "feature": "msg_per_day",
+              "op": "<=",
+              "value": 2.0
+            },
+            {
+              "feature": "corpus_span_days",
+              "op": ">=",
+              "value": 7.0
+            }
+          ]
+        }
+      ],
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "groups_count": 2,
+      "name": "lurker_or_observer",
+      "notes": [
+        "pattern_A_init_rate_max=0.2 (tp=2, fp=0)",
+        "pattern_B_msg_per_day_max=2.0 span_min=7.0d (tp=3, fp=0)"
+      ],
+      "positive_label": "lurker",
+      "precision": 1.0,
+      "recall": 1.0,
+      "strategy": "precision_floor:0.70 per-pattern, OR-combined",
+      "tn": 69,
+      "tp": 5,
+      "version": "0.2"
+    },
+    {
+      "axes": [
+        {
+          "axes": [
+            {
+              "feature": "init_rate",
+              "op": ">=",
+              "value": 0.95
+            },
+            {
+              "feature": "length_cv",
+              "op": "<=",
+              "value": 0.3
+            }
+          ]
+        }
+      ],
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "groups_count": 1,
+      "name": "bot_or_automated_poster",
+      "notes": [
+        "MATTR also discriminates (SangMata=0.49, human min=0.82) but is reserved as a future tertiary axis per M5 decision.",
+        "inter_msg_cv NOT used: SangMata is event-driven (cv=1.67), so clockwork-cadence gating would miss this bot class."
+      ],
+      "positive_label": "bot",
+      "precision": 1.0,
+      "recall": 1.0,
+      "strategy": "operator_locked: init_rate>=0.95 AND length_cv<=0.30",
+      "tn": 73,
+      "tp": 1,
+      "version": "0.2"
+    },
+    {
+      "axes": [
+        {
+          "axes": [
+            {
+              "feature": "msg_count",
+              "op": ">=",
+              "value": 195.0
+            }
+          ]
+        }
+      ],
+      "f1": 0.9767,
+      "fn": 1,
+      "fp": 0,
+      "groups_count": 1,
+      "name": "chatty_member",
+      "notes": [
+        "msg_count_min=195 (tp=21, fp=0)"
+      ],
+      "positive_label": "chatty_member",
+      "precision": 1.0,
+      "recall": 0.9545,
+      "strategy": "precision_floor:0.70 on msg_count",
+      "tn": 52,
+      "tp": 21,
+      "version": "0.1"
+    }
+  ],
+  "schema_version": "1.0",
+  "self_hash": "86b4e73a06346ae2bf2e51e7ee84691ab8dded399199318bbf1772eb5f2e3f60",
+  "simhash": [
+    {
+      "actors_fired": 59,
+      "auc": 0.5546,
+      "chosen_f1": 0.0526,
+      "chosen_precision": 0.1176,
+      "chosen_recall": 0.0339,
+      "chosen_threshold": null,
+      "cross_count": 1711,
+      "cross_max": 33,
+      "cross_min": 0,
+      "cross_p50": 9,
+      "enabled": false,
+      "f1_max_f1": 0.0856,
+      "f1_max_threshold": 5,
+      "language": "es",
+      "primitive": "function_word_distribution_top50",
+      "strategy": "precision_floor:0.70",
+      "within_count": 59,
+      "within_max": 25,
+      "within_min": 2,
+      "within_p50": 9
+    },
+    {
+      "actors_fired": 46,
+      "auc": 0.6776,
+      "chosen_f1": 0.0417,
+      "chosen_precision": 0.3333,
+      "chosen_recall": 0.0222,
+      "chosen_threshold": null,
+      "cross_count": 1035,
+      "cross_max": 27,
+      "cross_min": 0,
+      "cross_p50": 7,
+      "enabled": false,
+      "f1_max_f1": 0.1835,
+      "f1_max_threshold": 3,
+      "language": "es",
+      "primitive": "character_ngram_simhash",
+      "strategy": "precision_floor:0.70",
+      "within_count": 45,
+      "within_max": 12,
+      "within_min": 1,
+      "within_p50": 5
+    }
+  ]
+}

@@ -10,9 +10,11 @@ A dot-path like `"interaction_summary.conversation_initiation_rate"` means
 `profile.interaction_summary.get("conversation_initiation_rate")` must be
 non-None.
 
-Thresholds in concrete recipes are `UNCALIBRATED_*` module constants until
-the Rutify corpus grid lands (M5). The `reasoning` dict MUST carry
-`"calibrated": False` while any threshold is uncalibrated.
+Thresholds in concrete recipes are module constants calibrated against the
+Rutify corpus (M5, 2026-05-23). See ``attribution-recipes.md`` and
+``tests/fixtures/calibration/rutify_calibration_baseline.json`` for the
+provenance. The ``reasoning`` dict carries ``"calibrated": True`` and
+``"calibration_corpus": "rutify-full-2026-05-02"``.
 """
 
 from __future__ import annotations

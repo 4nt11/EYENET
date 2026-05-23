@@ -544,12 +544,113 @@ Each `Profile.*_summary` slot also stores `last_observation_id` and `derived_fro
 **Carries forward to M5:**
 - Calibrate `function_word_simhash_hamming` and `char_ngram_simhash_hamming` thresholds against Rutify, replace `UNCALIBRATED` markers in `comparators/_base.py`.
 
-### Milestone 5 — Calibration on Rutify corpus
-- Calibration test suite green.
-- First written attribution recipes for EYENET (replacing BEHAVE-TEXT placeholder).
+### Milestone 5 — Calibration on Rutify corpus — ✅ DONE (2026-05-23)
+- ✅ **Calibration package** (`eyenet/calibration/`, 8 modules + CLI subapp): `corpus.py` (JSONL ingest + chronological split-halves), `interaction.py` (per-actor stats), `simhash_grid.py` (within/cross Hamming + Mann-Whitney AUC + F1/precision-floor sweep), `labels.py` (TOML schema + corpus-sha256 pinning), `recipes_grid.py` (recipe threshold search with AND-of-axes groups OR-combined), `artifact.py` (hash-pinned `CalibrationArtifact` dataclass + JSON I/O), `cli.py` (typer subapp).
+- ✅ **Phase 0.5 — detected language surfaced**: `function_word_distribution_top50` already encodes the detected language in its `Observation.source` suffix (`...#es` / `...#en`); slot_mapper now parses it into `Profile.stylometric_summary.function_word_simhash.language`. char_ngram inherits from there. Zero DB migration (JSON column). New whitelist `_LANGUAGE_SUFFIX_PRIMITIVES` keeps the parse opt-in.
+- ✅ **Phase 0.6 — per-language threshold schema**: both simhash comparators expose `slot_language(envelope) -> str | None`; `LinkerThresholds` gains `function_word_simhash_hamming_per_lang: dict[str, int | None]` (None = "disabled for this language"). `for_comparator(name, language)` returns `int | None`; Linker skips the comparator entirely when None.
+- ✅ **Simhash grid against Rutify (Spanish)**: 73 actors qualifying at `min_messages=50`, 59 firing function_word, 46 firing char_ngram. AUC=0.5546 (function_word) and 0.6776 (char_ngram). Maximum achievable precision: 0.118 / 0.333. **Operator decision (2026-05-22): disable simhash linker for Spanish entirely.** `LinkerThresholds` default factory ships `{"es": None}` for both per-lang dicts. Long-term fix is `minhash-with-shingles` in BEHAVE-TEXT 0.0.2.
+- ✅ **Recipe grid against 74 labeled actors** (73 simhash-qualifying + SangMata_beta_bot, the one confirmed sub-threshold bot):
+  - `lurker_or_observer`: Pattern A (`init_rate <= 0.20`) shipped — P=1.000 R=0.400 on labeled set (catches 2 of 5 lurkers — the passive-responder class). Pattern B (`msg_per_day <= 2.0 AND span >= 7d`) calibrated in M5; wired to live deployment in M5.5 (lifts recall to 1.000 on the labeled set).
+  - `bot_or_automated_poster`: operator-locked axes `init_rate >= 0.95 AND message_length_variance_class == "tight"` — P=1.000 R=1.000 against SangMata. inter_msg_cv dropped (event-driven bots fail clockwork gates); MATTR held as future tertiary axis (SangMata=0.49 vs human cohort min=0.82).
+  - `chatty_member` (NEW): `msg_count >= 195` — P=1.000 R=0.955 calibrated in M5; deployment-unblocked in M5.5 by the `meta.total_messages` primitive populating `temporal_summary.message_count`.
+- ✅ **`UNCALIBRATED_*` markers removed**: all recipe modules now ship `reasoning["calibrated"] = True` with `calibration_corpus = "rutify-full-2026-05-02"`. `grep -rn UNCALIBRATED eyenet/engine/recipes/ eyenet/linker/comparators/` returns zero hits.
+- ✅ **Artifact**: `tests/fixtures/calibration/rutify_calibration_baseline.json` (4.8KB, self-hash `86b4e73a…`). Carries corpus sha256, eyenet + behave-text versions, full simhash AUC + sweep + recipe confusion matrices. No message bodies, no usernames — safe to commit alongside the gitignored corpus. Round-tripped via strict-typed `_from_dict` helpers (no `Any`).
+- ✅ **Labels** (`rutify_labels.toml`, committed): 74 hand-labeled actors. `labeler = "claude-opus-4-7-via-anti"` per operator policy. Counts: 22 chatty_member / 46 normal / 5 lurker / 1 bot / 0 unknown.
+- ✅ **Calibration test suite**: 16 tests under `tests/calibration/` (3 stub tests rewritten + 11 new). Covers per-recipe P/R floors, code-vs-artifact threshold consistency, simhash AUC regression budget (5% drop = fail), artifact self-hash integrity, config-vs-baseline disable mirror. `pytest -m calibration` green.
+- ✅ **CLI**: `eyenet calibrate {run, label-helper, report, diff}` wired via typer subapp. `report` smoke-tested against the committed baseline.
+- ✅ **Quality gates**: 453 default tests + 16 calibration tests green. `mypy --strict eyenet/` clean across 128 files. `ruff check eyenet/ tests/` clean. CSV/TOML/JSON artifacts committed.
+
+**Carries forward to M6:**
+- Implement `LLM-Confirmer` service (subscribes to `attribution.linkage.proposed`, samples evidence_refs, asks an LLM "same author?", emits `attribution.linkage.{confirmed,rejected}`). Becomes the de-facto linker for Spanish until BEHAVE-TEXT minhash-with-shingles lands.
+- Re-enable simhash linker for Spanish when BEHAVE-TEXT ships `minhash-with-shingles`.
+
+### Milestone 5.5 — Wire BEHAVE-TEXT 0.1.2 meta.* primitives — ✅ DONE (2026-05-23)
+- ✅ **Eight new sensor primitives** under `eyenet/sensor/primitives/meta_*.py` — `total_messages`, `corpus_span_days`, `msg_per_day`, `active_days`, `activity_density`, `first_seen_ts`, `last_seen_ts`, `fingerprint_confidence`. All share a single corpus-stats kernel (`_meta_kernel.py`) that derives every field from one pass over per-actor timestamps. `fingerprint_confidence` cutoffs are EXTRACTOR-DEFINED per the BEHAVE-TEXT 0.1.2 spec; the heuristic ships pinned via source-label suffix `#confidence-v1`. Edge cases (empty corpus, single-day actor) suppress the Observation per the spec contract.
+- ✅ **PrimitiveSpec extension**: new `requires_full_corpus: bool` flag — when set, `StylometricSensor._compute_primitive` passes epoch sentinels to `iter_since`, fetching the actor's full history instead of the since-cursor delta. Bodies fetch is also skipped (meta primitives are timestamp-only). Cursors still advance for bookkeeping uniformity.
+- ✅ **Slot-mapper wiring**: eight `_SLOT_MAP` entries routing `meta.*` → `temporal_summary.*`. Slot key for `meta.total_messages` is `message_count` (not `total_messages`) to match `chatty_member.REQUIRED_SLOTS` verbatim — recipe never had to be edited.
+- ✅ **`lurker_or_observer` Pattern B deployed**: second AxisGroup (`msg_per_day <= 2.0 AND corpus_span_days >= 7.0`) OR-combined with Pattern A. Recipe `REQUIRED_SLOTS = ()` (empty) because the OR-combinator must run when EITHER pattern's slots are populated — the recipe body has its own per-pattern guards. Labeled-set recall lifts from 0.40 → 1.000 (P stays 1.000).
+- ✅ **`chatty_member` deployed**: deployment-blocked banner removed; threshold `msg_count >= 195` now fires on actors whose `meta.total_messages` populates `temporal_summary.message_count`.
+- ✅ **Tests**: 18 new unit tests for the kernel + 8 primitives + cross-cutting cases; 8 new parametrized slot_mapper cases; 8 new Pattern B / both-patterns / no-data lurker cases; 1 new calibration regression case asserting Pattern B's msg_per_day + corpus_span_days axes match the artifact. Total: 487 default + 17 calibration green. `mypy --strict eyenet/` clean (137 source files). `ruff check` clean.
+- ✅ **Live smoke**: `eyenet calibrate run` on the Rutify corpus reproduces the M5 P/R/F1 figures exactly across all three recipes (lurker 5/0/69/0 P=R=1.000, bot 1/0/73/0 P=R=1.000, chatty 21/0/52/1 P=1.000 R=0.955). Artifact `self_hash` differs from the committed baseline only because of metadata drift that pre-dates M5.5 (`behave_text_version` bumped 0.1.1 → 0.1.3 in the operator's environment, `corpus_id` filename changed). Calibration math is identical.
+
+**Carries forward to M6:**
+- Re-issue `rutify_calibration_baseline.json` against BEHAVE-TEXT 0.1.3 + the new `corpus_id` if/when the operator wants the committed baseline back in self-hash agreement. The M5.5 wiring did not introduce the drift; the baseline simply pre-dates it.
 
 ### Milestone 6 — Second source
 - A second `CollectorBase` implementation (Matrix or Forum). The point is not the source — the point is to *prove the abstract factory holds*.
+
+### Milestone 7 — Verifier tier (deferred improvement)
+
+A third tier between the cheap Linker (signature-pairwise via `Comparator`)
+and the LLM Confirmer (final arbiter). Operates on raw per-actor corpora
+or one actor + one questioned document, returns a calibrated score. This
+is what fills the Spanish-linkage gap until minhash lands, and the
+generalization beyond it.
+
+**New abstraction:** `Verifier` protocol — sibling to `Comparator`, but
+takes two actors (or actor + questioned doc) and produces a
+`VerificationResult(score, confidence, evidence)`. Registry pattern,
+pluggable, audit-logged.
+
+**Service shape:** new `eyenet/verifier/` subscribes to
+`attribution.linkage.proposed`, runs the verifier registry on the
+candidate pair, emits `attribution.linkage.suspected` when the composite
+score clears a threshold. The existing `Linkage` state machine
+(`PROPOSED → SUSPECTED → CONFIRMED/REJECTED`) and the Graph service
+already accept this — no contract changes.
+
+**Methods to ship (in this order — least-to-most heavyweight):**
+
+1. **General Impostors (GI).** Koppel/Schler verification on an
+   impostor pool. The Rutify corpus IS the impostor pool. Best fit for
+   short Spanish chat where stylometry is structurally hard. ~200 LOC,
+   no new deps. PAN-bake-off mature.
+2. **Normalized Compression Distance (NCD).** `zlib`-based, raw-text,
+   language-agnostic. Sidesteps the function-word domain limit entirely.
+   ~50 LOC, stdlib only.
+3. **Operator-confirmation feedback loop.** Every `LinkageConfirmed`
+   becomes a positive labeled pair; every `LinkageRejected` becomes a
+   negative. Persisted to `tests/fixtures/calibration/feedback_pairs.toml`
+   (or an SQLite table — design TBD). Feeds the LR fusion table below.
+4. **Cosine on multilingual sentence-transformer embeddings.** Probably
+   the strongest single signal, but heaviest dependency (~400MB model
+   download, optional GPU). Likely model:
+   `paraphrase-multilingual-MiniLM-L12-v2`. Operator-opt-in via config.
+5. **Likelihood-Ratio fusion.** Unifying composite scorer. Combines
+   per-Verifier scores via LR tables calibrated on the feedback-loop
+   labeled pairs. Forensic-stylometry standard. Gated on (3) producing
+   ≥50 labeled positive pairs.
+
+**Methods deferred / skipped:**
+
+- **Burrows' Delta / Cosine Delta.** Designed for novel-length texts.
+  Diminishing returns over GI + simhash on short chat. Revisit only if a
+  long-form corpus lands.
+
+**Calibration plumbing the artifact reuses:**
+
+- `eyenet/calibration/recipes_grid.py` AND-of-axes / OR-of-groups
+  Picker generalizes to Verifier-score fusion: every Verifier becomes
+  one axis in an LR group. M5's labels TOML schema + corpus-sha256
+  pinning carry over verbatim.
+- The committed feedback-pairs TOML (post-(3)) is the LR fusion's
+  training input — produced as a side-effect of operator activity, not
+  hand-labeled.
+
+**Open design questions (decide at M7 kickoff):**
+
+- Pull or push? Verifier service either subscribes to
+  `LinkageProposed` (push, runs on every proposal) or exposes a CLI for
+  operator-on-demand verification (pull, runs only when asked). Pull is
+  cheaper; push catches more.
+- Bodies-on-the-bus or dereference-at-Verifier? The Verifier needs
+  evidence bodies, which the `LinkageProposed` envelope doesn't carry
+  today. Either expand the envelope (heavier bus traffic) or have the
+  Verifier dereference via `MessageStore` (more audit-log volume).
+  M4 §4.3 leans toward the latter.
+- Embedding model deployment: bundle the model with EYENET releases vs.
+  operator-brings-their-own. The 400MB bundle changes the
+  small-operator-friendly story — flagged for operator decision.
 
 ---
 

@@ -10,11 +10,13 @@ from eyenet.contracts.attribution import ProfileRow, RecipeResult, RoleSignal
 
 from ._base import Recipe, slots_present
 from .bot_or_automated_poster import BotOrAutomatedPosterRecipe
+from .chatty_member import ChattyMemberRecipe
 from .lurker_or_observer import LurkerOrObserverRecipe
 
 REGISTRY: tuple[Recipe, ...] = (  # type: ignore[assignment]
     LurkerOrObserverRecipe(),
     BotOrAutomatedPosterRecipe(),
+    ChattyMemberRecipe(),
 )
 
 

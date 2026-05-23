@@ -75,3 +75,9 @@ spans.ndjson*
 # Calibration corpora — operator-controlled, not in source
 tests/fixtures/corpora/rutify*
 tests/fixtures/corpora/*.real.jsonl
+# Raw corpus dumps in projroot — operator-only, never committed.
+/rutify-*.jsonl
+/rutify-users.json
+/rutify-users.json.bak
+# Stray planning artifacts emitted before plan-mode workflow kicked in
+/M5_PLAN.md

@@ -219,3 +219,47 @@ async def test_linker_respects_config_threshold(storage: SQLiteStorage, bus: Mem
     await asyncio.sleep(0.05)
 
     assert len(proposed) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_linker_skips_comparator_disabled_for_language(
+    storage: SQLiteStorage, bus: MemoryBus
+) -> None:
+    """A None per-language threshold disables the comparator for that language.
+
+    Spanish-specific use case (M5 / Rutify 2026-05-22): simhash signal is
+    too weak on short Spanish chat to support precision ≥ 0.70. We disable
+    rather than ship noise.
+    """
+    proposed: list[object] = []
+
+    async def _capture(subject: str, payload: bytes, headers: dict[str, str]) -> None:
+        proposed.append(payload)
+
+    await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
+
+    # Pre-seed actor B with a CLOSE hash — under default thresholds this
+    # would absolutely emit a proposal. The Spanish disable must override.
+    await storage.vector_index.upsert_simhash(
+        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
+    )
+
+    cfg = LinkerConfig(
+        thresholds=LinkerThresholds(
+            function_word_simhash_hamming=8,
+            function_word_simhash_hamming_per_lang={"es": None},
+        )
+    )
+    linker = Linker(bus=bus, storage=storage, config=cfg)
+    await linker.on_subscribe()
+
+    # Profile carries language="es" → comparator must skip.
+    env = _profile_envelope(_ACTOR_A, fw_hash=_CLOSE_HASH)
+    fw_slot = env.stylometric_summary["function_word_simhash"]
+    assert isinstance(fw_slot, dict)
+    fw_slot["language"] = "es"
+    await bus.publish(SUBJECT_PROFILE_CURRENT, env.model_dump_json().encode())
+    await asyncio.sleep(0.05)
+
+    assert len(proposed) == 0

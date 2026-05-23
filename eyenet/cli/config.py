@@ -8,16 +8,65 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def _spanish_disabled_default() -> dict[str, int | None]:
+    """Factory for per-language threshold dicts (PLAN §M5 / Rutify 2026-05-22).
+
+    Spanish entries default to ``None`` (disabled). Lives at module scope
+    because Pydantic's ``default_factory`` cannot infer the value-type of a
+    bare lambda returning ``{"es": None}`` under mypy strict.
+    """
+    return {"es": None}
+
+
 class LinkerThresholds(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # UNCALIBRATED defaults. Override per operator via config.toml.
+    # Language-blind fallbacks (M4 first-principles values). Used when an
+    # actor's slot language is not present in the per-lang override dict.
+    # Spanish is disabled via the per-lang defaults below.
     function_word_simhash_hamming: int = Field(default=8, ge=0, le=64)
     char_ngram_simhash_hamming: int = Field(default=10, ge=0, le=64)
 
-    def for_comparator(self, name: str) -> int:
-        """Return the configured threshold for a comparator by name."""
-        return getattr(self, name, 8)
+    # Per-language overrides (PLAN §M5). Value semantics:
+    #   * int  — use this threshold for actors whose slot language matches.
+    #   * None — explicitly DISABLE this comparator for actors of this
+    #            language. The Linker skips the comparator entirely (no
+    #            VectorIndex upsert, no proposal emission).
+    # Disabled-for-language exists because some primitives are empirically
+    # uninformative on certain language/domain combinations (e.g. simhash on
+    # short Spanish chat — Rutify calibration 2026-05-22). Better to be
+    # honest than to ship a calibrated-looking number that is actually noise.
+    #
+    # Defaults DISABLE both simhash comparators for Spanish, mirroring the
+    # committed calibration artifact (rutify_calibration_baseline.json).
+    # Operators override per-config to re-enable when a better primitive
+    # (minhash-with-shingles in BEHAVE-TEXT 0.0.2) lands.
+    function_word_simhash_hamming_per_lang: dict[str, int | None] = Field(
+        default_factory=_spanish_disabled_default
+    )
+    char_ngram_simhash_hamming_per_lang: dict[str, int | None] = Field(
+        default_factory=_spanish_disabled_default
+    )
+
+    def for_comparator(self, name: str, language: str | None = None) -> int | None:
+        """Return the configured threshold for a comparator by name.
+
+        Returns:
+          int  — the threshold to apply.
+          None — comparator is explicitly DISABLED for this language; the
+                 Linker MUST skip it.
+
+        When ``language`` is provided and the per-language dict contains the
+        language code, the per-language entry wins (including a ``None``
+        disable). Otherwise the language-blind default is used.
+        """
+        if language is not None:
+            per_lang_attr = f"{name}_per_lang"
+            per_lang = getattr(self, per_lang_attr, None)
+            if isinstance(per_lang, dict) and language in per_lang:
+                v = per_lang[language]
+                return None if v is None else int(v)
+        return int(getattr(self, name, 8))
 
 
 class LinkerConfig(BaseModel):

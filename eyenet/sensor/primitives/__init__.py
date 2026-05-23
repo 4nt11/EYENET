@@ -6,6 +6,13 @@ function. `StylometricSensor` iterates `PRIMITIVES` on every raw message.
 Primitives that need reply-graph data (e.g. `conversation_initiation_rate`)
 set `requires_reply_corpus=True` and provide `compute_with_reply`. The
 sensor fetches the reply-aware corpus and calls that function instead.
+
+Primitives whose semantics are corpus-level rather than window-level
+(`meta.*` — total_messages, span, rates, etc.) set
+`requires_full_corpus=True`. The sensor then passes the full per-actor
+history (cursor sentinels of epoch/null UUID) rather than the
+since-cursor delta. Cursors still advance normally — they're a no-op for
+meta primitives.
 """
 
 from __future__ import annotations
@@ -22,6 +29,14 @@ from . import (
     function_word_distribution_top50,
     mattr,
     message_length,
+    meta_active_days,
+    meta_activity_density,
+    meta_corpus_span_days,
+    meta_fingerprint_confidence,
+    meta_first_seen_ts,
+    meta_last_seen_ts,
+    meta_msg_per_day,
+    meta_total_messages,
     punctuation_style,
     typo_signature,
 )
@@ -46,6 +61,10 @@ class PrimitiveSpec:
     requires_reply_corpus: bool = False
     # Async compute used when `requires_reply_corpus=True`; ignored otherwise.
     compute_with_reply: AsyncComputeWithReplyFn | None = field(default=None, compare=False)
+    # Set to True for primitives whose semantics are corpus-level rather than
+    # window-level (e.g. meta.*). The sensor passes the full per-actor
+    # history regardless of cursor state.
+    requires_full_corpus: bool = False
 
 
 PRIMITIVES: tuple[PrimitiveSpec, ...] = (
@@ -95,6 +114,55 @@ PRIMITIVES: tuple[PrimitiveSpec, ...] = (
         compute=conversation_initiation_rate.compute,
         requires_reply_corpus=True,
         compute_with_reply=conversation_initiation_rate.compute_async,
+    ),
+    # ── meta.* (corpus-level, see BEHAVE-TEXT 0.1.2) ─────────────────────
+    PrimitiveSpec(
+        name=meta_total_messages.PRIMITIVE_NAME,
+        version=meta_total_messages.PRIMITIVE_VERSION,
+        compute=meta_total_messages.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_corpus_span_days.PRIMITIVE_NAME,
+        version=meta_corpus_span_days.PRIMITIVE_VERSION,
+        compute=meta_corpus_span_days.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_msg_per_day.PRIMITIVE_NAME,
+        version=meta_msg_per_day.PRIMITIVE_VERSION,
+        compute=meta_msg_per_day.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_active_days.PRIMITIVE_NAME,
+        version=meta_active_days.PRIMITIVE_VERSION,
+        compute=meta_active_days.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_activity_density.PRIMITIVE_NAME,
+        version=meta_activity_density.PRIMITIVE_VERSION,
+        compute=meta_activity_density.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_first_seen_ts.PRIMITIVE_NAME,
+        version=meta_first_seen_ts.PRIMITIVE_VERSION,
+        compute=meta_first_seen_ts.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_last_seen_ts.PRIMITIVE_NAME,
+        version=meta_last_seen_ts.PRIMITIVE_VERSION,
+        compute=meta_last_seen_ts.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=meta_fingerprint_confidence.PRIMITIVE_NAME,
+        version=meta_fingerprint_confidence.PRIMITIVE_VERSION,
+        compute=meta_fingerprint_confidence.compute,
+        requires_full_corpus=True,
     ),
 )
 

@@ -115,7 +115,7 @@ class Engine(ServiceBase):
             },
         ) as span:
             try:
-                await self._update_profile(actor_id, row, span)
+                await self._update_profile(actor_id, row, span, envelope_source=env.source)
             except Exception as exc:
                 span.record_exception(exc)
                 _log.error(
@@ -125,8 +125,15 @@ class Engine(ServiceBase):
                     error=str(exc),
                 )
 
-    async def _update_profile(self, actor_id: UUID, obs_row: ObservationRow, _span: object) -> None:
-        mapped = observation_to_slot(obs_row)
+    async def _update_profile(
+        self,
+        actor_id: UUID,
+        obs_row: ObservationRow,
+        _span: object,
+        *,
+        envelope_source: str | None = None,
+    ) -> None:
+        mapped = observation_to_slot(obs_row, envelope_source=envelope_source)
         if mapped is None:
             _log.debug(
                 "engine.primitive_not_mapped",

@@ -1,15 +1,21 @@
 """Comparator: character_ngram_simhash → Hamming on 64-bit simhash.
 
-Threshold: default 10 bits (looser than function_word; char n-grams are noisier).
-UNCALIBRATED — tightened by Rutify in M5.
-Slot path: stylometric_summary.char_ngram_simhash
+Threshold: default 10 bits (looser than function_word; char n-grams are
+noisier) — language-blind fallback retained from M4. The Rutify grid
+(M5, 2026-05-23) found AUC=0.68 on short Spanish chat with max
+achievable precision 0.33; Spanish is explicitly DISABLED at the config
+layer (``LinkerThresholds`` ships ``char_ngram_simhash_hamming_per_lang =
+{"es": None}``). The 10-bit default remains uncalibrated for non-Spanish
+languages.
+
+Slot path: ``stylometric_summary.char_ngram_simhash``.
 """
 
 from __future__ import annotations
 
 from eyenet.contracts.attribution import ProfileCurrentEnvelope
 
-from ._base import ComparisonResult
+from ._base import ComparisonResult, read_function_word_language
 from ._distance import hamming64
 
 _DEFAULT_THRESHOLD = 10
@@ -28,6 +34,11 @@ class _CharNgramSimhashHamming:
             return None
         v = slot.get("value")
         return str(v) if v is not None else None
+
+    def slot_language(self, envelope: ProfileCurrentEnvelope) -> str | None:
+        # char_ngram primitive does not detect language itself. Inherit from
+        # the function_word slot — the actor-wide language tag.
+        return read_function_word_language(envelope)
 
     def compare(self, value_a: str, value_b: str, threshold: int) -> ComparisonResult:
         dist = hamming64(value_a, value_b)

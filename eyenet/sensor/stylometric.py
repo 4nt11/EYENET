@@ -36,6 +36,12 @@ _log = structlog.get_logger()
 _SENSOR_INSTANCE = "stylometric_default"
 _RETRY_DELAY = 0.05  # seconds to wait on actor-not-yet-ingested race
 
+# Cursor sentinels for primitives that need the full per-actor history
+# (e.g. meta.*). Mirror the values produced by SQLiteCursorStore.get() when
+# no cursor row exists — see `eyenet/storage/cursors.py`.
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_NULL_UUID = UUID("00000000-0000-0000-0000-000000000000")
+
 
 class StylometricSensor(ServiceBase, SensorBase):
     """Stylometric sensor running the 4 M2 primitives."""
@@ -194,7 +200,13 @@ class StylometricSensor(ServiceBase, SensorBase):
         _messages_engine: object,
     ) -> ObservationEnvelope | None:
         cursor_store = self._storage.cursors
-        since_ts, since_msg_id = cursor_store.get(actor_id, spec.name)
+
+        # Meta primitives need the actor's full history, not the
+        # since-cursor delta — override with epoch sentinels.
+        if spec.requires_full_corpus:
+            since_ts, since_msg_id = _EPOCH, _NULL_UUID
+        else:
+            since_ts, since_msg_id = cursor_store.get(actor_id, spec.name)
 
         if spec.requires_reply_corpus and spec.compute_with_reply is not None:
             corpus_reply = await self._storage.corpus.iter_since_with_reply(
@@ -208,12 +220,14 @@ class StylometricSensor(ServiceBase, SensorBase):
         if not corpus:
             return None
 
-        # Batch-fetch bodies (all evidence_refs in the window)
+        # Meta primitives ignore bodies; skip the I/O. Other primitives
+        # batch-fetch bodies for all evidence_refs in the window.
         bodies: dict[str, str] = {}
-        for _ts, _mid, ref in corpus:
-            b = await self._storage.messages.get_by_evidence_ref(ref)
-            if b is not None:
-                bodies[ref] = b.decode("utf-8")
+        if not spec.requires_full_corpus:
+            for _ts, _mid, ref in corpus:
+                b = await self._storage.messages.get_by_evidence_ref(ref)
+                if b is not None:
+                    bodies[ref] = b.decode("utf-8")
 
         return spec.compute(corpus=corpus, bodies=bodies)
 

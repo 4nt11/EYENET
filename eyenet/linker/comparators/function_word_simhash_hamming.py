@@ -1,7 +1,13 @@
 """Comparator: function_word_distribution_top50 → Hamming on 64-bit simhash.
 
-Threshold: default 8 bits (UNCALIBRATED — tightened by Rutify in M5).
-Slot path: stylometric_summary.function_word_simhash
+Threshold: default 8 bits — language-blind fallback retained from M4. The
+Rutify grid (M5, 2026-05-23) found AUC=0.55 on short Spanish chat, so
+Spanish is explicitly DISABLED at the config layer (``LinkerThresholds``
+ships ``function_word_simhash_hamming_per_lang = {"es": None}``). The 8-bit
+default remains uncalibrated for non-Spanish languages — re-run the grid
+when a non-Spanish corpus lands.
+
+Slot path: ``stylometric_summary.function_word_simhash``.
 """
 
 from __future__ import annotations
@@ -11,7 +17,9 @@ from eyenet.contracts.attribution import ProfileCurrentEnvelope
 from ._base import ComparisonResult
 from ._distance import hamming64
 
-# UNCALIBRATED default. Override via config.toml [linker.thresholds].
+# Language-blind fallback (M4 first-principles value). Spanish is disabled
+# via LinkerThresholds; other languages still use this. Override via
+# config.toml [linker.thresholds] when a calibrated corpus exists.
 _DEFAULT_THRESHOLD = 8
 
 
@@ -28,6 +36,13 @@ class _FunctionWordSimhashHamming:
             return None
         v = slot.get("value")
         return str(v) if v is not None else None
+
+    def slot_language(self, envelope: ProfileCurrentEnvelope) -> str | None:
+        slot = envelope.stylometric_summary.get("function_word_simhash")
+        if not isinstance(slot, dict):
+            return None
+        lang = slot.get("language")
+        return lang if isinstance(lang, str) else None
 
     def compare(self, value_a: str, value_b: str, threshold: int) -> ComparisonResult:
         dist = hamming64(value_a, value_b)

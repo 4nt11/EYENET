@@ -131,8 +131,12 @@ addopts = [
   "-m", "unit or contract",
   "--cov=eyenet",
   "--cov-report=term-missing",
-  # TODO(M5): raise back to 95 after linker/graph/query_api coverage backfill.
-  "--cov-fail-under=89",
+  # TODO(EYENET v0.2): raise back to 89+ once eyenet/calibration has
+  # unit-test backfill. M5 dropped total coverage ~89% -> ~85% — the
+  # calibration CLI / TOML validators / sweep helpers are
+  # integration-tested via `eyenet calibrate run` against the real corpus,
+  # not unit-tested. Operator decision 2026-05-23: gate at 85 until v0.2.
+  "--cov-fail-under=85",
   "--timeout=30",
 ]
 
@@ -161,7 +165,7 @@ exclude_lines = [
 ]
 show_missing = true
 skip_covered = false
-fail_under = 89  # TODO(M5): raise back to 95
+fail_under = 85  # TODO(EYENET v0.2): raise back to 89+ after calibration backfill
 
 # -----------------------------------------------------------------------------
 # Ruff (strict)
@@ -226,6 +230,11 @@ ignore = [
 "eyenet/graph/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/cli/**/*.py" = [
   "T20",       # print is fine in CLI
+  "B008",      # typer.Option(...) defaults — idiomatic typer usage
+  "TC001", "TC002", "TC003",
+]
+"eyenet/calibration/**/*.py" = [
+  "T20",       # print is fine in CLI surface
   "B008",      # typer.Option(...) defaults — idiomatic typer usage
   "TC001", "TC002", "TC003",
 ]

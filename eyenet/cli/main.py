@@ -565,5 +565,10 @@ def linkage_reject(
     )
 
 
+from eyenet.calibration.cli import app as calibrate_app  # noqa: E402
+
+app.add_typer(calibrate_app, name="calibrate", help="M5 calibration grid + artifact tooling")
+
+
 if __name__ == "__main__":
     app()

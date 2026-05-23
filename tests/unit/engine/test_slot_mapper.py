@@ -60,6 +60,15 @@ def _row(
             "interaction_summary",
             "conversation_initiation_rate",
         ),
+        # M5.5 — meta.* primitives (BEHAVE-TEXT 0.1.2)
+        ("meta.total_messages", "temporal_summary", "message_count"),
+        ("meta.corpus_span_days", "temporal_summary", "corpus_span_days"),
+        ("meta.msg_per_day", "temporal_summary", "msg_per_day"),
+        ("meta.active_days", "temporal_summary", "active_days"),
+        ("meta.activity_density", "temporal_summary", "activity_density"),
+        ("meta.first_seen_ts", "temporal_summary", "first_seen_ts"),
+        ("meta.last_seen_ts", "temporal_summary", "last_seen_ts"),
+        ("meta.fingerprint_confidence", "temporal_summary", "fingerprint_confidence"),
     ],
 )
 def test_known_primitives_map_correctly(
@@ -115,3 +124,65 @@ def test_slot_dict_last_observation_id_is_row_id() -> None:
     result = observation_to_slot(row)
     assert result is not None
     assert result.slot_dict["last_observation_id"] == str(row.id)
+
+
+@pytest.mark.unit
+def test_function_word_language_es_propagates_to_slot() -> None:
+    row = _row(
+        "stylometric.function_word_distribution_top50",
+        value_kind=ValueKind.HASH,
+        value_hash="deadbeef",
+    )
+    result = observation_to_slot(row, envelope_source="eyenet/sensor/primitives/fnwd-top50:v0.2#es")
+    assert result is not None
+    assert result.slot_dict["language"] == "es"
+
+
+@pytest.mark.unit
+def test_function_word_language_en_propagates_to_slot() -> None:
+    row = _row(
+        "stylometric.function_word_distribution_top50",
+        value_kind=ValueKind.HASH,
+        value_hash="deadbeef",
+    )
+    result = observation_to_slot(row, envelope_source="eyenet/sensor/primitives/fnwd-top50:v0.2#en")
+    assert result is not None
+    assert result.slot_dict["language"] == "en"
+
+
+@pytest.mark.unit
+def test_function_word_missing_envelope_source_omits_language() -> None:
+    row = _row(
+        "stylometric.function_word_distribution_top50",
+        value_kind=ValueKind.HASH,
+        value_hash="deadbeef",
+    )
+    result = observation_to_slot(row)  # no envelope_source
+    assert result is not None
+    assert "language" not in result.slot_dict
+
+
+@pytest.mark.unit
+def test_function_word_invalid_lang_suffix_omits_language() -> None:
+    row = _row(
+        "stylometric.function_word_distribution_top50",
+        value_kind=ValueKind.HASH,
+        value_hash="deadbeef",
+    )
+    # Suffix is not in the recognised set — must not be smuggled into the slot.
+    result = observation_to_slot(row, envelope_source="eyenet/sensor/primitives/fnwd-top50:v0.2#zz")
+    assert result is not None
+    assert "language" not in result.slot_dict
+
+
+@pytest.mark.unit
+def test_char_ngram_does_not_pick_up_language_from_suffix() -> None:
+    """Only whitelisted primitives consume the #lang suffix. char_ngram does not."""
+    row = _row(
+        "stylometric.character_ngram_simhash",
+        value_kind=ValueKind.HASH,
+        value_hash="deadbeef",
+    )
+    result = observation_to_slot(row, envelope_source="eyenet/sensor/primitives/char3gram:v0.2#es")
+    assert result is not None
+    assert "language" not in result.slot_dict
