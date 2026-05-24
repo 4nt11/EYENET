@@ -141,7 +141,9 @@ class Linker(ServiceBase):
 
         for match in matches:
             result = comparator.compare(value, match.simhash_hex, threshold)
-            await self._emit_proposal(envelope, match.actor_id, comparator.name, result)
+            await self._emit_proposal(
+                envelope, match.actor_id, comparator.name, result, language=slot_lang
+            )
 
     async def _emit_proposal(
         self,
@@ -149,10 +151,21 @@ class Linker(ServiceBase):
         other_actor_id: UUID,
         method: str,
         result: ComparisonResult,
+        *,
+        language: str | None,
     ) -> None:
         linkage_id = _new_uuid7()
         now = datetime.now(tz=UTC)
         tc = _make_trace_context()
+
+        # M8: propagate the actor's detected language into the proposal
+        # evidence so the Verifier (and any other downstream consumer) can
+        # apply per-language behavior without re-reading ProfileCurrent.
+        # The Comparator's evidence is merged first; we add language last
+        # so a comparator can't accidentally shadow this key.
+        evidence: dict[str, object] = dict(result.evidence)
+        if language is not None:
+            evidence["language"] = language
 
         proposed_env = LinkageProposedEnvelope.from_pair(
             envelope.actor_id,
@@ -160,20 +173,25 @@ class Linker(ServiceBase):
             linkage_id=linkage_id,
             method=method,
             score=result.score,
-            evidence=dict(result.evidence),
+            evidence=evidence,
             proposed_at=now,
             trace_context=tc,
         )
 
-        await self.publisher.publish(SUBJECT_LINKAGE_PROPOSED, proposed_env)
-
+        # Persist BEFORE publishing — downstream subscribers (e.g. M8
+        # Verifier) transition the row by linkage_id and need it visible
+        # by the time they read the bus message. The opposite order races
+        # on real NATS.
         await self._storage.linkages.insert_proposed(
             actor_a=envelope.actor_id,
             actor_b=other_actor_id,
             method=method,
             score=result.score,
-            evidence=dict(result.evidence),
+            evidence=evidence,
+            linkage_id=linkage_id,
         )
+
+        await self.publisher.publish(SUBJECT_LINKAGE_PROPOSED, proposed_env)
 
         await self.audit.emit(
             event="linkage.proposed",

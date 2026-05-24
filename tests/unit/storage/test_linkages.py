@@ -64,6 +64,39 @@ async def test_insert_proposed_different_methods_create_different_rows(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_insert_proposed_honors_passed_linkage_id(
+    store: SQLiteLinkageStore,
+) -> None:
+    """Bus envelope's linkage_id must equal the DB row id. The whole
+    Verifier-over-the-wire path depends on this — M8 debugged it on
+    2026-05-24. Pin it so a future refactor cannot silently revert."""
+    forced = UUID("00000000-0000-0000-0000-0000000000aa")
+    row = await store.insert_proposed(_A, _B, method="m", score=0.5, evidence={}, linkage_id=forced)
+    assert row.id == forced
+    fetched = await store.get(forced)
+    assert fetched is not None
+    assert fetched.id == forced
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_insert_proposed_ignores_linkage_id_on_idempotent_match(
+    store: SQLiteLinkageStore,
+) -> None:
+    """Per contracts/storage.py docstring: passed linkage_id is *ignored*
+    when an existing PROPOSED row matches (pair, method). The returned
+    row keeps its original id."""
+    r1 = await store.insert_proposed(_A, _B, method="m", score=0.5, evidence={})
+    different_id = UUID("00000000-0000-0000-0000-0000000000bb")
+    assert r1.id != different_id
+    r2 = await store.insert_proposed(
+        _A, _B, method="m", score=0.9, evidence={}, linkage_id=different_id
+    )
+    assert r2.id == r1.id
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_transition_proposed_to_suspected(store: SQLiteLinkageStore) -> None:
     row = await store.insert_proposed(_A, _B, method="m", score=0.5, evidence={})
     updated = await store.transition(row.id, LinkageState.SUSPECTED, decided_by="anti")

@@ -77,6 +77,8 @@ class SQLiteLinkageStore(LinkageStore):
         method: str,
         score: float,
         evidence: dict[str, Any],
+        *,
+        linkage_id: UUID | None = None,
     ) -> LinkageRow:
         a, b = _sorted_pair(actor_a, actor_b)
         now = datetime.now(tz=UTC)
@@ -90,15 +92,22 @@ class SQLiteLinkageStore(LinkageStore):
                 )
             ).first()
             if existing is None:
-                row = LinkageTable(
-                    actor_a_id=a,
-                    actor_b_id=b,
-                    state=LinkageState.PROPOSED,
-                    method=method,
-                    score=score,
-                    evidence=evidence,
-                    proposed_at=now,
-                )
+                table_kwargs: dict[str, Any] = {
+                    "actor_a_id": a,
+                    "actor_b_id": b,
+                    "state": LinkageState.PROPOSED,
+                    "method": method,
+                    "score": score,
+                    "evidence": evidence,
+                    "proposed_at": now,
+                }
+                if linkage_id is not None:
+                    # Honor the caller's id so the bus envelope's
+                    # linkage_id matches the DB row. Mismatch silently
+                    # breaks downstream state-machine transitions over
+                    # the wire (M8 Verifier debugged this on 2026-05-24).
+                    table_kwargs["id"] = linkage_id
+                row = LinkageTable(**table_kwargs)
                 session.add(row)
                 session.commit()
                 session.refresh(row)
