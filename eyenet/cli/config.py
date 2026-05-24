@@ -112,6 +112,67 @@ class LinkerConfig(BaseModel):
     thresholds: LinkerThresholds = Field(default_factory=LinkerThresholds)
 
 
+class VerifierThresholds(BaseModel):
+    """M8 Verifier per-method score floors.
+
+    Verifier scores live in `[0.0, 1.0]` with higher = more similar — the
+    inverse of Linker Hamming distance. A pair becomes SUSPECTED iff the
+    composite score (mean of all enabled verifier scores) clears
+    ``composite_floor``.
+
+    Per-language overrides mirror the LinkerThresholds shape:
+      * float — use this floor for actors whose slot language matches.
+      * None  — explicitly DISABLE this verifier for the language.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Per-verifier minimum score required to count toward the composite.
+    general_impostors: float = Field(default=0.60, ge=0.0, le=1.0)
+    compression_distance: float = Field(default=0.55, ge=0.0, le=1.0)
+
+    # Per-language overrides. Defaults are empty: the language-blind floor
+    # applies until M8 calibration against Rutify decides otherwise.
+    general_impostors_per_lang: dict[str, float | None] = Field(default_factory=dict)
+    compression_distance_per_lang: dict[str, float | None] = Field(default_factory=dict)
+
+    # Composite score required to promote PROPOSED → SUSPECTED. Mean across
+    # all enabled verifier scores. Hand-set floor; the M8 calibration grid
+    # will refine it against ground-truth pairs.
+    composite_floor: float = Field(default=0.60, ge=0.0, le=1.0)
+
+    # Last-N messages per actor used to assemble the verifier corpus.
+    # Bounded so the compressor (NCD) and the impostor sampling (GI) stay
+    # predictable on chatty actors.
+    window_messages: int = Field(default=500, ge=10, le=10_000)
+
+    def for_verifier(self, name: str, language: str | None = None) -> float | None:
+        """Return the configured score floor for a verifier by name.
+
+        Returns:
+          float — the score floor to apply.
+          None  — verifier is explicitly DISABLED for this language; the
+                  VerifierService MUST skip it.
+
+        When ``language`` is provided and the per-language dict contains the
+        language code, the per-language entry wins (including a ``None``
+        disable). Otherwise the language-blind default is used.
+        """
+        if language is not None:
+            per_lang_attr = f"{name}_per_lang"
+            per_lang = getattr(self, per_lang_attr, None)
+            if isinstance(per_lang, dict) and language in per_lang:
+                v = per_lang[language]
+                return None if v is None else float(v)
+        return float(getattr(self, name, 0.5))
+
+
+class VerifierConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    thresholds: VerifierThresholds = Field(default_factory=VerifierThresholds)
+
+
 class RuntimeConfig(BaseModel):
     """Resolved runtime config for an EYENET service process."""
 
@@ -123,6 +184,7 @@ class RuntimeConfig(BaseModel):
     otlp_endpoint: str | None = None
     use_memory_bus: bool = False  # tests / dev-loop convenience
     linker: LinkerConfig = Field(default_factory=LinkerConfig)
+    verifier: VerifierConfig = Field(default_factory=VerifierConfig)
 
     @classmethod
     def from_env(
@@ -148,4 +210,10 @@ def _opt_path(s: str | None) -> Path | None:
     return Path(s) if s else None
 
 
-__all__ = ["LinkerConfig", "LinkerThresholds", "RuntimeConfig"]
+__all__ = [
+    "LinkerConfig",
+    "LinkerThresholds",
+    "RuntimeConfig",
+    "VerifierConfig",
+    "VerifierThresholds",
+]

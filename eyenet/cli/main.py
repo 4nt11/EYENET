@@ -16,7 +16,7 @@ from sqlmodel import Session, col, select
 from eyenet import __version__
 from eyenet.bus import MemoryBus, NATSBus
 from eyenet.bus.publisher import BusEnvelopePublisher
-from eyenet.cli.config import LinkerConfig, RuntimeConfig
+from eyenet.cli.config import LinkerConfig, RuntimeConfig, VerifierConfig
 from eyenet.collectors.matrix.real import MatrixCollector
 from eyenet.collectors.matrix.stub import MatrixCollectorStub
 from eyenet.collectors.telegram.auth import ensure_session
@@ -48,6 +48,7 @@ from eyenet.service import ServiceBase, run_service
 from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
 from eyenet.storage.engines import StoreName
 from eyenet.storage.messages import SQLiteMessageStore
+from eyenet.verifier.service import VerifierService
 
 app = typer.Typer(
     name="eyenet",
@@ -405,6 +406,41 @@ def linker_run(  # pragma: no cover
     _run(lambda bus, storage: Linker(bus=bus, storage=storage, config=linker_cfg), cfg)
 
 
+@app.command("verifier")
+def verifier_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    impostor_pool: Path | None = typer.Option(
+        None,
+        "--impostor-pool",
+        help="JSONL impostor-pool fixture; one actor per line "
+        "(default: tests/fixtures/calibration/impostor_pool.jsonl if present)",
+    ),
+) -> None:
+    """Run the M8 Verifier — push-mode service on linkage.proposed."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    verifier_cfg = VerifierConfig()
+
+    default_pool = Path("tests/fixtures/calibration/impostor_pool.jsonl")
+    pool_path = (
+        impostor_pool
+        if impostor_pool is not None
+        else (default_pool if default_pool.exists() else None)
+    )
+
+    def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+        return VerifierService(
+            bus=bus,
+            storage=storage,
+            config=verifier_cfg,
+            impostor_pool_path=pool_path,
+        )
+
+    _run(_factory, cfg)
+
+
 @app.command("graph")
 def graph_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
@@ -520,14 +556,40 @@ def _decision_command(
                 typer.echo(f"ERROR: linkage {linkage_id} not found", err=True)
                 raise typer.Exit(code=1)
 
-            r = cast("LinkageRow", row)
+            r = row
 
             await storage.linkages.transition(
                 linkage_id, new_state, decided_by=decided_by, notes=notes
             )
 
-            publisher = BusEnvelopePublisher(bus)
             now = datetime.now(tz=UTC)
+
+            # M8: confirm = SAME-author ground truth; reject = DIFF-author
+            # ground truth. suspect is operator triage, still ambiguous —
+            # no feedback row. Failure here MUST NOT roll back the state
+            # transition; log and continue.
+            feedback_truth = {
+                LinkageState.CONFIRMED: "same",
+                LinkageState.REJECTED: "diff",
+            }.get(new_state)
+            if feedback_truth is not None:
+                try:
+                    await storage.feedback_pairs.record(
+                        linkage_id=linkage_id,
+                        actor_a=r.actor_a_id,
+                        actor_b=r.actor_b_id,
+                        ground_truth=feedback_truth,
+                        decided_by=decided_by,
+                        decided_at=now,
+                        notes=notes,
+                    )
+                except ValueError as exc:
+                    # ground_truth validation — should never fire because
+                    # the dict literal above is closed-set, but be loud
+                    # if it does.
+                    typer.echo(f"WARN: feedback_pairs.record failed: {exc}", err=True)
+
+            publisher = BusEnvelopePublisher(bus)
             tc = _make_trace_context()
             env = envelope_cls.from_pair(
                 r.actor_a_id,
