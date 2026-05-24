@@ -23,6 +23,10 @@ dependencies = [
   "telethon>=1.36",
   "tgcrypto>=1.2",          # MTProto AES-IGE acceleration for telethon
   "PySocks>=1.7",            # socks proxy support; transitive from telethon, imported directly
+  # Matrix collector. [e2e] pulls python-olm (libolm bindings) for Megolm
+  # decryption + persistent device store. Operator must have libolm
+  # installed system-wide (apt: libolm-dev, dnf: libolm-devel, brew: libolm).
+  "matrix-nio[e2e]>=0.24",
 
   # http api (graph query + operator surface)
   "fastapi>=0.115",
@@ -48,6 +52,13 @@ dependencies = [
   # behave (sibling specs — path-editable until pinned)
   "behave-core",
   "behave-text",
+
+  # nlp (locale-aware primitives — M6.5 spaCy trio).
+  # Core dep, not optional: EYENET ships small-operator CTI; operators
+  # accept the storage cost in exchange for working software out of the box.
+  # The es_core_news_sm model (~13MB) is auto-fetched on first run by
+  # eyenet/sensor/primitives/_locale_morph_kernel.py.
+  "spacy>=3.7,<4.0",
 ]
 
 [tool.uv.sources]
@@ -153,6 +164,7 @@ omit = [
   "eyenet/bus/nats.py",
   "eyenet/collectors/telegram/real.py",
   "eyenet/collectors/telegram/auth.py",
+  "eyenet/collectors/matrix/real.py",
 ]
 
 [tool.coverage.report]
@@ -273,6 +285,9 @@ module = [
   "uuid_extensions.*",
   "behave_text.*",
   "behave_core.*",
+  "spacy.*",
+  "thinc.*",
+  "nio.*",
 ]
 ignore_missing_imports = true
 

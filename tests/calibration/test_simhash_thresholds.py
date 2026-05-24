@@ -97,3 +97,90 @@ def test_simhash_baseline_carries_actor_counts(
     """Documents the corpus the baseline was calibrated against."""
     assert baseline.actor_count_simhash_qualifying == 73
     assert baseline.min_messages == 50
+
+
+# ─── M6.5 spaCy trio (calibrated against Rutify 2026-05-23) ──────────────────
+# Both new simhashes failed to clear the precision_floor:0.70 strategy at
+# any threshold, mirroring the M5 outcome on the two earlier simhashes.
+# Operator decision (2026-05-23): disable both for Spanish in the default
+# LinkerThresholds, recorded as ``enabled=False`` in the committed
+# baseline. Re-enable when BEHAVE-TEXT minhash-with-shingles lands or
+# when a non-Spanish corpus is calibrated.
+
+
+@pytest.mark.calibration
+def test_baseline_pos_ngram_es_is_disabled(baseline: CalibrationArtifact) -> None:
+    s = _simhash(baseline, "pos_ngram_signature", "es")
+    assert s.enabled is False
+    assert s.chosen_threshold is None
+
+
+@pytest.mark.calibration
+def test_baseline_optional_grammar_es_is_disabled(baseline: CalibrationArtifact) -> None:
+    s = _simhash(baseline, "optional_grammar_signature", "es")
+    assert s.enabled is False
+    assert s.chosen_threshold is None
+
+
+@pytest.mark.calibration
+def test_config_default_pos_ngram_es_is_disabled() -> None:
+    """Production config mirrors the baseline disable for Spanish."""
+    t = LinkerThresholds()
+    assert t.for_comparator("pos_ngram_simhash_hamming", "es") is None
+
+
+@pytest.mark.calibration
+def test_config_default_optional_grammar_es_is_disabled() -> None:
+    t = LinkerThresholds()
+    assert t.for_comparator("optional_grammar_simhash_hamming", "es") is None
+
+
+@pytest.mark.calibration
+def test_pos_ngram_auc_within_regression_budget(baseline: CalibrationArtifact) -> None:
+    """5% AUC regression budget (PLAN §7.6).
+
+    Baseline AUC was 0.6108 at calibration time (2026-05-23). Floor at
+    0.6108 * 0.95 = 0.580. Anything worse indicates a primitive regression
+    even though the comparator is disabled at the config layer — the grid
+    math must stay stable.
+    """
+    s = _simhash(baseline, "pos_ngram_signature", "es")
+    assert s.auc > 0.50, f"AUC {s.auc} indicates broken signal"
+    assert s.auc >= 0.580
+
+
+@pytest.mark.calibration
+def test_optional_grammar_auc_within_regression_budget(baseline: CalibrationArtifact) -> None:
+    """5% AUC regression budget — baseline 0.6319, floor 0.600."""
+    s = _simhash(baseline, "optional_grammar_signature", "es")
+    assert s.auc > 0.50
+    assert s.auc >= 0.600
+
+
+@pytest.mark.calibration
+def test_simhash_grid_default_includes_m6_5_trio() -> None:
+    """The default grid run iterates the two new simhash primitives."""
+    import inspect
+
+    from eyenet.calibration.simhash_grid import run as grid_run
+
+    sig = inspect.signature(grid_run)
+    default_primitives: tuple[str, ...] = sig.parameters["primitives"].default
+    assert "pos_ngram_signature" in default_primitives
+    assert "optional_grammar_signature" in default_primitives
+
+
+@pytest.mark.calibration
+def test_all_four_es_simhashes_in_disabled_policy_set() -> None:
+    """``_ES_DISABLED_PRIMITIVES`` lists every simhash disabled for Spanish.
+
+    Adding a new ES-failing simhash requires adding it here; this test
+    is the gate that catches future additions where someone bumps the
+    primitive but forgets the policy entry.
+    """
+    from eyenet.calibration.artifact import _ES_DISABLED_PRIMITIVES
+
+    assert "function_word_distribution_top50" in _ES_DISABLED_PRIMITIVES
+    assert "character_ngram_simhash" in _ES_DISABLED_PRIMITIVES
+    assert "pos_ngram_signature" in _ES_DISABLED_PRIMITIVES
+    assert "optional_grammar_signature" in _ES_DISABLED_PRIMITIVES

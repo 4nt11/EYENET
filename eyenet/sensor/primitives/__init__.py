@@ -25,7 +25,9 @@ from behave_text.spec import Observation
 from . import (
     character_ngram_simhash,
     conversation_initiation_rate,
+    dialect_region,
     distinctive_vocabulary_signature,
+    evaluative_morphology_density,
     function_word_distribution_top50,
     mattr,
     message_length,
@@ -37,6 +39,8 @@ from . import (
     meta_last_seen_ts,
     meta_msg_per_day,
     meta_total_messages,
+    optional_grammar_signature,
+    pos_ngram_signature,
     punctuation_style,
     typo_signature,
 )
@@ -65,6 +69,11 @@ class PrimitiveSpec:
     # window-level (e.g. meta.*). The sensor passes the full per-actor
     # history regardless of cursor state.
     requires_full_corpus: bool = False
+    # Set to False for primitives that only need timestamps + ids (e.g.
+    # the meta.* family — total_messages, span_days, …). The sensor
+    # skips the MessageStore batch fetch when False, saving body I/O.
+    # The default is True because most primitives read message text.
+    requires_bodies: bool = True
 
 
 PRIMITIVES: tuple[PrimitiveSpec, ...] = (
@@ -115,53 +124,87 @@ PRIMITIVES: tuple[PrimitiveSpec, ...] = (
         requires_reply_corpus=True,
         compute_with_reply=conversation_initiation_rate.compute_async,
     ),
+    # ── locale-aware (corpus-level, dialect detection) ───────────────────
+    PrimitiveSpec(
+        name=dialect_region.PRIMITIVE_NAME,
+        version=dialect_region.PRIMITIVE_VERSION,
+        compute=dialect_region.compute,
+        requires_full_corpus=True,
+    ),
     # ── meta.* (corpus-level, see BEHAVE-TEXT 0.1.2) ─────────────────────
     PrimitiveSpec(
         name=meta_total_messages.PRIMITIVE_NAME,
         version=meta_total_messages.PRIMITIVE_VERSION,
         compute=meta_total_messages.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_corpus_span_days.PRIMITIVE_NAME,
         version=meta_corpus_span_days.PRIMITIVE_VERSION,
         compute=meta_corpus_span_days.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_msg_per_day.PRIMITIVE_NAME,
         version=meta_msg_per_day.PRIMITIVE_VERSION,
         compute=meta_msg_per_day.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_active_days.PRIMITIVE_NAME,
         version=meta_active_days.PRIMITIVE_VERSION,
         compute=meta_active_days.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_activity_density.PRIMITIVE_NAME,
         version=meta_activity_density.PRIMITIVE_VERSION,
         compute=meta_activity_density.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_first_seen_ts.PRIMITIVE_NAME,
         version=meta_first_seen_ts.PRIMITIVE_VERSION,
         compute=meta_first_seen_ts.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_last_seen_ts.PRIMITIVE_NAME,
         version=meta_last_seen_ts.PRIMITIVE_VERSION,
         compute=meta_last_seen_ts.compute,
         requires_full_corpus=True,
+        requires_bodies=False,
     ),
     PrimitiveSpec(
         name=meta_fingerprint_confidence.PRIMITIVE_NAME,
         version=meta_fingerprint_confidence.PRIMITIVE_VERSION,
         compute=meta_fingerprint_confidence.compute,
+        requires_full_corpus=True,
+        requires_bodies=False,
+    ),
+    # ── locale-aware (M6.5 spaCy trio, single tagger pass via kernel) ────
+    PrimitiveSpec(
+        name=pos_ngram_signature.PRIMITIVE_NAME,
+        version=pos_ngram_signature.PRIMITIVE_VERSION,
+        compute=pos_ngram_signature.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=evaluative_morphology_density.PRIMITIVE_NAME,
+        version=evaluative_morphology_density.PRIMITIVE_VERSION,
+        compute=evaluative_morphology_density.compute,
+        requires_full_corpus=True,
+    ),
+    PrimitiveSpec(
+        name=optional_grammar_signature.PRIMITIVE_NAME,
+        version=optional_grammar_signature.PRIMITIVE_VERSION,
+        compute=optional_grammar_signature.compute,
         requires_full_corpus=True,
     ),
 )

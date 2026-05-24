@@ -13,10 +13,14 @@ from __future__ import annotations
 from ._base import Comparator, ComparisonResult
 from .char_ngram_simhash_hamming import CharNgramSimhashHamming
 from .function_word_simhash_hamming import FunctionWordSimhashHamming
+from .optional_grammar_simhash_hamming import OptionalGrammarSimhashHamming
+from .pos_ngram_simhash_hamming import PosNgramSimhashHamming
 
 REGISTRY: tuple[Comparator, ...] = (
     FunctionWordSimhashHamming,
     CharNgramSimhashHamming,
+    PosNgramSimhashHamming,
+    OptionalGrammarSimhashHamming,
 )
 
 
@@ -33,5 +37,7 @@ __all__ = [
     "Comparator",
     "ComparisonResult",
     "FunctionWordSimhashHamming",
+    "OptionalGrammarSimhashHamming",
+    "PosNgramSimhashHamming",
     "select_for_slot",
 ]

@@ -18,6 +18,27 @@ def _spanish_disabled_default() -> dict[str, int | None]:
     return {"es": None}
 
 
+def _spanish_pos_ngram_default() -> dict[str, int | None]:
+    """M6.5 pos_ngram per-lang default — Spanish DISABLED.
+
+    Rutify calibration (2026-05-23) yielded AUC=0.61 with max precision
+    0.20 at any threshold — short Spanish chat doesn't separate within-
+    vs cross-author distance distributions well enough. Mirrors the M5
+    operator decision on function_word + char_ngram.
+    """
+    return {"es": None}
+
+
+def _spanish_optional_grammar_default() -> dict[str, int | None]:
+    """M6.5 optional_grammar per-lang default — Spanish DISABLED.
+
+    Rutify calibration (2026-05-23) yielded AUC=0.63 with max precision
+    0.08 at any threshold. Same operator decision rationale as the
+    sibling M5 + M6.5 simhash disables.
+    """
+    return {"es": None}
+
+
 class LinkerThresholds(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -26,6 +47,10 @@ class LinkerThresholds(BaseModel):
     # Spanish is disabled via the per-lang defaults below.
     function_word_simhash_hamming: int = Field(default=8, ge=0, le=64)
     char_ngram_simhash_hamming: int = Field(default=10, ge=0, le=64)
+    # M6.5 spaCy trio (locale-aware). Language-blind defaults; per-lang
+    # overrides below decide whether Spanish actually fires the comparator.
+    pos_ngram_simhash_hamming: int = Field(default=10, ge=0, le=64)
+    optional_grammar_simhash_hamming: int = Field(default=12, ge=0, le=64)
 
     # Per-language overrides (PLAN §M5). Value semantics:
     #   * int  — use this threshold for actors whose slot language matches.
@@ -46,6 +71,18 @@ class LinkerThresholds(BaseModel):
     )
     char_ngram_simhash_hamming_per_lang: dict[str, int | None] = Field(
         default_factory=_spanish_disabled_default
+    )
+    # M6.5 spaCy trio per-language overrides. Default state for Spanish is
+    # the language-blind threshold (re-enabled at startup); the M6.5
+    # calibration grid against Rutify will flip this to int / None as the
+    # data warrants. Until then a calibrated value lives here, NOT a
+    # blanket disable — these primitives are designed for Spanish and
+    # there is no other language ruleset shipping yet.
+    pos_ngram_simhash_hamming_per_lang: dict[str, int | None] = Field(
+        default_factory=_spanish_pos_ngram_default
+    )
+    optional_grammar_simhash_hamming_per_lang: dict[str, int | None] = Field(
+        default_factory=_spanish_optional_grammar_default
     )
 
     def for_comparator(self, name: str, language: str | None = None) -> int | None:

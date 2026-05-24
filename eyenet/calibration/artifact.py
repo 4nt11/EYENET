@@ -38,6 +38,33 @@ from .simhash_grid import GridResult, PrimitiveGridResult
 ARTIFACT_SCHEMA_VERSION: str = "1.0"
 """Bumped on breaking artifact-shape changes. Tests pin to exact version."""
 
+_ES_DISABLED_PRIMITIVES: frozenset[str] = frozenset(
+    {
+        # M5 disable (2026-05-22): AUC=0.55, precision floor unreached.
+        "function_word_distribution_top50",
+        # M5 disable (2026-05-22): AUC=0.68, precision floor unreached.
+        "character_ngram_simhash",
+        # M6.5 disable (2026-05-23): AUC=0.61, precision floor unreached.
+        "pos_ngram_signature",
+        # M6.5 disable (2026-05-23): AUC=0.63, precision floor unreached.
+        "optional_grammar_signature",
+    }
+)
+"""Simhash primitives that the operator has disabled for Spanish.
+
+Spanish disable is operator policy, not a calibration accident: every
+simhash primitive evaluated against the Rutify corpus has failed to
+clear the 0.70 precision floor at any threshold. The within/cross
+Hamming distributions overlap too much on short Spanish chat. Long-term
+fix is BEHAVE-TEXT 0.0.2's minhash-with-shingles (which can be tuned
+for short text) and/or the LLM-Confirmer; until those land, Spanish
+linkage is driven by the recipe layer + operator review queue.
+
+Adding a new primitive here means: artifact records ``enabled=False``
+for its Spanish slice, ``LinkerThresholds`` should ship ``{"es": None}``
+for that primitive's per-lang dict (so the Linker skips the comparator
+entirely), and the calibration regression tests assert the disable."""
+
 
 @dataclass(frozen=True)
 class SimhashArtifactEntry:
@@ -199,7 +226,15 @@ def build(
     simhash_entries: list[SimhashArtifactEntry] = []
     for p in simhash_grid.per_primitive:
         is_es_slice = p.language == "es"
-        enabled = not (simhash_es_disabled and is_es_slice)
+        # ``simhash_es_disabled`` is the CLI flag; ``_ES_DISABLED_PRIMITIVES``
+        # is the operator policy list. A primitive is recorded as
+        # disabled in the artifact iff BOTH apply — the operator chose
+        # to record the disable AND the primitive is on the policy list.
+        # M6.5 calibration (2026-05-23) added pos_ngram + optional_grammar
+        # to the policy list after their AUC failed to clear the
+        # precision floor against Rutify.
+        is_es_disabled_primitive = p.primitive in _ES_DISABLED_PRIMITIVES
+        enabled = not (simhash_es_disabled and is_es_slice and is_es_disabled_primitive)
         simhash_entries.append(_simhash_entry(p, enabled=enabled))
 
     return CalibrationArtifact(

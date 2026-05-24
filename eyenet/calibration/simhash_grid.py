@@ -51,6 +51,12 @@ from eyenet.sensor.primitives.character_ngram_simhash import (
 from eyenet.sensor.primitives.function_word_distribution_top50 import (
     compute as compute_function_word,
 )
+from eyenet.sensor.primitives.optional_grammar_signature import (
+    compute as compute_optional_grammar,
+)
+from eyenet.sensor.primitives.pos_ngram_signature import (
+    compute as compute_pos_ngram,
+)
 
 from .corpus import RutifyMessage, split_halves
 
@@ -152,6 +158,19 @@ def _language_from_source(source: str | None) -> str | None:
     return tail.strip().lower() if sep else None
 
 
+# Primitives that encode their own detected language as the final ``#…``
+# segment of ``Observation.source``. These read ``language`` directly from
+# the source; other simhash primitives (char_ngram) inherit the actor's
+# function_word language at the run() level.
+_SELF_LANG_PRIMITIVES: frozenset[str] = frozenset(
+    {
+        "function_word_distribution_top50",
+        "pos_ngram_signature",
+        "optional_grammar_signature",
+    }
+)
+
+
 def _compute_half_hash(
     primitive_name: str,
     messages: list[RutifyMessage],
@@ -163,12 +182,16 @@ def _compute_half_hash(
         obs = compute_function_word(corpus=corpus, bodies=bodies)
     elif primitive_name == "character_ngram_simhash":
         obs = compute_char_ngram(corpus=corpus, bodies=bodies)
+    elif primitive_name == "pos_ngram_signature":
+        obs = compute_pos_ngram(corpus=corpus, bodies=bodies)
+    elif primitive_name == "optional_grammar_signature":
+        obs = compute_optional_grammar(corpus=corpus, bodies=bodies)
     else:
         msg = f"unsupported primitive in calibration grid: {primitive_name!r}"
         raise ValueError(msg)
     if obs is None:
         return None
-    lang = _language_from_source(obs.source) if primitive_name.startswith("function_word") else None
+    lang = _language_from_source(obs.source) if primitive_name in _SELF_LANG_PRIMITIVES else None
     return HalfHash(
         actor_id=actor_id,
         primitive=primitive_name,
@@ -324,6 +347,10 @@ def run(
     primitives: tuple[str, ...] = (
         "function_word_distribution_top50",
         "character_ngram_simhash",
+        # M6.5 spaCy trio (simhash primitives only — evaluative_morphology is
+        # numeric and does not belong in a Hamming-grid sweep).
+        "pos_ngram_signature",
+        "optional_grammar_signature",
     ),
     language_filter: str | None = "es",
     min_precision: float = DEFAULT_MIN_PRECISION,
@@ -368,7 +395,7 @@ def run(
     for prim in primitives:
         prim_hashes = [h for h in half_hashes if h.primitive == prim]
         if language_filter is not None:
-            if prim.startswith("function_word"):
+            if prim in _SELF_LANG_PRIMITIVES:
                 prim_hashes = [h for h in prim_hashes if h.language == language_filter]
             else:
                 # char_ngram inherits the actor's function_word language.

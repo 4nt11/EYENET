@@ -129,8 +129,10 @@ def test_baseline_artifact_has_expected_shape() -> None:
     p = Path("tests/fixtures/calibration/rutify_calibration_baseline.json")
     artifact, _ = load(p)
     assert artifact.corpus_id == "rutify-full-2026-05-02"
-    assert len(artifact.simhash) == 2  # function_word + char_ngram
-    assert all(not s.enabled for s in artifact.simhash)  # es disabled
+    # 4 simhashes after M6.5: function_word + char_ngram + pos_ngram + optional_grammar.
+    # All four disabled for ES per operator policy (calibration 2026-05-23).
+    assert len(artifact.simhash) == 4
+    assert all(not s.enabled for s in artifact.simhash)  # all es disabled
     recipe_names = {r.name for r in artifact.recipes}
     assert recipe_names == {"lurker_or_observer", "bot_or_automated_poster", "chatty_member"}
 

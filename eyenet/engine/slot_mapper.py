@@ -31,6 +31,10 @@ from eyenet.contracts.observation import ObservationRow
 _LANGUAGE_SUFFIX_PRIMITIVES: frozenset[str] = frozenset(
     {
         "stylometric.function_word_distribution_top50",
+        # M6.5 spaCy trio — both simhash primitives append #<lang> so the
+        # Linker can resolve per-language thresholds.
+        "stylometric.pos_ngram_signature",
+        "lexical.optional_grammar_signature",
     }
 )
 _VALID_LANGUAGE_CODES: frozenset[str] = frozenset({"en", "es"})
@@ -74,6 +78,24 @@ _SLOT_MAP: dict[str, tuple[str, str]] = {
     "interaction.conversation_initiation_rate": (
         "interaction_summary",
         "conversation_initiation_rate",
+    ),
+    # M6 — locale-aware primitives
+    "lexical.dialect_region": (
+        "lexical_summary",
+        "dialect_region",
+    ),
+    # M6.5 — spaCy trio (locale-aware morpho-syntactic primitives)
+    "stylometric.pos_ngram_signature": (
+        "stylometric_summary",
+        "pos_ngram_signature",
+    ),
+    "lexical.evaluative_morphology_density": (
+        "lexical_summary",
+        "evaluative_morphology_density",
+    ),
+    "lexical.optional_grammar_signature": (
+        "lexical_summary",
+        "optional_grammar_signature",
     ),
     # M5.5 — meta.* (BEHAVE-TEXT 0.1.2). All route to temporal_summary.
     # Slot key for meta.total_messages is intentionally "message_count"

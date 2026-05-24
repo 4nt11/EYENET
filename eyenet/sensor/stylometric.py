@@ -25,6 +25,7 @@ from eyenet.contracts.enums import ValueKind
 from eyenet.contracts.observation import ObservationEnvelope, ObservationRow
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.contracts.sensor import SensorBase
+from eyenet.contracts.storage import MessageStore
 from eyenet.sensor.primitives import PRIMITIVES, PrimitiveSpec
 from eyenet.service import ServiceBase
 from eyenet.storage.actors import resolve_actor_id
@@ -126,6 +127,14 @@ class StylometricSensor(ServiceBase, SensorBase):
         obs_store = self._storage.observations
         messages_engine = self._storage._engines[StoreName.MESSAGES]
 
+        # Per-actor cache for the full-corpus fetch + body batch. Lazy:
+        # populated on the first ``requires_full_corpus`` primitive that
+        # needs it, reused by all subsequent ones. Saves ~10 SQLite reads
+        # + ~10 body batch fetches per actor when meta.* (x8) and the
+        # M6.5 trio (x3) all run in the same dispatch.
+        _full_corpus: list[tuple[datetime, UUID, str]] | None = None
+        _full_bodies: dict[str, str] | None = None
+
         succeeded = failed = 0
 
         for spec in PRIMITIVES:
@@ -140,7 +149,35 @@ class StylometricSensor(ServiceBase, SensorBase):
             ) as span:
                 try:
                     t0 = time.monotonic()
-                    obs = await self._compute_primitive(spec, actor_id, env, messages_engine)
+                    # Lazy-populate the per-actor full-corpus + bodies
+                    # cache when the first requires_full_corpus spec
+                    # needs them. Subsequent requires_full_corpus specs
+                    # skip the SQLite + MessageStore round-trips.
+                    if spec.requires_full_corpus and _full_corpus is None:
+                        _full_corpus = await self._storage.corpus.iter_since(
+                            actor_id, _EPOCH, _NULL_UUID
+                        )
+                    if (
+                        spec.requires_full_corpus
+                        and spec.requires_bodies
+                        and _full_bodies is None
+                        and _full_corpus is not None
+                    ):
+                        _full_bodies = await _batch_fetch_bodies(
+                            self._storage.messages, _full_corpus
+                        )
+                    obs = await self._compute_primitive(
+                        spec,
+                        actor_id,
+                        env,
+                        messages_engine,
+                        _precomputed_corpus=_full_corpus if spec.requires_full_corpus else None,
+                        _precomputed_bodies=(
+                            _full_bodies
+                            if spec.requires_full_corpus and spec.requires_bodies
+                            else None
+                        ),
+                    )
                     duration_ms = (time.monotonic() - t0) * 1000
                     span.set_attribute("primitive.duration_ms", duration_ms)
 
@@ -198,6 +235,9 @@ class StylometricSensor(ServiceBase, SensorBase):
         actor_id: UUID,
         _env: RawMessageEnvelope,
         _messages_engine: object,
+        *,
+        _precomputed_corpus: list[tuple[datetime, UUID, str]] | None = None,
+        _precomputed_bodies: dict[str, str] | None = None,
     ) -> ObservationEnvelope | None:
         cursor_store = self._storage.cursors
 
@@ -216,20 +256,45 @@ class StylometricSensor(ServiceBase, SensorBase):
                 return None
             return await spec.compute_with_reply(corpus_with_reply=corpus_reply)
 
-        corpus = await self._storage.corpus.iter_since(actor_id, since_ts, since_msg_id)
+        if _precomputed_corpus is not None:
+            corpus = _precomputed_corpus
+        else:
+            corpus = await self._storage.corpus.iter_since(actor_id, since_ts, since_msg_id)
         if not corpus:
             return None
 
-        # Meta primitives ignore bodies; skip the I/O. Other primitives
-        # batch-fetch bodies for all evidence_refs in the window.
-        bodies: dict[str, str] = {}
-        if not spec.requires_full_corpus:
-            for _ts, _mid, ref in corpus:
-                b = await self._storage.messages.get_by_evidence_ref(ref)
-                if b is not None:
-                    bodies[ref] = b.decode("utf-8")
+        # Bodies handling:
+        #   * ``requires_bodies=False`` primitives (meta.*) get an empty dict.
+        #   * Precomputed bodies (from the per-actor cache) are reused.
+        #   * Otherwise, batch-fetch bodies for the window's evidence_refs.
+        bodies: dict[str, str]
+        if not spec.requires_bodies:
+            bodies = {}
+        elif _precomputed_bodies is not None:
+            bodies = _precomputed_bodies
+        else:
+            bodies = await _batch_fetch_bodies(self._storage.messages, corpus)
 
         return spec.compute(corpus=corpus, bodies=bodies)
+
+
+async def _batch_fetch_bodies(
+    messages_store: MessageStore,
+    corpus: list[tuple[datetime, UUID, str]],
+) -> dict[str, str]:
+    """Fetch the body text for every evidence_ref in ``corpus``.
+
+    Returns a dict mapping ``evidence_ref → body_text`` for refs whose
+    body is present in the MessageStore; refs with missing bodies are
+    silently skipped (the primitive's kernel filters them out a second
+    time and the count is observable via traces).
+    """
+    bodies: dict[str, str] = {}
+    for _ts, _mid, ref in corpus:
+        b = await messages_store.get_by_evidence_ref(ref)
+        if b is not None:
+            bodies[ref] = b.decode("utf-8")
+    return bodies
 
 
 def _observation_to_row(

@@ -1,11 +1,11 @@
 {
   "actor_count_simhash_qualifying": 73,
   "actor_count_total": 74,
-  "behave_text_version": "0.1.1",
+  "behave_text_version": "0.1.3",
   "corpus_id": "rutify-full-2026-05-02",
   "corpus_sha256": "bc0aab18b5278a20c075d1fb67250f3f449e1106517e9b596059b77eceafab71",
   "eyenet_version": "0.0.0",
-  "generated_at": "2026-05-23T02:59:57Z",
+  "generated_at": "2026-05-23T08:06:16Z",
   "label_counts": {
     "bot": 1,
     "chatty_member": 22,
@@ -15,11 +15,7 @@
   },
   "labeler": "claude-opus-4-7-via-anti",
   "min_messages": 50,
-  "notes": [
-    "Simhash linker DISABLED for Spanish (PLAN \u00a7M5): AUC=0.55 / 0.68 cannot support precision >= 0.70 on this corpus. Long-term fix is minhash-with-shingles in BEHAVE-TEXT 0.0.2.",
-    "chatty_member recipe is calibrated (msg_count>=195, P=1.0 R=0.955) but deployment-blocked: required slot temporal_summary.message_count is unmapped in v0.",
-    "lurker_or_observer ships Pattern A only (init_rate <= 0.20); Pattern B (msg_per_day<=2 AND span>=7d) is calibrated but deployment-blocked on temporal_summary primitives."
-  ],
+  "notes": [],
   "recipes": [
     {
       "axes": [
@@ -128,7 +124,7 @@
     }
   ],
   "schema_version": "1.0",
-  "self_hash": "86b4e73a06346ae2bf2e51e7ee84691ab8dded399199318bbf1772eb5f2e3f60",
+  "self_hash": "d4aa2e267ea94318ec725a96918e67804e892f588bdac44d76e4be1fa07dfe1a",
   "simhash": [
     {
       "actors_fired": 59,
@@ -173,6 +169,50 @@
       "within_max": 12,
       "within_min": 1,
       "within_p50": 5
+    },
+    {
+      "actors_fired": 48,
+      "auc": 0.6108,
+      "chosen_f1": 0.0714,
+      "chosen_precision": 0.2,
+      "chosen_recall": 0.0435,
+      "chosen_threshold": null,
+      "cross_count": 1128,
+      "cross_max": 40,
+      "cross_min": 2,
+      "cross_p50": 12,
+      "enabled": false,
+      "f1_max_f1": 0.1255,
+      "f1_max_threshold": 8,
+      "language": "es",
+      "primitive": "pos_ngram_signature",
+      "strategy": "precision_floor:0.70",
+      "within_count": 46,
+      "within_max": 27,
+      "within_min": 3,
+      "within_p50": 10
+    },
+    {
+      "actors_fired": 48,
+      "auc": 0.6319,
+      "chosen_f1": 0.1244,
+      "chosen_precision": 0.0798,
+      "chosen_recall": 0.2826,
+      "chosen_threshold": null,
+      "cross_count": 1128,
+      "cross_max": 36,
+      "cross_min": 0,
+      "cross_p50": 13,
+      "enabled": false,
+      "f1_max_f1": 0.1266,
+      "f1_max_threshold": 4,
+      "language": "es",
+      "primitive": "optional_grammar_signature",
+      "strategy": "precision_floor:0.70",
+      "within_count": 46,
+      "within_max": 33,
+      "within_min": 0,
+      "within_p50": 7
     }
   ]
 }
