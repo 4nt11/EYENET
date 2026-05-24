@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from opentelemetry import trace
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, col, select
@@ -24,6 +25,8 @@ import eyenet.models  # noqa: F401 — registers all tables on SQLModel.metadata
 from eyenet.contracts.storage import GraphStore
 from eyenet.models.graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from eyenet.storage.engines import StoreName, create_all_for
+
+_tracer = trace.get_tracer("eyenet.storage.graph")
 
 
 class SQLiteGraphStore(GraphStore):
@@ -39,7 +42,16 @@ class SQLiteGraphStore(GraphStore):
     ) -> None:
         now = datetime.now(tz=UTC)
         ntype = GraphNodeType(node_type)
-        with Session(self._engine) as session:
+        with (
+            _tracer.start_as_current_span(
+                "storage.graph.upsert_node",
+                attributes={
+                    "graph.node_type": ntype.value,
+                    "graph.node_id": str(node_id),
+                },
+            ),
+            Session(self._engine) as session,
+        ):
             existing = session.exec(
                 select(GraphNodeTable).where(
                     col(GraphNodeTable.node_id) == node_id,
@@ -65,7 +77,17 @@ class SQLiteGraphStore(GraphStore):
     ) -> None:
         now = datetime.now(tz=UTC)
         etype = GraphEdgeType(edge_type)
-        with Session(self._engine) as session:
+        with (
+            _tracer.start_as_current_span(
+                "storage.graph.upsert_edge",
+                attributes={
+                    "graph.edge_type": etype.value,
+                    "graph.src_id": str(src_id),
+                    "graph.dst_id": str(dst_id),
+                },
+            ),
+            Session(self._engine) as session,
+        ):
             existing = session.exec(
                 select(GraphEdgeTable).where(
                     col(GraphEdgeTable.edge_type) == etype,

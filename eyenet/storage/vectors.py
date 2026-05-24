@@ -12,12 +12,14 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+from opentelemetry import trace
 from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 
 from eyenet.contracts.storage import VectorIndex
 
 _log = structlog.get_logger(__name__)
+_tracer = trace.get_tracer("eyenet.storage.vectors")
 
 
 def _hex_to_int(h: str) -> int:
@@ -103,7 +105,16 @@ class SQLiteVectorIndex(VectorIndex):
         primitive_name: str,
         simhash_hex: str,
     ) -> None:
-        with self._engine.begin() as conn:
+        with (
+            _tracer.start_as_current_span(
+                "storage.vectors.upsert_simhash",
+                attributes={
+                    "actor.id": str(actor_id),
+                    "primitive.name": primitive_name,
+                },
+            ),
+            self._engine.begin() as conn,
+        ):
             conn.execute(
                 text(
                     """
@@ -130,7 +141,17 @@ class SQLiteVectorIndex(VectorIndex):
         Linker can pass both values to comparator.compare() for evidence.
         """
         query_int = _hex_to_int(simhash_hex)
-        with self._engine.begin() as conn:
+        with (
+            _tracer.start_as_current_span(
+                "storage.vectors.nearest",
+                attributes={
+                    "primitive.name": primitive_name,
+                    "query.max_distance": max_distance,
+                    "query.limit": limit,
+                },
+            ) as nearest_span,
+            self._engine.begin() as conn,
+        ):
             if exclude_actor_id is not None:
                 rows = conn.execute(
                     text(
@@ -174,14 +195,16 @@ class SQLiteVectorIndex(VectorIndex):
                         "lim": limit,
                     },
                 ).fetchall()
-        return [
-            VectorMatch(
-                actor_id=UUID(str(r[0])),
-                distance=int(r[2]),
-                simhash_hex=_int_to_hex(int(r[1])),
-            )
-            for r in rows
-        ]
+            matches = [
+                VectorMatch(
+                    actor_id=UUID(str(r[0])),
+                    distance=int(r[2]),
+                    simhash_hex=_int_to_hex(int(r[1])),
+                )
+                for r in rows
+            ]
+            nearest_span.set_attribute("result.count", len(matches))
+            return matches
 
 
 __all__ = ["SQLiteVectorIndex", "VectorMatch"]

@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from opentelemetry import trace
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, col, select
 
@@ -24,6 +25,8 @@ from eyenet.contracts.enums import LinkageState
 from eyenet.contracts.storage import LinkageStore
 from eyenet.models.linkage import LinkageTable
 from eyenet.storage.engines import StoreName, create_all_for
+
+_tracer = trace.get_tracer("eyenet.storage.linkages")
 
 _LEGAL_TRANSITIONS: dict[LinkageState, frozenset[LinkageState]] = {
     LinkageState.PROPOSED: frozenset(
@@ -82,7 +85,18 @@ class SQLiteLinkageStore(LinkageStore):
     ) -> LinkageRow:
         a, b = _sorted_pair(actor_a, actor_b)
         now = datetime.now(tz=UTC)
-        with Session(self._engine) as session:
+        with (
+            _tracer.start_as_current_span(
+                "storage.linkages.insert_proposed",
+                attributes={
+                    "linkage.method": method,
+                    "linkage.score": score,
+                    "actor.a.id": str(a),
+                    "actor.b.id": str(b),
+                },
+            ),
+            Session(self._engine) as session,
+        ):
             existing = session.exec(
                 select(LinkageTable).where(
                     col(LinkageTable.actor_a_id) == a,

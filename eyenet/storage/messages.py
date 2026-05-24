@@ -10,6 +10,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import structlog
+from opentelemetry import trace
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -18,6 +19,7 @@ from eyenet.contracts.storage import MessageStore
 from eyenet.models import AttachmentTable, MessageTable
 
 _log = structlog.get_logger()
+_tracer = trace.get_tracer("eyenet.storage.messages")
 
 
 class SQLiteMessageStore(MessageStore):
@@ -58,17 +60,27 @@ class SQLiteMessageStore(MessageStore):
         All rows are written in a single transaction.
         """
 
-        try:
-            with Session(self._engine, expire_on_commit=False) as session:
-                session.add(row)
-                session.flush()
-                for att in attachments or []:
-                    session.add(att)
-                session.commit()
-            return True
-        except IntegrityError:
-            _log.debug("message.duplicate", evidence_ref=row.evidence_ref)
-            return False
+        with _tracer.start_as_current_span(
+            "storage.messages.put_message",
+            attributes={
+                "source.platform": getattr(row, "platform", "unknown"),
+                "message.evidence_ref": row.evidence_ref,
+                "message.attachment_count": len(attachments or []),
+            },
+        ) as put_span:
+            try:
+                with Session(self._engine, expire_on_commit=False) as session:
+                    session.add(row)
+                    session.flush()
+                    for att in attachments or []:
+                        session.add(att)
+                    session.commit()
+                put_span.set_attribute("message.inserted", True)
+                return True
+            except IntegrityError:
+                put_span.set_attribute("message.inserted", False)
+                _log.debug("message.duplicate", evidence_ref=row.evidence_ref)
+                return False
 
 
 __all__ = ["SQLiteMessageStore"]

@@ -5,12 +5,15 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
+from opentelemetry import trace
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, col, select
 
 from eyenet.contracts.attribution import ProfileRow
 from eyenet.contracts.storage import ProfileStore
 from eyenet.models import ProfileTable
+
+_tracer = trace.get_tracer("eyenet.storage.profiles")
 
 
 class SQLiteProfileStore(ProfileStore):
@@ -27,7 +30,16 @@ class SQLiteProfileStore(ProfileStore):
 
     async def upsert_current(self, profile_row: object) -> None:
         row = cast("ProfileRow", profile_row)
-        with Session(self._engine) as session:
+        with (
+            _tracer.start_as_current_span(
+                "storage.profiles.upsert_current",
+                attributes={
+                    "actor.id": str(row.actor_id),
+                    "profile.version": row.version,
+                },
+            ),
+            Session(self._engine) as session,
+        ):
             # Demote the existing current row, if any.
             existing = session.exec(
                 select(ProfileTable)
