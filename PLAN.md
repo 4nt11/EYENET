@@ -680,7 +680,44 @@ The point of M7 is to *prove the abstract factory holds*. Matrix beats Forum/IRC
 - Reply graph — `m.relates_to` parsing into `reply_to_platform_msgid`.
 - Backfill cursor persistence — today's backfill re-paginates from the latest sync token on every restart. MessageStore dedup makes this correct but wasteful on large rooms. Persisted resume tokens (likely a `CorpusCursor`-shaped row keyed by `(matrix, room_id, "backfill")`) when an operator hits a room large enough to feel it.
 
-### Milestone 8 — Verifier tier (deferred improvement)
+### Milestone 8 — Verifier tier — ✅ DONE (2026-05-24)
+
+Third tier between the cheap Linker (signature-pairwise via `Comparator`)
+and the future LLM Confirmer. Operates on raw per-actor corpora, returns
+a composite score that promotes `PROPOSED → SUSPECTED` autonomously.
+Fills the Spanish-linkage gap left by M5's blanket-disabled simhashes,
+and generalizes beyond it.
+
+- ✅ **`Verifier` Protocol + REGISTRY** (`eyenet/verifier/verifiers/{_base.py,__init__.py}`) — sibling of `Comparator`. `VerificationResult(method, score∈[0,1], confidence∈[0,1], evidence, skipped, skip_reason)`. Two methods ship: `GeneralImpostors` (Koppel/Schler, ~200 LOC, n_iters=100 bootstrap subsamples over function-word + char-trigram feature subspaces) and `CompressionDistance` (NCD via zlib, ~50 LOC, stdlib-only, symmetric concat, 50KB-cap window).
+- ✅ **`VerifierService`** (`eyenet/verifier/service.py`) — `ServiceBase` subclass. Subscribes to `attribution.linkage.proposed`; dereferences last-N message bodies for both actors via MESSAGES engine; runs REGISTRY; composite = mean of non-skipped scores; if composite ≥ `composite_floor` → `LinkageStore.transition(SUSPECTED)` + emits `LinkageSuspectedEnvelope`. Audit-emits `verifier.evaluated` per verifier and `linkage.suspected` on promotion. Per-language disable honored via `VerifierThresholds.for_verifier(name, language) -> float | None`.
+- ✅ **`VerifierThresholds`** (`eyenet/cli/config.py`) — mirrors `LinkerThresholds`: per-method float floors + `<method>_per_lang: dict[str, float | None]` overrides + `composite_floor` + `window_messages`. M8 ships GI/NCD enabled for all languages (no Spanish disable; the calibration grid will surface AUC).
+- ✅ **`FeedbackPair` SQLite store** (`eyenet/models/feedback.py`, `eyenet/storage/feedback.py`) — auto-populated by the existing `eyenet linkage confirm` (→`ground_truth="same"`) and `eyenet linkage reject` (→`ground_truth="diff"`) commands. `suspect` does NOT write (still ambiguous). Colocated in the PROFILES engine so the `linkage_id` FK resolves natively. Pair-order invariant (`actor_a_id < actor_b_id`) enforced at both contract and DB layers, mirroring `LinkageStore`. Idempotent on `linkage_id` — operator overrides replace the prior row.
+- ✅ **CLI**: new `eyenet verifier` push-mode runner (mirrors `eyenet linker`). `--impostor-pool` flag accepts a JSONL fixture; defaults to `tests/fixtures/calibration/impostor_pool.jsonl` if present, falls back to empty pool (GI degrades to plain cosine with confidence=0.3).
+- ✅ **Calibration grid** (`eyenet/calibration/verifier_grid.py`) — score-higher-is-better mirror of `simhash_grid`. SAME pairs from per-sender `split_halves`, DIFF pairs sampled cross-sender (capped at 5x within count, seeded RNG for reproducibility). AUC via `mann_whitney_auc_higher_better`, 101-row sweep over [0,1] score thresholds, precision-floor + F1-max pickers. `VerifierGridResult` mirrors `PrimitiveGridResult` field-for-field.
+- ✅ **Artifact extension** (`eyenet/calibration/artifact.py`) — schema 1.0 → 1.1 (additive). New `VerifierArtifactEntry` + `verifiers: tuple[...]` field on `CalibrationArtifact`. New `_ES_DISABLED_VERIFIERS` sibling set (empty on ship — GI/NCD are designed for short chat). Migration applied to committed `rutify_calibration_baseline.json` — `schema_version="1.1"`, `verifiers=()` for the M5/M6.5-era baseline; new self_hash `958d347e…`.
+- ✅ **`eyenet calibrate run` wired** to emit the `verifiers` section alongside `simhash` and `recipes`. `eyenet calibrate report` renders the new section as a markdown table.
+- ✅ **Tests**: 32 new unit tests across `tests/unit/verifier/` (5 files: Protocol contract, GI, NCD, VerifierThresholds, _bag) + 4 new `FeedbackPair` storage tests + 3 new integration tests (`tests/integration/test_verifier_pipeline.py` — same-author promoted, diff-author not promoted, short-corpus skip) + 9 new calibration tests (`tests/calibration/test_verifier_thresholds.py` — synthetic AUC floor, artifact roundtrip, schema 1.1 baseline, `_ES_DISABLED_VERIFIERS` empty policy).
+- ✅ **Quality gates**: `pytest -m "unit or contract"` 628 green (was 581, +47). `pytest -m integration` 22 green (was 19, +3). `pytest -m calibration` 34 green (was 25, +9). `mypy --strict eyenet/` clean across 164 source files. `ruff check` clean. Coverage 87.38% (above 85% gate).
+- ✅ **Live smoke**: `eyenet --help` shows the new `verifier` command. Verifier registry resolves GI + NCD at import; synthetic same/diff corpus separates cleanly (GI same=0.886 / diff=0.013; NCD same=0.569 / diff=0.358). FeedbackPair CRUD verified against a real SQLite file with linkage FK.
+
+**Carries forward to M8.5 / M9 (deferred per the operator's M8-scope decision):**
+- Sentence-transformer cosine verifier (heavyweight; needs operator decision on bundle-vs-BYO model).
+- LR fusion (method 5) — gated on ≥50 confirmed pairs in `FeedbackPair`.
+- TOML export of feedback pairs (`eyenet calibrate export-feedback`) — only needed when LR fusion lands.
+- Real Rutify calibration run against the new verifier grid (corpus is gitignored; operator-triggered). Will update `rutify_calibration_baseline.json` with non-empty `verifiers` entries and may flip `_ES_DISABLED_VERIFIERS` per the AUC outcome.
+- Re-enable the four ES-disabled signature simhashes when BEHAVE-TEXT 0.0.2 ships minhash-with-shingles.
+
+**Gap-closure pass (2026-05-24, same-day-as-M8):** post-ship audit closed:
+- ✅ **Behavioral bug — language propagation.** `VerifierService._extract_language` read `evidence["language"]` but the Linker never put it there. Fix in `eyenet/linker/linker.py::_emit_proposal` injects `slot_language` into the proposal evidence dict. Per-language disable path is now reachable at runtime. New unit tests `tests/unit/linker/test_language_propagation.py` cover the propagation + the no-language case.
+- ✅ **Stable linkage_id across bus + DB.** Linker minted a fresh UUID for the bus envelope while `insert_proposed` minted a different one for the DB row — silently mismatched. Verifier transitions failed with "linkage not found" the first time anything tried to chain on the wire ID. `LinkageStore.insert_proposed` now accepts an optional `linkage_id`; Linker passes its envelope ID. Persist-before-publish ordering added to defeat the read race on real NATS.
+- ✅ **`FeedbackPairRow` Pydantic schema** (`eyenet/contracts/feedback.py`) — sibling to the SQLModel `FeedbackPairTable`, mirrors the LinkageRow / LinkageTable split. Enforces `actor_a_id < actor_b_id` and `ground_truth ∈ {"same","diff"}` at the contract layer. Surface-gate test registers it as Surface=db. `FeedbackPairStore` ABC return types narrowed from `object` to `FeedbackPairRow`; SQLite impl converts at the boundary via `_row_to_contract`.
+- ✅ **CLI integration tests** (`tests/integration/test_linkage_cli_feedback.py`) — `CliRunner` against `eyenet linkage {confirm,reject,suspect}` asserting state machine + FeedbackPair side-effects + terminal-state refusal.
+- ✅ **E2E test against real NATS** (`tests/e2e/test_m8_nats_pipeline.py`, gated on `EYENET_E2E=1`) — propose→verify→suspected over wire for same-author corpora; no-promotion for diff-author. Confirmed running against `nats://127.0.0.1:4222`.
+- ✅ **Synthetic impostor pool** at `tests/fixtures/calibration/impostor_pool.jsonl` — 12 actors × 30 messages across 6 Spanish + 6 English style buckets. GI now runs with confidence=1.0 out of the box (was degraded to confidence=0.3 plain-cosine fallback). Loader autopicks the path when `--impostor-pool` is unset.
+- ✅ **Verifier syslog on promotion (#5)** — closed as no-op for codebase consistency. Linker and Graph don't syslog linkage state-machine events either; the convention is audit-only for that signal class. Documented inline.
+- ✅ Final gates: 634 unit/contract, 26 integration (+4 CLI feedback), 34 calibration, 5 E2E (2 new M8 + 3 prior). Coverage 87.45%. `mypy --strict` clean across 165 files. `ruff check` clean.
+
+### Milestone 8 — original design notes (for reference)
 
 A third tier between the cheap Linker (signature-pairwise via `Comparator`)
 and the LLM Confirmer (final arbiter). Operates on raw per-actor corpora
