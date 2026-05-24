@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from .attribution import LinkageRow
     from .feedback import FeedbackPairRow
 
 
@@ -195,8 +196,8 @@ class LinkageStore(ABC):
         evidence: dict[str, Any],
         *,
         linkage_id: UUID | None = None,
-    ) -> object:
-        """Insert or update a proposed linkage row. Returns LinkageRow.
+    ) -> LinkageRow:
+        """Insert or update a proposed linkage row.
 
         Sorts the pair (actor_a < actor_b) before write. Idempotent on
         (actor_a, actor_b, method, PROPOSED state) — updates score if higher.
@@ -225,7 +226,7 @@ class LinkageStore(ABC):
         """
 
     @abstractmethod
-    async def get(self, linkage_id: UUID) -> object | None:
+    async def get(self, linkage_id: UUID) -> LinkageRow | None:
         """Return LinkageRow or None."""
 
     @abstractmethod

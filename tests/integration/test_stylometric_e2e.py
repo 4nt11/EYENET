@@ -183,15 +183,21 @@ async def test_failure_isolation(tmp_path: Path) -> None:
     )
 
     errors: list[str] = []
+    processed_count = 0
     original_run = sensor._run_primitives
 
     async def _instrumented(actor_id, env, body):  # type: ignore[no-untyped-def]
+        nonlocal processed_count
         try:
             await original_run(actor_id, env, body)
         except Exception as e:
             errors.append(str(e))
+        finally:
+            processed_count += 1
 
     sensor._run_primitives = _instrumented  # type: ignore[method-assign]
+
+    expected = sum(1 for line in _FIXTURE.read_text().splitlines() if line.strip())
 
     with patch(
         "eyenet.sensor.primitives.mattr.compute",
@@ -199,14 +205,18 @@ async def test_failure_isolation(tmp_path: Path) -> None:
     ):
         sensor_task = asyncio.create_task(run_service(sensor))
         collector_task = asyncio.create_task(run_service(collector, tick_interval=0.001))
-        # Wait until collector fixture is exhausted, then give sensor extra time.
+        # Poll until every envelope has reached _run_primitives. No blanket
+        # post-drain sleep — the counter is the drain signal.
         deadline = asyncio.get_event_loop().time() + 30.0
-        while collector._fixture_iter and asyncio.get_event_loop().time() < deadline:
+        while processed_count < expected and asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(0.05)
-        await asyncio.sleep(5.0)  # let sensor drain in-flight tasks
         await collector.shutdown()
         await sensor.shutdown()
         await asyncio.gather(sensor_task, collector_task)
+
+    assert processed_count == expected, (
+        f"sensor drained {processed_count}/{expected} envelopes before shutdown"
+    )
 
     # The _run_primitives wrapper should have caught the mattr failure internally.
     # No outer exception should have propagated.
