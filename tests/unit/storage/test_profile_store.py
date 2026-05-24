@@ -40,7 +40,7 @@ def _profile(actor_id: UUID, version: int, mattr: float = 0.5) -> ProfileRow:
 @pytest.fixture
 def store() -> SQLiteProfileStore:
     engine = open_in_memory_engine()
-    create_all_for(StoreName.PROFILES, engine)
+    create_all_for(StoreName.MAIN, engine)
     return SQLiteProfileStore(engine)
 
 

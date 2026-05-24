@@ -273,7 +273,7 @@ class MatrixCollector(CollectorSkeleton):
             if resolved is not None:
                 self._monitor_room_ids.add(resolved)
 
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         with Session(messages_engine) as session:
             self._source_uuid = upsert_source(
                 session,
@@ -613,7 +613,7 @@ class MatrixCollector(CollectorSkeleton):
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 
         edited_at = datetime.fromtimestamp(event.server_timestamp / 1000.0, tz=UTC)
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         with Session(messages_engine) as session:
             # Find the target message in the same room.
             group = self._lookup_group_uuid(session, room.room_id)
@@ -713,7 +713,7 @@ class MatrixCollector(CollectorSkeleton):
         group_title = room.display_name or room.machine_name or None
         group_kind = GroupKind.MATRIX_ROOM
 
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         if self._source_uuid is None:
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 
@@ -959,7 +959,7 @@ class MatrixCollector(CollectorSkeleton):
         group_title = room.display_name or room.machine_name or None
         body = getattr(event, "body", "") or ""
 
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         display_name = room.user_name(event.sender) or None
         reply_to_platform_msgid = self._extract_reply_to(event)
 
@@ -1102,7 +1102,7 @@ class MatrixCollector(CollectorSkeleton):
         actor_key = "actor:" + hashlib.sha256(f"matrix||{event.sender}".encode()).hexdigest()
         evidence_ref = f"matrix:{room.room_id}:{event.event_id}"
 
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         with Session(messages_engine) as session:
             group_uuid = self._lookup_group_uuid(session, room.room_id)
             if group_uuid is None:

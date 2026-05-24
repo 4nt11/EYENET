@@ -71,7 +71,7 @@ def _row_to_contract(row: LinkageTable) -> LinkageRow:
 class SQLiteLinkageStore(LinkageStore):
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
-        create_all_for(StoreName.PROFILES, engine)
+        create_all_for(StoreName.MAIN, engine)
 
     async def insert_proposed(
         self,

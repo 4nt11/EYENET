@@ -40,7 +40,7 @@ def _row(
 @pytest.fixture
 def store() -> SQLiteObservationStore:
     engine = open_in_memory_engine()
-    create_all_for(StoreName.OBSERVATIONS, engine)
+    create_all_for(StoreName.MAIN, engine)
     return SQLiteObservationStore(engine)
 
 

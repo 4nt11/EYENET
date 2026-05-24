@@ -1,0 +1,92 @@
+extends:
+  - [spectral:oas, recommended]
+
+# EYENET OpenAPI ruleset.
+# Adds project-specific gates on top of Spectral's recommended OAS3 rules.
+
+rules:
+  # Tighten a few built-ins from warn → error.
+  operation-description: warn
+  info-contact: warn
+  info-license: warn
+  oas3-unused-component: warn
+
+  # Every 4xx/5xx response on every operation MUST either be a $ref to a
+  # components.responses entry OR declare application/problem+json content
+  # whose schema is $ref ProblemDetail. Linted against the unresolved doc so
+  # the $ref structure is visible.
+  eyenet-error-response-shape:
+    description: 4xx/5xx responses must be a $ref or declare application/problem+json → ProblemDetail
+    message: "{{path}}: 4xx/5xx must $ref a shared response or declare application/problem+json with schema $ref ProblemDetail"
+    severity: error
+    resolved: false
+    given: "$.paths.*.*.responses[?(@property.match(/^[45]\\d\\d$/))]"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          oneOf:
+            - type: object
+              required: ["$ref"]
+            - type: object
+              required: [content]
+              properties:
+                content:
+                  type: object
+                  required: ["application/problem+json"]
+                  properties:
+                    application/problem+json:
+                      type: object
+                      required: [schema]
+                      properties:
+                        schema:
+                          type: object
+                          required: ["$ref"]
+                          properties:
+                            $ref: { const: "#/components/schemas/ProblemDetail" }
+
+  # The shared components.responses entries themselves must be problem+json →
+  # ProblemDetail. Scoped by NAME so SUCCESS-shape entries (WriteAcceptedResponse)
+  # are excluded explicitly.
+  eyenet-shared-error-response-shape:
+    description: Shared error-response components must declare application/problem+json → ProblemDetail
+    message: "components.responses.{{property}} must declare application/problem+json with schema $ref ProblemDetail"
+    severity: error
+    resolved: false
+    given: "$.components.responses[?(@property=='Unauthorized' || @property=='Forbidden' || @property=='NotFound' || @property=='Conflict' || @property=='Validation' || @property=='RateLimited' || @property=='Unavailable')]"
+    then:
+      field: content
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          required: ["application/problem+json"]
+          properties:
+            application/problem+json:
+              type: object
+              required: [schema]
+              properties:
+                schema:
+                  type: object
+                  required: ["$ref"]
+                  properties:
+                    $ref: { const: "#/components/schemas/ProblemDetail" }
+
+  eyenet-schema-names-pascal:
+    description: components.schemas keys must be PascalCase
+    severity: error
+    given: "$.components.schemas"
+    then:
+      field: "@key"
+      function: pattern
+      functionOptions:
+        match: "^[A-Z][A-Za-z0-9]+$"
+
+  eyenet-path-param-snake:
+    description: path parameters MUST be snake_case identifiers
+    severity: error
+    given: "$.paths[*]..parameters[?(@.in=='path')].name"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^([a-z]+_id|token_id|topic)$"

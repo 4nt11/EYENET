@@ -50,7 +50,7 @@ def _setup_pool(tmp_path: Path) -> Path:
             source=SourceKind.MATRIX,
             matrix_homeserver_url="https://example.org",
             matrix_user_id="@alpha_mx:example.org",
-            matrix_access_token="stub-token",  # noqa: S106 — test fixture, not a real token
+            matrix_access_token="stub-token",
             cooldown_seconds=0,
         ),
     ]

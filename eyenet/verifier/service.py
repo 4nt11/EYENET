@@ -317,7 +317,7 @@ class VerifierService(ServiceBase):
         application code, which is allowed.
         """
         limit = self._thresholds.window_messages
-        engine = self._storage._engines[StoreName.MESSAGES]
+        engine = self._storage._engines[StoreName.MAIN]
         with Session(engine) as session:
             stmt = (
                 select(MessageTable.body)

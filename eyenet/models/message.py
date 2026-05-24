@@ -1,4 +1,9 @@
-"""MessageTable + AttachmentTable — see contracts/message.py."""
+"""MessageTable + AttachmentTable — see contracts/message.py.
+
+AttachmentTable carries sensitivity columns per API_PLAN §4.7 / §4.9 —
+mirrors ObservationTable so reclassification works uniformly across both
+evidence-bearing surfaces.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +11,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, CheckConstraint, Index
 from sqlmodel import Column, Field, SQLModel
 
-from eyenet.contracts.enums import AttachmentKind
+from eyenet.contracts.enums import AttachmentKind, SensitivityTier
 
 from ._base import new_uuid7
+from .observation import TIER_MONOTONE_CK
 
 
 class MessageTable(SQLModel, table=True):
@@ -38,6 +44,14 @@ class MessageTable(SQLModel, table=True):
 
 class AttachmentTable(SQLModel, table=True):
     __tablename__ = "attachment"
+    __table_args__ = (
+        Index(
+            "ix_attachment_tier",
+            "classifier_tier",
+            "operator_tier_override",
+        ),
+        CheckConstraint(TIER_MONOTONE_CK, name="ck_attachment_tier_monotone"),
+    )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     message_id: UUID = Field(foreign_key="message.id", index=True)
@@ -47,6 +61,8 @@ class AttachmentTable(SQLModel, table=True):
     sha256: str = Field(index=True)
     filename: str | None = None
     storage_uri: str | None = None
+    classifier_tier: SensitivityTier = Field(default=SensitivityTier.NORMAL)
+    operator_tier_override: SensitivityTier | None = None
 
 
 __all__ = ["AttachmentTable", "MessageTable"]

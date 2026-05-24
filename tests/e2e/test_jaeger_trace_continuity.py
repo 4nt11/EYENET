@@ -105,7 +105,7 @@ async def _seed_fixture(storage: SQLiteStorage) -> list[dict[str, Any]]:
     list of records so the test can publish their envelopes in order."""
 
     records = [json.loads(line) for line in _FIXTURE.read_text().splitlines() if line.strip()]
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(engine)
 
     with Session(engine) as session:

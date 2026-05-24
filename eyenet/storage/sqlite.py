@@ -42,21 +42,21 @@ class SQLiteStorage(Storage):
     def __init__(self, data_dir: Path) -> None:
         self._data_dir = data_dir
         self._engines: dict[StoreName, Engine] = open_all(data_dir)
-        self._messages = SQLiteMessageStore(self._engines[StoreName.MESSAGES])
-        self._corpus = SQLiteCorpusStore(self._engines[StoreName.MESSAGES])
-        self._cursors = SQLiteCursorStore(self._engines[StoreName.CORPUS])
-        self._observations = SQLiteObservationStore(self._engines[StoreName.OBSERVATIONS])
-        self._profiles = SQLiteProfileStore(self._engines[StoreName.PROFILES])
-        self._vectors = SQLiteVectorIndex(self._engines[StoreName.VECTORS])
-        self._graph = SQLiteGraphStore(self._engines[StoreName.GRAPH])
-        self._linkages = SQLiteLinkageStore(self._engines[StoreName.PROFILES])
-        self._personas = SQLitePersonaStore(self._engines[StoreName.PROFILES])
-        self._feedback_pairs = SQLiteFeedbackPairStore(self._engines[StoreName.PROFILES])
+        self._messages = SQLiteMessageStore(self._engines[StoreName.MAIN])
+        self._corpus = SQLiteCorpusStore(self._engines[StoreName.MAIN])
+        self._cursors = SQLiteCursorStore(self._engines[StoreName.MAIN])
+        self._observations = SQLiteObservationStore(self._engines[StoreName.MAIN])
+        self._profiles = SQLiteProfileStore(self._engines[StoreName.MAIN])
+        self._vectors = SQLiteVectorIndex(self._engines[StoreName.MAIN])
+        self._graph = SQLiteGraphStore(self._engines[StoreName.MAIN])
+        self._linkages = SQLiteLinkageStore(self._engines[StoreName.MAIN])
+        self._personas = SQLitePersonaStore(self._engines[StoreName.MAIN])
+        self._feedback_pairs = SQLiteFeedbackPairStore(self._engines[StoreName.MAIN])
         self._audit = SQLiteAuditStore(
             self._engines[StoreName.AUDIT],
             ndjson_path=data_dir / "audit.ndjson",
         )
-        self._syslog = SQLiteSystemLogStore(self._engines[StoreName.SYSLOG])
+        self._syslog = SQLiteSystemLogStore(self._engines[StoreName.MAIN])
 
     @property
     def messages(self) -> MessageStore:

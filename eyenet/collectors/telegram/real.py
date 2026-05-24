@@ -146,7 +146,7 @@ class TelegramCollector(CollectorSkeleton):
                 self._monitor_raw_ids = resolved
 
         # Ensure a SourceTable row exists for this identity.
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         with Session(messages_engine) as session:
             self._source_uuid = upsert_source(
                 session,
@@ -321,7 +321,7 @@ class TelegramCollector(CollectorSkeleton):
         group_kind = _chat_kind(chat)
         group_title: str | None = getattr(chat, "title", None)
 
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
         if self._source_uuid is None:
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 

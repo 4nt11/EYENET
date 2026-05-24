@@ -25,7 +25,7 @@ async def test_open_close(tmp_path: Path) -> None:
 def test_pragmas_applied(tmp_path: Path) -> None:
     engines = open_all(tmp_path)
     try:
-        engine = engines[StoreName.MESSAGES]
+        engine = engines[StoreName.MAIN]
         with engine.connect() as conn:
             fk = conn.execute(text("PRAGMA foreign_keys")).scalar()
             jm = conn.execute(text("PRAGMA journal_mode")).scalar()
@@ -53,7 +53,7 @@ def test_each_store_has_only_its_tables(tmp_path: Path) -> None:
         assert "audit_log" in tables
         assert "message" not in tables
         # Profiles DB has linkage / persona / persona_membership.
-        with engines[StoreName.PROFILES].connect() as conn:
+        with engines[StoreName.MAIN].connect() as conn:
             tables = {
                 row[0]
                 for row in conn.execute(

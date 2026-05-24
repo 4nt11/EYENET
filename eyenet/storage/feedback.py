@@ -50,7 +50,7 @@ def _row_to_contract(row: FeedbackPairTable) -> FeedbackPairRow:
 class SQLiteFeedbackPairStore(FeedbackPairStore):
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
-        create_all_for(StoreName.PROFILES, engine)
+        create_all_for(StoreName.MAIN, engine)
 
     async def record(
         self,

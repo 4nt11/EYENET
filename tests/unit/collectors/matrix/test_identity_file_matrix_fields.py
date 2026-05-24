@@ -23,7 +23,7 @@ def test_matrix_entry_round_trip(tmp_path: Path) -> None:
         source=SourceKind.MATRIX,
         matrix_homeserver_url="https://element.unredacted.org",
         matrix_user_id="@leroyjenkins:unredacted.org",
-        matrix_access_token="secret-token-xyz",  # noqa: S106 — test fixture
+        matrix_access_token="secret-token-xyz",
         matrix_device_id="EYENET01",
         matrix_monitor_rooms=["!room1:server", "#alias:server"],
     )
@@ -38,7 +38,7 @@ def test_matrix_entry_round_trip(tmp_path: Path) -> None:
     assert out.source == SourceKind.MATRIX
     assert out.matrix_homeserver_url == "https://element.unredacted.org"
     assert out.matrix_user_id == "@leroyjenkins:unredacted.org"
-    assert out.matrix_access_token == "secret-token-xyz"  # noqa: S105 — test fixture
+    assert out.matrix_access_token == "secret-token-xyz"
     assert out.matrix_device_id == "EYENET01"
     assert out.matrix_monitor_rooms == ["!room1:server", "#alias:server"]
 
@@ -90,7 +90,7 @@ def test_mixed_source_toml_loads_without_telegram_session_for_matrix(tmp_path: P
         source=SourceKind.MATRIX,
         matrix_homeserver_url="https://example.org",
         matrix_user_id="@a:example.org",
-        matrix_access_token="t",  # noqa: S106 — test fixture
+        matrix_access_token="t",
     )
     path = tmp_path / "identities.toml"
     dump(IdentityFile(identities=[tg, mx]), path)

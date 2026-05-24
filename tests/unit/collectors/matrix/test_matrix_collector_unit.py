@@ -306,7 +306,7 @@ async def test_on_subscribe_wires_callbacks_and_resolves_aliases(
     fake = coll._client
     assert isinstance(fake, _FakeAsyncClient)
     # Access token plumbed through; no login round-trip.
-    assert fake.access_token == "secret"  # noqa: S105 — test fixture
+    assert fake.access_token == "secret"
     # Nine callbacks registered: RoomMessageText, four media kinds,
     # ReactionEvent, MegolmEvent, BadEvent, UnknownBadEvent.
     assert len(fake.callbacks) == 9
@@ -391,7 +391,7 @@ async def test_backfill_refuses_without_monitor_rooms(
         cooldown_seconds=0,
         matrix_homeserver_url="https://example.org",
         matrix_user_id="@alpha_mx:example.org",
-        matrix_access_token="secret",  # noqa: S106 — test fixture
+        matrix_access_token="secret",
         matrix_monitor_rooms=[],
     )
     cfg_path = tmp_path / "identities.toml"

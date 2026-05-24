@@ -21,7 +21,7 @@ _LID2 = UUID("00000000-0000-0000-0000-000000000098")
 @pytest.fixture
 def store() -> SQLitePersonaStore:
     engine = open_in_memory_engine()
-    create_all_for(StoreName.PROFILES, engine)
+    create_all_for(StoreName.MAIN, engine)
     # Seed linkage rows so FK constraints on via_linkage_id are satisfied
     from datetime import UTC, datetime
 

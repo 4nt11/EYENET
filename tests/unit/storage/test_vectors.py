@@ -25,7 +25,7 @@ _DIST64 = "ffffffffffffffff"  # 64 bits from BASE
 @pytest.fixture
 def index() -> SQLiteVectorIndex:
     engine = open_in_memory_engine()
-    create_all_for(StoreName.PROFILES, engine)
+    create_all_for(StoreName.MAIN, engine)
     return SQLiteVectorIndex(engine)
 
 

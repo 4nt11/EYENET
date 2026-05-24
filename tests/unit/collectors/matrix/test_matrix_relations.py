@@ -53,7 +53,7 @@ async def _setup_collector(
         cooldown_seconds=0,
         matrix_homeserver_url="https://example.org",
         matrix_user_id="@alpha_mx:example.org",
-        matrix_access_token="secret",  # noqa: S106 — fixture
+        matrix_access_token="secret",
         matrix_monitor_rooms=["!room:example.org"],
     )
     cfg_path = tmp_path / "identities.toml"
@@ -111,7 +111,7 @@ async def test_reply_to_platform_msgid_published(
     assert child_env.reply_to_platform_msgid == "$parent"
 
     # FK resolved on insert because parent landed first.
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         rows = s.exec(select(MessageTable).order_by(MessageTable.platform_msgid)).all()
         by_id = {r.platform_msgid: r for r in rows}
@@ -146,7 +146,7 @@ async def test_reply_pending_when_parent_unknown(
     )
     await coll._on_message(room, child)
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         row = s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$child")).first()
         assert row is not None
@@ -190,7 +190,7 @@ async def test_edit_replaces_body_and_keeps_history(
     await coll._on_message(room, original)
     await coll._on_message(room, edit)
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         row = s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$orig")).first()
         assert row is not None
@@ -239,7 +239,7 @@ async def test_reaction_inserted_into_reaction_table(
     )
     await coll._on_reaction(room, reaction)
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         rows = s.exec(select(ReactionTable)).all()
         assert len(rows) == 1
@@ -305,7 +305,7 @@ async def test_reaction_dropped_when_target_unknown(
     )
     await coll._on_reaction(room, reaction)
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         rows = s.exec(select(ReactionTable)).all()
         assert rows == []

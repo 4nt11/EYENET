@@ -95,7 +95,7 @@ def _add_member(
 class SQLitePersonaStore(PersonaStore):
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
-        create_all_for(StoreName.PROFILES, engine)
+        create_all_for(StoreName.MAIN, engine)
 
     async def persona_for_actor(self, actor_id: UUID) -> PersonaRow | None:
         with Session(self._engine) as session:

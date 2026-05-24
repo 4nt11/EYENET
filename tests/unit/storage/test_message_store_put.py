@@ -22,7 +22,7 @@ _NOW = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
 @pytest.fixture
 def engine() -> Engine:
     e = open_in_memory_engine()
-    create_all_for(StoreName.MESSAGES, e)
+    create_all_for(StoreName.MAIN, e)
     return e
 
 

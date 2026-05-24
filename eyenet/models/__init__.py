@@ -12,7 +12,8 @@ from sqlmodel import SQLModel
 
 from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
-from .case import CaseTable
+from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
+from .clearance import SystemUserClearanceGrantTable
 from .corpus import CorpusCursorTable
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
@@ -40,6 +41,8 @@ __all__ = [
     "ActorTable",
     "AttachmentTable",
     "AuditLogTable",
+    "CaseCollaboratorTable",
+    "CaseMemberTable",
     "CaseTable",
     "CorpusCursorTable",
     "EngagementAuthorizationTable",
@@ -65,5 +68,6 @@ __all__ = [
     "SQLModel",
     "SourceTable",
     "SystemLogTable",
+    "SystemUserClearanceGrantTable",
     "SystemUserTable",
 ]

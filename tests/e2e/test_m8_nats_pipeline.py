@@ -80,7 +80,7 @@ async def _nats_url() -> AsyncIterator[str]:
 
 
 async def _seed_actor(storage: SQLiteStorage, bodies: list[str], *, msg_prefix: str) -> UUID:
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(engine)
     with Session(engine) as session:
         source_id = upsert_source(

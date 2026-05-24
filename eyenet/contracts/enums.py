@@ -100,12 +100,84 @@ class EngagementScope(StrEnum):
     ACTIVE_ENGAGE = "active_engage"
 
 
-class CaseState(StrEnum):
-    """Operator investigation lifecycle (MODELS §2.15)."""
+class CaseStatus(StrEnum):
+    """Operator investigation lifecycle (API_PLAN §4.10.3 / MODELS §2.15).
+
+    `archived` is terminal — reopening an archived case creates a NEW
+    successor case via `parent_case_id`, never mutates the archived row.
+    """
 
     OPEN = "open"
     CLOSED = "closed"
     ARCHIVED = "archived"
+
+
+class CaseSubjectKind(StrEnum):
+    """Kind of row that can be a `case_member` subject (API_PLAN §4.10.1)."""
+
+    OBSERVATION = "observation"
+    ATTACHMENT = "attachment"
+    MESSAGE = "message"
+    ACTOR = "actor"
+    PERSONA = "persona"
+    LINKAGE = "linkage"
+
+
+class CaseRoleOnCase(StrEnum):
+    """A collaborator's role on a specific case (API_PLAN §4.10.1).
+
+    Distinct from `SystemUserRole`: the latter is org-wide, this one is
+    per-case. A user can be VIEWER org-wide and OWNER on a case.
+    """
+
+    OWNER = "owner"
+    ANALYST = "analyst"
+    REVIEWER = "reviewer"
+
+
+class SensitivityTier(StrEnum):
+    """Evidence sensitivity tier (API_PLAN §4.7).
+
+    Promotable, never demotable. Default at ingest is `normal`. The classifier
+    chain (§4.9.1) sets `classifier_tier` at ingest; operators may promote via
+    `operator_tier_override` but never demote.
+    """
+
+    NORMAL = "normal"
+    RESTRICTED = "restricted"
+    CLASSIFIED = "classified"
+
+
+class ClearanceScope(StrEnum):
+    """Grant-only scopes flowing through the §4.8 grant lifecycle.
+
+    Never present in any role baseline — every scope here MUST be granted
+    explicitly with a bounded expiry (≤ 90 days) and a mandatory reason.
+
+    - `READ_RESTRICTED` / `READ_CLASSIFIED` gate sensitive-evidence reads (§4.7).
+    - `ADMIN_RECLASSIFY` authorises tier promotion (§4.9).
+    - `ADMIN_CASE` authorises archive + administrative case actions (§4.10).
+    """
+
+    READ_RESTRICTED = "read:restricted"
+    READ_CLASSIFIED = "read:classified"
+    ADMIN_RECLASSIFY = "admin:reclassify"
+    ADMIN_CASE = "admin:case"
+
+
+class ReclassificationSubjectKind(StrEnum):
+    """What kind of row is being reclassified (§4.9)."""
+
+    OBSERVATION = "observation"
+    ATTACHMENT = "attachment"
+
+
+class FileServedVia(StrEnum):
+    """How bytes were served — recorded in `file_access_journal` (§5.6)."""
+
+    INLINE_JSON = "inline_json"
+    ATTACHMENT_STREAM = "attachment_stream"
+    THUMBNAIL_ONLY = "thumbnail_only"
 
 
 class SystemUserRole(StrEnum):
@@ -183,16 +255,22 @@ class CollectorState(StrEnum):
 __all__ = [
     "ActorAliasKind",
     "AttachmentKind",
-    "CaseState",
+    "CaseRoleOnCase",
+    "CaseStatus",
+    "CaseSubjectKind",
+    "ClearanceScope",
     "CollectorState",
     "ConfidenceTier",
     "EngagementScope",
     "EngagementSubjectKind",
+    "FileServedVia",
     "GroupKind",
     "IdentityState",
     "InfrastructureKind",
     "LinkageState",
     "MembershipRole",
+    "ReclassificationSubjectKind",
+    "SensitivityTier",
     "SourceKind",
     "SystemLogLevel",
     "SystemUserRole",

@@ -1,8 +1,18 @@
 """`Storage` ABCs — abstract factory for the persistence layer (PLAN §5.2).
 
-v0 implementation: SQLite (one DB file per store). Cross-store joins are
-forbidden — the boundaries are documented in PLAN §5.2 and crossings live in
-application code, NOT in the storage layer.
+Backend selection is controlled by ``EYENET_STORAGE_TYPE`` (default ``sqlite``);
+see ``eyenet/storage/engines.py``. v0 ships the SQLite concrete impl; the ABCs
+here stay backend-agnostic so MySQL / MariaDB / Postgres impls drop in without
+ABC churn.
+
+Per the updated PLAN §5.2 (M9.1a.2a): two physical databases per deployment.
+``main`` holds every operational table — cross-store SQL joins are FIRST-CLASS
+here; atomic multi-row writes span any operational table in one transaction.
+``audit`` holds hash-chained append-only forensic evidence (``audit_log``
+today, plus the M9.1c file-access journal tables) and stays physically
+isolated so the forensic record remains tamper-evident even if the
+operational DB is compromised. Crossings INTO ``audit`` are application-layer:
+audit is a write target, not a read source for normal queries.
 
 Stores:
   MessageStore     — raw messages by `evidence_ref`

@@ -180,15 +180,17 @@ EYENET is operator-grade, not consumer-privacy-minimized. The rule is mechanical
 - `VectorIndex` — similarity search over hash/vector primitives (sqlite-vec for TF-IDF; flat SQL Hamming for simhashes until ~1M signatures).
 - `GraphStore` — nodes + edges with typed relations.
 
-v0 implementation: **all backed by SQLite** in separate database files, one per concern. Migration to Postgres + pgvector + Neo4j when scale forces it; the abstract factory pays for itself there.
+v0 implementation: **all backed by SQLite**. Backend dispatched by `EYENET_STORAGE_TYPE` (default `sqlite`); MySQL / MariaDB / Postgres concrete impls drop in without ABC churn. The Store ABCs at `eyenet/contracts/storage.py` stay backend-agnostic.
 
-**Cross-store join boundaries.** Multiple SQLite files = no cross-database SQL joins. The boundaries (and the application-side join code that crosses them) are:
-- `MessageStore` ↔ `ObservationStore` — joined by `evidence_ref` in app code (Sensor, Engine read paths).
-- `ObservationStore` ↔ `ProfileStore` — joined by `actor_id` in Engine.
-- `ProfileStore` ↔ `GraphStore` — joined by `actor_id` in Linker / Graph upsert.
-- `VectorIndex` keys are `(actor_id, primitive_name)` and dereference into `ObservationStore` for raw values.
+**Two-DB physical layout (M9.1a.2a).** EYENET deploys with two physical databases per backend:
 
-All other "joins" are forbidden — if a query needs them, it's a sign two stores should be merged or a denormalized view added.
+- **`main`** — every operational table (messages, observations, profiles, linkages, personas, graph, syslog, cases, clearance grants, system users, ...). **Cross-store SQL joins are FIRST-CLASS here.** Atomic multi-row writes span any operational table in one transaction. Stores remain logical groupings (one Python class owns each table family) but share one physical engine.
+
+- **`audit`** — hash-chained append-only forensic evidence: `audit_log` today, plus `file_access_journal`, `file_access_acknowledgment`, `system_user_signing_pubkey_history` once M9.1c lands. **Physically isolated from `main`** so the forensic record stays tamper-evident even if the operational DB is compromised. Crossings INTO `audit` are application-layer — audit is a write target, not a read source for normal queries.
+
+**History.** The pre-M9.1a posture was 8 separate SQLite files per concern with a strict "no cross-store joins" rule. The original rationale was SQLite single-writer concurrency, which does not apply to MySQL/MariaDB/Postgres. With backend-agnosticism on the table, we collapsed the 7 operational stores into `main` to enable native cross-joins and cross-store atomicity; the audit-isolation guarantee (the only forensically load-bearing piece) is preserved.
+
+**`Linkage` table constraint.** Per MODELS §2.5, store the unordered pair as `(actor_a_id, actor_b_id)` with the invariant `actor_a_id < actor_b_id` (lexicographic on UUIDv7). Enforced at the DB layer with a CHECK constraint AND in the contract `__init__` validator. Insertion code MUST sort the pair before write; this prevents duplicate `(A,B)` / `(B,A)` linkage rows.
 
 **`Linkage` table constraint.** Per MODELS §2.5, store the unordered pair as `(actor_a_id, actor_b_id)` with the invariant `actor_a_id < actor_b_id` (lexicographic on UUIDv7). Enforced at the DB layer with a CHECK constraint AND in the contract `__init__` validator. Insertion code MUST sort the pair before write; this prevents duplicate `(A,B)` / `(B,A)` linkage rows.
 
@@ -493,7 +495,7 @@ The journald firehose is for grep + tail. It is NOT operator-queryable from insi
 
 ### Milestone 1 — Bus + skeleton services — ✅ DONE (2026-05-04)
 - ✅ Two `Bus` impls: `NATSBus` (`eyenet/bus/nats.py`) over `nats-py` and `MemoryBus` (`eyenet/bus/memory.py`) for unit/integration tests. Subject matcher (`subjects.py`) handles `*` / `>` wildcards. `BusEnvelopePublisher` enforces `trace_context` on every publish and refuses unknown subjects (PLAN §3 taxonomy).
-- ✅ `SQLiteStorage` aggregate (`eyenet/storage/sqlite.py`) — 8 per-store SQLite files (`messages.db`, `corpus.db`, `observations.db`, `profiles.db`, `vectors.db`, `graph.db`, `audit.db`, `syslog.db`) with WAL + FK pragmas. Cross-store FKs dropped per PLAN §5.2 — boundaries crossed in app code. AuditLog hash-chain enforced inside the write transaction; mirrored to `audit.ndjson` (mode `0600`).
+- ✅ `SQLiteStorage` aggregate (`eyenet/storage/sqlite.py`) — two per-store SQLite files (`main.db`, `audit.db`) with WAL + FK pragmas. `main` holds every operational table; `audit` is the isolated tamper-evident evidence boundary. Backend dispatched by `EYENET_STORAGE_TYPE` (default `sqlite`); MySQL / MariaDB impls drop in without ABC churn. AuditLog hash-chain enforced inside the write transaction; mirrored to `audit.ndjson` (mode `0600`). (Pre-M9.1a.2a posture: 8 files with strict no-cross-join rule — collapsed when backend-agnosticism was added; see §5.2.)
 - ✅ Telemetry (`eyenet/telemetry/`): OTel `init_telemetry`, W3C trace context extract/inject, structlog JSON renderer auto-populating `trace_id`/`span_id`, `should_keep_trace` predicate hook (PLAN §8.6, returns True), `AuditEmitter` for combined bus + persisted audit emit.
 - ✅ `FileIdentityPool` (`eyenet/identity_pool/file.py`) — TOML reader, claim/release/freeze_all state machine, persisted across restarts. `device_fingerprint` per-source schemas pinned (PLAN §6.1).
 - ✅ `ServiceBase` + `run_service` (`eyenet/service/`) — boot order, SIGTERM/SIGINT handlers, `service.start`/`service.stop` audit + syslog. Bus close is caller-owned so co-resident services share one bus.

@@ -106,7 +106,7 @@ async def _seed_fixture(  # pragma: no cover
     now: datetime,
 ) -> None:
     """Seed MessageTable rows from fixture records, setting reply_to_msg_id."""
-    messages_engine = storage._engines[StoreName.MESSAGES]
+    messages_engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(messages_engine)
 
     with Session(messages_engine) as session:
@@ -218,7 +218,7 @@ async def _smoke_run(  # pragma: no cover
         await asyncio.gather(sensor_task, engine_task, collector_task)
 
         if dump_profiles:
-            profiles_engine = storage._engines[StoreName.PROFILES]
+            profiles_engine = storage._engines[StoreName.MAIN]
             with Session(profiles_engine) as session:
                 rows = session.exec(
                     select(ProfileTable)

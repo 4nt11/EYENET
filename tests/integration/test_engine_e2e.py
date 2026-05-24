@@ -70,7 +70,7 @@ async def _seed_messages(storage: SQLiteStorage) -> dict[str, UUID]:
             if line.strip():
                 records.append(json.loads(line))
 
-    messages_engine = storage._engines[StoreName.MESSAGES]
+    messages_engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(messages_engine)
 
     with Session(messages_engine) as session:
@@ -176,7 +176,7 @@ async def test_engine_e2e_role_signals(tmp_path: Path) -> None:
 
     # Wait until both actors have a profile with a non-None role_signal, or timeout.
     def _get_role(actor_id: UUID) -> str | None:
-        attribution_engine = storage._engines[StoreName.PROFILES]
+        attribution_engine = storage._engines[StoreName.MAIN]
         with Session(attribution_engine) as session:
             row = session.exec(
                 select(ProfileTable)

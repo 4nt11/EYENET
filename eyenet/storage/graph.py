@@ -32,7 +32,7 @@ _tracer = trace.get_tracer("eyenet.storage.graph")
 class SQLiteGraphStore(GraphStore):
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
-        create_all_for(StoreName.GRAPH, engine)
+        create_all_for(StoreName.MAIN, engine)
 
     async def upsert_node(
         self,

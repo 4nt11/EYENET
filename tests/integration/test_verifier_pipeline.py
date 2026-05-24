@@ -49,7 +49,7 @@ async def _seed_corpus_async(
     msg_prefix: str,
 ) -> UUID:
     """Seed a synthetic actor with N bodies. Returns the actor_id assigned by upsert_actor."""
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(engine)
     with Session(engine) as session:
         source_id = upsert_source(

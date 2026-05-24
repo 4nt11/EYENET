@@ -20,7 +20,7 @@ _C = UUID("00000000-0000-0000-0000-000000000003")
 @pytest.fixture
 def store() -> SQLiteLinkageStore:
     engine = open_in_memory_engine()
-    create_all_for(StoreName.PROFILES, engine)
+    create_all_for(StoreName.MAIN, engine)
     return SQLiteLinkageStore(engine)
 
 

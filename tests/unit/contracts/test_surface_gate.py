@@ -34,6 +34,7 @@ _DB_ONLY_MODULES: frozenset[str] = frozenset(
         "eyenet.contracts.social_graph",
         "eyenet.contracts.infrastructure",
         "eyenet.contracts.case",
+        "eyenet.contracts.clearance",
         "eyenet.contracts.system_user",
         "eyenet.contracts.syslog",
         "eyenet.contracts.corpus",
@@ -42,6 +43,7 @@ _DB_ONLY_MODULES: frozenset[str] = frozenset(
 )
 _INTERFACE_MODULES: frozenset[str] = frozenset(
     {
+        "eyenet.contracts.audit_subjects",
         "eyenet.contracts.bus",
         "eyenet.contracts.storage",
         "eyenet.contracts.identity_pool",

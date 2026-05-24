@@ -61,7 +61,7 @@ async def _seed_messages(storage: SQLiteStorage) -> None:
             if line.strip():
                 records.append(json.loads(line))
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(engine)
 
     with Session(engine) as session:

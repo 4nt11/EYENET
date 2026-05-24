@@ -1,0 +1,2777 @@
+openapi: 3.1.0
+info:
+  title: EYENET HTTP API
+  version: "1.0.0-pre"
+  summary: Operator-grade evidence platform — REST + SSE surface
+  description: |
+    EYENET v1 HTTP API. Authoritative source of truth: `API_PLAN.md`.
+
+    Operational invariants surfaced here:
+      * All errors are `application/problem+json` (RFC 7807) using `ProblemDetail`.
+      * All list endpoints are opaque-cursor paginated; no offset.
+      * All writes are bus-published after a durable audit append; clients receive `202 + WriteAccepted` and must poll.
+      * SSE streams declare per-event payloads via the `x-eyenet-sse-events` operation extension.
+      * Bearer auth: short-lived RS256 access JWT OR a Personal Access Token (`eyenet_pat_...`).
+        Authority (scopes) is resolved server-side per request — never trust scope claims in a token.
+      * HTTP/2 mandatory. HTTP/1.1 is refused at the listener.
+  contact:
+    name: EYENET maintainers
+    url: https://eyenet.local/
+  license:
+    name: AGPL-3.0-or-later
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+servers:
+  - url: https://eyenet.local
+    description: Operator deployment (local-bind by default; reverse-proxied for TLS)
+
+tags:
+  - name: auth
+    description: Login, refresh, logout, PAT and stream-token minting.
+  - name: actors
+    description: Actor reads — detail, neighbors, observations, timeline.
+  - name: personas
+    description: Persona reads — detail and member list.
+  - name: linkages
+    description: Linkage reads and operator decisions (confirm/reject/suspect).
+  - name: graph
+    description: Aggregate graph stats and actor search.
+  - name: audit
+    description: Audit chain reads and integrity verification.
+  - name: identities
+    description: Identity-pool operator actions (claim/release/freeze_all).
+  - name: control
+    description: System-wide operator actions (panic).
+  - name: stream
+    description: Server-Sent Events. Storage-backed replay via `Last-Event-ID`.
+  - name: health
+    description: Liveness, readiness, and Prometheus metrics scrape.
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.1 Auth
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: auth_login
+      security: []
+      summary: Exchange username + password for an access JWT and refresh token.
+      description: Public endpoint. Subject to per-IP throttling (see §12.3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        "200":
+          description: Credentials accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: auth_refresh
+      security: []
+      summary: Exchange a refresh token for a fresh access JWT.
+      description: Rotates the refresh token; the old row is marked `replaced_by`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        "200":
+          description: New access token issued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessToken' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: auth_logout
+      summary: Revoke the current refresh token and denylist the access jti.
+      responses:
+        "204": { description: Logged out. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: auth_me
+      summary: Return the authenticated SystemUser and currently-granted scopes.
+      responses:
+        "200":
+          description: Current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMe' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/tokens:
+    get:
+      tags: [auth]
+      operationId: auth_list_tokens
+      summary: List the caller's own active Personal Access Tokens.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of PAT summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPagePATSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [auth]
+      operationId: auth_mint_token
+      summary: Mint a new Personal Access Token. Secret is returned ONCE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PATMintRequest' }
+      responses:
+        "201":
+          description: PAT minted. Secret is plaintext only in this response.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PATMinted' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/auth/tokens/{token_id}:
+    delete:
+      tags: [auth]
+      operationId: auth_revoke_token
+      summary: Revoke a PAT belonging to the caller (or any user with admin:tokens).
+      parameters:
+        - { $ref: '#/components/parameters/TokenIdPath' }
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/auth/stream-token:
+    post:
+      tags: [auth]
+      operationId: auth_mint_stream_token
+      summary: Mint a short-lived (≤15 min) bearer token usable in the SSE query string.
+      description: Browser SSE fallback path. See API_PLAN §6.4.2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StreamTokenRequest' }
+      responses:
+        "200":
+          description: Stream token minted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StreamTokenMinted' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.2 Reads
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/actors/{actor_id}:
+    get:
+      tags: [actors]
+      operationId: actors_get
+      summary: Get an actor by id. Emits one `evidence_access` audit row.
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+      responses:
+        "200":
+          description: Actor detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActorDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/actors/{actor_id}/neighbors:
+    get:
+      tags: [actors]
+      operationId: actors_neighbors
+      summary: List graph neighbors of an actor (typed-edge discriminated union).
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of typed neighbor edges.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NeighborList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/actors/{actor_id}/observations:
+    get:
+      tags: [actors]
+      operationId: actors_observations
+      summary: List observations attributable to an actor.
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+      responses:
+        "200":
+          description: Cursor page of observation summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageObservationSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/actors/{actor_id}/timeline:
+    get:
+      tags: [actors]
+      operationId: actors_timeline
+      summary: Time-ordered messages and observations for an actor.
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+      responses:
+        "200":
+          description: Cursor page of timeline entries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageTimelineEntry' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/personas/{persona_id}:
+    get:
+      tags: [personas]
+      operationId: personas_get
+      summary: Get a persona by id.
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+      responses:
+        "200":
+          description: Persona detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PersonaDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/personas/{persona_id}/members:
+    get:
+      tags: [personas]
+      operationId: personas_members
+      summary: List members (actors belonging to this persona).
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of persona members.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPagePersonaMember' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/linkages:
+    get:
+      tags: [linkages]
+      operationId: linkages_list
+      summary: List linkages. Index read — does not audit.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - name: state
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/LinkageState' }
+        - name: method
+          in: query
+          required: false
+          schema: { type: string, maxLength: 64 }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+      responses:
+        "200":
+          description: Cursor page of linkages.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageLinkageSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/linkages/{linkage_id}:
+    get:
+      tags: [linkages]
+      operationId: linkages_get
+      summary: Get linkage detail with comparator evidence.
+      parameters:
+        - { $ref: '#/components/parameters/LinkageIdPath' }
+      responses:
+        "200":
+          description: Linkage detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LinkageDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/graph/stats:
+    get:
+      tags: [graph]
+      operationId: graph_stats
+      summary: Aggregate counts. No per-entity dereference; no evidence audit.
+      responses:
+        "200":
+          description: Graph statistics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphStats' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/graph/search:
+    get:
+      tags: [graph]
+      operationId: graph_search
+      summary: Search actors by handle/alias/identifier.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of matching actor summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageActorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.3 Audit
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/audit:
+    get:
+      tags: [audit]
+      operationId: audit_list
+      summary: List audit rows. Reading audit does NOT emit a new audit row.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+        - name: user
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: subject
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: Cursor page of audit rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageAuditRow' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/audit/verify:
+    get:
+      tags: [audit]
+      operationId: audit_verify
+      summary: Recompute the audit hash chain and return the first break (if any).
+      responses:
+        "200":
+          description: Verification result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditVerifyResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.4 Writes
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/linkages/{linkage_id}/confirm:
+    post:
+      tags: [linkages]
+      operationId: linkages_confirm
+      summary: Operator confirms a linkage. Publishes `attribution.linkage.confirmed`.
+      parameters:
+        - { $ref: '#/components/parameters/LinkageIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkageDecisionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/linkages/{linkage_id}/reject:
+    post:
+      tags: [linkages]
+      operationId: linkages_reject
+      summary: Operator rejects a linkage. Publishes `attribution.linkage.rejected`.
+      parameters:
+        - { $ref: '#/components/parameters/LinkageIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkageDecisionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/linkages/{linkage_id}/suspect:
+    post:
+      tags: [linkages]
+      operationId: linkages_suspect
+      summary: Operator marks a linkage as suspected. Publishes `attribution.linkage.suspected`.
+      parameters:
+        - { $ref: '#/components/parameters/LinkageIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkageDecisionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/identities/{identity_id}/claim:
+    post:
+      tags: [identities]
+      operationId: identities_claim
+      summary: Claim an identity-pool entry. Publishes `eyenet.identity.claimed`.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdentityActionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/identities/{identity_id}/release:
+    post:
+      tags: [identities]
+      operationId: identities_release
+      summary: Release a claimed identity back to the pool. Publishes `eyenet.identity.released`.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdentityActionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/identities/freeze_all:
+    post:
+      tags: [identities]
+      operationId: identities_freeze_all
+      summary: Freeze every identity in the pool. Publishes `eyenet.identity.freeze_all`.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdentityActionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/panic:
+    post:
+      tags: [control]
+      operationId: control_panic
+      summary: Global panic — halts collectors, freezes identities, broadcasts to UI.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PanicRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.5 SSE streams
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/stream/linkages:
+    get:
+      tags: [stream]
+      operationId: stream_linkages
+      summary: SSE stream of linkage state-transition events.
+      parameters:
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      x-eyenet-sse-events:
+        - subject: attribution.linkage.proposed
+          payload_schema: '#/components/schemas/LinkageProposedEvent'
+        - subject: attribution.linkage.confirmed
+          payload_schema: '#/components/schemas/LinkageStateChangedEvent'
+        - subject: attribution.linkage.rejected
+          payload_schema: '#/components/schemas/LinkageStateChangedEvent'
+        - subject: attribution.linkage.suspected
+          payload_schema: '#/components/schemas/LinkageStateChangedEvent'
+        - subject: stream.gap
+          payload_schema: '#/components/schemas/StreamGapEvent'
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/stream/personas:
+    get:
+      tags: [stream]
+      operationId: stream_personas
+      summary: SSE stream of persona-update events.
+      parameters:
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      x-eyenet-sse-events:
+        - subject: attribution.persona.updated
+          payload_schema: '#/components/schemas/PersonaUpdatedEvent'
+        - subject: stream.gap
+          payload_schema: '#/components/schemas/StreamGapEvent'
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/stream/audit:
+    get:
+      tags: [stream]
+      operationId: stream_audit
+      summary: SSE stream of audit events.
+      parameters:
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      x-eyenet-sse-events:
+        - subject: eyenet.audit
+          payload_schema: '#/components/schemas/AuditEvent'
+        - subject: stream.gap
+          payload_schema: '#/components/schemas/StreamGapEvent'
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/stream/control:
+    get:
+      tags: [stream]
+      operationId: stream_control
+      summary: SSE stream of system-wide operator actions (panic, freeze, release).
+      parameters:
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      x-eyenet-sse-events:
+        - subject: eyenet.control.panic
+          payload_schema: '#/components/schemas/ControlEvent'
+        - subject: eyenet.identity.freeze_all
+          payload_schema: '#/components/schemas/ControlEvent'
+        - subject: eyenet.identity.released
+          payload_schema: '#/components/schemas/ControlEvent'
+        - subject: stream.gap
+          payload_schema: '#/components/schemas/StreamGapEvent'
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/stream/all:
+    get:
+      tags: [stream]
+      operationId: stream_all
+      summary: Multiplexed SSE stream — union of permitted topics.
+      description: |
+        Caller selects topics via repeated `?topic=` query params. The server
+        intersects with the caller's granted `stream:*` scopes; topics for which
+        the caller lacks scope are silently dropped (no leakage).
+      parameters:
+        - name: topic
+          in: query
+          required: true
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 16
+            items: { $ref: '#/components/schemas/StreamTopic' }
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.6 Health / metrics
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/healthz:
+    get:
+      tags: [health]
+      operationId: health_live
+      security: []
+      summary: Liveness probe. Process is up.
+      responses:
+        "200":
+          description: Alive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthStatus' }
+
+  /v1/readyz:
+    get:
+      tags: [health]
+      operationId: health_ready
+      security: []
+      summary: Readiness probe — storage, bus, auth keys all loaded.
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyStatus' }
+        "503":
+          description: A required component is degraded.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /v1/metrics:
+    get:
+      tags: [health]
+      operationId: health_metrics
+      summary: Prometheus scrape endpoint. Requires `read:metrics`.
+      responses:
+        "200":
+          description: Prometheus text exposition (v0.0.4).
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404":
+          description: Metrics disabled at this deployment (`EYENET_API_METRICS_ENABLED` unset).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
+  /v1/attachments/{blob_id}/manifest:
+    get:
+      tags: [attachments]
+      operationId: attachments_manifest
+      summary: Manifest envelope (metadata only — NO content bytes).
+      description: |
+        Step 1 of the §5.6 two-step access flow. Returns content hash, size,
+        mime, tier, and a single-use `access_nonce` (60s TTL) required to POST
+        the matching `FileAccessAcknowledgment`. Calling this endpoint is not
+        access — no journal row is appended.
+      parameters:
+        - { $ref: '#/components/parameters/BlobIdPath' }
+      responses:
+        "200":
+          description: Manifest envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileManifest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/attachments/{blob_id}/access:
+    post:
+      tags: [attachments]
+      operationId: attachments_access
+      summary: Acknowledged binary fetch (signed; journaled).
+      description: |
+        Step 2 of the §5.6 two-step access flow. Body is the signed
+        acknowledgment. Server verifies operator signature, validates clearance
+        scope against the row's tier, appends a `file_access_journal` row, then
+        streams bytes. Failure at any step yields a 4xx and NO bytes flow.
+      parameters:
+        - { $ref: '#/components/parameters/BlobIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileAccessAcknowledgment' }
+      responses:
+        "200":
+          description: Binary content stream. Content-Type matches the manifest's `content_mime`.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ── Reclassification (API_PLAN §4.9) ────────────────────────────────────
+  /v1/observations/{observation_id}/reclassify:
+    post:
+      tags: [reclassify]
+      operationId: observations_reclassify
+      summary: Promote an observation's sensitivity tier (signed; audited).
+      description: |
+        §4.9 reclassification. Requires `admin:reclassify` (a grant-only scope —
+        see §4.6 baseline exclusion). Monotone: `new_tier` MUST be strictly
+        higher than `effective_tier(row)` — endpoint guard returns 422 on
+        violation, and the storage CHECK rejects independently. Emits
+        `eyenet.audit.reclassify.observation` (success) or
+        `eyenet.audit.reclassify.rejected` (any refusal path) — both are
+        permanent audit-log rows.
+      parameters:
+        - { $ref: '#/components/parameters/ObservationIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReclassificationRequest' }
+      responses:
+        "200":
+          description: Promotion applied. Row's `operator_tier_override` updated; audit event written.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReclassificationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/attachments/{blob_id}/reclassify:
+    post:
+      tags: [reclassify]
+      operationId: attachments_reclassify
+      summary: Promote an attachment's sensitivity tier (signed; audited).
+      description: |
+        §4.9 reclassification for file-blob rows. Same contract as
+        `observations_reclassify` — monotone promotion only, mandatory signed
+        body, `admin:reclassify` required. Emits
+        `eyenet.audit.reclassify.attachment` or `eyenet.audit.reclassify.rejected`.
+        Affects subsequent calls to `/v1/attachments/{blob_id}/manifest` and
+        `/v1/attachments/{blob_id}/access` (§5.6) — readers below the new tier
+        receive a `RedactionMarker` envelope on manifest, and 403 on access.
+      parameters:
+        - { $ref: '#/components/parameters/BlobIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReclassificationRequest' }
+      responses:
+        "200":
+          description: Promotion applied. Row's `operator_tier_override` updated; audit event written.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReclassificationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ── Cases (API_PLAN §4.10) ──────────────────────────────────────────────
+  /v1/cases:
+    get:
+      tags: [cases]
+      operationId: cases_list
+      summary: List cases visible to the caller.
+      description: |
+        Visibility predicate (§4.10.4): a case appears iff
+        `effective_tier(case) <= max_tier_scope(user)` AND
+        (`effective_tier(case) != classified` OR caller is a collaborator).
+        `status=archived` requires `admin:case`.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { $ref: '#/components/parameters/CaseStatusQuery' }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+      responses:
+        "200":
+          description: Page of cases visible to the caller.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCaseSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [cases]
+      operationId: cases_create
+      summary: Create a new case.
+      description: |
+        Requires `write:cases`. The creator is automatically added as the case's
+        first collaborator with `role_on_case = owner`. Initial `effective_tier`
+        is `normal` (no members yet). Emits `eyenet.audit.case.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseCreateRequest' }
+      responses:
+        "200":
+          description: Case created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}:
+    get:
+      tags: [cases]
+      operationId: cases_get
+      summary: Case detail (visibility predicate per §4.10.4 applies).
+      description: |
+        Returns full case row. A 404 is returned (not 403) when the case is
+        invisible to the caller, to avoid revealing case existence.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      responses:
+        "200":
+          description: Case detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    patch:
+      tags: [cases]
+      operationId: cases_update
+      summary: Update title and/or description (open cases only).
+      description: |
+        Requires `write:cases` and case ownership (or `admin:case`). 409 when
+        `status != open`. Emits `eyenet.audit.case.updated`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseUpdateRequest' }
+      responses:
+        "200":
+          description: Case updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/close:
+    post:
+      tags: [cases]
+      operationId: cases_close
+      summary: Close an open case.
+      description: |
+        Open → closed (§4.10.3). Requires `write:cases` and ownership (or
+        `admin:case`). 409 if already closed/archived. Emits
+        `eyenet.audit.case.closed`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseCloseRequest' }
+      responses:
+        "200":
+          description: Case closed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/reopen:
+    post:
+      tags: [cases]
+      operationId: cases_reopen
+      summary: Reopen a closed (or archived, with admin) case.
+      description: |
+        Closed → open requires `write:cases` + ownership (or `admin:case`).
+        Archived → open requires `admin:case` and produces a NEW case row with
+        `parent_case_id` set to the archived id (§4.10.3). The archived row
+        stays archived. Emits `eyenet.audit.case.reopened`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseReopenRequest' }
+      responses:
+        "200":
+          description: Case reopened (or successor case created for archived reopens).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/archive:
+    post:
+      tags: [cases]
+      operationId: cases_archive
+      summary: Archive a closed case (admin:case).
+      description: |
+        Closed → archived (§4.10.3). Requires `admin:case` and a reason ≥ 32
+        chars. Archived cases are invisible to standard list/detail endpoints
+        and stop conferring case-membership access. Emits
+        `eyenet.audit.case.archived`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseArchiveRequest' }
+      responses:
+        "200":
+          description: Case archived.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/members:
+    get:
+      tags: [cases]
+      operationId: cases_list_members
+      summary: List members of a case (active + soft-removed).
+      description: |
+        Returns active members and, when `include_removed=1`, soft-removed
+        rows too — preserving the audit trail of what once was a member.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/ActiveOnlyQuery' }
+      responses:
+        "200":
+          description: Page of memberships.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCaseMemberSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [cases]
+      operationId: cases_add_member
+      summary: Add a single subject to a case.
+      description: |
+        Requires `write:cases` on a case the caller owns/co-analyses. 409 when
+        case is closed/archived. Emits `eyenet.audit.case.member_added` and,
+        if the subject's tier raises the case's `effective_tier`,
+        `eyenet.audit.case.tier_changed`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseMemberAddRequest' }
+      responses:
+        "200":
+          description: Membership row created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseMemberSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/members/bulk:
+    post:
+      tags: [cases]
+      operationId: cases_bulk_add_members
+      summary: Atomic bulk add (up to 500 subjects, all-or-nothing).
+      description: |
+        Same authorisation as single add. Server commits all rows in a single
+        storage transaction; ANY validation failure aborts the entire batch
+        with 422. One `member_added` audit event per row; one
+        `tier_changed` event if the batch promotes `effective_tier`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseMemberBulkAddRequest' }
+      responses:
+        "200":
+          description: Bulk add succeeded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseMemberBulkResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/members/bulk-remove:
+    post:
+      tags: [cases]
+      operationId: cases_bulk_remove_members
+      summary: Atomic bulk soft-remove (up to 500 member_ids, all-or-nothing).
+      description: |
+        Same authorisation as single remove. Server soft-removes all rows in a
+        single storage transaction. One `member_removed` audit event per row;
+        one `tier_changed` event if the batch lowers `effective_tier`
+        (membership removal can lower the case's tier within a single
+        open-lifecycle window — see §4.10.5).
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseMemberBulkRemoveRequest' }
+      responses:
+        "200":
+          description: Bulk remove succeeded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseMemberBulkResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/members/{member_id}:
+    delete:
+      tags: [cases]
+      operationId: cases_remove_member
+      summary: Soft-remove a single membership.
+      description: |
+        Sets `removed_at` and `removed_by_user_id` on the row. Membership row
+        survives forever — the audit chain references it by `member_id`.
+        Requires `write:cases` on the case. Emits `eyenet.audit.case.member_removed`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+        - { $ref: '#/components/parameters/MemberIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseMemberRemoveRequest' }
+      responses:
+        "200":
+          description: Membership soft-removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseMemberSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/collaborators:
+    get:
+      tags: [cases]
+      operationId: cases_list_collaborators
+      summary: List collaborators on a case.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/ActiveOnlyQuery' }
+      responses:
+        "200":
+          description: Page of collaborators.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCaseCollaboratorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [cases]
+      operationId: cases_add_collaborator
+      summary: Add a collaborator to a case.
+      description: |
+        Requires ownership of the case OR `admin:case`. Emits
+        `eyenet.audit.case.collaborator_added`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseCollaboratorAddRequest' }
+      responses:
+        "200":
+          description: Collaborator added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseCollaboratorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/collaborators/{collaborator_id}:
+    delete:
+      tags: [cases]
+      operationId: cases_revoke_collaborator
+      summary: Soft-revoke a case collaborator.
+      description: |
+        Sets `revoked_at`. Effective immediately — cache-bypass per §4.4.1.
+        Emits `eyenet.audit.case.collaborator_revoked`.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+        - { $ref: '#/components/parameters/CollaboratorIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseCollaboratorRevokeRequest' }
+      responses:
+        "200":
+          description: Collaborator revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseCollaboratorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ── File-access exoneration (API_PLAN §5.8) ─────────────────────────────
+  /v1/audit/file-access:
+    get:
+      tags: [audit]
+      operationId: audit_file_access_by_hash
+      summary: Signed access record (or signed non-access proof) for a content hash.
+      description: |
+        Empty `accesses` is a positive cryptographic assertion of non-access
+        against the journal head at `query_time`. Requires `admin:clearance`
+        (the query itself reveals access patterns).
+      parameters:
+        - { $ref: '#/components/parameters/ContentHashQuery' }
+      responses:
+        "200":
+          description: Signed exoneration envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileAccessExoneration' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/audit/file-access/by-user:
+    get:
+      tags: [audit]
+      operationId: audit_file_access_by_user
+      summary: Per-operator file-access history over a time window.
+      description: |
+        The "Alice is leaving the team; what did she touch?" report (§5.8).
+        Returned envelope uses the same `FileAccessExoneration` shape — the
+        `content_hash` field carries a sentinel value when querying by user.
+      parameters:
+        - { $ref: '#/components/parameters/SystemUserIdQuery' }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+      responses:
+        "200":
+          description: Signed per-user exoneration envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileAccessExoneration' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/audit/anchors:
+    get:
+      tags: [audit]
+      operationId: audit_list_anchors
+      summary: External-witness anchor records emitted on `eyenet.audit.anchor`.
+      description: |
+        Operator-facing read of the same anchor records that are dispatched to
+        configured sinks (§5.9). Useful for cross-checking that the local
+        deployment's view matches what external parties have received.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/SinceTs' }
+        - { $ref: '#/components/parameters/UntilTs' }
+      responses:
+        "200":
+          description: Page of anchor records, newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageAnchor' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  # ── Clearance grants (API_PLAN §4.8) ────────────────────────────────────
+  /v1/clearance/grants:
+    get:
+      tags: [clearance]
+      operationId: clearance_list_grants
+      summary: List clearance grants, filterable by user and active state.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { $ref: '#/components/parameters/ActiveOnlyQuery' }
+        - name: user_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: scope
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ClearanceScope' }
+      responses:
+        "200":
+          description: Page of clearance grants.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageClearanceGrantSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [clearance]
+      operationId: clearance_grant
+      summary: Grant a clearance scope to a user. Requires `admin:clearance`.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClearanceGrantRequest' }
+      responses:
+        "201":
+          description: Grant created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClearanceGrantDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/clearance/grants/{grant_id}:
+    get:
+      tags: [clearance]
+      operationId: clearance_get_grant
+      summary: Full grant detail (incl. reason, revocation, parent chain).
+      parameters:
+        - { $ref: '#/components/parameters/GrantIdPath' }
+      responses:
+        "200":
+          description: Grant detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClearanceGrantDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/clearance/grants/{grant_id}/revoke:
+    post:
+      tags: [clearance]
+      operationId: clearance_revoke_grant
+      summary: Revoke a clearance grant. Requires `admin:clearance`.
+      parameters:
+        - { $ref: '#/components/parameters/GrantIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClearanceRevokeRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+# ──────────────────────────────────────────────────────────────────────────
+# Components
+# ──────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: "JWT or eyenet_pat_<prefix>_<secret>"
+      description: |
+        Accepts EITHER:
+          * An RS256 access JWT issued by `/v1/auth/login` (15-minute TTL).
+          * A Personal Access Token of the form `eyenet_pat_<22-char-prefix>_<32-char-secret>`.
+
+        Scopes are resolved server-side at request time from `system_user_scope`.
+        Tokens never carry scope claims.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor returned by a prior page.
+      schema: { type: string, maxLength: 4096 }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Page size. Default 50, max 500.
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+    IncludeTotal:
+      name: include_total
+      in: query
+      required: false
+      description: When `1`, include a best-effort `estimated_total` (capped at 10000).
+      schema: { type: integer, enum: [0, 1] }
+    SinceTs:
+      name: since
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    UntilTs:
+      name: until
+      in: query
+      required: false
+      schema: { type: string, format: date-time }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated key (uuid7 recommended). Replays return the stored response.
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: SSE resume cursor (uuid7 of last received event).
+      schema: { type: string, maxLength: 64 }
+    StreamTokenQuery:
+      name: stream_token
+      in: query
+      required: false
+      description: Browser SSE fallback — short-lived bearer obtained from `/v1/auth/stream-token`.
+      schema: { type: string, maxLength: 2048 }
+    ActorIdPath:
+      name: actor_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PersonaIdPath:
+      name: persona_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LinkageIdPath:
+      name: linkage_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdentityIdPath:
+      name: identity_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TokenIdPath:
+      name: token_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BlobIdPath:
+      name: blob_id
+      in: path
+      required: true
+      description: Attachment blob identifier (uuid7).
+      schema: { type: string, format: uuid }
+    GrantIdPath:
+      name: grant_id
+      in: path
+      required: true
+      description: Clearance grant identifier (uuid7).
+      schema: { type: string, format: uuid }
+    ContentHashQuery:
+      name: content_hash
+      in: query
+      required: true
+      description: SHA-256 of the served bytes, lower-case hex.
+      schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+    SystemUserIdQuery:
+      name: user_id
+      in: query
+      required: true
+      description: System user UUID. Required by per-user exoneration queries.
+      schema: { type: string, format: uuid }
+    ActiveOnlyQuery:
+      name: active_only
+      in: query
+      required: false
+      description: When `1`, return only grants whose ACTIVE(now) predicate holds (§4.8).
+      schema: { type: integer, enum: [0, 1] }
+    ObservationIdPath:
+      name: observation_id
+      in: path
+      required: true
+      description: Observation row identifier (uuid7).
+      schema: { type: string, format: uuid }
+    CaseIdPath:
+      name: case_id
+      in: path
+      required: true
+      description: Case identifier (uuid7).
+      schema: { type: string, format: uuid }
+    MemberIdPath:
+      name: member_id
+      in: path
+      required: true
+      description: Case-membership row identifier (uuid7).
+      schema: { type: string, format: uuid }
+    CollaboratorIdPath:
+      name: collaborator_id
+      in: path
+      required: true
+      description: Case-collaborator row identifier (uuid7).
+      schema: { type: string, format: uuid }
+    CaseStatusQuery:
+      name: status
+      in: query
+      required: false
+      description: Filter cases by lifecycle status. `archived` requires `admin:case`.
+      schema:
+        type: string
+        enum: [open, closed, archived]
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    Forbidden:
+      description: Authenticated but insufficient scope.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    Conflict:
+      description: Idempotency-Key reused with a different body, or duplicate write.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    Validation:
+      description: Request failed schema validation.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    RateLimited:
+      description: Too many requests.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    Unavailable:
+      description: Audit chain, storage, or bus is degraded.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetail' }
+    WriteAcceptedResponse:
+      description: Write accepted. Durable audit row persisted; bus fan-out is async.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/WriteAccepted' }
+
+  schemas:
+    # ── Errors ────────────────────────────────────────────────────────────
+    ProblemDetail:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, request_id]
+      properties:
+        type:        { type: string, format: uri }
+        title:       { type: string, maxLength: 256 }
+        status:      { type: integer, minimum: 100, maximum: 599 }
+        detail:      { type: string, nullable: true, maxLength: 2048 }
+        instance:    { type: string, nullable: true, maxLength: 2048 }
+        request_id:  { type: string, maxLength: 64 }
+        trace_id:    { type: string, nullable: true, pattern: '^[0-9a-f]{32}$' }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ValidationError' }
+          default: []
+    ValidationError:
+      type: object
+      additionalProperties: false
+      required: [loc, msg, type]
+      properties:
+        loc:
+          type: array
+          items:
+            oneOf:
+              - { type: string }
+              - { type: integer }
+        msg:  { type: string, maxLength: 512 }
+        type: { type: string, maxLength: 128 }
+
+    # ── Pagination ────────────────────────────────────────────────────────
+    CursorPageBase:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: {}
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+
+    # Concrete CursorPage variants (the OpenAPI way — no generics).
+    CursorPagePATSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PATSummary' }
+    CursorPageObservationSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ObservationSummary' }
+    CursorPageTimelineEntry:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/TimelineEntry' }
+    CursorPagePersonaMember:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PersonaMember' }
+    CursorPageLinkageSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/LinkageSummary' }
+    CursorPageActorSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ActorSummary' }
+    CursorPageAuditRow:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/AuditRow' }
+
+    # ── Enums (mirrors of eyenet/contracts/enums.py) ──────────────────────
+    LinkageState:
+      type: string
+      enum: [proposed, suspected, confirmed, rejected, superseded]
+    StreamTopic:
+      type: string
+      enum:
+        - attribution.linkage
+        - attribution.persona
+        - eyenet.audit
+        - eyenet.control
+
+    # ── Auth ──────────────────────────────────────────────────────────────
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 128 }
+        password: { type: string, minLength: 1, maxLength: 1024, format: password }
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string, minLength: 16, maxLength: 256 }
+    TokenPair:
+      type: object
+      additionalProperties: false
+      required: [access_token, access_expires_at, refresh_token, refresh_expires_at, token_type]
+      properties:
+        access_token:       { type: string }
+        access_expires_at:  { type: string, format: date-time }
+        refresh_token:      { type: string }
+        refresh_expires_at: { type: string, format: date-time }
+        token_type:         { type: string, enum: [Bearer] }
+    AccessToken:
+      type: object
+      additionalProperties: false
+      required: [access_token, access_expires_at, token_type]
+      properties:
+        access_token:      { type: string }
+        access_expires_at: { type: string, format: date-time }
+        token_type:        { type: string, enum: [Bearer] }
+    SystemUserRole:
+      description: Operator-tier role (MODELS §2.17).
+      type: string
+      enum: [admin, analyst, viewer]
+    UserMe:
+      type: object
+      additionalProperties: false
+      required: [user_id, username, role, scopes]
+      properties:
+        user_id:  { type: string, format: uuid }
+        username: { type: string, maxLength: 128 }
+        role:     { $ref: '#/components/schemas/SystemUserRole' }
+        scopes:
+          type: array
+          items: { type: string, maxLength: 64 }
+    PATSummary:
+      type: object
+      additionalProperties: false
+      required: [token_id, name, prefix, scopes, created_at]
+      properties:
+        token_id:     { type: string, format: uuid }
+        name:         { type: string, maxLength: 128 }
+        prefix:       { type: string, maxLength: 32 }
+        scopes:
+          type: array
+          items: { type: string, maxLength: 64 }
+        created_at:   { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        expires_at:   { type: string, format: date-time, nullable: true }
+    PATMintRequest:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name:       { type: string, minLength: 1, maxLength: 128 }
+        scopes:
+          type: array
+          minItems: 1
+          items: { type: string, maxLength: 64 }
+        expires_at: { type: string, format: date-time, nullable: true }
+    PATMinted:
+      type: object
+      additionalProperties: false
+      required: [token_id, name, prefix, scopes, secret, created_at]
+      properties:
+        token_id:   { type: string, format: uuid }
+        name:       { type: string, maxLength: 128 }
+        prefix:     { type: string, maxLength: 32 }
+        scopes:
+          type: array
+          items: { type: string, maxLength: 64 }
+        secret:
+          type: string
+          description: Full PAT (`eyenet_pat_<prefix>_<secret>`). Shown ONCE. Never re-displayed.
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, nullable: true }
+    StreamTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [topics]
+      properties:
+        topics:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { $ref: '#/components/schemas/StreamTopic' }
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 900
+          default: 900
+    StreamTokenMinted:
+      type: object
+      additionalProperties: false
+      required: [stream_token, expires_at, topics]
+      properties:
+        stream_token: { type: string }
+        expires_at:   { type: string, format: date-time }
+        topics:
+          type: array
+          items: { $ref: '#/components/schemas/StreamTopic' }
+
+    # ── Actors / personas / linkages / graph ──────────────────────────────
+    ActorSummary:
+      type: object
+      additionalProperties: false
+      required: [actor_id, primary_handle]
+      properties:
+        actor_id:       { type: string, format: uuid }
+        primary_handle: { type: string, maxLength: 256 }
+        platforms:
+          type: array
+          items: { type: string, maxLength: 32 }
+        score:          { type: number, format: float, nullable: true }
+    ActorDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ActorSummary' }
+        - type: object
+          additionalProperties: false
+          required: [first_seen, last_seen, alias_count, observation_count]
+          properties:
+            first_seen:        { type: string, format: date-time }
+            last_seen:         { type: string, format: date-time }
+            alias_count:       { type: integer, minimum: 0 }
+            observation_count: { type: integer, minimum: 0 }
+            persona_id:        { type: string, format: uuid, nullable: true }
+    NeighborList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/NeighborEdge' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+    NeighborEdge:
+      oneOf:
+        - { $ref: '#/components/schemas/LinkedToEdge' }
+        - { $ref: '#/components/schemas/BelongsToPersonaEdge' }
+      discriminator:
+        propertyName: edge_type
+        mapping:
+          linked_to: '#/components/schemas/LinkedToEdge'
+          belongs_to_persona: '#/components/schemas/BelongsToPersonaEdge'
+    LinkedToEdge:
+      type: object
+      additionalProperties: false
+      required: [edge_type, target_id, attrs]
+      properties:
+        edge_type: { type: string, enum: [linked_to] }
+        target_id: { type: string, format: uuid }
+        attrs:     { $ref: '#/components/schemas/LinkedToAttrs' }
+    LinkedToAttrs:
+      type: object
+      additionalProperties: false
+      required: [state, method, score, linkage_id]
+      properties:
+        state:      { $ref: '#/components/schemas/LinkageState' }
+        method:     { type: string, maxLength: 64 }
+        score:      { type: number, format: float }
+        linkage_id: { type: string, format: uuid }
+    BelongsToPersonaEdge:
+      type: object
+      additionalProperties: false
+      required: [edge_type, target_id, attrs]
+      properties:
+        edge_type: { type: string, enum: [belongs_to_persona] }
+        target_id: { type: string, format: uuid }
+        attrs:     { $ref: '#/components/schemas/BelongsToPersonaAttrs' }
+    BelongsToPersonaAttrs:
+      type: object
+      additionalProperties: false
+      required: [since]
+      properties:
+        since:           { type: string, format: date-time }
+        via_linkage_id:  { type: string, format: uuid, nullable: true }
+    ObservationSummary:
+      type: object
+      additionalProperties: false
+      required: [observation_id, kind, ts, sensitivity]
+      properties:
+        observation_id: { type: string, format: uuid }
+        kind:           { type: string, maxLength: 64 }
+        ts:             { type: string, format: date-time }
+        score:          { type: number, format: float, nullable: true }
+        primitive:      { type: string, maxLength: 64, nullable: true }
+        sensitivity:    { $ref: '#/components/schemas/SensitivityTier' }
+        attachment_blob_id:
+          description: Present when this observation has a binary attachment. Use `/v1/attachments/{blob_id}/manifest` to inspect before fetching.
+          type: string
+          format: uuid
+          nullable: true
+    TimelineEntry:
+      type: object
+      additionalProperties: false
+      required: [ts, kind, id]
+      properties:
+        ts:      { type: string, format: date-time }
+        kind:    { type: string, enum: [message, observation] }
+        id:      { type: string, format: uuid }
+        summary: { type: string, maxLength: 512, nullable: true }
+    PersonaSummary:
+      type: object
+      additionalProperties: false
+      required: [persona_id, label, member_count]
+      properties:
+        persona_id:   { type: string, format: uuid }
+        label:        { type: string, maxLength: 256 }
+        member_count: { type: integer, minimum: 0 }
+    PersonaDetail:
+      allOf:
+        - { $ref: '#/components/schemas/PersonaSummary' }
+        - type: object
+          additionalProperties: false
+          required: [created_at, updated_at]
+          properties:
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    PersonaMember:
+      type: object
+      additionalProperties: false
+      required: [actor_id, since]
+      properties:
+        actor_id:        { type: string, format: uuid }
+        since:           { type: string, format: date-time }
+        via_linkage_id:  { type: string, format: uuid, nullable: true }
+    LinkageSummary:
+      type: object
+      additionalProperties: false
+      required: [linkage_id, actor_a_id, actor_b_id, state, score, proposed_at]
+      properties:
+        linkage_id:  { type: string, format: uuid }
+        actor_a_id:  { type: string, format: uuid }
+        actor_b_id:  { type: string, format: uuid }
+        state:       { $ref: '#/components/schemas/LinkageState' }
+        score:       { type: number, format: float }
+        method:      { type: string, maxLength: 64 }
+        proposed_at: { type: string, format: date-time }
+        decided_at:  { type: string, format: date-time, nullable: true }
+        decided_by:  { type: string, format: uuid, nullable: true }
+    LinkageDetail:
+      allOf:
+        - { $ref: '#/components/schemas/LinkageSummary' }
+        - type: object
+          additionalProperties: false
+          properties:
+            evidence:
+              type: array
+              items: { $ref: '#/components/schemas/LinkageEvidence' }
+    LinkageEvidence:
+      type: object
+      additionalProperties: false
+      required: [comparator, score]
+      properties:
+        comparator: { type: string, maxLength: 64 }
+        score:      { type: number, format: float }
+        detail:     { type: object, additionalProperties: true }
+    LinkageDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1024 }
+        note:   { type: string, maxLength: 4096, nullable: true }
+    LinkageStateCounts:
+      description: Per-state counters surfaced inside `GraphStats`.
+      type: object
+      additionalProperties: false
+      required: [proposed, suspected, confirmed, rejected]
+      properties:
+        proposed:  { type: integer, minimum: 0 }
+        suspected: { type: integer, minimum: 0 }
+        confirmed: { type: integer, minimum: 0 }
+        rejected:  { type: integer, minimum: 0 }
+    GraphStats:
+      type: object
+      additionalProperties: false
+      required: [actors, personas, linkages, observations]
+      properties:
+        actors:       { type: integer, minimum: 0 }
+        personas:     { type: integer, minimum: 0 }
+        linkages:     { $ref: '#/components/schemas/LinkageStateCounts' }
+        observations: { type: integer, minimum: 0 }
+        computed_at:  { type: string, format: date-time }
+
+    # ── Identities / control ──────────────────────────────────────────────
+    IdentityActionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1024 }
+        note:   { type: string, maxLength: 4096, nullable: true }
+    PanicRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1024 }
+        confirm:
+          type: string
+          enum: [I_UNDERSTAND]
+          description: Mandatory blocking acknowledgment to prevent accidental fires.
+
+    # ── Audit ─────────────────────────────────────────────────────────────
+    AuditRow:
+      type: object
+      additionalProperties: false
+      required: [event_id, subject, user_id, ts, prev_hash, hash]
+      properties:
+        event_id:    { type: string, format: uuid }
+        subject:     { type: string, maxLength: 128 }
+        user_id:     { type: string, format: uuid, nullable: true }
+        ts:          { type: string, format: date-time }
+        request_id:  { type: string, nullable: true, maxLength: 64 }
+        trace_id:    { type: string, nullable: true, pattern: '^[0-9a-f]{32}$' }
+        span_id:     { type: string, nullable: true, pattern: '^[0-9a-f]{16}$' }
+        payload:     { type: object, additionalProperties: true }
+        prev_hash:   { type: string, maxLength: 128 }
+        hash:        { type: string, maxLength: 128 }
+    AuditChainBreak:
+      description: First detected divergence between recomputed and stored hash chains.
+      type: object
+      additionalProperties: false
+      required: [event_id, expected_hash, actual_hash]
+      properties:
+        event_id:      { type: string, format: uuid }
+        expected_hash: { type: string }
+        actual_hash:   { type: string }
+    AuditVerifyResult:
+      type: object
+      additionalProperties: false
+      required: [verified, rows_checked]
+      properties:
+        verified:     { type: boolean }
+        rows_checked: { type: integer, minimum: 0 }
+        first_break:
+          anyOf:
+            - { $ref: '#/components/schemas/AuditChainBreak' }
+            - { type: "null" }
+
+    # ── Writes ────────────────────────────────────────────────────────────
+    WriteAccepted:
+      type: object
+      additionalProperties: false
+      required: [subject, event_id, applied, poll]
+      properties:
+        subject:  { type: string, maxLength: 128 }
+        event_id: { type: string, format: uuid }
+        applied:  { type: boolean }
+        poll:     { type: string, maxLength: 2048 }
+
+    # ── Stream events ─────────────────────────────────────────────────────
+    LinkageProposedEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, linkage_id, actor_a_id, actor_b_id, score, ts]
+      properties:
+        event_id:   { type: string, format: uuid }
+        linkage_id: { type: string, format: uuid }
+        actor_a_id: { type: string, format: uuid }
+        actor_b_id: { type: string, format: uuid }
+        score:      { type: number, format: float }
+        method:     { type: string, maxLength: 64 }
+        ts:         { type: string, format: date-time }
+    LinkageStateChangedEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, linkage_id, state, ts]
+      properties:
+        event_id:   { type: string, format: uuid }
+        linkage_id: { type: string, format: uuid }
+        state:      { $ref: '#/components/schemas/LinkageState' }
+        decided_by: { type: string, format: uuid, nullable: true }
+        ts:         { type: string, format: date-time }
+    PersonaUpdatedEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, persona_id, ts]
+      properties:
+        event_id:   { type: string, format: uuid }
+        persona_id: { type: string, format: uuid }
+        change:     { type: string, enum: [member_added, member_removed, label_changed, created] }
+        ts:         { type: string, format: date-time }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, subject, ts]
+      properties:
+        event_id: { type: string, format: uuid }
+        subject:  { type: string, maxLength: 128 }
+        user_id:  { type: string, format: uuid, nullable: true }
+        ts:       { type: string, format: date-time }
+    ControlEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, subject, ts]
+      properties:
+        event_id: { type: string, format: uuid }
+        subject:  { type: string, maxLength: 128 }
+        user_id:  { type: string, format: uuid, nullable: true }
+        reason:   { type: string, maxLength: 512, nullable: true }
+        ts:       { type: string, format: date-time }
+    StreamGapEvent:
+      type: object
+      additionalProperties: false
+      required: [oldest_available]
+      properties:
+        oldest_available: { type: string, maxLength: 64 }
+
+    # ── Health ────────────────────────────────────────────────────────────
+    HealthStatus:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+    ReadyComponents:
+      description: Per-subsystem readiness flags surfaced from `/v1/readyz`.
+      type: object
+      additionalProperties: false
+      required: [storage, bus, auth_keys]
+      properties:
+        storage:   { type: string, enum: [up, down] }
+        bus:       { type: string, enum: [up, down] }
+        auth_keys: { type: string, enum: [up, down] }
+    ReadyStatus:
+      type: object
+      additionalProperties: false
+      required: [status, components]
+      properties:
+        status:     { type: string, enum: [ready, degraded] }
+        components: { $ref: '#/components/schemas/ReadyComponents' }
+
+    # ── Sensitivity / redaction (API_PLAN §4.7) ───────────────────────────
+    SensitivityTier:
+      description: |
+        Tier governs which clearance scope is required to read row content.
+        Promotable but never demotable (API_PLAN §4.7).
+      type: string
+      enum: [normal, restricted, classified]
+    RedactionMarker:
+      description: |
+        Replaces a content-bearing field when the caller lacks the clearance scope
+        required for the row's sensitivity tier. Metadata (id, ts, kind, etc.)
+        remains visible on the parent envelope so analysts can SEE that sensitive
+        evidence exists and escalate (§4.7).
+      type: object
+      additionalProperties: false
+      required: [redacted, tier, reason]
+      properties:
+        redacted:               { type: boolean, enum: [true] }
+        tier:                   { $ref: '#/components/schemas/SensitivityTier' }
+        reason:                 { type: string, maxLength: 256 }
+        request_clearance_at:   { type: string, maxLength: 256, nullable: true }
+        grant_request_subject:  { type: string, maxLength: 128, nullable: true }
+
+    # ── File-access journal (API_PLAN §5.6–5.8) ───────────────────────────
+    FileManifest:
+      description: |
+        Metadata envelope returned by `GET /v1/attachments/{blob_id}/manifest`.
+        Contains no content bytes. The `access_nonce` is single-use, 60s TTL,
+        and required to POST the matching `FileAccessAcknowledgment` (§5.6).
+      type: object
+      additionalProperties: false
+      required:
+        [blob_id, content_hash, content_size, content_mime, tier,
+         source_subject_id, source_subject_kind, collected_at, access_nonce, nonce_expires_at]
+      properties:
+        blob_id:             { type: string, format: uuid }
+        content_hash:        { type: string, pattern: '^[0-9a-f]{64}$' }
+        content_size:        { type: integer, minimum: 0 }
+        content_mime:        { type: string, maxLength: 128 }
+        tier:                { $ref: '#/components/schemas/SensitivityTier' }
+        source_subject_id:   { type: string, format: uuid }
+        source_subject_kind: { type: string, enum: [observation, message] }
+        collected_at:        { type: string, format: date-time }
+        access_nonce:        { type: string, format: uuid }
+        nonce_expires_at:    { type: string, format: date-time }
+    # FileAccessAcknowledgment: case_refs is REQUIRED when the row is classified
+    # (§4.10.4 hybrid rule). Optional otherwise. Server enforces.
+    FileAccessAcknowledgment:
+      description: |
+        Body for `POST /v1/attachments/{blob_id}/access`. Operator's explicit,
+        signed acknowledgment that they are about to view sensitive bytes
+        (§5.6 two-step flow). Bytes flow only after server verifies the
+        signature against `system_user.signing_pubkey` (§5.7).
+      type: object
+      additionalProperties: false
+      required:
+        [access_nonce, expected_content_hash, reason, operator_signature]
+      properties:
+        access_nonce:          { type: string, format: uuid }
+        expected_content_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        reason:                { type: string, minLength: 16, maxLength: 1024 }
+        viewing_context:       { type: string, maxLength: 512, nullable: true }
+        operator_signature:    { type: string, pattern: '^ed25519:[A-Za-z0-9_-]{86,90}={0,2}$' }
+        case_refs:
+          type: array
+          maxItems: 32
+          items: { type: string, format: uuid }
+          description: |
+            Cases the operator is working under for this access (§4.10.7).
+            Server REQUIRES at least one entry resolving to a case where the
+            target row is a member AND the operator is a collaborator when
+            the row's effective tier is `classified` (§4.10.4 hybrid rule).
+            Optional for `normal` / `restricted` rows.
+    FileServedVia:
+      description: How the bytes were served — `file_access_journal.served_via` (§5.6).
+      type: string
+      enum: [inline_json, attachment_stream, thumbnail_only]
+    FileAccessJournalEntry:
+      description: Row from the `file_access_journal` (§5.6).
+      type: object
+      additionalProperties: false
+      required:
+        [access_id, audit_event_id, user_id, content_hash, content_size,
+         tier, served_at, served_via, operator_signature_verified,
+         signing_pubkey_fingerprint]
+      properties:
+        access_id:                   { type: string, format: uuid }
+        audit_event_id:              { type: string, format: uuid }
+        user_id:                     { type: string, format: uuid }
+        grant_id:                    { type: string, format: uuid, nullable: true }
+        content_hash:                { type: string, pattern: '^[0-9a-f]{64}$' }
+        content_size:                { type: integer, minimum: 0 }
+        content_mime:                { type: string, maxLength: 128, nullable: true }
+        tier:                        { $ref: '#/components/schemas/SensitivityTier' }
+        served_at:                   { type: string, format: date-time }
+        served_via:                  { $ref: '#/components/schemas/FileServedVia' }
+        operator_signature_verified: { type: boolean }
+        signing_pubkey_fingerprint:  { type: string, pattern: '^[0-9a-f]{16}$' }
+    FileAccessExoneration:
+      description: |
+        Signed assertion against the journal head (§5.8). An empty `accesses`
+        array is a positive cryptographic proof of non-access at the time
+        `query_time` for the journal at head `journal_head_at_query`.
+      type: object
+      additionalProperties: false
+      required:
+        [content_hash, query_time, journal_head_at_query, accesses, exoneration_signature]
+      properties:
+        content_hash:           { type: string, pattern: '^[0-9a-f]{64}$' }
+        query_time:             { type: string, format: date-time }
+        journal_head_at_query:  { type: string, pattern: '^[0-9a-f]{64}$' }
+        accesses:
+          type: array
+          items: { $ref: '#/components/schemas/FileAccessJournalEntry' }
+        exoneration_signature:  { type: string, pattern: '^ed25519:[A-Za-z0-9_-]{86,90}={0,2}$' }
+
+    # ── External anchoring (API_PLAN §5.9) ────────────────────────────────
+    Anchor:
+      description: |
+        External-witness record. Issued every 5 minutes; fanned out to
+        operator-configured sinks (file, webhook, email). The pair
+        (`audit_head`, `journal_head`) is signed by the deployment's server key
+        and can be independently verified by any party who has been receiving
+        anchors on a regular cadence (§5.9).
+      type: object
+      additionalProperties: false
+      required:
+        [deployment_id, anchor_seq, anchored_at,
+         audit_head, journal_head, signature]
+      properties:
+        deployment_id: { type: string, format: uuid }
+        anchor_seq:    { type: integer, minimum: 0 }
+        anchored_at:   { type: string, format: date-time }
+        audit_head:    { type: string, pattern: '^[0-9a-f]{64}$' }
+        journal_head: { type: string, pattern: '^[0-9a-f]{64}$' }
+        signature:     { type: string, pattern: '^ed25519:[A-Za-z0-9_-]{86,90}={0,2}$' }
+    CursorPageAnchor:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Anchor' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+
+    # ── Clearance grants (API_PLAN §4.8) ──────────────────────────────────
+    ClearanceScope:
+      description: |
+        Grant-only scopes that flow through the §4.8 clearance-grant lifecycle:
+        bounded expiry (≤90 days), mandatory reason, individually revocable.
+        `read:restricted` / `read:classified` gate sensitive-evidence reads (§4.7).
+        `admin:reclassify` authorises sensitivity-tier promotion (§4.9).
+        `admin:case` authorises administrative case actions (archive, reopen-from-archived,
+        override-collaborator) (§4.10).
+      type: string
+      enum: [read:restricted, read:classified, admin:reclassify, admin:case]
+    ClearanceGrantRequest:
+      description: |
+        Body for `POST /v1/clearance/grants`. Caller must hold `admin:clearance`.
+        `expires_at` is mandatory and capped at `granted_at + 90 days` server-side
+        (§4.8). `reason` length ≥ 16 — "ok" is not a reason. `case_refs` (optional)
+        anchors the grant to one or more §4.10 cases; server validates each exists
+        and is `open`.
+      type: object
+      additionalProperties: false
+      required: [user_id, scope, reason, expires_at]
+      properties:
+        user_id:    { type: string, format: uuid }
+        scope:      { $ref: '#/components/schemas/ClearanceScope' }
+        reason:     { type: string, minLength: 16, maxLength: 1024 }
+        expires_at: { type: string, format: date-time }
+        case_refs:
+          type: array
+          maxItems: 32
+          items: { type: string, format: uuid }
+          description: Cases this grant authorises work under (§4.10.7).
+    ClearanceRevokeRequest:
+      description: Body for `DELETE /v1/clearance/grants/{grant_id}`.
+      type: object
+      additionalProperties: false
+      required: [revocation_reason]
+      properties:
+        revocation_reason: { type: string, minLength: 1, maxLength: 1024 }
+    ClearanceGrantSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [grant_id, user_id, scope, granted_by_user_id, granted_at, expires_at, active]
+      properties:
+        grant_id:           { type: string, format: uuid }
+        user_id:            { type: string, format: uuid }
+        scope:              { $ref: '#/components/schemas/ClearanceScope' }
+        granted_by_user_id: { type: string, format: uuid }
+        granted_at:         { type: string, format: date-time }
+        expires_at:         { type: string, format: date-time }
+        revoked_at:         { type: string, format: date-time, nullable: true }
+        active:             { type: boolean, description: "Server-evaluated ACTIVE(now) predicate." }
+    ClearanceGrantDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ClearanceGrantSummary' }
+        - type: object
+          additionalProperties: false
+          required: [reason]
+          properties:
+            reason:             { type: string, minLength: 16, maxLength: 1024 }
+            revoked_by_user_id: { type: string, format: uuid, nullable: true }
+            revocation_reason:  { type: string, maxLength: 1024, nullable: true }
+            parent_grant_id:    { type: string, format: uuid, nullable: true }
+    CursorPageClearanceGrantSummary:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ClearanceGrantSummary' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+
+    # ── Reclassification (API_PLAN §4.9) ──────────────────────────────────
+    ReclassificationSubjectKind:
+      description: |
+        The kind of row being reclassified — observations and attachments carry
+        their own sensitivity tiers independently (§4.7).
+      type: string
+      enum: [observation, attachment]
+    ReclassificationRequest:
+      description: |
+        Body for `POST /v1/{observations,attachments}/{id}/reclassify`. Caller
+        must hold `admin:reclassify` (§4.9). `new_tier` MUST be strictly higher
+        than the row's current `effective_tier` — server returns 422 on equal
+        or lower (the storage CHECK constraint is the second line of defence).
+        `reason` length ≥ 32: justification is mandatory and short reasons are
+        rejected as not-a-reason. `operator_signature` is an Ed25519 signature
+        over the canonical request form (§5.7); a session JWT alone is never
+        sufficient to reclassify.
+      type: object
+      additionalProperties: false
+      required: [new_tier, reason, operator_signature]
+      properties:
+        new_tier:
+          allOf:
+            - { $ref: '#/components/schemas/SensitivityTier' }
+          description: |
+            Target tier. Server rejects `normal` (cannot reclassify TO `normal`)
+            and any value ≤ the row's current `effective_tier`.
+        reason:
+          type: string
+          minLength: 32
+          maxLength: 1024
+          description: Case identifier, triggering observation, peer-review reference.
+        viewing_context:
+          type: string
+          nullable: true
+          maxLength: 1024
+          description: What the operator was doing when they made the call. Stored verbatim in the audit row.
+        operator_signature:
+          type: string
+          pattern: '^ed25519:[A-Za-z0-9_\-]{86,90}={0,2}$'
+          description: Ed25519 signature over the canonical request form (§5.7).
+        case_refs:
+          type: array
+          maxItems: 32
+          items: { type: string, format: uuid }
+          description: Cases where this row is evidence (§4.10.7). Server validates each exists.
+    ReclassificationResult:
+      description: |
+        200 envelope returned by both reclassify endpoints. Records the post-write
+        state of the row's sensitivity columns AND the audit event that anchors
+        the change. Replay invariant (§4.9): given the audit log alone, the
+        effective tier at every point in time is reconstructable — this envelope
+        is the inline confirmation of that fact for the caller.
+      type: object
+      additionalProperties: false
+      required:
+        - subject_id
+        - subject_kind
+        - classifier_tier
+        - operator_tier_override
+        - effective_tier
+        - prior_effective_tier
+        - audit_event_id
+        - reclassified_at
+        - grant_id
+      properties:
+        subject_id:             { type: string, format: uuid }
+        subject_kind:           { $ref: '#/components/schemas/ReclassificationSubjectKind' }
+        classifier_tier:        { $ref: '#/components/schemas/SensitivityTier' }
+        operator_tier_override: { $ref: '#/components/schemas/SensitivityTier' }
+        effective_tier:         { $ref: '#/components/schemas/SensitivityTier' }
+        prior_effective_tier:   { $ref: '#/components/schemas/SensitivityTier' }
+        audit_event_id:         { type: string, format: uuid }
+        reclassified_at:        { type: string, format: date-time }
+        grant_id:
+          type: string
+          format: uuid
+          description: The `admin:reclassify` grant that authorised this call.
+
+    # ── Cases (API_PLAN §4.10) ────────────────────────────────────────────
+    CaseStatus:
+      description: Lifecycle state of a case (§4.10.3).
+      type: string
+      enum: [open, closed, archived]
+    CaseSubjectKind:
+      description: Kind of row that can be a case member (§4.10.1).
+      type: string
+      enum: [observation, attachment, message, actor, persona, linkage]
+    CaseRoleOnCase:
+      description: A collaborator's role on a specific case (§4.10.1).
+      type: string
+      enum: [owner, analyst, reviewer]
+    CaseSummary:
+      description: List/index view of a case. §4.10.
+      type: object
+      additionalProperties: false
+      required:
+        [case_id, title, status, effective_tier, created_by_user_id, created_at]
+      properties:
+        case_id:             { type: string, format: uuid }
+        title:               { type: string, minLength: 4, maxLength: 256 }
+        status:              { $ref: '#/components/schemas/CaseStatus' }
+        effective_tier:      { $ref: '#/components/schemas/SensitivityTier' }
+        created_by_user_id:  { type: string, format: uuid }
+        created_at:          { type: string, format: date-time }
+        member_count:        { type: integer, minimum: 0 }
+        collaborator_count:  { type: integer, minimum: 0 }
+    CaseDetail:
+      description: Detail view of a case including timestamps, reasons, and parent chain.
+      allOf:
+        - { $ref: '#/components/schemas/CaseSummary' }
+        - type: object
+          additionalProperties: false
+          properties:
+            description:           { type: string, maxLength: 8192, nullable: true }
+            closed_at:             { type: string, format: date-time, nullable: true }
+            closed_by_user_id:     { type: string, format: uuid, nullable: true }
+            close_reason:          { type: string, maxLength: 1024, nullable: true }
+            archived_at:           { type: string, format: date-time, nullable: true }
+            archived_by_user_id:   { type: string, format: uuid, nullable: true }
+            archive_reason:        { type: string, maxLength: 1024, nullable: true }
+            parent_case_id:        { type: string, format: uuid, nullable: true }
+    CursorPageCaseSummary:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CaseSummary' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+    CaseCreateRequest:
+      description: Body for `POST /v1/cases`. Requires `write:cases`.
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:       { type: string, minLength: 4, maxLength: 256 }
+        description: { type: string, maxLength: 8192, nullable: true }
+    CaseUpdateRequest:
+      description: |
+        Body for `PATCH /v1/cases/{case_id}`. Either or both of `title` /
+        `description` may be present. Rejected when `status != open`.
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        title:       { type: string, minLength: 4, maxLength: 256 }
+        description: { type: string, maxLength: 8192, nullable: true }
+        reason:      { type: string, minLength: 16, maxLength: 1024 }
+    CaseCloseRequest:
+      description: Body for `POST /v1/cases/{case_id}/close`. Open → closed (§4.10.3).
+      type: object
+      additionalProperties: false
+      required: [close_reason]
+      properties:
+        close_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseReopenRequest:
+      description: |
+        Body for `POST /v1/cases/{case_id}/reopen`. Closed → open requires
+        case ownership or `admin:case`; archived → open requires `admin:case`
+        and yields a new case row with `parent_case_id` set to the archived id.
+      type: object
+      additionalProperties: false
+      required: [reopen_reason]
+      properties:
+        reopen_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseArchiveRequest:
+      description: |
+        Body for `POST /v1/cases/{case_id}/archive`. Requires `admin:case` and
+        `reason` ≥ 32 chars per §4.10.3 archive bar.
+      type: object
+      additionalProperties: false
+      required: [archive_reason]
+      properties:
+        archive_reason: { type: string, minLength: 32, maxLength: 1024 }
+
+    # ── Case members ──────────────────────────────────────────────────────
+    CaseMemberSummary:
+      description: One `case_member` row (active OR soft-removed). §4.10.1.
+      type: object
+      additionalProperties: false
+      required:
+        [member_id, case_id, subject_kind, subject_id,
+         added_by_user_id, added_at, add_reason, active]
+      properties:
+        member_id:           { type: string, format: uuid }
+        case_id:             { type: string, format: uuid }
+        subject_kind:        { $ref: '#/components/schemas/CaseSubjectKind' }
+        subject_id:          { type: string, format: uuid }
+        added_by_user_id:    { type: string, format: uuid }
+        added_at:            { type: string, format: date-time }
+        add_reason:          { type: string, maxLength: 1024 }
+        active:              { type: boolean, description: "False once `removed_at` is set." }
+        removed_at:          { type: string, format: date-time, nullable: true }
+        removed_by_user_id:  { type: string, format: uuid, nullable: true }
+        removal_reason:      { type: string, maxLength: 1024, nullable: true }
+    CursorPageCaseMemberSummary:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CaseMemberSummary' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+    CaseMemberAddRequest:
+      description: Body for `POST /v1/cases/{case_id}/members`. Adds one subject.
+      type: object
+      additionalProperties: false
+      required: [subject_kind, subject_id, add_reason]
+      properties:
+        subject_kind: { $ref: '#/components/schemas/CaseSubjectKind' }
+        subject_id:   { type: string, format: uuid }
+        add_reason:   { type: string, minLength: 16, maxLength: 1024 }
+    CaseMemberRemoveRequest:
+      description: Body for `DELETE /v1/cases/{case_id}/members/{member_id}`. Soft-removes.
+      type: object
+      additionalProperties: false
+      required: [removal_reason]
+      properties:
+        removal_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseMemberSubjectRef:
+      description: One subject in a bulk add request.
+      type: object
+      additionalProperties: false
+      required: [subject_kind, subject_id]
+      properties:
+        subject_kind: { $ref: '#/components/schemas/CaseSubjectKind' }
+        subject_id:   { type: string, format: uuid }
+    CaseMemberBulkAddRequest:
+      description: |
+        Body for `POST /v1/cases/{case_id}/members/bulk`. Atomic — server commits
+        all 500-or-fewer rows or none. Emits one `member_added` audit event per row.
+      type: object
+      additionalProperties: false
+      required: [subjects, add_reason]
+      properties:
+        subjects:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/CaseMemberSubjectRef' }
+        add_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseMemberBulkRemoveRequest:
+      description: |
+        Body for `POST /v1/cases/{case_id}/members/bulk-remove`. Atomic — soft-removes
+        all 500-or-fewer rows or none. Emits one `member_removed` audit event per row.
+      type: object
+      additionalProperties: false
+      required: [member_ids, removal_reason]
+      properties:
+        member_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string, format: uuid }
+        removal_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseMemberBulkResult:
+      description: 200 envelope for bulk add/remove.
+      type: object
+      additionalProperties: false
+      required: [case_id, affected_member_ids, audit_event_ids, effective_tier]
+      properties:
+        case_id:             { type: string, format: uuid }
+        affected_member_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Member ids that were added or soft-removed by this call.
+        audit_event_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: One audit event id per affected row, in the same order.
+        effective_tier:       { $ref: '#/components/schemas/SensitivityTier' }
+        prior_effective_tier: { $ref: '#/components/schemas/SensitivityTier' }
+
+    # ── Case collaborators ────────────────────────────────────────────────
+    CaseCollaboratorSummary:
+      description: One `case_collaborator` row. §4.10.1.
+      type: object
+      additionalProperties: false
+      required:
+        [collaborator_id, case_id, user_id, role_on_case,
+         granted_by_user_id, granted_at, active]
+      properties:
+        collaborator_id:    { type: string, format: uuid }
+        case_id:            { type: string, format: uuid }
+        user_id:            { type: string, format: uuid }
+        role_on_case:       { $ref: '#/components/schemas/CaseRoleOnCase' }
+        granted_by_user_id: { type: string, format: uuid }
+        granted_at:         { type: string, format: date-time }
+        active:             { type: boolean }
+        revoked_at:         { type: string, format: date-time, nullable: true }
+        revoked_by_user_id: { type: string, format: uuid, nullable: true }
+        revocation_reason:  { type: string, maxLength: 1024, nullable: true }
+    CursorPageCaseCollaboratorSummary:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CaseCollaboratorSummary' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
+    CaseCollaboratorAddRequest:
+      description: Body for `POST /v1/cases/{case_id}/collaborators`.
+      type: object
+      additionalProperties: false
+      required: [user_id, role_on_case]
+      properties:
+        user_id:      { type: string, format: uuid }
+        role_on_case: { $ref: '#/components/schemas/CaseRoleOnCase' }
+    CaseCollaboratorRevokeRequest:
+      description: Body for `DELETE /v1/cases/{case_id}/collaborators/{collaborator_id}`.
+      type: object
+      additionalProperties: false
+      required: [revocation_reason]
+      properties:
+        revocation_reason: { type: string, minLength: 1, maxLength: 1024 }

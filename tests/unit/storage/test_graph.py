@@ -19,7 +19,7 @@ _P = UUID("00000000-0000-0000-0000-000000000010")
 @pytest.fixture
 def store() -> SQLiteGraphStore:
     engine = open_in_memory_engine()
-    create_all_for(StoreName.GRAPH, engine)
+    create_all_for(StoreName.MAIN, engine)
     return SQLiteGraphStore(engine)
 
 

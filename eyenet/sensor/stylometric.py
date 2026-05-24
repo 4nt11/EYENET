@@ -89,7 +89,7 @@ class StylometricSensor(ServiceBase, SensorBase):
             await self._process(env)
 
     async def _process(self, env: RawMessageEnvelope) -> None:
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
 
         with Session(messages_engine) as session:
             actor_id = resolve_actor_id(session, env.actor_key)
@@ -137,7 +137,7 @@ class StylometricSensor(ServiceBase, SensorBase):
     async def _run_primitives(self, actor_id: UUID, env: RawMessageEnvelope, _body: str) -> None:
         cursor_store = self._storage.cursors
         obs_store = self._storage.observations
-        messages_engine = self._storage._engines[StoreName.MESSAGES]
+        messages_engine = self._storage._engines[StoreName.MAIN]
 
         # Per-actor cache for the full-corpus fetch + body batch. Lazy:
         # populated on the first ``requires_full_corpus`` primitive that

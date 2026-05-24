@@ -56,7 +56,7 @@ async def _setup_collector(
         cooldown_seconds=0,
         matrix_homeserver_url="https://example.org",
         matrix_user_id="@alpha_mx:example.org",
-        matrix_access_token="secret",  # noqa: S106 — fixture
+        matrix_access_token="secret",
         matrix_monitor_rooms=["!room:example.org"],
     )
     cfg_path = tmp_path / "identities.toml"
@@ -106,7 +106,7 @@ async def test_cleartext_image_attachment_downloaded_and_persisted(
     # dispatcher).
     await coll._ingest_media_event(room, event)
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         rows = s.exec(select(AttachmentTable)).all()
         assert len(rows) == 1
@@ -167,7 +167,7 @@ async def test_attachment_with_failing_integrity_flags_source_specific(
     )
     await coll._ingest_media_event(room, event)
 
-    engine = storage._engines[StoreName.MESSAGES]
+    engine = storage._engines[StoreName.MAIN]
     with Session(engine) as s:
         msg = s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$enc1")).first()
         assert msg is not None

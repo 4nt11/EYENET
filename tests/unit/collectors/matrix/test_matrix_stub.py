@@ -25,7 +25,7 @@ def _setup_pool(tmp_path: Path, name: str) -> Path:
         source=SourceKind.MATRIX,
         matrix_homeserver_url="https://example.org",
         matrix_user_id=f"@{name}:example.org",
-        matrix_access_token="stub-token",  # noqa: S106 — test fixture
+        matrix_access_token="stub-token",
         cooldown_seconds=0,
     )
     cfg_path = tmp_path / "identities.toml"
