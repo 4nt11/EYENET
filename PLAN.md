@@ -576,10 +576,111 @@ Each `Profile.*_summary` slot also stores `last_observation_id` and `derived_fro
 **Carries forward to M6:**
 - Re-issue `rutify_calibration_baseline.json` against BEHAVE-TEXT 0.1.3 + the new `corpus_id` if/when the operator wants the committed baseline back in self-hash agreement. The M5.5 wiring did not introduce the drift; the baseline simply pre-dates it.
 
-### Milestone 6 — Second source
-- A second `CollectorBase` implementation (Matrix or Forum). The point is not the source — the point is to *prove the abstract factory holds*.
+### Milestone 6 — Locale-aware primitives: `lexical.dialect_region` — ✅ DONE (2026-05-23)
 
-### Milestone 7 — Verifier tier (deferred improvement)
+First of four language-agnostic, locale-aware primitives. BCP-47 `xx-YY` is the universal output; Spanish is the first calibrated language, not the design scope. Adding a second language (English, Portuguese, ...) post-M6 is a matter of registering its marker vocab — no primitive contract changes.
+
+- ✅ **INGEOTEC vocabulary corpus committed via git-lfs** at `data/ingeotec/voc/*.tsv.gz` (27 files × ~2-13MB, regional-spanish-models v1). `.gitattributes` configured (`filter=lfs diff=lfs merge=lfs -text`); LFS hooks merged into `.githooks/pre-push` and new `post-checkout` / `post-commit` / `post-merge`. `data/` gitignore restructured to `data/*` + `!data/ingeotec/` so the corpus tracks while other data subdirs (storage, attachments) stay excluded.
+- ✅ **Offline marker builder** (`scripts/build_regional_markers.py`, ~270 LOC): reads INGEOTEC `<CC>.tsv.gz` files, computes exclusivity = `freq[region][tok] / sum_all_regions_freq[tok]`, applies a comprehensive blocklist of TIME-DECAYING proper nouns (politicians, parties, sports clubs, cities, media outlets, Twitter handles), structural acronym filter (length-3 with ≤1 vowel rejected unless in `_DIALECTAL_3CHAR_WHITELIST`), and emits top-N per region by `exclusivity × log(1+ndocs)`. Default thresholds: `excl ≥ 0.70`, `min_ndocs ≥ 5000`, `top_n = 80`.
+- ✅ **Generated markers** (`eyenet/sensor/primitives/_regional_markers.py`): 14 BCP-47 regions, 569 total markers. Strong coverage on es-AR (boludo, che, posta, laburo, quilombo, vos, sos, tenes, …), es-CL (weon, altiro, aweonao, callampa, fome, cabros, conchetumare, …), es-MX (chido, chingo, chingon, culero, neta, chinga, …), es-VE (chamo, marico, arrecho, bachaqueo, …), es-ES (cojones, gilipollas, flipando, chaval, ostia, mola, guay, …), es-CO (chimba, bacano, gonorrea, hijueputa, gamin, dizque, …), es-PE (causa, pata, pituco, …). Sparse coverage on es-BO, es-CU, es-PR (low INGEOTEC sample size; revisit when richer corpora land).
+- ✅ **Primitive module** (`eyenet/sensor/primitives/dialect_region.py`, ~180 LOC): `requires_full_corpus=True`, MIN_MESSAGES=10, MIN_HIT_RATE=0.001, CONFIDENCE_MARGIN=1.8. Language gate via inline function-word overlap vote (es vs en, ~16 anchors each) — wrong language returns `None`. Below-confidence emits `Observation(value="unknown")` per BEHAVE-TEXT 0.1.x spec so downstream can distinguish "undetected" from "not extracted". Source label `eyenet/sensor/primitives/dialect-region:v0.1#dialect-markers-v1`.
+- ✅ **Slot wiring** (`eyenet/engine/slot_mapper.py`): `"lexical.dialect_region": ("lexical_summary", "dialect_region")`. NOT in `_LANGUAGE_SUFFIX_PRIMITIVES` (it IS the language/region detector; redundant).
+- ✅ **Tests** (`tests/unit/sensor/primitives/test_dialect_region.py`, 19 cases): registry contract, requires_full_corpus, language gate (English → None), ambiguous Spanish → unknown, region detection (AR/CL/MX/VE/ES), tied-region margin gate, observation source/confidence shape, slot mapper wiring, marker-set integrity (BCP-47 format, non-empty, single-token).
+- ✅ **Quality gates**: 506 unit+contract tests green (was 487, +19 dialect_region). `mypy --strict eyenet/` clean across 139 source files. `ruff check eyenet/ tests/ scripts/` clean.
+- ✅ **Live smoke**: `python3 scripts/build_regional_markers.py` reproduces the committed `_regional_markers.py` byte-for-byte from `data/ingeotec/voc/*.tsv.gz`.
+
+**Carries forward to M6.5:**
+- Iterative blocklist tuning. The current blocklist catches the bulk of political/sports/city noise but new proper nouns will surface as the operator audits attribution traces. Add to `_NOISE_BLOCKLIST` and re-run the builder.
+- A small residual of names (~5%) still passes the filter; harmless for attribution but worth a periodic sweep.
+
+### Milestone 6.5 — Locale-aware primitives: spaCy trio — ✅ DONE (2026-05-23)
+
+- ✅ **Three primitives** sharing a single spaCy tagger pass via `eyenet/sensor/primitives/_locale_morph_kernel.py`:
+  - `stylometric.pos_ngram_signature` — 64-bit simhash over UPOS bigram counts. Source label declares tagger + n: `#spacy-es_core_news_sm-bi`. MIN_TOKENS=200.
+  - `lexical.evaluative_morphology_density` — sum(eval-bucket hits) / NOUN+ADJ count. Buckets: diminutive, augmentative, pejorative, intensive. Range clamped [0, 1] per BEHAVE-TEXT spec. MIN_TARGET_TOKENS=50.
+  - `lexical.optional_grammar_signature` — 64-bit simhash over choice-point bucket counts: compound_past, subjunctive, clitic_le/la/lo, relative_que/cual/quien. MIN_TOKENS=200.
+- ✅ **spaCy is a CORE dependency** (`pyproject.toml`), not optional. Operator decision 2026-05-23: EYENET ships small-operator CTI; operators accept the storage cost in exchange for working software out of the box. The `es_core_news_sm` model (~13MB) is **auto-fetched on first run** by `_load_nlp()` via `spacy.cli.download`, with a structlog audit event `event=spacy.model_downloaded`. spaCy loads with `parser` and `ner` disabled but `lemmatizer + attribute_ruler` enabled — the optional-grammar rule pack reads `token.lemma_` for `haber`.
+- ✅ **`LocaleRuleset` protocol** + registry (`eyenet/sensor/primitives/_locale_rules/__init__.py`). Spanish ruleset (`_locale_rules/es.py`) ships first; future English/Portuguese register a `RULESET` constant + a `RULESETS[code]` entry, no kernel changes. Surface-form rules for evaluative morphology (sm lemmatizer preserves diminutives, so lemma-based detection is impossible); `token.morph.get("Mood", [])` for subjunctive (immune to the sm lemmatizer's irregular-verb mangling, e.g. `fuera → fuerir`). Blocklist for lexicalized "-ito" / "-azo" / "-ico" surface forms (`bonito`, `escrito`, `politico`, …).
+- ✅ **Shared kernel** (`_locale_morph_kernel.py`): single `nlp.pipe(batch_size=64)` pass yields `MorphAnalysis` (pos_bigrams Counter + evaluative_counts + optional_grammar_counts + token totals + window). All three primitives consume the same analysis.
+- ✅ **Language gate consolidated**: `dialect_region` (M6) and the M6.5 trio now share `_locale_rules/_language_gate.py` (`is_spanish` + `detect_language` returning BCP-47 code). Anchor sets unchanged from M6.
+- ✅ **Slot wiring** (`eyenet/engine/slot_mapper.py`): three new `_SLOT_MAP` entries (`stylometric_summary.pos_ngram_signature`, `lexical_summary.evaluative_morphology_density`, `lexical_summary.optional_grammar_signature`). Both simhash primitives added to `_LANGUAGE_SUFFIX_PRIMITIVES` — they encode `#<lang>` themselves; the density primitive stays off (numeric, no per-language threshold branch).
+- ✅ **Two new linker comparators** (`pos_ngram_simhash_hamming`, `optional_grammar_simhash_hamming`) registered in `REGISTRY`. `LinkerThresholds` ships **calibrated defaults for Spanish**: `pos_ngram_simhash_hamming_per_lang = {"es": 10}` and `optional_grammar_simhash_hamming_per_lang = {"es": 12}`. Calibration logic in `eyenet/calibration/artifact.py` scopes the M5 ES-blanket-disable to the M5 primitives only — M6.5 simhashes are exempt.
+- ✅ **Calibration grid extended** (`eyenet/calibration/simhash_grid.py`): default primitive tuple now includes `pos_ngram_signature` + `optional_grammar_signature`; both detect their own language via the source-label suffix path (`_SELF_LANG_PRIMITIVES`). The committed `rutify_calibration_baseline.json` pre-dates M6.5; the next `eyenet calibrate run` against the corpus will emit grid entries for the new primitives and the M6.5 calibration regression tests will lift to AUC budget assertions.
+- ✅ **Tests**: 52 new unit tests (`test_locale_morph_kernel.py` 22, `test_pos_ngram_signature.py` 11, `test_evaluative_morphology_density.py` 10, `test_optional_grammar_signature.py` 9) + 4 new calibration regression tests (`test_simhash_thresholds.py`). Total: 558 default + 21 calibration green. Coverage 85.48% (above gate).
+- ✅ **Quality gates**: `pytest -m "unit or contract"` 558 green; `pytest -m calibration` 21 green; `mypy --strict eyenet/` clean across 148 source files; `ruff check eyenet/ tests/ scripts/` clean.
+- ✅ **Live smoke**: in-process end-to-end (Spanish chat paragraph → all three primitives emit valid Observations with expected source-label suffixes). Auto-fetch of `es_core_news_sm` verified in a fresh venv.
+
+**Fixes pass — round 2 (2026-05-23, same day):** honest review found a deeper set of gaps. Closed:
+- ✅ **Production correctness bug, not just a perf issue.** Pre-fix `_compute_primitive` skipped body fetches for ALL `requires_full_corpus=True` primitives (gated on `if not spec.requires_full_corpus`), which silently broke the M6.5 trio end-to-end through the sensor — they got `bodies={}` and returned None every time. Fix: added `requires_bodies: bool = True` to `PrimitiveSpec`; meta.* explicitly set `requires_bodies=False`; the trio inherits the default True. Now they actually run.
+- ✅ **Sensor-side full-corpus + bodies memo.** `_run_primitives` lazily fetches the full corpus + body batch once per actor dispatch and reuses them across the 11 `requires_full_corpus=True` primitives (8 meta + 3 trio). Net savings per actor per dispatch: ~10 fewer SQLite reads and ~10 fewer MessageStore round-trips.
+- ✅ **Kernel cache key tightened.** Now includes a bodies fingerprint — defends against the "same evidence_refs, different content" stale-result class of bugs that tests had been masking via UUID-prefixed refs.
+- ✅ **`_KernelStats` dataclass** replaces the `_NLP_PIPE_CALLS` module global. Tests read `kernel._stats.pipe_calls` / `cache_hits` / `cache_misses`. The leading underscore signals test-visible-not-API; the additional counters make future debugging cheaper.
+- ✅ **Sensor-integration tests prove the properties end-to-end.** `tests/integration/test_stylometric_kernel_memo.py` drives the real sensor dispatch loop with the synthetic_m2 fixture and asserts (a) `_stats.pipe_calls <= msg_count` — the kernel runs at most once per envelope across the trio, and (b) `iter_since` is called far less than `msg_count × 11` — the storage memo works.
+- ✅ **CI bootstrap.** `tests/conftest.py` session-scoped fixture fails-fast with a clear remediation message if `es_core_news_sm` isn't installed. `scripts/install_models.py` is the documented provisioning entry point for CI runners. Production still auto-fetches on first run; CI gets the explicit path.
+- ✅ **pytest-benchmark perf floor.** `tests/unit/sensor/primitives/test_locale_morph_kernel_benchmark.py` (opt-in via `pytest -m benchmark`) asserts mean kernel time over 200 messages is under 500ms. Local baseline ~190ms; budget catches >2.5× regressions.
+
+Test count: 566 unit/contract (+1 cache-miss test from round 1's 565) + 18 integration (+2 new from this round) + 21 calibration. `mypy --strict` clean, `ruff` clean, coverage 85.43% above the 85% gate. E2E suite (`EYENET_E2E=1`) green: 3/3 against real NATS via testcontainers.
+
+**Fixes pass — round 1 (2026-05-23):** earlier honest post-ship review surfaced five gaps that closed in the previous round:
+- ✅ **Kernel is now genuinely single-pass per actor.** Added a module-level single-slot memo to `compute_morph_analysis()` keyed on `(language, tuple(evidence_refs))` — the sensor's per-actor dispatch rebuilds the `corpus` list per primitive, so `id()`-based memoization wouldn't hit. Across the three M6.5 primitive calls for one actor, spaCy now runs **once**, not three times. Verified by `_NLP_PIPE_CALLS == 1` after three back-to-back primitive calls; wallclock for the trio dropped from ~3× kernel cost to ~10ms total in the smoke.
+- ✅ **Auto-fetch branch is exercised by a test.** `test_load_nlp_auto_downloads_on_missing_model` monkeypatches `spacy.load` to raise `OSError` on the first call, intercepts `_spacy_download`, and asserts the retry path fires exactly once. The OSError → download → retry contract is no longer theoretical.
+- ✅ **`evidence_ref` falls back to the last in-bodies ref.** New `evidence_ref_for(corpus, bodies)` helper in the kernel walks the corpus in reverse and returns the most recent ref the kernel actually processed (one that's in `bodies`). All three primitives use it instead of `corpus[-1][2]`. Three new unit tests cover the trailing-missing-body case + the empty-overlap case.
+- ✅ **`_reset_for_tests` properly exported**; companion `_reset_cache_for_tests` added for cheap between-test isolation (drops memo only, keeps the loaded spaCy model — full `_reset_for_tests` would multiply test-suite runtime by orders of magnitude). Conftest at `tests/unit/sensor/primitives/conftest.py` autouses the cache-only reset.
+- ✅ **Gate divergence documented.** `_language_gate.py` module docstring now explains that `is_spanish` (loose, tie → True, used by M6 `dialect_region`) and `detect_language` (strict, ≥2 anchor hits required, used by the M6.5 trio) intentionally have different thresholds. The next reader won't "fix" the apparent inconsistency.
+- Test count: 565 unit/contract (was 558, +7 fixes-pass) + 21 calibration; coverage 85.66% (up slightly); `mypy --strict` + `ruff check` clean.
+
+**Calibration completion (2026-05-23, same day):** the Rutify re-run landed. Operator decision: **both new simhashes DISABLED for Spanish**, mirroring the M5 outcome on the existing pair:
+
+| Primitive | AUC | Max precision (any t) | Operator action |
+|---|---|---|---|
+| `function_word_distribution_top50` | 0.5546 | 0.118 | M5 disable (unchanged) |
+| `character_ngram_simhash` | 0.6776 | 0.333 | M5 disable (unchanged) |
+| `pos_ngram_signature` | **0.6108** | 0.200 | **M6.5 disable (new)** |
+| `optional_grammar_signature` | **0.6319** | 0.080 | **M6.5 disable (new)** |
+
+Neither M6.5 simhash cleared the `precision_floor:0.70` strategy at any threshold — same structural ceiling as the M5 simhashes on short Spanish chat. Code changes:
+- `LinkerThresholds.pos_ngram_simhash_hamming_per_lang = {"es": None}`
+- `LinkerThresholds.optional_grammar_simhash_hamming_per_lang = {"es": None}`
+- Artifact policy `_ES_DISABLED_PRIMITIVES` now includes all four ES-failing simhashes.
+- `tests/fixtures/calibration/rutify_calibration_baseline.json` refreshed (`self_hash=d4aa2e26…`, `corpus_id=rutify-full-2026-05-02`, `corpus_sha256=bc0aab18…`); records `enabled=False, chosen_threshold=None` for all four ES slices.
+- Calibration regression tests lifted from wiring-only to **AUC budget** (5% drop floors: 0.580 pos_ngram, 0.600 optional_grammar) + config-mirror + policy-set membership.
+- Three calibrated recipes (`lurker_or_observer`, `bot_or_automated_poster`, `chatty_member`) re-validated — same P/R/F1 as M5.5 to four decimals.
+
+Final gates: 566 unit/contract + 25 calibration + 18 integration + 3 E2E (real NATS) green. `mypy --strict` clean (148 files). `ruff` clean. Coverage 85.43%.
+
+**Carries forward (still):**
+- Re-enable simhashes for Spanish when BEHAVE-TEXT 0.0.2 ships minhash-with-shingles and/or when the LLM-Confirmer service lands. The disable list in `eyenet/calibration/artifact.py::_ES_DISABLED_PRIMITIVES` is the swap point.
+- Wire `evaluative_morphology_density` as a `recipes_grid` axis when a recipe wants it. The slot is populated; the recipe consumer doesn't exist yet. Adding the axis requires computing the primitive during calibration in `interaction.py` and adding a new `ActorStats` column — real work, defer until a recipe needs it.
+- Add an English ruleset (`_locale_rules/en.py`) when an English-language corpus lands. The kernel and slot wiring need zero changes — register `RULESET` + a `RULESETS["en"]` entry.
+
+### Milestone 7 — Second source: Matrix — ✅ DONE (2026-05-23)
+
+The point of M7 is to *prove the abstract factory holds*. Matrix beats Forum/IRC/RSS as the second source because matrix-nio is async-callback-driven like Telethon but the room/event model, auth (access_token vs MTProto session), and ID shapes (`@user:server` / `!room:server` / `$event_id`) are all materially different — making the "factory survives a wildly different SDK" claim much stronger.
+
+- ✅ **matrix-nio>=0.24 added as a CORE dep** (`pyproject.toml`). No `[e2e]` extra — unencrypted rooms only in v0 (E2EE would add `libolm` C compile + per-identity key cache; deferred). `mypy.overrides` extended with `nio.*`. `coverage.omit` extended with `eyenet/collectors/matrix/real.py` (live-network code path).
+- ✅ **`IdentityFileEntry` extended** (`eyenet/identity_pool/loader.py`) with `matrix_homeserver_url`, `matrix_user_id`, `matrix_access_token`, `matrix_device_id`, `matrix_monitor_rooms`. All optional — Telegram-only TOMLs round-trip unchanged. New helper `_uses_session_file(SourceKind) -> bool` scopes the on-disk session-file precheck to Telegram only; Matrix carries auth in the TOML so the existing loader's session_path existence check is now per-source instead of all-or-nothing.
+- ✅ **`MatrixCollectorStub`** (`eyenet/collectors/matrix/stub.py`, ~95 LOC) mirrors `TelegramCollectorStub` line-for-line with `SourceKind.MATRIX`, `evidence_ref` prefix `matrix:<room_id>:<event_id>`, and the same JSONL replay shape.
+- ✅ **`MatrixCollector`** (`eyenet/collectors/matrix/real.py`, ~320 LOC):
+  - `AsyncClient(homeserver, user_id, device_id=...)` + pre-provisioned `access_token` — no login round-trip at start.
+  - Room aliases (`#alias:server`) resolved to canonical `!room_id:server` via `client.room_resolve_alias`. `!`-prefixed entries pass through. Unknown forms warn and drop.
+  - `add_event_callback(self._on_message, RoomMessageText)` — text events only for M7. `m.image` / `m.file` and other event kinds ignored at the callback level. Encrypted-room `MegolmEvent`s are silently dropped (not subscribed).
+  - Self-echoes (sender == own user_id) dropped at ingest.
+  - `actor_key = "actor:" + sha256("matrix||<user_id>")`. `evidence_ref = "matrix:<room_id>:<event_id>"`. `GroupKind.MATRIX_ROOM` on every monitored room.
+  - **OPSEC: `set_presence="offline"` hard-coded on every `sync_forever` call. Matrix has no separate "invisible" presence; "offline" IS invisible. No operator knob — the constant `_PRESENCE_OFFLINE` is the only allowed value.**
+- ✅ **CLI** (`eyenet/cli/main.py`) — `--type` extended to `{telegram-stub, telegram, matrix-stub, matrix}`. The legacy `stub` value is kept as a deprecated alias that emits a stderr warning + maps to `telegram-stub`. Session-file precheck now gated on `collector == "telegram"` only.
+- ✅ **Backfill** via `/messages` pagination — opt-in with `--backfill`. Refuses if `matrix_monitor_rooms` is empty (would otherwise scrape every joined room — sanity stop). One-shot `sync` populates per-room `prev_batch` tokens; the collector then pages backwards in chunks of 100, ingesting text events via the same `_ingest_event` path as live sync. Default per-room limit 1000; configurable via `MatrixCollector(backfill_limit=...)`. Runs in parallel with `sync_forever`; MessageStore's unique-`evidence_ref` constraint deduplicates the overlap. Added 2026-05-23 same day as M7 in response to live-smoke feedback.
+- ✅ **Deferred from Telegram parity (called out, not silent)**: attachments (text-only — `has_attachment=False` always), reply/relation parsing (`m.relates_to` deferred — `reply_to_platform_msgid` always None), E2EE.
+- ✅ **Tests**: 15 new unit tests under `tests/unit/collectors/matrix/` (contract smoke, identity TOML round-trip, stub envelope shape, real-collector with a fake `AsyncClient` exercising on_subscribe, callback wiring, alias resolution, ingest, self-echo drop, presence=offline assertion). 1 new integration test `tests/integration/test_two_sources_one_sensor.py` — the M7 proof: Telegram + Matrix stubs on a single MemoryBus + sensor, asserts 6 envelopes (3+3), per-source subject partitioning, evidence_ref prefix matching, audit-row isolation across `collector.telegram` and `collector.matrix`. New fixture `tests/fixtures/corpora/synthetic_matrix.jsonl`.
+- ✅ **Quality gates**: `pytest -m "unit or contract"` 581 green; `pytest -m integration` 19 green (was 18, +1 two-sources); `pytest -m calibration` 25 green. Coverage 86.25% (above 85% gate). `mypy --strict eyenet/` clean across 151 source files. `ruff check eyenet/ tests/ scripts/` clean.
+- ✅ **Live smoke**: `eyenet collector --identity alpha_mx --type matrix-stub --fixture tests/fixtures/corpora/synthetic_matrix.jsonl --memory-bus` boots, emits hash-chained `service.start`/`service.stop` audit rows under `collector.matrix` with the contract-pinned `instance_id` (`4ba08aaf` for identity `alpha_mx`), exits cleanly on SIGTERM.
+
+**Carries forward (defer until an operator asks):**
+- E2EE rooms — wire matrix-nio `[e2e]` (libolm) and a per-identity key cache when an operator needs to monitor an encrypted room.
+- Attachments — `m.image` / `m.file` events into `AttachmentTable` rows.
+- Reply graph — `m.relates_to` parsing into `reply_to_platform_msgid`.
+- Backfill cursor persistence — today's backfill re-paginates from the latest sync token on every restart. MessageStore dedup makes this correct but wasteful on large rooms. Persisted resume tokens (likely a `CorpusCursor`-shaped row keyed by `(matrix, room_id, "backfill")`) when an operator hits a room large enough to feel it.
+
+### Milestone 8 — Verifier tier (deferred improvement)
 
 A third tier between the cheap Linker (signature-pairwise via `Comparator`)
 and the LLM Confirmer (final arbiter). Operates on raw per-actor corpora
