@@ -286,6 +286,11 @@ async def test_full_pipeline_trace_lands_in_jaeger(tmp_path: Path) -> None:
         "engine.update_profile",
         "linker.compare",
         "graph.upsert",
+        # Tier 2 — bus-layer auto-instrumentation
+        "bus.publish",
+        "bus.deliver",
+        # Tier 6 — storage hot writes (at least one must appear in the pipeline lineage)
+        "storage.graph.upsert_node",
     }
 
     # Pull the union of operations across every sampled trace. Each

@@ -158,19 +158,19 @@ collector.ingest                         ✓ SHIPPED (root)
 ## 5. FIX ORDER — STATUS
 
 1. ✅ **Subscriber-side `extract` + `attach`** — DONE. `attach_from_headers` context manager shipped in `eyenet/telemetry/propagation.py`; wired into every subscriber inside the `create_task` target. (Commit `911e423`.)
-2. ❌ **Bus-layer spans** — deferred. Add `bus.publish` to `BusEnvelopePublisher.publish` and `bus.deliver` to `MemoryBus._invoke` + the NATS subscribe callback. Auto-instruments every service for free.
+2. ✅ **Bus-layer spans** — DONE. `bus.publish` in `BusEnvelopePublisher.publish` / `.publish_observation`; `bus.deliver` in `MemoryBus._invoke` and the NATS subscribe `_adapter`. The bus layer now also attaches from headers, so subscribers' own `attach_from_headers` is a no-op safety net.
 3. ✅ **Collector spans** — DONE. `collector.ingest` in `telegram/real.py:_ingest_msg`, `matrix/real.py:_ingest_event` / `_ingest_media_event` / `_emit_decrypt_sentinel`. Trace now starts where the message enters EYENET.
-4. ❌ **Graph fill-in** — deferred. Span on the four missing handlers (`suspected`, `confirmed`, `rejected`, `persona_updated`). One copy-paste each.
-5. ❌ **Per-verifier spans** — deferred. Mirror the sensor's `sensor.primitive.{name}` pattern with `verifier.{name}`. PLAN §8.4 implies this is required.
-6. ❌ **Storage spans** — deferred. Wrap the hot writes (`linkages.insert_proposed`, `vectors.nearest`, `vectors.upsert_simhash`, `profiles.upsert_current`, `graph.upsert_*`, `messages.insert`).
-7. ❌ **AuditEmitter span** — deferred. Wraps the dual publish+persist and records `audit.hash_chain_prev` as a span attribute.
+4. ✅ **Graph fill-in** — DONE. `graph.upsert` spans on `_handle_suspected`, `_handle_confirmed` (with `graph.op="merge"`), `_handle_rejected`, `_on_persona_updated_inner` (with `graph.op="persona_upsert"`).
+5. ✅ **Per-verifier spans** — DONE. `verifier.{name}` child spans inside the `_evaluate_pair` loop, mirroring the sensor's `sensor.primitive.{name}` pattern. Records `verifier.score`, `verifier.confidence`, `verifier.skipped`.
+6. ✅ **Storage spans** — DONE. Hot writes wrapped: `storage.linkages.insert_proposed`, `storage.vectors.upsert_simhash`, `storage.vectors.nearest`, `storage.profiles.upsert_current`, `storage.graph.upsert_node`, `storage.graph.upsert_edge`, `storage.messages.put_message`, `storage.observations.by_evidence`.
+7. ✅ **AuditEmitter span** — DONE. `audit.emit` wraps the dual publish+persist with `audit.event` / `audit.subject_kind` / `audit.subject_id` / `audit.id` attributes.
 
 **Bonus shipped this session:**
 - `EYENET_TRACING_DISABLED` / `OTEL_SDK_DISABLED` env-var off-switch in `init_telemetry`.
 - Unit + per-service continuity test suite (`tests/integration/test_trace_continuity.py`).
 - E2E Jaeger test gated by `EYENET_E2E_JAEGER=1` (`tests/e2e/test_jaeger_trace_continuity.py`).
 
-Steps 1, 3 (and the off-switch) closed in this session — the difference between "we have trace decorations" and "we have a working end-to-end trace." Steps 2, 4–7 are depth fill-in: useful, not urgent.
+Steps 1, 3 (and the off-switch) closed in the propagation session. Steps 2, 4, 5, 6, 7 — the depth fill-in tiers — closed in the follow-up session. New span coverage is verified by `tests/integration/test_depth_spans.py` (8 tests, all green) and asserted in `tests/e2e/test_jaeger_trace_continuity.py` for `bus.publish` / `bus.deliver` / `storage.graph.upsert_node` when run with `EYENET_E2E_JAEGER=1`.
 
 ---
 
