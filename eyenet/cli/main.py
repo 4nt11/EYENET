@@ -17,6 +17,8 @@ from eyenet import __version__
 from eyenet.bus import MemoryBus, NATSBus
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.cli.config import LinkerConfig, RuntimeConfig
+from eyenet.collectors.matrix.real import MatrixCollector
+from eyenet.collectors.matrix.stub import MatrixCollectorStub
 from eyenet.collectors.telegram.auth import ensure_session
 from eyenet.collectors.telegram.real import TelegramCollector
 from eyenet.collectors.telegram.stub import TelegramCollectorStub
@@ -242,19 +244,43 @@ def _make_trace_context() -> TraceContext:
 # -- service commands -------------------------------------------------------
 
 
+_COLLECTOR_TYPES = ("telegram-stub", "telegram", "matrix-stub", "matrix", "stub")
+# `stub` is the legacy alias for `telegram-stub` — kept for one release to
+# avoid breaking operator scripts written against M1/M2 docs.
+_LEGACY_TELEGRAM_STUB_ALIAS = "stub"
+
+
 @app.command("collector")
 def collector_run(  # pragma: no cover
     identity: str = typer.Option(..., "--identity", help="identity name from pool"),
-    collector: str = typer.Option("stub", "--type", help="'stub' or 'telegram'"),
-    fixture: Path | None = typer.Option(None, "--fixture", help="JSONL replay file (stub only)"),
+    collector: str = typer.Option(
+        "telegram-stub",
+        "--type",
+        help="one of: telegram-stub, telegram, matrix-stub, matrix",
+    ),
+    fixture: Path | None = typer.Option(
+        None, "--fixture", help="JSONL replay file (stub types only)"
+    ),
     backfill: bool = typer.Option(False, "--backfill", help="replay full history oldest-first"),
     data_dir: Path | None = typer.Option(None, "--data-dir"),
     identities: Path | None = typer.Option(None, "--identities"),
     nats_url: str | None = typer.Option(None, "--nats-url"),
     memory_bus: bool = typer.Option(False, "--memory-bus", help="use in-process bus"),
-    tick: float = typer.Option(1.0, "--tick", help="emission interval for stub (s)"),
+    tick: float = typer.Option(1.0, "--tick", help="emission interval for stub types (s)"),
 ) -> None:
-    """Run a collector. Use --type to select the platform (default: stub)."""
+    """Run a collector. Use --type to select the source + mode."""
+
+    if collector == _LEGACY_TELEGRAM_STUB_ALIAS:
+        typer.echo(
+            "warning: --type stub is deprecated; use --type telegram-stub.",
+            err=True,
+        )
+        collector = "telegram-stub"
+    if collector not in _COLLECTOR_TYPES:
+        raise typer.BadParameter(
+            f"unknown --type {collector!r}; expected one of "
+            f"{', '.join(t for t in _COLLECTOR_TYPES if t != _LEGACY_TELEGRAM_STUB_ALIAS)}"
+        )
 
     cfg = RuntimeConfig.from_env(
         data_dir=data_dir,
@@ -265,14 +291,18 @@ def collector_run(  # pragma: no cover
     if cfg.identities_path is None:
         raise typer.BadParameter("identities path is required (--identities or EYENET_IDENTITIES)")
 
-    if collector == "telegram":
+    # Telegram is the only source today that requires a pre-existing session
+    # file on disk (MTProto). Matrix carries its auth in the TOML.
+    needs_session_file = collector == "telegram"
+
+    if needs_session_file:
         ident_file = load_identities(cfg.identities_path, check_session_files=False)
         entries = {e.name: e for e in ident_file.identities}
         if identity not in entries:
             raise typer.BadParameter(f"identity {identity!r} not found in identities file")
         ensure_session(entries[identity])
 
-    pool = FileIdentityPool(cfg.identities_path, check_session_files=(collector != "telegram"))
+    pool = FileIdentityPool(cfg.identities_path, check_session_files=needs_session_file)
 
     if collector == "telegram":
 
@@ -286,7 +316,31 @@ def collector_run(  # pragma: no cover
             )
 
         _run(_factory, cfg, tick=0.0)
-    else:
+    elif collector == "matrix":
+
+        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+            return MatrixCollector(
+                bus=bus,
+                storage=storage,
+                pool=pool,
+                identity_name=identity,
+                backfill=backfill,
+            )
+
+        _run(_factory, cfg, tick=0.0)
+    elif collector == "matrix-stub":
+
+        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+            return MatrixCollectorStub(
+                bus=bus,
+                storage=storage,
+                pool=pool,
+                identity_name=identity,
+                fixture_path=fixture,
+            )
+
+        _run(_factory, cfg, tick=tick)
+    else:  # telegram-stub
 
         def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
             return TelegramCollectorStub(

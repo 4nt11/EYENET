@@ -1,0 +1,3 @@
+{"actor_key":"actor:1111111111111111111111111111111111111111111111111111111111111111","platform_groupid":"!room:example.org","platform_msgid":"$evt001","body":"hello matrix world","sent_at_source":"2026-05-24T10:00:00+00:00"}
+{"actor_key":"actor:1111111111111111111111111111111111111111111111111111111111111111","platform_groupid":"!room:example.org","platform_msgid":"$evt002","body":"second message in the room","sent_at_source":"2026-05-24T10:00:30+00:00"}
+{"actor_key":"actor:2222222222222222222222222222222222222222222222222222222222222222","platform_groupid":"!room:example.org","platform_msgid":"$evt003","body":"reply from another actor","sent_at_source":"2026-05-24T10:01:00+00:00"}

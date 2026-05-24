@@ -27,6 +27,7 @@ from .message import AttachmentTable, MessageTable
 from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
 from .profile import ProfileTable
+from .reaction import ReactionTable
 from .social_graph import MembershipTable
 from .source import SourceTable
 from .syslog import SystemLogTable
@@ -57,6 +58,7 @@ __all__ = [
     "PersonaMembershipTable",
     "PersonaTable",
     "ProfileTable",
+    "ReactionTable",
     "SQLModel",
     "SourceTable",
     "SystemLogTable",

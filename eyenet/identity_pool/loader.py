@@ -38,12 +38,39 @@ class IdentityFileEntry(BaseModel):
     # Accepts @username strings or numeric chat IDs (as strings).
     monitor_groups: list[str] = Field(default_factory=list)
 
+    # Matrix-specific (required when source=matrix). Access token is sensitive
+    # — file is gitignored + age-encrypted at rest per PLAN §6.1, same as
+    # telegram_api_hash. No session file: nio caches state under the
+    # collector's data dir, not via a single .session blob.
+    matrix_homeserver_url: str | None = None
+    matrix_user_id: str | None = None
+    matrix_access_token: str | None = None
+    matrix_device_id: str | None = None
+    # Room ids (!abc:server) or aliases (#room:server). Empty = no monitoring.
+    matrix_monitor_rooms: list[str] = Field(default_factory=list)
+    # E2EE device store path. nio persists Olm sessions, Megolm inbound
+    # group sessions, and the sync token here. Empty/None = default to
+    # `<eyenet_data_dir>/matrix/<identity_name>/store/`, populated by
+    # MatrixCollector at start. The directory contains long-lived crypto
+    # state; do NOT include in any future `eyenet purge`.
+    matrix_device_store_path: str | None = None
+
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
         if not self.session_path:
             default = Path.home() / ".local" / "share" / "eyenet" / "sessions" / self.name
             self.session_path = str(default)
         return self
+
+
+def _uses_session_file(source: SourceKind) -> bool:
+    """Return True if the source kind persists auth as a session file on disk.
+
+    Telegram (MTProto via telethon) does. Matrix does not — nio holds the
+    access_token in memory; the operator stores it directly in the TOML.
+    """
+
+    return source == SourceKind.TELEGRAM
 
 
 class IdentityFile(BaseModel):
@@ -63,6 +90,8 @@ def load(path: Path, *, check_session_files: bool = True) -> IdentityFile:
     parsed = IdentityFile.model_validate(raw)
     if check_session_files:
         for entry in parsed.identities:
+            if not _uses_session_file(entry.source):
+                continue
             session = Path(entry.session_path)
             if not session.exists():
                 raise ValueError(f"identity {entry.name!r} session_path missing: {session}")
@@ -99,8 +128,27 @@ def dump(model: IdentityFile, path: Path) -> None:
         if entry.monitor_groups:
             groups_str = ", ".join(f'"{g}"' for g in entry.monitor_groups)
             lines.append(f"monitor_groups = [{groups_str}]")
+        lines.extend(_matrix_lines(entry))
         lines.append("")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _matrix_lines(entry: IdentityFileEntry) -> list[str]:
+    out: list[str] = []
+    if entry.matrix_homeserver_url is not None:
+        out.append(f"matrix_homeserver_url = {_q(entry.matrix_homeserver_url)}")
+    if entry.matrix_user_id is not None:
+        out.append(f"matrix_user_id = {_q(entry.matrix_user_id)}")
+    if entry.matrix_access_token is not None:
+        out.append(f"matrix_access_token = {_q(entry.matrix_access_token)}")
+    if entry.matrix_device_id is not None:
+        out.append(f"matrix_device_id = {_q(entry.matrix_device_id)}")
+    if entry.matrix_monitor_rooms:
+        rooms_str = ", ".join(f'"{r}"' for r in entry.matrix_monitor_rooms)
+        out.append(f"matrix_monitor_rooms = [{rooms_str}]")
+    if entry.matrix_device_store_path is not None:
+        out.append(f"matrix_device_store_path = {_q(entry.matrix_device_store_path)}")
+    return out
 
 
 def _q(s: str) -> str:

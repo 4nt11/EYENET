@@ -102,6 +102,7 @@ _STORE_TABLES: dict[StoreName, frozenset[str]] = {
             "group_",
             "message",
             "attachment",
+            "reaction",
             "actor_alias_history",
             "membership",
             "group_snapshot",

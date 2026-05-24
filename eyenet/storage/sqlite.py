@@ -38,6 +38,7 @@ class SQLiteStorage(Storage):
     """
 
     def __init__(self, data_dir: Path) -> None:
+        self._data_dir = data_dir
         self._engines: dict[StoreName, Engine] = open_all(data_dir)
         self._messages = SQLiteMessageStore(self._engines[StoreName.MESSAGES])
         self._corpus = SQLiteCorpusStore(self._engines[StoreName.MESSAGES])
@@ -97,6 +98,10 @@ class SQLiteStorage(Storage):
     @property
     def syslog(self) -> SQLiteSystemLogStore:
         return self._syslog
+
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir
 
     async def close(self) -> None:
         close_all(self._engines.values())
