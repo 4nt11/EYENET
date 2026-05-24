@@ -37,6 +37,7 @@ _DB_ONLY_MODULES: frozenset[str] = frozenset(
         "eyenet.contracts.system_user",
         "eyenet.contracts.syslog",
         "eyenet.contracts.corpus",
+        "eyenet.contracts.feedback",
     }
 )
 _INTERFACE_MODULES: frozenset[str] = frozenset(

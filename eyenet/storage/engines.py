@@ -117,7 +117,9 @@ _STORE_TABLES: dict[StoreName, frozenset[str]] = {
     ),
     StoreName.CORPUS: frozenset({"corpus_cursor"}),
     StoreName.OBSERVATIONS: frozenset({"observation"}),
-    StoreName.PROFILES: frozenset({"profile", "linkage", "persona", "persona_membership"}),
+    StoreName.PROFILES: frozenset(
+        {"profile", "linkage", "persona", "persona_membership", "feedback_pair"}
+    ),
     StoreName.VECTORS: frozenset(),  # sqlite-vec virtual tables, declared at runtime
     StoreName.GRAPH: frozenset({"graph_node", "graph_edge"}),
     StoreName.AUDIT: frozenset({"audit_log"}),

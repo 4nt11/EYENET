@@ -19,8 +19,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from .feedback import FeedbackPairRow
 
 
 class MessageStore(ABC):
@@ -190,11 +193,19 @@ class LinkageStore(ABC):
         method: str,
         score: float,
         evidence: dict[str, Any],
+        *,
+        linkage_id: UUID | None = None,
     ) -> object:
         """Insert or update a proposed linkage row. Returns LinkageRow.
 
         Sorts the pair (actor_a < actor_b) before write. Idempotent on
         (actor_a, actor_b, method, PROPOSED state) — updates score if higher.
+
+        ``linkage_id``: when provided, the new row uses this UUID instead of
+        a fresh one. The Linker passes the same UUID it puts in the
+        ``LinkageProposed`` bus envelope so downstream consumers (Verifier,
+        operator CLI) can correlate envelope → DB row without a pair lookup.
+        Ignored when an existing PROPOSED row is found.
         """
 
     @abstractmethod
@@ -226,6 +237,45 @@ class LinkageStore(ABC):
         offset: int = 0,
     ) -> list[object]:
         """Return list[LinkageRow] filtered by actor_id and/or state."""
+
+
+class FeedbackPairStore(ABC):
+    """Operator-confirmed SAME/DIFF-author pairs (M8).
+
+    Auto-populated by `eyenet linkage confirm`/`reject`. Consumed by the
+    Verifier calibration grid to compute per-method AUC against ground
+    truth. The unordered pair invariant (actor_a_id < actor_b_id) mirrors
+    `LinkageStore` (PLAN §5.2).
+    """
+
+    @abstractmethod
+    async def record(
+        self,
+        *,
+        linkage_id: UUID,
+        actor_a: UUID,
+        actor_b: UUID,
+        ground_truth: str,
+        decided_by: str,
+        decided_at: datetime,
+        notes: str | None = None,
+    ) -> FeedbackPairRow:
+        """Insert (or update on retry) one feedback pair. Returns FeedbackPairRow.
+
+        Idempotent on `linkage_id` (unique constraint). A subsequent call with
+        the same linkage_id but a different ground_truth replaces the prior
+        row — operator overrides are valid until the LinkageState becomes
+        terminal.
+        """
+
+    @abstractmethod
+    async def get(self, linkage_id: UUID) -> FeedbackPairRow | None:
+        """Return FeedbackPairRow for this linkage_id or None."""
+
+    @abstractmethod
+    async def all_pairs(self) -> list[tuple[UUID, UUID, str]]:
+        """Return `[(actor_a_id, actor_b_id, ground_truth), ...]` for the
+        calibration grid. Order is unspecified."""
 
 
 class PersonaStore(ABC):
@@ -303,12 +353,17 @@ class Storage(ABC):
     @abstractmethod
     def personas(self) -> PersonaStore: ...
 
+    @property
+    @abstractmethod
+    def feedback_pairs(self) -> FeedbackPairStore: ...
+
     @abstractmethod
     async def close(self) -> None: ...
 
 
 __all__ = [
     "CorpusStore",
+    "FeedbackPairStore",
     "GraphStore",
     "LinkageStore",
     "MessageStore",

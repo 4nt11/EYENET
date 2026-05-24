@@ -8,6 +8,7 @@ from sqlalchemy.engine import Engine
 
 from eyenet.contracts.storage import (
     CorpusStore,
+    FeedbackPairStore,
     GraphStore,
     LinkageStore,
     MessageStore,
@@ -22,6 +23,7 @@ from .audit import SQLiteAuditStore
 from .corpus import SQLiteCorpusStore
 from .cursors import SQLiteCursorStore
 from .engines import StoreName, close_all, open_all
+from .feedback import SQLiteFeedbackPairStore
 from .graph import SQLiteGraphStore
 from .linkages import SQLiteLinkageStore
 from .messages import SQLiteMessageStore
@@ -49,6 +51,7 @@ class SQLiteStorage(Storage):
         self._graph = SQLiteGraphStore(self._engines[StoreName.GRAPH])
         self._linkages = SQLiteLinkageStore(self._engines[StoreName.PROFILES])
         self._personas = SQLitePersonaStore(self._engines[StoreName.PROFILES])
+        self._feedback_pairs = SQLiteFeedbackPairStore(self._engines[StoreName.PROFILES])
         self._audit = SQLiteAuditStore(
             self._engines[StoreName.AUDIT],
             ndjson_path=data_dir / "audit.ndjson",
@@ -90,6 +93,10 @@ class SQLiteStorage(Storage):
     @property
     def personas(self) -> PersonaStore:
         return self._personas
+
+    @property
+    def feedback_pairs(self) -> FeedbackPairStore:
+        return self._feedback_pairs
 
     @property
     def audit(self) -> SQLiteAuditStore:
