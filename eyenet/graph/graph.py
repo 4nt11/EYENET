@@ -152,17 +152,27 @@ class Graph(ServiceBase):
             _log.error("graph.suspected_parse_error", error=str(exc))
             return
 
-        await self._storage.graph.upsert_edge(
-            GraphEdgeType.LINKED_TO,
-            env.actor_a_id,
-            env.actor_b_id,
-            {
-                "state": "suspected",
-                "decided_by": env.decided_by,
-                "linkage_id": str(env.linkage_id),
-                "updated_at": datetime.now(tz=UTC).isoformat(),
+        with _tracer.start_as_current_span(
+            "graph.upsert",
+            attributes={
+                "service.name": self.name,
+                "graph.op": "edge_upsert",
+                "graph.edge_type": GraphEdgeType.LINKED_TO,
+                "graph.source_event": "attribution.linkage.suspected",
+                "linkage.id": str(env.linkage_id),
             },
-        )
+        ):
+            await self._storage.graph.upsert_edge(
+                GraphEdgeType.LINKED_TO,
+                env.actor_a_id,
+                env.actor_b_id,
+                {
+                    "state": "suspected",
+                    "decided_by": env.decided_by,
+                    "linkage_id": str(env.linkage_id),
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
+                },
+            )
 
     async def _handle_confirmed(self, payload: bytes) -> None:
         try:
@@ -173,48 +183,59 @@ class Graph(ServiceBase):
 
         now = datetime.now(tz=UTC)
 
-        await self._storage.graph.upsert_edge(
-            GraphEdgeType.LINKED_TO,
-            env.actor_a_id,
-            env.actor_b_id,
-            {
-                "state": "confirmed",
-                "decided_by": env.decided_by,
-                "linkage_id": str(env.linkage_id),
-                "updated_at": now.isoformat(),
+        with _tracer.start_as_current_span(
+            "graph.upsert",
+            attributes={
+                "service.name": self.name,
+                "graph.op": "merge",
+                "graph.source_event": "attribution.linkage.confirmed",
+                "linkage.id": str(env.linkage_id),
             },
-        )
-
-        # Persona aggregation — union-find merge
-        persona_row = cast(
-            "PersonaRow",
-            await self._storage.personas.merge_actors(
+        ) as confirmed_span:
+            await self._storage.graph.upsert_edge(
+                GraphEdgeType.LINKED_TO,
                 env.actor_a_id,
                 env.actor_b_id,
-                via_linkage_id=env.linkage_id,
-            ),
-        )
-
-        persona_id = persona_row.id
-        member_ids = persona_row.member_actor_ids
-
-        # Upsert Persona node
-        await self._storage.graph.upsert_node(
-            GraphNodeType.PERSONA,
-            persona_id,
-            {
-                "member_count": len(member_ids),
-                "updated_at": now.isoformat(),
-            },
-        )
-        # Upsert BelongsToPersona edges for all current members
-        for actor_id in member_ids:
-            await self._storage.graph.upsert_edge(
-                GraphEdgeType.BELONGS_TO_PERSONA,
-                actor_id,
-                persona_id,
-                {"joined_at": now.isoformat()},
+                {
+                    "state": "confirmed",
+                    "decided_by": env.decided_by,
+                    "linkage_id": str(env.linkage_id),
+                    "updated_at": now.isoformat(),
+                },
             )
+
+            # Persona aggregation — union-find merge
+            persona_row = cast(
+                "PersonaRow",
+                await self._storage.personas.merge_actors(
+                    env.actor_a_id,
+                    env.actor_b_id,
+                    via_linkage_id=env.linkage_id,
+                ),
+            )
+
+            persona_id = persona_row.id
+            member_ids = persona_row.member_actor_ids
+            confirmed_span.set_attribute("persona.id", str(persona_id))
+            confirmed_span.set_attribute("persona.member_count", len(member_ids))
+
+            # Upsert Persona node
+            await self._storage.graph.upsert_node(
+                GraphNodeType.PERSONA,
+                persona_id,
+                {
+                    "member_count": len(member_ids),
+                    "updated_at": now.isoformat(),
+                },
+            )
+            # Upsert BelongsToPersona edges for all current members
+            for actor_id in member_ids:
+                await self._storage.graph.upsert_edge(
+                    GraphEdgeType.BELONGS_TO_PERSONA,
+                    actor_id,
+                    persona_id,
+                    {"joined_at": now.isoformat()},
+                )
 
         # Emit PersonaUpdated
         tc = _make_trace_context()
@@ -253,17 +274,27 @@ class Graph(ServiceBase):
             _log.error("graph.rejected_parse_error", error=str(exc))
             return
 
-        await self._storage.graph.upsert_edge(
-            GraphEdgeType.LINKED_TO,
-            env.actor_a_id,
-            env.actor_b_id,
-            {
-                "state": "rejected",
-                "decided_by": env.decided_by,
-                "linkage_id": str(env.linkage_id),
-                "updated_at": datetime.now(tz=UTC).isoformat(),
+        with _tracer.start_as_current_span(
+            "graph.upsert",
+            attributes={
+                "service.name": self.name,
+                "graph.op": "edge_upsert",
+                "graph.edge_type": GraphEdgeType.LINKED_TO,
+                "graph.source_event": "attribution.linkage.rejected",
+                "linkage.id": str(env.linkage_id),
             },
-        )
+        ):
+            await self._storage.graph.upsert_edge(
+                GraphEdgeType.LINKED_TO,
+                env.actor_a_id,
+                env.actor_b_id,
+                {
+                    "state": "rejected",
+                    "decided_by": env.decided_by,
+                    "linkage_id": str(env.linkage_id),
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
+                },
+            )
 
     # -- persona.updated (idempotent replay) -----------------------------------
 
@@ -279,18 +310,28 @@ class Graph(ServiceBase):
             return
 
         now = datetime.now(tz=UTC)
-        await self._storage.graph.upsert_node(
-            GraphNodeType.PERSONA,
-            env.persona_id,
-            {"member_count": len(env.member_actor_ids), "updated_at": now.isoformat()},
-        )
-        for actor_id in env.member_actor_ids:
-            await self._storage.graph.upsert_edge(
-                GraphEdgeType.BELONGS_TO_PERSONA,
-                actor_id,
+        with _tracer.start_as_current_span(
+            "graph.upsert",
+            attributes={
+                "service.name": self.name,
+                "graph.op": "persona_upsert",
+                "graph.source_event": "attribution.persona.updated",
+                "persona.id": str(env.persona_id),
+                "persona.member_count": len(env.member_actor_ids),
+            },
+        ):
+            await self._storage.graph.upsert_node(
+                GraphNodeType.PERSONA,
                 env.persona_id,
-                {"joined_at": now.isoformat()},
+                {"member_count": len(env.member_actor_ids), "updated_at": now.isoformat()},
             )
+            for actor_id in env.member_actor_ids:
+                await self._storage.graph.upsert_edge(
+                    GraphEdgeType.BELONGS_TO_PERSONA,
+                    actor_id,
+                    env.persona_id,
+                    {"joined_at": now.isoformat()},
+                )
 
 
 def _make_trace_context() -> TraceContext:
