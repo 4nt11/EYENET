@@ -18,8 +18,12 @@ import nats
 from nats.aio.client import Client as NATSClient
 from nats.aio.msg import Msg as NATSMsg
 from nats.aio.subscription import Subscription as NATSSubscription
+from opentelemetry import trace
 
 from eyenet.contracts.bus import Bus, Handler, Subscription
+from eyenet.telemetry.propagation import attach_from_headers
+
+_tracer = trace.get_tracer("eyenet.bus.nats")
 
 
 class _NATSSubWrapper(Subscription):
@@ -60,7 +64,19 @@ class NATSBus(Bus):
     ) -> Subscription:
         async def _adapter(msg: NATSMsg) -> None:
             hdrs = dict(msg.headers or {})
-            await handler(msg.subject, msg.data, hdrs)
+            with (
+                attach_from_headers(hdrs),
+                _tracer.start_as_current_span(
+                    "bus.deliver",
+                    attributes={
+                        "messaging.system": "nats",
+                        "messaging.destination": msg.subject,
+                        "messaging.operation": "receive",
+                        "messaging.message.payload_size_bytes": len(msg.data),
+                    },
+                ),
+            ):
+                await handler(msg.subject, msg.data, hdrs)
 
         sub = await self._client.subscribe(
             subject,

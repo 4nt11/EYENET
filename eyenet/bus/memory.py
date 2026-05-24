@@ -23,9 +23,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from opentelemetry import trace
+
 from eyenet.contracts.bus import Bus, Handler, Subscription
+from eyenet.telemetry.propagation import attach_from_headers
 
 from .subjects import is_valid_pattern, subject_matches
+
+_tracer = trace.get_tracer("eyenet.bus.memory")
 
 
 @dataclass
@@ -165,7 +170,19 @@ class MemoryBus(Bus):
         payload: bytes,
         headers: dict[str, str],
     ) -> None:
-        await handler(subject, payload, headers)
+        with (
+            attach_from_headers(headers),
+            _tracer.start_as_current_span(
+                "bus.deliver",
+                attributes={
+                    "messaging.system": "memory",
+                    "messaging.destination": subject,
+                    "messaging.operation": "receive",
+                    "messaging.message.payload_size_bytes": len(payload),
+                },
+            ),
+        ):
+            await handler(subject, payload, headers)
 
 
 __all__ = ["MemoryBus"]

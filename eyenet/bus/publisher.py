@@ -8,9 +8,12 @@ the W3C `traceparent` / `tracestate` headers automatically.
 from __future__ import annotations
 
 from behave_text.spec import Observation, event_topic_for
+from opentelemetry import trace
 
 from eyenet.contracts._base import BusEnvelope
 from eyenet.contracts.bus import Bus
+
+_tracer = trace.get_tracer("eyenet.bus.publisher")
 
 # Allowed subject patterns documented in PLAN §3. Acceptance is permissive
 # enough to allow rendered subjects ("raw.message.telegram.abcd1234") AND
@@ -57,7 +60,17 @@ class BusEnvelopePublisher:
         if envelope.trace_context.tracestate:
             headers["tracestate"] = envelope.trace_context.tracestate
         payload = envelope.model_dump_json().encode("utf-8")
-        await self._bus.publish(subject, payload, headers=headers)
+        with _tracer.start_as_current_span(
+            "bus.publish",
+            attributes={
+                "messaging.system": "eyenet",
+                "messaging.destination": subject,
+                "messaging.operation": "publish",
+                "messaging.message.payload_size_bytes": len(payload),
+                "schema.version": envelope.schema_version,
+            },
+        ):
+            await self._bus.publish(subject, payload, headers=headers)
 
     async def publish_observation(self, obs: Observation) -> None:
         """Publish a BEHAVE-TEXT Observation envelope.
@@ -77,7 +90,17 @@ class BusEnvelopePublisher:
         if traceparent:
             headers["traceparent"] = traceparent
         payload = obs.model_dump_json().encode("utf-8")
-        await self._bus.publish(subject, payload, headers=headers)
+        with _tracer.start_as_current_span(
+            "bus.publish",
+            attributes={
+                "messaging.system": "eyenet",
+                "messaging.destination": subject,
+                "messaging.operation": "publish",
+                "messaging.message.payload_size_bytes": len(payload),
+                "schema.version": str(obs.v),
+            },
+        ):
+            await self._bus.publish(subject, payload, headers=headers)
 
 
 __all__ = ["BusEnvelopePublisher"]
