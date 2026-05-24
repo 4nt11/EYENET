@@ -3,6 +3,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
 
+# git-lfs pre-push (merged manually — see `git lfs update --manual`)
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\ngit-lfs not found on PATH\n\n"; exit 2; }
+git lfs pre-push "$@"
+
 if [[ -z "${VIRTUAL_ENV:-}" ]] && [[ -f .venv/bin/activate ]]; then
   # shellcheck disable=SC1091
   . .venv/bin/activate

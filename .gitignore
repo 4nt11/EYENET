@@ -60,7 +60,12 @@ config.toml
 config.local.toml
 
 # Operational artifacts (data, not code)
-data/
+# Note: gitignore re-inclusion requires negating each directory level — use
+# `data/*` so subdirs can be selectively whitelisted below.
+data/*
+# INGEOTEC regional-spanish-models vocab — LFS-tracked, used by
+# scripts/build_regional_markers.py to regenerate _regional_markers.py
+!data/ingeotec/
 storage/*.db
 storage/*.db-*
 *.sqlite
