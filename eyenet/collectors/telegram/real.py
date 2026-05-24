@@ -22,6 +22,7 @@ from typing import cast
 from uuid import UUID
 
 import structlog
+from opentelemetry import trace
 from sqlmodel import Session
 from telethon import TelegramClient, events
 from telethon.tl.types import (
@@ -57,6 +58,7 @@ from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.telemetry.propagation import current_traceparent
 
 _log = structlog.get_logger()
+_tracer = trace.get_tracer("eyenet.collector.telegram")
 
 # max subscriptions returned in health()
 _HEALTH_SUBS_CAP = 100
@@ -269,7 +271,37 @@ class TelegramCollector(CollectorSkeleton):
         sender: object,
         chat: object,
     ) -> bool:
-        """Core ingest: persist + publish one message. Returns True if written."""
+        """Core ingest: persist + publish one message. Returns True if written.
+
+        Trace root: every inbound Telegram message produces one
+        ``collector.ingest`` span. ``current_traceparent()`` inside the
+        publish below reads this span, so downstream subscribers (sensor,
+        engine, linker, verifier, graph) parent to it via header propagation.
+        """
+        with _tracer.start_as_current_span(
+            "collector.ingest",
+            attributes={
+                "service.name": self.name,
+                "service.instance_id": self.instance_id,
+                "source.platform": "telegram",
+                "source.id": str(self._source_uuid) if self._source_uuid else "",
+                "message.platform_msgid": str(msg.id),
+                "message.platform_groupid": str(chat_id),
+            },
+        ) as span:
+            return await self._ingest_msg_inner(
+                msg, chat_id=chat_id, sender=sender, chat=chat, span=span
+            )
+
+    async def _ingest_msg_inner(
+        self,
+        msg: TLMessage,
+        *,
+        chat_id: int,
+        sender: object,
+        chat: object,
+        span: trace.Span,
+    ) -> bool:
         sent_at = msg.date.replace(tzinfo=UTC) if msg.date.tzinfo is None else msg.date
         collected_at = datetime.now(tz=UTC)
 
@@ -315,6 +347,7 @@ class TelegramCollector(CollectorSkeleton):
 
         platform_msgid = str(msg.id)
         evidence_ref = f"telegram:{platform_groupid}:{platform_msgid}"
+        span.set_attribute("message.evidence_ref", evidence_ref)
         body = msg.message
         body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
 

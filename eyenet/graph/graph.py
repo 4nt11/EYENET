@@ -34,7 +34,7 @@ from eyenet.contracts.attribution import (
 )
 from eyenet.models.graph import GraphEdgeType, GraphNodeType
 from eyenet.service import ServiceBase
-from eyenet.telemetry.propagation import current_traceparent
+from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
 
 _tracer = trace.get_tracer("eyenet.graph")
 _log = structlog.get_logger()
@@ -56,8 +56,8 @@ class Graph(ServiceBase):
         async def _on_linkage(s: str, p: bytes, h: dict[str, str]) -> None:
             asyncio.create_task(self._on_linkage_event(s, p, h))  # noqa: RUF006
 
-        async def _on_persona(_s: str, p: bytes, _h: dict[str, str]) -> None:
-            asyncio.create_task(self._on_persona_updated(p))  # noqa: RUF006
+        async def _on_persona(_s: str, p: bytes, h: dict[str, str]) -> None:
+            asyncio.create_task(self._on_persona_updated(p, h))  # noqa: RUF006
 
         await self._bus.subscribe("attribution.profile.current", _on_profile)
         await self._bus.subscribe("attribution.linkage.>", _on_linkage)
@@ -65,7 +65,11 @@ class Graph(ServiceBase):
 
     # -- profile.current -------------------------------------------------------
 
-    async def _on_profile_current(self, payload: bytes, _headers: dict[str, str]) -> None:
+    async def _on_profile_current(self, payload: bytes, headers: dict[str, str]) -> None:
+        with attach_from_headers(headers):
+            await self._on_profile_current_inner(payload)
+
+    async def _on_profile_current_inner(self, payload: bytes) -> None:
         try:
             env = ProfileCurrentEnvelope.model_validate_json(payload)
         except Exception as exc:
@@ -96,8 +100,12 @@ class Graph(ServiceBase):
     # -- linkage events --------------------------------------------------------
 
     async def _on_linkage_event(
-        self, subject: str, payload: bytes, _headers: dict[str, str]
+        self, subject: str, payload: bytes, headers: dict[str, str]
     ) -> None:
+        with attach_from_headers(headers):
+            await self._on_linkage_event_inner(subject, payload)
+
+    async def _on_linkage_event_inner(self, subject: str, payload: bytes) -> None:
         if subject == "attribution.linkage.proposed":
             await self._handle_proposed(payload)
         elif subject == "attribution.linkage.suspected":
@@ -259,7 +267,11 @@ class Graph(ServiceBase):
 
     # -- persona.updated (idempotent replay) -----------------------------------
 
-    async def _on_persona_updated(self, payload: bytes) -> None:
+    async def _on_persona_updated(self, payload: bytes, headers: dict[str, str]) -> None:
+        with attach_from_headers(headers):
+            await self._on_persona_updated_inner(payload)
+
+    async def _on_persona_updated_inner(self, payload: bytes) -> None:
         try:
             env = PersonaUpdatedEnvelope.model_validate_json(payload)
         except Exception as exc:

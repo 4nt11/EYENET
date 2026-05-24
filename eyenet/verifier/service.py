@@ -38,7 +38,7 @@ from eyenet.models.message import MessageTable
 from eyenet.service import ServiceBase
 from eyenet.storage.engines import StoreName
 from eyenet.storage.sqlite import SQLiteStorage
-from eyenet.telemetry.propagation import current_traceparent
+from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
 
 from .verifiers import REGISTRY, VerificationResult, Verifier, default_registry
 
@@ -142,9 +142,17 @@ class VerifierService(ServiceBase):
 
     async def _process_proposed(
         self,
+        subject: str,
+        payload: bytes,
+        headers: dict[str, str],
+    ) -> None:
+        with attach_from_headers(headers):
+            await self._process_proposed_inner(subject, payload)
+
+    async def _process_proposed_inner(
+        self,
         _subject: str,
         payload: bytes,
-        _headers: dict[str, str],
     ) -> None:
         try:
             envelope = LinkageProposedEnvelope.model_validate_json(payload)

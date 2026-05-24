@@ -30,6 +30,7 @@ from eyenet.sensor.primitives import PRIMITIVES, PrimitiveSpec
 from eyenet.service import ServiceBase
 from eyenet.storage.actors import resolve_actor_id
 from eyenet.storage.engines import StoreName
+from eyenet.telemetry.propagation import attach_from_headers
 
 _tracer = trace.get_tracer("eyenet.sensor.stylometric")
 _log = structlog.get_logger()
@@ -61,20 +62,31 @@ class StylometricSensor(ServiceBase, SensorBase):
         ]
 
     async def on_subscribe(self) -> None:
-        async def _handler(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
+        async def _handler(_subject: str, payload: bytes, headers: dict[str, str]) -> None:
             try:
                 env = RawMessageEnvelope.model_validate_json(payload)
             except Exception as exc:
                 _log.error("sensor.envelope_parse_error", error=str(exc))
                 return
             # Fire-and-forget: don't block the bus fanout waiting for full primitive compute.
-            asyncio.create_task(self._process(env))  # noqa: RUF006
+            asyncio.create_task(self._dispatch(env, headers))  # noqa: RUF006
 
         await self._bus.subscribe("raw.message.>", _handler, queue_group="sensor")
 
     async def on_raw_message(self, _envelope: RawMessageEnvelope) -> Iterable[ObservationEnvelope]:
         # SensorBase contract; StylometricSensor uses the internal _process path.
         return []
+
+    async def _dispatch(self, env: RawMessageEnvelope, headers: dict[str, str]) -> None:
+        """Bus-delivery trampoline: attach upstream trace context, then process.
+
+        Trace context attach lives INSIDE the create_task target — see
+        ``attach_from_headers`` docstring for why scheduling-time attachment
+        would be a no-op.
+        """
+
+        with attach_from_headers(headers):
+            await self._process(env)
 
     async def _process(self, env: RawMessageEnvelope) -> None:
         messages_engine = self._storage._engines[StoreName.MESSAGES]

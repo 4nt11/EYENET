@@ -36,7 +36,7 @@ from eyenet.contracts.attribution import (
 )
 from eyenet.contracts.observation import ObservationRow
 from eyenet.service import ServiceBase
-from eyenet.telemetry.propagation import current_traceparent
+from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
 
 from .recipes import pick_winner
 from .slot_mapper import observation_to_slot
@@ -71,8 +71,12 @@ class Engine(ServiceBase):
         await self._bus.subscribe("identity.engagement.authorized", _on_engagement)
 
     async def _process_observation(
-        self, subject: str, payload: bytes, _headers: dict[str, str]
+        self, subject: str, payload: bytes, headers: dict[str, str]
     ) -> None:
+        with attach_from_headers(headers):
+            await self._process_observation_inner(subject, payload)
+
+    async def _process_observation_inner(self, subject: str, payload: bytes) -> None:
         try:
             env = ObservationEnvelope.model_validate_json(payload)
         except Exception as exc:

@@ -64,6 +64,7 @@ from nio import (
     WhoamiResponse,
 )
 from nio.crypto.attachments import decrypt_attachment
+from opentelemetry import trace
 from sqlmodel import Session, select
 
 from eyenet.collectors.base.skeleton import CollectorSkeleton
@@ -95,6 +96,7 @@ from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.telemetry.propagation import current_traceparent
 
 _log = structlog.get_logger()
+_tracer = trace.get_tracer("eyenet.collector.matrix")
 
 # max subscriptions returned in health()
 _HEALTH_SUBS_CAP = 100
@@ -681,6 +683,21 @@ class MatrixCollector(CollectorSkeleton):
         return UUID(str(row))
 
     async def _ingest_event(self, room: MatrixRoom, event: RoomMessageText) -> None:
+        with _tracer.start_as_current_span(
+            "collector.ingest",
+            attributes={
+                "service.name": self.name,
+                "service.instance_id": self.instance_id,
+                "source.platform": "matrix",
+                "source.id": str(self._source_uuid) if self._source_uuid else "",
+                "message.kind": "text",
+                "message.platform_msgid": str(getattr(event, "event_id", "")),
+                "message.platform_groupid": str(room.room_id),
+            },
+        ):
+            await self._ingest_event_inner(room, event)
+
+    async def _ingest_event_inner(self, room: MatrixRoom, event: RoomMessageText) -> None:
         if not self._should_ingest(room, event.sender):
             return
         body = event.body or ""
@@ -911,6 +928,21 @@ class MatrixCollector(CollectorSkeleton):
         return body, True
 
     async def _ingest_media_event(self, room: MatrixRoom, event: Any) -> None:
+        with _tracer.start_as_current_span(
+            "collector.ingest",
+            attributes={
+                "service.name": self.name,
+                "service.instance_id": self.instance_id,
+                "source.platform": "matrix",
+                "source.id": str(self._source_uuid) if self._source_uuid else "",
+                "message.kind": "media",
+                "message.platform_msgid": str(getattr(event, "event_id", "")),
+                "message.platform_groupid": str(room.room_id),
+            },
+        ):
+            await self._ingest_media_event_inner(room, event)
+
+    async def _ingest_media_event_inner(self, room: MatrixRoom, event: Any) -> None:
         if not self._should_ingest(room, getattr(event, "sender", None)):
             return
         if self._source_uuid is None:
@@ -1128,6 +1160,27 @@ class MatrixCollector(CollectorSkeleton):
     # ---- decrypt sentinel -------------------------------------------------
 
     async def _emit_decrypt_sentinel(
+        self,
+        room: MatrixRoom,
+        event: MegolmEvent,
+        reason: str,
+    ) -> None:
+        with _tracer.start_as_current_span(
+            "collector.ingest",
+            attributes={
+                "service.name": self.name,
+                "service.instance_id": self.instance_id,
+                "source.platform": "matrix",
+                "source.id": str(self._source_uuid) if self._source_uuid else "",
+                "message.kind": "decrypt_sentinel",
+                "message.platform_msgid": str(getattr(event, "event_id", "")),
+                "message.platform_groupid": str(room.room_id),
+                "decrypt.failure_reason": reason,
+            },
+        ):
+            await self._emit_decrypt_sentinel_inner(room, event, reason)
+
+    async def _emit_decrypt_sentinel_inner(
         self,
         room: MatrixRoom,
         event: MegolmEvent,

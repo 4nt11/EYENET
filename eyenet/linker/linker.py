@@ -32,7 +32,7 @@ from eyenet.contracts.bus import Bus
 from eyenet.service import ServiceBase
 from eyenet.storage.sqlite import SQLiteStorage
 from eyenet.storage.vectors import VectorMatch
-from eyenet.telemetry.propagation import current_traceparent
+from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
 
 from .comparators import REGISTRY, Comparator, ComparisonResult
 
@@ -71,9 +71,17 @@ class Linker(ServiceBase):
 
     async def _process_profile(
         self,
+        subject: str,
+        payload: bytes,
+        headers: dict[str, str],
+    ) -> None:
+        with attach_from_headers(headers):
+            await self._process_profile_inner(subject, payload)
+
+    async def _process_profile_inner(
+        self,
         _subject: str,
         payload: bytes,
-        _headers: dict[str, str],
     ) -> None:
         try:
             envelope = ProfileCurrentEnvelope.model_validate_json(payload)
