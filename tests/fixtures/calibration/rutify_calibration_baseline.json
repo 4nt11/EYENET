@@ -123,8 +123,8 @@
       "version": "0.1"
     }
   ],
-  "schema_version": "1.0",
-  "self_hash": "d4aa2e267ea94318ec725a96918e67804e892f588bdac44d76e4be1fa07dfe1a",
+  "schema_version": "1.1",
+  "self_hash": "958d347e0ad9f01b118acfdfcbb04bbf797f6e3937f39e688a31ac92d44b7c92",
   "simhash": [
     {
       "actors_fired": 59,
@@ -214,5 +214,6 @@
       "within_min": 0,
       "within_p50": 7
     }
-  ]
+  ],
+  "verifiers": []
 }

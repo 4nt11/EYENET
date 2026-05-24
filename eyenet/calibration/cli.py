@@ -29,6 +29,7 @@ from .interaction import ActorStats, compute_actor_stats, compute_all, write_csv
 from .labels import assert_matches_corpus, load as load_labels
 from .recipes_grid import render as render_recipes, run as run_recipes
 from .simhash_grid import render_grid_result, run as run_simhash
+from .verifier_grid import run as run_verifier_grid
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -149,6 +150,21 @@ def cmd_run(  # pragma: no cover
     recipe_results = run_recipes(stats, labelset.by_sender, min_precision=min_precision)
     typer.echo(render_recipes(recipe_results))
 
+    typer.echo("\nrunning verifier grid (M8)...")
+    v_grid = run_verifier_grid(
+        msgs,
+        min_messages=min_messages,
+        language=language,
+        min_precision=min_precision,
+    )
+    typer.echo(f"verifier grid: {v_grid.actor_count} actors, {len(v_grid.per_verifier)} verifiers")
+    for v in v_grid.per_verifier:
+        typer.echo(
+            f"  {v.verifier}: AUC={v.auc:.4f}  "
+            f"chosen_t={v.chosen_threshold:.2f}  "
+            f"P={v.chosen_precision:.3f}  R={v.chosen_recall:.3f}  F1={v.chosen_f1:.3f}"
+        )
+
     cid = corpus_id or corpus.stem
     artifact = build(
         corpus_id=cid,
@@ -161,6 +177,8 @@ def cmd_run(  # pragma: no cover
         simhash_grid=sh_grid,
         simhash_es_disabled=disable_simhash_lang,
         recipe_results=recipe_results,
+        verifier_grid=v_grid,
+        verifier_es_disabled=disable_simhash_lang,
         notes=(),
     )
     self_hash = write(artifact, out)
@@ -251,6 +269,18 @@ def cmd_report(  # pragma: no cover
             f"| {r.name} | {r.strategy} | {r.tp} | {r.fp} | {r.tn} | {r.fn} | "
             f"{r.precision} | {r.recall} | {r.f1} |"
         )
+    if a.verifiers:
+        typer.echo("")
+        typer.echo("## Verifiers (M8)")
+        typer.echo("")
+        typer.echo("| verifier | lang | enabled | AUC | chosen_threshold | P | R | F1 |")
+        typer.echo("|---|---|---|---|---|---|---|---|")
+        for v in a.verifiers:
+            typer.echo(
+                f"| {v.verifier} | {v.language} | {v.enabled} | {v.auc} | "
+                f"{v.chosen_threshold} | {v.chosen_precision} | "
+                f"{v.chosen_recall} | {v.chosen_f1} |"
+            )
     if a.notes:
         typer.echo("")
         typer.echo("## Notes")

@@ -34,9 +34,31 @@ from pathlib import Path
 
 from .recipes_grid import RecipeCalibration
 from .simhash_grid import GridResult, PrimitiveGridResult
+from .verifier_grid import VerifierGrid, VerifierGridResult
 
-ARTIFACT_SCHEMA_VERSION: str = "1.0"
-"""Bumped on breaking artifact-shape changes. Tests pin to exact version."""
+ARTIFACT_SCHEMA_VERSION: str = "1.1"
+"""Bumped on breaking artifact-shape changes. Tests pin to exact version.
+
+1.0 → 1.1 (M8, 2026-05-24): added the ``verifiers`` tuple field for the
+M8 Verifier-tier calibration grid. Additive change — old 1.0 artifacts
+load with ``verifiers=()``.
+"""
+
+_ES_DISABLED_VERIFIERS: frozenset[str] = frozenset()
+"""Verifier names that the operator has disabled for Spanish.
+
+M8 ships empty: GI and NCD are designed for short Spanish chat — exactly
+the corpus shape where the simhash linker structurally fails. The
+calibration grid against Rutify (M8 calibration run) will surface AUC;
+if any verifier fails to clear the 0.70 precision floor at every
+threshold, add it here and ship ``VerifierThresholds.<name>_per_lang =
+{"es": None}`` to disable it at runtime.
+
+Sibling shape to ``_ES_DISABLED_PRIMITIVES`` — kept as a separate set so
+the simhash and verifier policy decisions stay legible and the artifact
+build path treats them independently.
+"""
+
 
 _ES_DISABLED_PRIMITIVES: frozenset[str] = frozenset(
     {
@@ -113,6 +135,32 @@ class RecipeArtifactEntry:
 
 
 @dataclass(frozen=True)
+class VerifierArtifactEntry:
+    """One verifier's M8 calibration outcome for a language slice."""
+
+    verifier: str
+    language: str | None
+    enabled: bool  # False when verifier is disabled for this language
+    actors_evaluated: int
+    within_count: int
+    within_min: float
+    within_p50: float
+    within_max: float
+    cross_count: int
+    cross_min: float
+    cross_p50: float
+    cross_max: float
+    auc: float
+    strategy: str
+    chosen_threshold: float | None
+    chosen_precision: float
+    chosen_recall: float
+    chosen_f1: float
+    f1_max_threshold: float
+    f1_max_f1: float
+
+
+@dataclass(frozen=True)
 class CalibrationArtifact:
     """Top-level artifact written to ``rutify_calibration_baseline.json``."""
 
@@ -129,6 +177,7 @@ class CalibrationArtifact:
     label_counts: dict[str, int]
     simhash: tuple[SimhashArtifactEntry, ...]
     recipes: tuple[RecipeArtifactEntry, ...]
+    verifiers: tuple[VerifierArtifactEntry, ...] = field(default_factory=tuple)
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def to_canonical_dict(self) -> dict[str, object]:
@@ -146,6 +195,40 @@ def _percentile_or_zero(sorted_vals: list[int], pct: int) -> int:
         return 0
     k = max(0, min(len(sorted_vals) - 1, (pct * (len(sorted_vals) - 1)) // 100))
     return sorted_vals[k]
+
+
+def _percentile_or_zero_float(sorted_vals: list[float], pct: int) -> float:
+    if not sorted_vals:
+        return 0.0
+    k = max(0, min(len(sorted_vals) - 1, (pct * (len(sorted_vals) - 1)) // 100))
+    return sorted_vals[k]
+
+
+def _verifier_entry(v: VerifierGridResult, *, enabled: bool) -> VerifierArtifactEntry:
+    within = sorted(v.within_scores)
+    cross = sorted(v.cross_scores)
+    return VerifierArtifactEntry(
+        verifier=v.verifier,
+        language=v.language,
+        enabled=enabled,
+        actors_evaluated=v.actors_evaluated,
+        within_count=len(within),
+        within_min=within[0] if within else 0.0,
+        within_p50=_percentile_or_zero_float(within, 50),
+        within_max=within[-1] if within else 0.0,
+        cross_count=len(cross),
+        cross_min=cross[0] if cross else 0.0,
+        cross_p50=_percentile_or_zero_float(cross, 50),
+        cross_max=cross[-1] if cross else 0.0,
+        auc=v.auc,
+        strategy=v.strategy,
+        chosen_threshold=v.chosen_threshold if enabled else None,
+        chosen_precision=v.chosen_precision,
+        chosen_recall=v.chosen_recall,
+        chosen_f1=v.chosen_f1,
+        f1_max_threshold=v.f1_max_threshold,
+        f1_max_f1=v.f1_max_f1,
+    )
 
 
 def _simhash_entry(p: PrimitiveGridResult, *, enabled: bool) -> SimhashArtifactEntry:
@@ -211,6 +294,8 @@ def build(
     simhash_grid: GridResult,
     simhash_es_disabled: bool,
     recipe_results: list[RecipeCalibration],
+    verifier_grid: VerifierGrid | None = None,
+    verifier_es_disabled: bool = True,
     notes: tuple[str, ...] = (),
 ) -> CalibrationArtifact:
     """Construct the artifact dataclass (does not write to disk).
@@ -237,6 +322,20 @@ def build(
         enabled = not (simhash_es_disabled and is_es_slice and is_es_disabled_primitive)
         simhash_entries.append(_simhash_entry(p, enabled=enabled))
 
+    verifier_entries: list[VerifierArtifactEntry] = []
+    if verifier_grid is not None:
+        for v in verifier_grid.per_verifier:
+            is_es_slice = v.language == "es"
+            # Mirror the simhash policy lens: a verifier is recorded as
+            # disabled iff the operator flag is on AND the verifier is on
+            # the ES-disabled policy list. M8 ships ``_ES_DISABLED_VERIFIERS``
+            # empty — verifiers default to enabled — but the gating exists
+            # so a future calibration run can flip a verifier off without
+            # rebuilding this branch.
+            is_es_disabled_verifier = v.verifier in _ES_DISABLED_VERIFIERS
+            enabled = not (verifier_es_disabled and is_es_slice and is_es_disabled_verifier)
+            verifier_entries.append(_verifier_entry(v, enabled=enabled))
+
     return CalibrationArtifact(
         schema_version=ARTIFACT_SCHEMA_VERSION,
         corpus_id=corpus_id,
@@ -251,6 +350,7 @@ def build(
         label_counts=dict(sorted(label_counts.items())),
         simhash=tuple(simhash_entries),
         recipes=tuple(_recipe_entry(rc) for rc in recipe_results),
+        verifiers=tuple(verifier_entries),
         notes=notes,
     )
 
@@ -417,6 +517,41 @@ def _coerce_simhash(r: dict[str, object]) -> SimhashArtifactEntry:
     )
 
 
+def _as_optional_float(d: dict[str, object], key: str) -> float | None:
+    v = d.get(key)
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        msg = f"artifact field {key!r}: expected number or null, got {type(v).__name__}"
+        raise ValueError(msg)
+    return float(v)
+
+
+def _coerce_verifier(r: dict[str, object]) -> VerifierArtifactEntry:
+    return VerifierArtifactEntry(
+        verifier=_as_str(r, "verifier"),
+        language=_as_optional_str(r, "language"),
+        enabled=_as_bool(r, "enabled"),
+        actors_evaluated=_as_int(r, "actors_evaluated"),
+        within_count=_as_int(r, "within_count"),
+        within_min=_as_float(r, "within_min"),
+        within_p50=_as_float(r, "within_p50"),
+        within_max=_as_float(r, "within_max"),
+        cross_count=_as_int(r, "cross_count"),
+        cross_min=_as_float(r, "cross_min"),
+        cross_p50=_as_float(r, "cross_p50"),
+        cross_max=_as_float(r, "cross_max"),
+        auc=_as_float(r, "auc"),
+        strategy=_as_str(r, "strategy"),
+        chosen_threshold=_as_optional_float(r, "chosen_threshold"),
+        chosen_precision=_as_float(r, "chosen_precision"),
+        chosen_recall=_as_float(r, "chosen_recall"),
+        chosen_f1=_as_float(r, "chosen_f1"),
+        f1_max_threshold=_as_float(r, "f1_max_threshold"),
+        f1_max_f1=_as_float(r, "f1_max_f1"),
+    )
+
+
 def _coerce_recipe(r: dict[str, object]) -> RecipeArtifactEntry:
     return RecipeArtifactEntry(
         name=_as_str(r, "name"),
@@ -451,6 +586,7 @@ def _from_dict(d: dict[str, object]) -> CalibrationArtifact:
         label_counts=_as_str_int_dict(d, "label_counts"),
         simhash=tuple(_coerce_simhash(s) for s in _as_dict_list(d, "simhash")),
         recipes=tuple(_coerce_recipe(r) for r in _as_dict_list(d, "recipes")),
+        verifiers=tuple(_coerce_verifier(r) for r in _as_dict_list(d, "verifiers")),
         notes=_as_str_tuple(d, "notes"),
     )
 
@@ -476,6 +612,7 @@ __all__ = [
     "CalibrationArtifact",
     "RecipeArtifactEntry",
     "SimhashArtifactEntry",
+    "VerifierArtifactEntry",
     "build",
     "corpus_sha256",
     "load",
