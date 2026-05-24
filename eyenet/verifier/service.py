@@ -190,16 +190,27 @@ class VerifierService(ServiceBase):
                 continue
             if verifier.requires_language and language is None:
                 continue
-            try:
-                result = verifier.verify(corpus_a, corpus_b, language=language)
-            except Exception as exc:
-                _log.error(
-                    "verifier.error",
-                    verifier=verifier.name,
-                    error=str(exc),
-                    linkage_id=str(envelope.linkage_id),
-                )
-                continue
+            with _tracer.start_as_current_span(
+                f"verifier.{verifier.name}",
+                attributes={
+                    "verifier.name": verifier.name,
+                    "verifier.language": language or "und",
+                },
+            ) as verify_span:
+                try:
+                    result = verifier.verify(corpus_a, corpus_b, language=language)
+                except Exception as exc:
+                    verify_span.set_attribute("verifier.error", str(exc))
+                    _log.error(
+                        "verifier.error",
+                        verifier=verifier.name,
+                        error=str(exc),
+                        linkage_id=str(envelope.linkage_id),
+                    )
+                    continue
+                verify_span.set_attribute("verifier.score", result.score)
+                verify_span.set_attribute("verifier.confidence", result.confidence)
+                verify_span.set_attribute("verifier.skipped", result.skipped)
             results.append(result)
             await self.audit.emit(
                 event="verifier.evaluated",
