@@ -27,9 +27,12 @@ def _append_worker(args: tuple[str, str, int]) -> str:
     data_dir, service, n = args
     # Open a fresh storage in the subprocess. The init lock makes this safe
     # even though the parent already opened the data_dir.
-    from eyenet.storage import SQLiteStorage
+    import os
 
-    storage = SQLiteStorage(Path(data_dir))
+    from eyenet.storage.factory import get_repository
+
+    os.environ["EYENET_STORAGE_TYPE"] = "sqlite"
+    storage = get_repository(data_dir=Path(data_dir))
 
     async def run() -> None:
         for _ in range(n):
@@ -57,12 +60,15 @@ def _append_worker(args: tuple[str, str, int]) -> str:
 
 
 @pytest.mark.unit
-def test_four_processes_append_audit_chain_linear(tmp_path: Path) -> None:
+def test_four_processes_append_audit_chain_linear(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     # Pre-init schema in the parent so the audit-chain race is what's tested,
     # not the init race (which has its own test).
-    from eyenet.storage import SQLiteStorage
+    from eyenet.storage.factory import get_repository
 
-    SQLiteStorage(tmp_path)
+    monkeypatch.setenv("EYENET_STORAGE_TYPE", "sqlite")
+    get_repository(data_dir=tmp_path)
 
     workers = [(str(tmp_path), f"svc{i}", 25) for i in range(4)]
     ctx = mp.get_context("spawn")
@@ -72,7 +78,7 @@ def test_four_processes_append_audit_chain_linear(tmp_path: Path) -> None:
     assert results == ["OK"] * 4, f"workers failed: {results}"
 
     # Now read the chain back in the parent and walk it forward.
-    storage = SQLiteStorage(tmp_path)
+    storage = get_repository(data_dir=tmp_path)
 
     async def read_chain() -> list[tuple[str, str, str]]:
         rows = await storage.all_audit()
