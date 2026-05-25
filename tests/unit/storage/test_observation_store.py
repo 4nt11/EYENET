@@ -38,9 +38,8 @@ def _row(
 
 
 @pytest.fixture
-def store() -> SQLiteObservationStore:
+def store() -> BaseRepository:
     storage = get_repository(in_memory=True)
-    return storage
     return storage
 
 

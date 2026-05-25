@@ -18,9 +18,8 @@ _C = UUID("00000000-0000-0000-0000-000000000003")
 
 
 @pytest.fixture
-def store() -> SQLiteLinkageStore:
+def store() -> BaseRepository:
     storage = get_repository(in_memory=True)
-    return storage
     return storage
 
 

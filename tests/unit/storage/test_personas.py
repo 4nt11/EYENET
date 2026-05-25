@@ -19,7 +19,7 @@ _LID2 = UUID("00000000-0000-0000-0000-000000000098")
 
 
 @pytest.fixture
-def store() -> SQLitePersonaStore:
+def store() -> BaseRepository:
     storage = get_repository(in_memory=True)
     return storage
     # Seed linkage rows so FK constraints on via_linkage_id are satisfied

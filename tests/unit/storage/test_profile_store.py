@@ -38,9 +38,8 @@ def _profile(actor_id: UUID, version: int, mattr: float = 0.5) -> ProfileRow:
 
 
 @pytest.fixture
-def store() -> SQLiteProfileStore:
+def store() -> BaseRepository:
     storage = get_repository(in_memory=True)
-    return storage
     return storage
 
 

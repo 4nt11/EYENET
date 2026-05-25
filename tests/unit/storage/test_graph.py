@@ -17,9 +17,8 @@ _P = UUID("00000000-0000-0000-0000-000000000010")
 
 
 @pytest.fixture
-def store() -> SQLiteGraphStore:
+def store() -> BaseRepository:
     storage = get_repository(in_memory=True)
-    return storage
     return storage
 
 
