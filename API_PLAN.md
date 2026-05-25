@@ -2119,6 +2119,121 @@ Unblocks every handler in §4.6–4.8 (clearance), §4.9 (reclassification), and
 - **Tests** in `tests/unit/storage/`: `test_clearance.py`, `test_cases.py`, `test_reclassify.py` covering CHECK enforcement, partial-unique behaviour, soft-delete round-trip, monotonicity rejection.
 - **Definition of done:** new tests pass; existing 914-test suite green; coverage ≥ 0.84; `mypy eyenet/models/ eyenet/storage/` clean; `rm -rf data/*.db && open_all(...)` bootstraps; `sqlite3 data/audit.db ".schema"` shows the four CHECK constraints.
 
+#### M9.1a.5 — Storage abstract-factory cutover (intermediary)
+
+**Shipped 2026-05-24/25, 18 commits, merge `5efbe50`.** Prerequisite for everything in M9.1b/c/2/3/4/5: every later handler is typed against `BaseRepository`, not the legacy sub-stores. This was the deepest non-content refactor in the M9 chain and is documented here so the architecture history is auditable.
+
+**Problem this fixed.** M9.1a shipped four new tables but the storage layer they landed in had drifted into 15 sub-store ABCs (`MessageStore`, `CaseStore`, `ClearanceStore`, `AuditStore`, …) backed by 17 separate `SQLite<Name>Store` files. Most of each impl was generic SQLModel ORM that would run unchanged against Postgres or MySQL. The dialect-specific surface was tiny (the audit `BEGIN IMMEDIATE` raw-cursor write, pragmas, the in-memory engine, a couple of generated-column expressions). Splitting the persistence surface 15 ways meant every new handler in M9.1b–M9.5 would be a 20-file diff. The M9.1a.2b helper work duplicated the very anti-pattern this fixes.
+
+**Target shape (DECNET pattern).**
+
+```
+eyenet/storage/
+  __init__.py            # exports BaseRepository, get_repository, errors, blob helpers — NO concrete classes
+  errors.py              # backend-neutral exceptions
+  attachments.py         # blob helpers — attachment_root / store_attachment
+  factory.py             # get_repository(**kwargs) → BaseRepository, env-dispatched on EYENET_STORAGE_TYPE
+  repository.py          # BaseRepository(ABC) — flat ~80-method async ABC
+  sqlmodel_repo/         # generic SQLModel/SQLAlchemy mixin layer (ANSI SQL only)
+    __init__.py          #   SQLModelRepository(BaseRepository) — mixin compose + session() escape hatch
+    _helpers.py          #   safe_session, build_audit_row, audit_or_warn, TIER_RANK
+    audit.py             #   AuditMixin — append_audit / all_audit (BEGIN IMMEDIATE override lives in SQLiteRepository)
+    cases.py             #   CasesMixin — create_case, close_case, add_case_member, …
+    clearance.py         #   ClearanceMixin — grant_clearance, expire_due_clearances, active_clearance_grants_for, effective_clearance_scopes
+    corpus.py            #   CorpusMixin — append_corpus, iter_corpus_since
+    cursors.py           #   CursorsMixin — get_cursor, set_cursor, get_cursors_bulk, set_cursors_bulk
+    actors.py            #   ActorsMixin — upsert_source/group/actor, resolve_actor_id
+    attachments.py       #   AttachmentsMixin — put_attachment, reclassify_attachment
+    feedback.py          #   FeedbackMixin — record_feedback_pair, get_feedback_pair, all_feedback_pairs
+    graph.py             #   GraphMixin — upsert_graph_node, upsert_graph_edge, graph_neighbors, graph_stats
+    linkages.py          #   LinkagesMixin — insert_proposed_linkage, transition_linkage, list_linkages
+    messages.py          #   MessagesMixin — put_message, get_message_body, resolve_message_id, recent_message_bodies_for_actor
+    observations.py      #   ObservationsMixin — put_observation, put_observations_bulk, reclassify_observation
+    personas.py          #   PersonasMixin — merge_actors_into_persona, split_actor_from_persona, persona_for_actor
+    profiles.py          #   ProfilesMixin — get_current_profile, upsert_current_profile, profile_history
+    syslog.py            #   SyslogMixin — append_syslog
+    vectors.py           #   VectorsMixin — upsert_simhash, nearest_simhashes
+  sqlite_repo/           # concrete SQLite backend (~200 lines of overrides)
+    database.py          #   get_async_engine / get_sync_engine / init_main_db / init_audit_db / init_lock / open_in_memory_*
+    repository.py        #   SQLiteRepository(SQLModelRepository) — overrides:
+                         #     _append_audit_locked (BEGIN IMMEDIATE on raw aiosqlite cursor, hash-chained)
+                         #     set_cursors_bulk     (INSERT … ON CONFLICT DO UPDATE — race-safe)
+                         #     __init__             (engine wiring + init lock)
+```
+
+Future MySQL/Postgres backends slot in as `eyenet/storage/mysql_repo/repository.py` and `eyenet/storage/postgres_repo/repository.py` with their own ~5-method override sets (`information_schema`, `INSERT IGNORE`, `SERIALIZABLE`, `ON CONFLICT`). They share the entire `sqlmodel_repo/` mixin layer.
+
+**Naming map (every flat method = `<verb>_<domain>`).** Every caller uses dotless access — no more `storage.cases.create_case(...)`; instead `await storage.create_case(...)`.
+
+| Old (sub-store)                              | New (flat)                                  |
+|----------------------------------------------|---------------------------------------------|
+| `storage.audit.append(...)`                  | `await storage.append_audit(...)`           |
+| `storage.cases.create_case(...)`             | `await storage.create_case(...)`            |
+| `storage.cases.add_member(...)`              | `await storage.add_case_member(...)`        |
+| `storage.clearance.grant(...)`               | `await storage.grant_clearance(...)`        |
+| `storage.clearance.expire_due(...)`          | `await storage.expire_due_clearances(...)`  |
+| `storage.observations.put(...)`              | `await storage.put_observation(...)`        |
+| `storage.observations.reclassify(...)`       | `await storage.reclassify_observation(...)` |
+| `storage.attachments.put(...)`               | `await storage.put_attachment(...)`         |
+| `storage.attachments.reclassify(...)`        | `await storage.reclassify_attachment(...)`  |
+| `storage.messages.put_message(...)`          | `await storage.put_message(...)`            |
+| `storage.messages.get_by_evidence_ref(...)`  | `await storage.get_message_body(...)`       |
+| `storage.linkages.insert_proposed(...)`      | `await storage.insert_proposed_linkage(...)`|
+| `storage.linkages.transition(...)`           | `await storage.transition_linkage(...)`     |
+| `storage.linkages.get(...)`                  | `await storage.get_linkage(...)`            |
+| `storage.linkages.list_linkages(...)`        | `await storage.list_linkages(...)`          |
+| `storage.personas.persona_for_actor(...)`    | `await storage.persona_for_actor(...)`      |
+| `storage.personas.merge_actors(...)`         | `await storage.merge_actors_into_persona(...)` |
+| `storage.personas.split_actor(...)`          | `await storage.split_actor_from_persona(...)` |
+| `storage.graph.upsert_node(...)`             | `await storage.upsert_graph_node(...)`      |
+| `storage.graph.upsert_edge(...)`             | `await storage.upsert_graph_edge(...)`      |
+| `storage.graph.stats()`                      | `await storage.graph_stats()`               |
+| `storage.vector_index.upsert_simhash(...)`   | `await storage.upsert_simhash(...)`         |
+| `storage.vector_index.nearest(...)`          | `await storage.nearest_simhashes(...)`      |
+| `storage.cursors.get(...)`                   | `await storage.get_cursor(...)`             |
+| `storage.cursors.set(...)`                   | `await storage.set_cursor(...)`             |
+| `storage.corpus.append(...)`                 | `await storage.append_corpus(...)`          |
+| `storage.corpus.iter_since(...)`             | `await storage.iter_corpus_since(...)`      |
+| `storage.profiles.get_current(...)`          | `await storage.get_current_profile(...)`    |
+| `storage.profiles.upsert(...)`               | `await storage.upsert_current_profile(...)` |
+| `storage.feedback_pairs.record(...)`         | `await storage.record_feedback_pair(...)`   |
+| `storage.syslog.append(...)`                 | `await storage.append_syslog(...)`          |
+
+**Sync → async flip.** Every method on the repository is `async def`. The legacy sync `Session(engine)` path is gone. Engines use `sqlite+aiosqlite://` + `AsyncSession`. DDL stays sync (`SQLModel.metadata.create_all` is sync-only) via a parallel `get_sync_engine` used only at boot. The `BEGIN IMMEDIATE` audit chain uses a raw aiosqlite cursor inside an `asyncio.Lock` for in-process serialization on top of SQLite's RESERVED lock for cross-process.
+
+**Escape hatch.** `BaseRepository.session()` is an `async with` context manager yielding the main-engine `AsyncSession`. Reserved for collector-side custom transactions (Matrix edit patching, reaction insertion) that don't fit a single repo call. Production code uses it in `eyenet/collectors/matrix/real.py` exactly twice.
+
+**Two firm rules.**
+
+1. **No dialect leak in mixins.** The `sqlmodel_repo/` mixin layer must use only generic SQLModel ORM (SELECT-then-add/update). Dialect-specific SQL (`sqlalchemy.dialects.sqlite.insert`, `BEGIN IMMEDIATE`, `INSERT IGNORE`, `INFORMATION_SCHEMA`) lives only in the concrete backend's `repository.py`. The audit `_append_audit_locked` and the SQLite `set_cursors_bulk` upsert are the established override pattern: declared as `raise NotImplementedError` on `SQLModelRepository`, overridden on `SQLiteRepository`.
+
+2. **Tests use `BaseRepository` + `get_repository()`, not direct `SQLiteRepository` imports.** Every test types against the abstract surface and constructs via the factory. SQLite-specific impl probes (audit `BEGIN IMMEDIATE`, init lock, pragma wiring) pin via `monkeypatch.setenv("EYENET_STORAGE_TYPE", "sqlite")` AND get a `_sqlite` filename suffix (`test_audit_chain_sqlite.py`, `test_init_concurrency_sqlite.py`, `test_repository_sqlite.py`). When MySQL/Postgres backends land, mirror files sit alongside (`test_audit_chain_mysql.py`, …) without collision.
+
+**What got deleted (Phase 6).**
+
+- `eyenet/storage/{audit,cursors,feedback,linkages,personas,syslog,vectors,messages,profiles,observations,graph,corpus,sqlite,reply_resolver,actors,engines}.py` — 16 legacy modules
+- `eyenet/contracts/storage.py` — 387 lines of sub-store ABCs (`MessageStore`, `CaseStore`, `ClearanceStore`, `AuditStore`, `LinkageStore`, `PersonaStore`, `ProfileStore`, `VectorIndex`, `GraphStore`, `FeedbackPairStore`, `CorpusStore`, `ObservationStore`, `Storage` aggregate)
+- 17 test files migrated, 4 renamed with `_sqlite` suffix, 1 deleted (`test_audit_drift_guard.py` — tested a legacy hand-pinned INSERT column tuple that the new SQLModel ORM path doesn't have)
+
+**Caller migration footprint.**
+
+| Layer            | Files migrated | Notes                                                                 |
+|------------------|----------------|-----------------------------------------------------------------------|
+| Production       | 14             | Every service constructor takes `storage: BaseRepository`             |
+| Unit tests       | ~30            | Fixtures use `get_repository(in_memory=True)`                         |
+| Integration/e2e  | ~15            | Shared `tests/_seed.py:seed_telegram_fixture` helper replaces per-test sync seed blocks |
+| Total            | ~60 files      | `+1576 / −4286` lines net                                             |
+
+**Performance notes.** Async session overhead is ~2–5 ms higher per call than the legacy sync `Session(engine)` path. The StylometricSensor dispatch loop was the worst hot spot (15 primitives × 3 sessions/primitive per envelope). The fix landed in three batched-write helpers, all generic enough to live in the mixin layer:
+
+- `get_cursors_bulk(actor_id, primitive_names)` — single SELECT for every per-primitive cursor in one dispatch
+- `put_observations_bulk(rows)` — single session for all primitives' observations
+- `set_cursors_bulk(actor_id, updates)` — single transaction; SQLite override uses `INSERT ... ON CONFLICT DO UPDATE` for race safety under concurrent dispatch
+
+Plus one repo helper: `recent_message_bodies_for_actor(actor_id, limit=N)` — the Verifier's window-corpus loader replaces a `storage._engines[StoreName.MAIN]` + raw `Session` + LIFO select pattern with one round-trip.
+
+**Definition of done.** ruff format clean, ruff check clean, mypy `--strict` clean (275 source files, 0 errors), bandit 0 issues, deptry clean, detect-secrets clean, `pytest` 962/962 unit + 41/42 integration (1 throughput-bound flake under SQLite QueuePool pressure) + 5/5 e2e over real NATS, 18 commits squashed-or-merged as `5efbe50`.
+
 #### M9.1b — Auth-token storage + JWT
 
 Unblocks `/v1/auth/login`, `/refresh`, `/logout`, `/me`, PAT mint/list/revoke, and the JWT denylist enforcement path.
