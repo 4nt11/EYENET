@@ -165,12 +165,6 @@ omit = [
   "eyenet/collectors/telegram/real.py",
   "eyenet/collectors/telegram/auth.py",
   "eyenet/collectors/matrix/real.py",
-  # New flat-repository tree — no callers exercise it yet (Phase 5).
-  # Reinstate once the caller sweep lands.
-  "eyenet/storage/repository.py",
-  "eyenet/storage/factory.py",
-  "eyenet/storage/sqlmodel_repo/*",
-  "eyenet/storage/sqlite_repo/*",
 ]
 
 [tool.coverage.report]
