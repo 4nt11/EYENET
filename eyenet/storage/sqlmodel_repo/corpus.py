@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlmodel import col, select
@@ -11,6 +11,12 @@ from sqlmodel import col, select
 from eyenet.models import MessageTable
 
 from ._helpers import safe_session
+
+
+def _ensure_utc(ts: datetime) -> datetime:
+    """SQLite drops tzinfo on round-trip — restore UTC on read so
+    downstream tz-aware kernels (meta.*) don't trip the naive guard."""
+    return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts
 
 
 class CorpusMixin:
@@ -45,7 +51,7 @@ class CorpusMixin:
                 .order_by(col(MessageTable.sent_at_source), col(MessageTable.id))
             )
             result = await session.exec(stmt)
-            return [(ts, mid, ref) for ts, mid, ref in result]
+            return [(_ensure_utc(ts), mid, ref) for ts, mid, ref in result]
 
     async def iter_corpus_since_with_reply(
         self,
@@ -67,7 +73,7 @@ class CorpusMixin:
                 .order_by(col(MessageTable.sent_at_source), col(MessageTable.id))
             )
             result = await session.exec(stmt)
-            return [(ts, mid, ref, reply) for ts, mid, ref, reply in result]
+            return [(_ensure_utc(ts), mid, ref, reply) for ts, mid, ref, reply in result]
 
 
 __all__ = ["CorpusMixin"]

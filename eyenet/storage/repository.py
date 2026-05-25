@@ -303,6 +303,10 @@ class BaseRepository(ABC):
     # =================================================================
 
     @abstractmethod
+    async def put_observations_bulk(self, observation_rows: list[object]) -> None:
+        """Persist many observation rows in one session."""
+
+    @abstractmethod
     async def put_observation(self, observation_row: object) -> None:
         """Persist an :class:`ObservationRow`. Type-erased to avoid
         contract-layer coupling at the ABC."""
@@ -449,6 +453,14 @@ class BaseRepository(ABC):
     # =================================================================
 
     @abstractmethod
+    async def get_cursors_bulk(
+        self,
+        actor_id: UUID,
+        primitive_names: Any,
+    ) -> dict[str, Any]:
+        """Bulk-read cursors for several primitives in one round-trip."""
+
+    @abstractmethod
     async def get_cursor(
         self,
         actor_id: UUID,
@@ -456,6 +468,14 @@ class BaseRepository(ABC):
     ) -> tuple[datetime, UUID]:
         """Return `(last_processed_msg_ts, last_processed_msg_id)` or
         the epoch/nil-UUID sentinel pair."""
+
+    @abstractmethod
+    async def set_cursors_bulk(
+        self,
+        actor_id: UUID,
+        updates: Any,
+    ) -> None:
+        """Apply many cursor updates in one session."""
 
     @abstractmethod
     async def set_cursor(

@@ -14,6 +14,7 @@ import asyncio
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 import structlog
@@ -128,14 +129,22 @@ class StylometricSensor(ServiceBase, SensorBase):
             await self._run_primitives(actor_id, env, body_bytes.decode("utf-8"))
 
     async def _run_primitives(self, actor_id: UUID, env: RawMessageEnvelope, _body: str) -> None:
-        # Per-actor cache for the full-corpus fetch + body batch. Lazy:
-        # populated on the first ``requires_full_corpus`` primitive that
-        # needs it, reused by all subsequent ones. Saves ~10 SQLite reads
-        # + ~10 body batch fetches per actor when meta.* (x8) and the
-        # M6.5 trio (x3) all run in the same dispatch.
         _full_corpus: list[tuple[datetime, UUID, str]] | None = None
         _full_bodies: dict[str, str] | None = None
 
+        _cursor_names = [s.name for s in PRIMITIVES if not s.requires_full_corpus]
+        _cursor_cache = await self._storage.get_cursors_bulk(actor_id, _cursor_names)
+
+        # Resolve current-evidence_ref → msg_id once for the dispatch.
+        # Every primitive that succeeds advances its cursor to this point;
+        # batching this one lookup saves a session per primitive.
+        _current_msg_id = await self._storage.get_message_id_by_evidence_ref(env.evidence_ref)
+        if _current_msg_id is None:
+            from eyenet.models._base import new_uuid7  # noqa: PLC0415
+            _current_msg_id = new_uuid7()
+
+        _cursor_updates: list[tuple[str, datetime, UUID]] = []
+        _observation_rows: list[ObservationRow] = []
         succeeded = failed = 0
 
         for spec in PRIMITIVES:
@@ -173,6 +182,7 @@ class StylometricSensor(ServiceBase, SensorBase):
                             if spec.requires_full_corpus and spec.requires_bodies
                             else None
                         ),
+                        _cursor=_cursor_cache.get(spec.name),
                     )
                     duration_ms = (time.monotonic() - t0) * 1000
                     span.set_attribute("primitive.duration_ms", duration_ms)
@@ -192,9 +202,9 @@ class StylometricSensor(ServiceBase, SensorBase):
                         await self.publisher.publish_observation(obs)
 
                         row = _observation_to_row(obs, actor_id, self.instance_id, spec.version)
-                        await self._storage.put_observation(row)
+                        _observation_rows.append(row)
 
-                        await self._advance_cursor(actor_id, spec.name, env)
+                        _cursor_updates.append((spec.name, env.sent_at_source, _current_msg_id))
 
                         succeeded += 1
                 except Exception as exc:
@@ -207,6 +217,13 @@ class StylometricSensor(ServiceBase, SensorBase):
                         actor_id=str(actor_id),
                         error=str(exc),
                     )
+
+        if _observation_rows:
+            await self._storage.put_observations_bulk(
+                cast(list[object], _observation_rows)
+            )
+        if _cursor_updates:
+            await self._storage.set_cursors_bulk(actor_id, _cursor_updates)
 
         _log.info(
             "sensor.dispatch.complete",
@@ -224,11 +241,14 @@ class StylometricSensor(ServiceBase, SensorBase):
         *,
         _precomputed_corpus: list[tuple[datetime, UUID, str]] | None = None,
         _precomputed_bodies: dict[str, str] | None = None,
+        _cursor: tuple[datetime, UUID] | None = None,
     ) -> ObservationEnvelope | None:
         # Meta primitives need the actor's full history, not the
         # since-cursor delta — override with epoch sentinels.
         if spec.requires_full_corpus:
             since_ts, since_msg_id = _EPOCH, _NULL_UUID
+        elif _cursor is not None:
+            since_ts, since_msg_id = _cursor
         else:
             since_ts, since_msg_id = await self._storage.get_cursor(actor_id, spec.name)
 
@@ -256,23 +276,6 @@ class StylometricSensor(ServiceBase, SensorBase):
             bodies = await _batch_fetch_bodies(self._storage, corpus)
 
         return spec.compute(corpus=corpus, bodies=bodies)
-
-    async def _advance_cursor(
-        self,
-        actor_id: UUID,
-        primitive_name: str,
-        env: RawMessageEnvelope,
-    ) -> None:
-        from eyenet.models._base import new_uuid7  # noqa: PLC0415
-
-        msg_id = await self._storage.get_message_id_by_evidence_ref(env.evidence_ref)
-        await self._storage.set_cursor(
-            actor_id,
-            primitive_name,
-            env.sent_at_source,
-            msg_id or new_uuid7(),
-        )
-
 
 async def _batch_fetch_bodies(
     storage: BaseRepository,

@@ -12,10 +12,13 @@ import asyncio
 import contextlib
 import json
 import uuid as _uuid
-from datetime import UTC
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -24,6 +27,8 @@ from eyenet.contracts.audit import (
     AuditLogRow,
     compute_self_hash,
 )
+from eyenet.models import CorpusCursorTable
+from eyenet.storage.sqlmodel_repo._helpers import safe_session
 from eyenet.storage.sqlite_repo.database import (
     get_async_engine,
     get_sync_engine,
@@ -177,6 +182,41 @@ class SQLiteRepository(SQLModelRepository):
             return
         with self._ndjson.open("a", encoding="utf-8") as fh:
             fh.write(row.model_dump_json() + "\n")
+
+    async def set_cursors_bulk(
+        self,
+        actor_id: UUID,
+        updates: Sequence[tuple[str, datetime, UUID]],
+    ) -> None:
+        """SQLite override: INSERT ... ON CONFLICT for race-safe bulk upsert.
+
+        The generic mixin uses SELECT-then-add which races under concurrent
+        dispatches for the same actor (UNIQUE violation). SQLite expresses
+        an atomic upsert via ``ON CONFLICT (actor_id, primitive_name) DO
+        UPDATE SET ...``.
+        """
+        if not updates:
+            return
+        rows = [
+            {
+                "actor_id": actor_id,
+                "primitive_name": name,
+                "last_processed_msg_ts": last_ts,
+                "last_processed_msg_id": last_msg_id,
+            }
+            for name, last_ts, last_msg_id in updates
+        ]
+        stmt = sqlite_insert(CorpusCursorTable).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["actor_id", "primitive_name"],
+            set_={
+                "last_processed_msg_ts": stmt.excluded.last_processed_msg_ts,
+                "last_processed_msg_id": stmt.excluded.last_processed_msg_id,
+            },
+        )
+        async with safe_session(self._session_factory) as session:
+            await session.exec(stmt)  # type: ignore[arg-type]
+            await session.commit()
 
     async def close(self) -> None:
         await self.engine.dispose()
