@@ -40,7 +40,6 @@ from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.models.graph import GraphEdgeType
 from eyenet.storage import SQLiteStorage
-from eyenet.storage.personas import SQLitePersonaStore
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -137,7 +136,7 @@ async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: SQLiteS
     await asyncio.sleep(0.3)
 
     # Step 3: Verify Persona was created
-    personas = await cast("SQLitePersonaStore", storage.personas).all_personas()
+    personas = await storage.all_personas()
     assert len(personas) >= 1
     persona = personas[0]
     assert set(persona.member_actor_ids) == {_ACTOR_A, _ACTOR_B}

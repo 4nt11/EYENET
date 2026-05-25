@@ -44,7 +44,6 @@ from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.models.graph import GraphEdgeType
 from eyenet.storage import SQLiteStorage
-from eyenet.storage.personas import SQLitePersonaStore
 
 pytestmark = [
     pytest.mark.e2e,
@@ -176,7 +175,7 @@ async def test_full_m4_pipeline_over_real_nats(tmp_path: Path) -> None:  # noqa:
             await asyncio.sleep(0.8)
 
             # Step 3 — Persona created.
-            personas = await cast("SQLitePersonaStore", storage.personas).all_personas()
+            personas = await storage.all_personas()
             assert len(personas) >= 1
             persona = personas[0]
             assert set(persona.member_actor_ids) == {_ACTOR_A, _ACTOR_B}

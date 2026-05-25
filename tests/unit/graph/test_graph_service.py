@@ -28,7 +28,6 @@ from eyenet.contracts.attribution import (
 from eyenet.graph.graph import Graph
 from eyenet.models.graph import GraphEdgeType
 from eyenet.storage import SQLiteStorage
-from eyenet.storage.personas import SQLitePersonaStore
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -201,7 +200,7 @@ async def test_linkage_confirmed_creates_persona(storage: SQLiteStorage, bus: Me
     await bus.publish(SUBJECT_LINKAGE_CONFIRMED, _confirmed_env().model_dump_json().encode())
     await asyncio.sleep(0.1)
 
-    personas = await cast("SQLitePersonaStore", storage.personas).all_personas()
+    personas = await storage.all_personas()
     assert len(personas) >= 1
     persona = personas[0]
     assert set(persona.member_actor_ids) == {_ACTOR_A, _ACTOR_B}
