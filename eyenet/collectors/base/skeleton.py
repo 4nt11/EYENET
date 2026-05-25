@@ -20,7 +20,7 @@ from eyenet.contracts.enums import CollectorState, SourceKind
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.identity_pool.loader import IdentityFileEntry
 from eyenet.service import ServiceBase
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.repository import BaseRepository
 
 
 class CollectorSkeleton(ServiceBase, CollectorBase):
@@ -30,7 +30,7 @@ class CollectorSkeleton(ServiceBase, CollectorBase):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
         pool: IdentityPool,
         identity_name: str,
         source_kind: SourceKind,

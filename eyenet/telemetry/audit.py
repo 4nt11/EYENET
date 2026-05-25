@@ -16,7 +16,7 @@ from uuid_extensions import uuid7
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.audit import AuditEvent, subject_for
-from eyenet.storage.audit import SQLiteAuditStore
+from eyenet.storage.repository import BaseRepository
 
 from .propagation import current_traceparent
 
@@ -29,7 +29,7 @@ class AuditEmitter:
     def __init__(
         self,
         publisher: BusEnvelopePublisher,
-        store: SQLiteAuditStore,
+        store: BaseRepository,
         *,
         service: str,
         instance_id: str,
@@ -77,7 +77,7 @@ class AuditEmitter:
                 trace_context=tc,
             )
             await self._publisher.publish(subject_for(self._service), envelope)
-            await self._store.append(
+            await self._store.append_audit(
                 {
                     "id": audit_id,
                     "event": event,

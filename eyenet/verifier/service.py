@@ -23,7 +23,6 @@ from uuid import UUID
 
 import structlog
 from opentelemetry import trace
-from sqlmodel import Session, col, select
 
 from eyenet.cli.config import VerifierConfig, VerifierThresholds
 from eyenet.contracts._base import TraceContext, _new_uuid7
@@ -34,10 +33,8 @@ from eyenet.contracts.attribution import (
 )
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import LinkageState
-from eyenet.models.message import MessageTable
 from eyenet.service import ServiceBase
-from eyenet.storage.engines import StoreName
-from eyenet.storage.sqlite import SQLiteStorage
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
 
 from .verifiers import REGISTRY, VerificationResult, Verifier, default_registry
@@ -103,7 +100,7 @@ class VerifierService(ServiceBase):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
         config: VerifierConfig | None = None,
         impostor_pool_path: Path | None = None,
         verifiers: tuple[Verifier, ...] | None = None,
@@ -175,8 +172,8 @@ class VerifierService(ServiceBase):
     async def _evaluate_pair(self, envelope: LinkageProposedEnvelope) -> None:
         language = self._extract_language(envelope)
 
-        corpus_a = self._load_corpus(envelope.actor_a_id)
-        corpus_b = self._load_corpus(envelope.actor_b_id)
+        corpus_a = await self._load_corpus(envelope.actor_a_id)
+        corpus_b = await self._load_corpus(envelope.actor_b_id)
 
         results: list[VerificationResult] = []
         for verifier in self._verifiers:
@@ -258,7 +255,7 @@ class VerifierService(ServiceBase):
         scored: list[VerificationResult],
     ) -> None:
         try:
-            await self._storage.linkages.transition(
+            await self._storage.transition_linkage(
                 envelope.linkage_id,
                 LinkageState.SUSPECTED,
                 decided_by=_VERIFIER_DECIDED_BY,
@@ -307,29 +304,12 @@ class VerifierService(ServiceBase):
         lang = envelope.evidence.get("language")
         return lang if isinstance(lang, str) else None
 
-    def _load_corpus(self, actor_id: UUID) -> list[str]:
-        """Return last-N message bodies for actor_id, oldest-first.
-
-        Reads from the MESSAGES engine directly because CorpusStore's
-        public ABC walks forward from a (ts, msg_id) cursor — fine for
-        the sensor's per-primitive flow but wasteful when we want a
-        bounded LIFO window. PLAN §5.2 boundary is crossed here in
-        application code, which is allowed.
-        """
-        limit = self._thresholds.window_messages
-        engine = self._storage._engines[StoreName.MAIN]
-        with Session(engine) as session:
-            stmt = (
-                select(MessageTable.body)
-                .where(MessageTable.actor_id == actor_id)
-                .order_by(col(MessageTable.sent_at_source).desc())
-                .order_by(col(MessageTable.id).desc())
-                .limit(limit)
-            )
-            rows = list(session.exec(stmt).all())
-        # Reverse to chronological order — verifiers expect oldest-first.
-        rows.reverse()
-        return [str(b) for b in rows if b]
+    async def _load_corpus(self, actor_id: UUID) -> list[str]:
+        """Return last-N message bodies for actor_id, oldest-first."""
+        return await self._storage.recent_message_bodies_for_actor(
+            actor_id,
+            limit=self._thresholds.window_messages,
+        )
 
 
 __all__ = ["VerifierService"]

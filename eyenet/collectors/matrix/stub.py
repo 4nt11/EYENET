@@ -21,7 +21,7 @@ from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import SourceKind
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
 
 
@@ -32,7 +32,7 @@ class MatrixCollectorStub(CollectorSkeleton):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
         pool: IdentityPool,
         identity_name: str,
         fixture_path: Path | None = None,

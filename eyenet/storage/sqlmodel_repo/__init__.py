@@ -8,10 +8,13 @@ IMMEDIATE` lock, pragma wiring, and engine construction.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from eyenet.storage.repository import BaseRepository
 
+from ._helpers import safe_session
 from .actors import ActorsMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
@@ -66,6 +69,17 @@ class SQLModelRepository(
     async def _append_audit_locked(self, row_data: dict[str, Any]) -> Any:
         """Dialect-specific atomic audit append. SQLite uses BEGIN IMMEDIATE."""
         raise NotImplementedError("subclass must override _append_audit_locked")
+
+    @contextlib.asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        """Escape hatch: open an AsyncSession on the main engine.
+
+        For domain operations, prefer the typed flat methods. This is
+        for collector-side custom transactions (Matrix edit patching,
+        reaction insertion) that can't be expressed as a single repo call.
+        """
+        async with safe_session(self._session_factory) as session:
+            yield session
 
     async def close(self) -> None:
         await self.engine.dispose()

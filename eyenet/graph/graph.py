@@ -86,7 +86,7 @@ class Graph(ServiceBase):
                 "graph.source_event": "attribution.profile.current",
             },
         ):
-            await self._storage.graph.upsert_node(
+            await self._storage.upsert_graph_node(
                 GraphNodeType.ACTOR,
                 env.actor_id,
                 {
@@ -130,9 +130,9 @@ class Graph(ServiceBase):
             "graph.upsert",
             attributes={"graph.op": "edge_upsert", "graph.edge_type": GraphEdgeType.LINKED_TO},
         ):
-            await self._storage.graph.upsert_node(GraphNodeType.ACTOR, env.actor_a_id, {})
-            await self._storage.graph.upsert_node(GraphNodeType.ACTOR, env.actor_b_id, {})
-            await self._storage.graph.upsert_edge(
+            await self._storage.upsert_graph_node(GraphNodeType.ACTOR, env.actor_a_id, {})
+            await self._storage.upsert_graph_node(GraphNodeType.ACTOR, env.actor_b_id, {})
+            await self._storage.upsert_graph_edge(
                 GraphEdgeType.LINKED_TO,
                 env.actor_a_id,
                 env.actor_b_id,
@@ -162,7 +162,7 @@ class Graph(ServiceBase):
                 "linkage.id": str(env.linkage_id),
             },
         ):
-            await self._storage.graph.upsert_edge(
+            await self._storage.upsert_graph_edge(
                 GraphEdgeType.LINKED_TO,
                 env.actor_a_id,
                 env.actor_b_id,
@@ -192,7 +192,7 @@ class Graph(ServiceBase):
                 "linkage.id": str(env.linkage_id),
             },
         ) as confirmed_span:
-            await self._storage.graph.upsert_edge(
+            await self._storage.upsert_graph_edge(
                 GraphEdgeType.LINKED_TO,
                 env.actor_a_id,
                 env.actor_b_id,
@@ -207,7 +207,7 @@ class Graph(ServiceBase):
             # Persona aggregation — union-find merge
             persona_row = cast(
                 "PersonaRow",
-                await self._storage.personas.merge_actors(
+                await self._storage.merge_actors_into_persona(
                     env.actor_a_id,
                     env.actor_b_id,
                     via_linkage_id=env.linkage_id,
@@ -220,7 +220,7 @@ class Graph(ServiceBase):
             confirmed_span.set_attribute("persona.member_count", len(member_ids))
 
             # Upsert Persona node
-            await self._storage.graph.upsert_node(
+            await self._storage.upsert_graph_node(
                 GraphNodeType.PERSONA,
                 persona_id,
                 {
@@ -230,7 +230,7 @@ class Graph(ServiceBase):
             )
             # Upsert BelongsToPersona edges for all current members
             for actor_id in member_ids:
-                await self._storage.graph.upsert_edge(
+                await self._storage.upsert_graph_edge(
                     GraphEdgeType.BELONGS_TO_PERSONA,
                     actor_id,
                     persona_id,
@@ -284,7 +284,7 @@ class Graph(ServiceBase):
                 "linkage.id": str(env.linkage_id),
             },
         ):
-            await self._storage.graph.upsert_edge(
+            await self._storage.upsert_graph_edge(
                 GraphEdgeType.LINKED_TO,
                 env.actor_a_id,
                 env.actor_b_id,
@@ -320,13 +320,13 @@ class Graph(ServiceBase):
                 "persona.member_count": len(env.member_actor_ids),
             },
         ):
-            await self._storage.graph.upsert_node(
+            await self._storage.upsert_graph_node(
                 GraphNodeType.PERSONA,
                 env.persona_id,
                 {"member_count": len(env.member_actor_ids), "updated_at": now.isoformat()},
             )
             for actor_id in env.member_actor_ids:
-                await self._storage.graph.upsert_edge(
+                await self._storage.upsert_graph_edge(
                     GraphEdgeType.BELONGS_TO_PERSONA,
                     actor_id,
                     env.persona_id,

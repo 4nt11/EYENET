@@ -388,6 +388,16 @@ class BaseRepository(ABC):
         Returns True on insert, False if `evidence_ref` already exists."""
 
     @abstractmethod
+    async def recent_message_bodies_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """Return up to ``limit`` recent non-empty bodies for an actor,
+        oldest-first. Used by the Verifier window-corpus loader."""
+
+    @abstractmethod
     async def resolve_message_id(
         self,
         *,
@@ -674,6 +684,20 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
+
+    # =================================================================
+    # ESCAPE HATCH (collector-side custom transactions)
+    # =================================================================
+
+    @abstractmethod
+    def session(self) -> Any:
+        """Open an async session on the main engine.
+
+        Returns an ``AsyncContextManager[AsyncSession]``. Use the typed
+        flat methods first; this escape hatch is for transactions that
+        can't be expressed as a single repo call (Matrix edit patching,
+        reaction insertion).
+        """
 
     # =================================================================
     # LIFECYCLE

@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import SystemLogLevel
-from eyenet.storage.sqlite import SQLiteStorage
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry import AuditEmitter, get_logger
 
 
@@ -33,7 +33,7 @@ class ServiceBase(ABC):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
     ) -> None:
         self._bus = bus
         self._storage = storage
@@ -55,7 +55,7 @@ class ServiceBase(ABC):
         return self._bus
 
     @property
-    def storage(self) -> SQLiteStorage:
+    def storage(self) -> BaseRepository:
         return self._storage
 
     @property
@@ -67,7 +67,7 @@ class ServiceBase(ABC):
         if self._audit is None:
             self._audit = AuditEmitter(
                 self._publisher,
-                self._storage.audit,
+                self._storage,
                 service=self.name,
                 instance_id=self.instance_id,
             )
@@ -96,7 +96,7 @@ class ServiceBase(ABC):
         event: str,
         message: str,
     ) -> None:
-        await self._storage.syslog.append(
+        await self._storage.append_syslog(
             level=level,
             service=self.name,
             instance_id=self.instance_id,

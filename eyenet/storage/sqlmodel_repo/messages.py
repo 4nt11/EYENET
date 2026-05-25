@@ -13,7 +13,7 @@ from uuid import UUID
 import structlog
 from opentelemetry import trace
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlmodel import col, select
 
 from eyenet.models import MessageTable
 
@@ -80,6 +80,24 @@ class MessagesMixin:
                 put_span.set_attribute("message.inserted", False)
                 _log.debug("message.duplicate", evidence_ref=evidence_ref)
                 return False
+
+    async def recent_message_bodies_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        limit: int,
+    ) -> list[str]:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageTable.body)
+                .where(MessageTable.actor_id == actor_id)
+                .order_by(col(MessageTable.sent_at_source).desc())
+                .order_by(col(MessageTable.id).desc())
+                .limit(limit)
+            )
+            rows = list(result.all())
+        rows.reverse()
+        return [str(b) for b in rows if b]
 
     async def resolve_message_id(
         self,
