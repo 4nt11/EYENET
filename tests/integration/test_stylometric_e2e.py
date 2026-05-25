@@ -29,7 +29,9 @@ from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
+from eyenet.storage import upsert_actor, upsert_group, upsert_source
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.storage.engines import StoreName
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/corpora/synthetic_m2.jsonl"
@@ -47,7 +49,7 @@ def _pool(tmp_path: Path, name: str = "tg_alpha") -> FileIdentityPool:
     return FileIdentityPool(cfg)
 
 
-async def _seed_messages(storage: SQLiteStorage) -> None:
+async def _seed_messages(storage: BaseRepository) -> None:
     """Pre-populate actor rows and message bodies for the fixture messages.
 
     The stub collector only publishes envelopes; it doesn't write to MessageStore.
@@ -121,7 +123,7 @@ async def test_stylometric_e2e(tmp_path: Path) -> None:
     pool = _pool(tmp_path)
     bus = MemoryBus()
     data_dir = tmp_path / "data"
-    storage = SQLiteStorage(data_dir)
+    storage = get_repository(data_dir=data_dir)
 
     await _seed_messages(storage)
 
@@ -169,7 +171,7 @@ async def test_failure_isolation(tmp_path: Path) -> None:
 
     pool = _pool(tmp_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data2")
+    storage = get_repository(data_dir=tmp_path / "data2")
 
     await _seed_messages(storage)
 

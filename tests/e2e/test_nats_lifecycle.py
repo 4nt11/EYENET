@@ -16,7 +16,7 @@ from eyenet.bus import NATSBus
 from eyenet.engine.skeleton import EngineSkeleton
 from eyenet.linker.linker import Linker
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 pytestmark = [
     pytest.mark.e2e,
@@ -35,7 +35,7 @@ async def test_two_services_against_real_nats(tmp_path: Path) -> None:
         url = f"nats://{nats.get_container_host_ip()}:{nats.get_exposed_port(4222)}"
         bus_a = await NATSBus.connect(url)
         bus_b = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             engine = EngineSkeleton(bus=bus_a, storage=storage)
             linker = Linker(bus=bus_b, storage=storage)

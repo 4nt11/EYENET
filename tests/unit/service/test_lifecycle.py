@@ -10,7 +10,7 @@ import pytest
 from eyenet.bus import MemoryBus
 from eyenet.contracts.audit import verify_chain
 from eyenet.service import ServiceBase, run_service
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 
 class _Toy(ServiceBase):
@@ -30,7 +30,7 @@ class _Toy(ServiceBase):
 @pytest.mark.asyncio
 async def test_start_to_stop_clean(tmp_path: Path) -> None:
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path)
+    storage = get_repository(data_dir=tmp_path)
     svc = _Toy(bus=bus, storage=storage)
 
     task = asyncio.create_task(run_service(svc))
@@ -54,7 +54,7 @@ async def test_start_to_stop_clean(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_publishes_service_start_on_bus(tmp_path: Path) -> None:
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path)
+    storage = get_repository(data_dir=tmp_path)
     seen: list[str] = []
 
     async def cap(subject: str, _payload: bytes, _headers: dict[str, str]) -> None:

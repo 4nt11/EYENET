@@ -7,13 +7,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from eyenet.storage import SQLiteStorage, StoreName, open_all
+from eyenet.storage import StoreName, open_all
+from eyenet.storage.factory import get_repository
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_open_close(tmp_path: Path) -> None:
-    s = SQLiteStorage(tmp_path)
+    s = get_repository(data_dir=tmp_path)
     try:
         for name in StoreName:
             assert (tmp_path / f"{name.value}.db").exists()

@@ -42,7 +42,9 @@ from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
 from eyenet.linker.linker import Linker
 from eyenet.models._base import new_uuid7
 from eyenet.models.message import MessageTable
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
+from eyenet.storage import upsert_actor, upsert_group, upsert_source
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.storage.engines import StoreName
 from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.verifier.service import VerifierService
@@ -79,7 +81,7 @@ async def _nats_url() -> AsyncIterator[str]:
         yield url
 
 
-async def _seed_actor(storage: SQLiteStorage, bodies: list[str], *, msg_prefix: str) -> UUID:
+async def _seed_actor(storage: BaseRepository, bodies: list[str], *, msg_prefix: str) -> UUID:
     engine = storage._engines[StoreName.MAIN]
     store = SQLiteMessageStore(engine)
     with Session(engine) as session:
@@ -152,7 +154,7 @@ async def test_m8_propose_verify_suspect_over_real_nats(tmp_path: Path) -> None:
         bus_verifier = await NATSBus.connect(url)
         bus_capture = await NATSBus.connect(url)
         bus_publisher = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             proposals: list[LinkageProposedEnvelope] = []
             suspicions: list[LinkageSuspectedEnvelope] = []
@@ -246,7 +248,7 @@ async def test_m8_diff_author_no_promotion_over_real_nats(tmp_path: Path) -> Non
         bus_verifier = await NATSBus.connect(url)
         bus_capture = await NATSBus.connect(url)
         bus_publisher = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             suspicions: list[bytes] = []
 

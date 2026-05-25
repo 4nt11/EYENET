@@ -27,7 +27,8 @@ from eyenet.contracts.attribution import (
 )
 from eyenet.graph.graph import Graph
 from eyenet.models.graph import GraphEdgeType
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -38,12 +39,12 @@ _LID = UUID("00000000-0000-0000-0000-000000000099")
 
 
 @pytest.fixture
-def storage(tmp_path: object) -> SQLiteStorage:
+def storage(tmp_path: object) -> BaseRepository:
     import tempfile
     from pathlib import Path
 
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 @pytest.fixture
@@ -109,7 +110,7 @@ def _rejected_env() -> LinkageRejectedEnvelope:
     )
 
 
-async def _start_graph(bus: MemoryBus, storage: SQLiteStorage) -> Graph:
+async def _start_graph(bus: MemoryBus, storage: BaseRepository) -> Graph:
     graph = Graph(bus=bus, storage=storage)
     await graph.on_subscribe()
     return graph
@@ -117,7 +118,7 @@ async def _start_graph(bus: MemoryBus, storage: SQLiteStorage) -> Graph:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_profile_current_upserts_actor_node(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_profile_current_upserts_actor_node(storage: BaseRepository, bus: MemoryBus) -> None:
     await _start_graph(bus, storage)
     env = _profile_env(_ACTOR_A)
     await bus.publish(SUBJECT_PROFILE_CURRENT, env.model_dump_json().encode())
@@ -130,7 +131,7 @@ async def test_profile_current_upserts_actor_node(storage: SQLiteStorage, bus: M
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_linkage_proposed_upserts_both_actor_nodes(
-    storage: SQLiteStorage, bus: MemoryBus
+    storage: BaseRepository, bus: MemoryBus
 ) -> None:
     await _start_graph(bus, storage)
     env = _proposed_env()
@@ -144,7 +145,7 @@ async def test_linkage_proposed_upserts_both_actor_nodes(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_linkage_proposed_upserts_linked_to_edge(
-    storage: SQLiteStorage, bus: MemoryBus
+    storage: BaseRepository, bus: MemoryBus
 ) -> None:
     await _start_graph(bus, storage)
     env = _proposed_env()
@@ -157,7 +158,7 @@ async def test_linkage_proposed_upserts_linked_to_edge(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linkage_suspected_updates_edge_state(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linkage_suspected_updates_edge_state(storage: BaseRepository, bus: MemoryBus) -> None:
     await _start_graph(bus, storage)
 
     # First propose, then suspect
@@ -172,7 +173,7 @@ async def test_linkage_suspected_updates_edge_state(storage: SQLiteStorage, bus:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linkage_rejected_updates_edge_state(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linkage_rejected_updates_edge_state(storage: BaseRepository, bus: MemoryBus) -> None:
     await _start_graph(bus, storage)
 
     await bus.publish(SUBJECT_LINKAGE_PROPOSED, _proposed_env().model_dump_json().encode())
@@ -186,7 +187,7 @@ async def test_linkage_rejected_updates_edge_state(storage: SQLiteStorage, bus: 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linkage_confirmed_creates_persona(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linkage_confirmed_creates_persona(storage: BaseRepository, bus: MemoryBus) -> None:
     await _start_graph(bus, storage)
 
     # Pre-seed the linkage row first — Graph's confirm handler calls personas.merge_actors
@@ -209,7 +210,7 @@ async def test_linkage_confirmed_creates_persona(storage: SQLiteStorage, bus: Me
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_linkage_confirmed_emits_persona_updated(
-    storage: SQLiteStorage, bus: MemoryBus
+    storage: BaseRepository, bus: MemoryBus
 ) -> None:
     persona_updates: list[PersonaUpdatedEnvelope] = []
 
@@ -233,7 +234,7 @@ async def test_linkage_confirmed_emits_persona_updated(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_linkage_confirmed_upserts_persona_node(
-    storage: SQLiteStorage, bus: MemoryBus
+    storage: BaseRepository, bus: MemoryBus
 ) -> None:
     await _start_graph(bus, storage)
     await storage.insert_proposed_linkage(

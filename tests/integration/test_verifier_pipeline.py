@@ -28,7 +28,9 @@ from eyenet.contracts.attribution import (
 from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
 from eyenet.models._base import new_uuid7
 from eyenet.models.message import MessageTable
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
+from eyenet.storage import upsert_actor, upsert_group, upsert_source
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.storage.engines import StoreName
 from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.verifier.service import VerifierService
@@ -38,12 +40,12 @@ _NOW = datetime(2026, 5, 24, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
-    return SQLiteStorage(Path(tempfile.mkdtemp()))
+def storage() -> BaseRepository:
+    return get_repository(data_dir=Path(tempfile.mkdtemp()))
 
 
 async def _seed_corpus_async(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     bodies: list[str],
     *,
     msg_prefix: str,
@@ -114,7 +116,7 @@ def _proposed(actor_a: UUID, actor_b: UUID, linkage_id: UUID) -> LinkageProposed
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_same_author_promoted_to_suspected(storage: SQLiteStorage) -> None:
+async def test_same_author_promoted_to_suspected(storage: BaseRepository) -> None:
     bus = MemoryBus()
     suspected: list[LinkageSuspectedEnvelope] = []
 
@@ -162,7 +164,7 @@ async def test_same_author_promoted_to_suspected(storage: SQLiteStorage) -> None
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_diff_author_not_promoted(storage: SQLiteStorage) -> None:
+async def test_diff_author_not_promoted(storage: BaseRepository) -> None:
     bus = MemoryBus()
     suspected: list[bytes] = []
 
@@ -203,7 +205,7 @@ async def test_diff_author_not_promoted(storage: SQLiteStorage) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_short_corpus_skips_verifier(storage: SQLiteStorage) -> None:
+async def test_short_corpus_skips_verifier(storage: BaseRepository) -> None:
     bus = MemoryBus()
     suspected: list[bytes] = []
 

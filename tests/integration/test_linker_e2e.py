@@ -25,7 +25,8 @@ from eyenet.contracts.attribution import (
     ProfileCurrentEnvelope,
 )
 from eyenet.linker.linker import Linker
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -43,9 +44,9 @@ _HASH_C = "ffffffffffffffff"
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
+def storage() -> BaseRepository:
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 def _profile_env(actor_id: UUID, fw_hash: str) -> ProfileCurrentEnvelope:
@@ -63,7 +64,7 @@ def _profile_env(actor_id: UUID, fw_hash: str) -> ProfileCurrentEnvelope:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_close_actors_produce_proposal(storage: SQLiteStorage) -> None:
+async def test_close_actors_produce_proposal(storage: BaseRepository) -> None:
     bus = MemoryBus()
     proposals: list[LinkageProposedEnvelope] = []
 
@@ -94,7 +95,7 @@ async def test_close_actors_produce_proposal(storage: SQLiteStorage) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_far_actors_produce_no_proposal(storage: SQLiteStorage) -> None:
+async def test_far_actors_produce_no_proposal(storage: BaseRepository) -> None:
     bus = MemoryBus()
     proposals: list[object] = []
 
@@ -121,7 +122,7 @@ async def test_far_actors_produce_no_proposal(storage: SQLiteStorage) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_proposal_persisted_to_storage(storage: SQLiteStorage) -> None:
+async def test_proposal_persisted_to_storage(storage: BaseRepository) -> None:
     bus = MemoryBus()
     linker = Linker(bus=bus, storage=storage)
     await linker.on_subscribe()
@@ -143,7 +144,7 @@ async def test_proposal_persisted_to_storage(storage: SQLiteStorage) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_multiple_profiles_only_close_pairs_proposed(storage: SQLiteStorage) -> None:
+async def test_multiple_profiles_only_close_pairs_proposed(storage: BaseRepository) -> None:
     """A close to B, but C is far from both. Only A↔B should be proposed."""
     bus = MemoryBus()
     proposals: list[LinkageProposedEnvelope] = []

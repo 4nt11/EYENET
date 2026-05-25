@@ -18,14 +18,14 @@ from typer.testing import CliRunner
 
 from eyenet.cli.main import app
 from eyenet.contracts.enums import LinkageState
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 
 def _seed_proposed_linkage(data_dir: Path) -> str:
     """Seed one PROPOSED Linkage row in a fresh data_dir; return its linkage_id."""
 
     async def _run() -> str:
-        storage = SQLiteStorage(data_dir)
+        storage = get_repository(data_dir=data_dir)
         a, b = sorted([uuid4(), uuid4()])
         try:
             row = await storage.insert_proposed_linkage(
@@ -47,7 +47,7 @@ def _assert_state_and_feedback(
     async def _run() -> None:
         from uuid import UUID
 
-        storage = SQLiteStorage(data_dir)
+        storage = get_repository(data_dir=data_dir)
         try:
             lid = UUID(linkage_id)
             row = await storage.get_linkage(lid)

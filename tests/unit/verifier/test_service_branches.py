@@ -28,7 +28,8 @@ from eyenet.contracts.attribution import (
     LinkageProposedEnvelope,
 )
 from eyenet.contracts.enums import LinkageState
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.verifier.service import VerifierService
 from eyenet.verifier.verifiers import VerificationResult
 
@@ -69,8 +70,8 @@ class _StubVerifier:
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
-    return SQLiteStorage(Path(tempfile.mkdtemp()))
+def storage() -> BaseRepository:
+    return get_repository(data_dir=Path(tempfile.mkdtemp()))
 
 
 def _envelope(linkage_id: UUID) -> LinkageProposedEnvelope:
@@ -93,7 +94,7 @@ def _events(caplog: list[Any]) -> list[str]:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_verifier_error_branch_caught_and_logged(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
 ) -> None:
     bus = MemoryBus()
     linkage = await storage.insert_proposed_linkage(_A, _B, method="test", score=0.5, evidence={})
@@ -122,7 +123,7 @@ async def test_verifier_error_branch_caught_and_logged(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_no_qualified_results_branch(storage: SQLiteStorage) -> None:
+async def test_no_qualified_results_branch(storage: BaseRepository) -> None:
     bus = MemoryBus()
     linkage = await storage.insert_proposed_linkage(_A, _B, method="test", score=0.5, evidence={})
     skipped = VerificationResult(
@@ -151,7 +152,7 @@ async def test_no_qualified_results_branch(storage: SQLiteStorage) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_skip_promotion_illegal_transition(storage: SQLiteStorage) -> None:
+async def test_skip_promotion_illegal_transition(storage: BaseRepository) -> None:
     bus = MemoryBus()
     linkage = await storage.insert_proposed_linkage(_A, _B, method="test", score=0.5, evidence={})
     # Operator beat the verifier to it — already terminal.

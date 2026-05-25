@@ -43,7 +43,7 @@ from eyenet.contracts.enums import LinkageState
 from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.models.graph import GraphEdgeType
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 pytestmark = [
     pytest.mark.e2e,
@@ -101,7 +101,7 @@ async def test_full_m4_pipeline_over_real_nats(tmp_path: Path) -> None:  # noqa:
         bus_graph = await NATSBus.connect(url)
         bus_capture = await NATSBus.connect(url)
         bus_publisher = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             proposals: list[LinkageProposedEnvelope] = []
             persona_updates: list[PersonaUpdatedEnvelope] = []

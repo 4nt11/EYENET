@@ -36,7 +36,9 @@ from eyenet.models._base import new_uuid7
 from eyenet.sensor.primitives import _locale_morph_kernel as kernel
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
+from eyenet.storage import upsert_actor, upsert_group, upsert_source
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.storage.engines import StoreName
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/corpora/synthetic_m2.jsonl"
@@ -54,7 +56,7 @@ def _pool(tmp_path: Path) -> FileIdentityPool:
     return FileIdentityPool(cfg)
 
 
-async def _seed_messages(storage: SQLiteStorage) -> int:
+async def _seed_messages(storage: BaseRepository) -> int:
     """Reuse the synthetic_m2 fixture; return the message count."""
     from eyenet.storage.messages import SQLiteMessageStore
 
@@ -124,7 +126,7 @@ async def test_kernel_runs_once_per_actor_dispatch(tmp_path: Path) -> None:
     """End-to-end: across the M6.5 trio, spaCy runs once per dispatch."""
     pool = _pool(tmp_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     msg_count = await _seed_messages(storage)
 
     kernel._reset_for_tests()
@@ -187,7 +189,7 @@ async def test_full_corpus_fetched_once_per_dispatch(tmp_path: Path) -> None:
     """End-to-end: 11 requires_full_corpus primitives share ONE SQLite read."""
     pool = _pool(tmp_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     msg_count = await _seed_messages(storage)
 
     sensor = StylometricSensor(bus=bus, storage=storage)

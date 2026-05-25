@@ -28,7 +28,7 @@ from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEnt
 from eyenet.identity_pool.loader import dump
 from eyenet.sensor.skeleton import SensorSkeleton
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/corpora"
 _TG_FIXTURE = _FIXTURES / "synthetic_small.jsonl"
@@ -65,7 +65,7 @@ async def test_two_sources_one_sensor(tmp_path: Path) -> None:
     cfg_path = _setup_pool(tmp_path)
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
 
     sensor = SensorSkeleton(bus=bus, storage=storage)
     tg = TelegramCollectorStub(

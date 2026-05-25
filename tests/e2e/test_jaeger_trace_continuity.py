@@ -59,7 +59,9 @@ from eyenet.linker.linker import Linker
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.sensor.stylometric import StylometricSensor
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
+from eyenet.storage import upsert_actor, upsert_group, upsert_source
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.storage.engines import StoreName
 from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.telemetry.propagation import current_traceparent
@@ -100,7 +102,7 @@ def _install_otlp_exporter() -> tuple[TracerProvider, BatchSpanProcessor]:
     return new_provider, processor
 
 
-async def _seed_fixture(storage: SQLiteStorage) -> list[dict[str, Any]]:
+async def _seed_fixture(storage: BaseRepository) -> list[dict[str, Any]]:
     """Seed actor + message rows from the M2 synthetic fixture. Returns the
     list of records so the test can publish their envelopes in order."""
 
@@ -218,7 +220,7 @@ async def test_full_pipeline_trace_lands_in_jaeger(tmp_path: Path) -> None:
     tracer = otel_trace.get_tracer("eyenet.collector.telegram")
 
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     records = await _seed_fixture(storage)
 
     sensor = StylometricSensor(bus=bus, storage=storage)

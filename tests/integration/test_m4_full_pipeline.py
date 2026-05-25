@@ -39,7 +39,8 @@ from eyenet.contracts.enums import LinkageState
 from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.models.graph import GraphEdgeType
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -52,9 +53,9 @@ _HASH_B = "0000000000000001"  # 1-bit Hamming distance
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
+def storage() -> BaseRepository:
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 def _profile_env(actor_id: UUID, fw_hash: str) -> ProfileCurrentEnvelope:
@@ -72,7 +73,7 @@ def _profile_env(actor_id: UUID, fw_hash: str) -> ProfileCurrentEnvelope:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: SQLiteStorage) -> None:
+async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: BaseRepository) -> None:
     bus = MemoryBus()
     proposals: list[LinkageProposedEnvelope] = []
     persona_updates: list[PersonaUpdatedEnvelope] = []

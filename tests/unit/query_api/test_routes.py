@@ -15,7 +15,8 @@ from eyenet.contracts._base import _new_uuid7
 from eyenet.contracts.attribution import LinkageRow, PersonaRow, ProfileRow
 from eyenet.models.graph import GraphEdgeType, GraphNodeType
 from eyenet.query_api.app import create_app
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
 _ACTOR_A = UUID("00000000-0000-0000-0000-000000000001")
@@ -24,13 +25,13 @@ _LID = UUID("00000000-0000-0000-0000-000000000099")
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
+def storage() -> BaseRepository:
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 @pytest.fixture
-def client(storage: SQLiteStorage) -> TestClient:
+def client(storage: BaseRepository) -> TestClient:
     app = create_app(storage)
     return TestClient(app, raise_server_exceptions=True)
 
@@ -63,7 +64,7 @@ def test_healthz_returns_ok(client: TestClient) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_actor_returns_summary(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_get_actor_returns_summary(storage: BaseRepository, client: TestClient) -> None:
     row = _profile_row(_ACTOR_A)
     await storage.upsert_current_profile(row)
 
@@ -75,7 +76,7 @@ async def test_get_actor_returns_summary(storage: SQLiteStorage, client: TestCli
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_actor_includes_persona_id(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_get_actor_includes_persona_id(storage: BaseRepository, client: TestClient) -> None:
     row = _profile_row(_ACTOR_A)
     await storage.upsert_current_profile(row)
     persona = cast(
@@ -99,7 +100,7 @@ def test_get_actor_404_when_missing(client: TestClient) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_neighbors_returns_edges(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_get_neighbors_returns_edges(storage: BaseRepository, client: TestClient) -> None:
     await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {"state": "proposed"}
     )
@@ -114,7 +115,7 @@ async def test_get_neighbors_returns_edges(storage: SQLiteStorage, client: TestC
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_get_neighbors_empty_when_no_edges(
-    storage: SQLiteStorage, client: TestClient
+    storage: BaseRepository, client: TestClient
 ) -> None:
     resp = client.get(f"/actor/{_ACTOR_A}/neighbors")
     assert resp.status_code == 200
@@ -123,7 +124,7 @@ async def test_get_neighbors_empty_when_no_edges(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_neighbors_filter_by_state(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_get_neighbors_filter_by_state(storage: BaseRepository, client: TestClient) -> None:
     await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {"state": "proposed"}
     )
@@ -145,7 +146,7 @@ async def test_get_neighbors_filter_by_state(storage: SQLiteStorage, client: Tes
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_persona_returns_summary(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_get_persona_returns_summary(storage: BaseRepository, client: TestClient) -> None:
     persona = cast(
         "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
     )
@@ -168,7 +169,7 @@ def test_get_persona_404_when_missing(client: TestClient) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_list_linkages_returns_rows(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_list_linkages_returns_rows(storage: BaseRepository, client: TestClient) -> None:
     await storage.insert_proposed_linkage(_ACTOR_A, _ACTOR_B, method="m", score=0.9, evidence={})
 
     resp = client.get("/linkages")
@@ -180,7 +181,7 @@ async def test_list_linkages_returns_rows(storage: SQLiteStorage, client: TestCl
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_list_linkages_empty_when_none(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_list_linkages_empty_when_none(storage: BaseRepository, client: TestClient) -> None:
     resp = client.get("/linkages")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -188,7 +189,7 @@ async def test_list_linkages_empty_when_none(storage: SQLiteStorage, client: Tes
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_list_linkages_filter_by_state(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_list_linkages_filter_by_state(storage: BaseRepository, client: TestClient) -> None:
     from eyenet.contracts.enums import LinkageState
 
     row = cast(
@@ -210,7 +211,7 @@ async def test_list_linkages_filter_by_state(storage: SQLiteStorage, client: Tes
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_graph_stats_returns_counts(storage: SQLiteStorage, client: TestClient) -> None:
+async def test_graph_stats_returns_counts(storage: BaseRepository, client: TestClient) -> None:
     await storage.upsert_graph_node(GraphNodeType.ACTOR, _ACTOR_A, {})
     await storage.upsert_graph_node(GraphNodeType.ACTOR, _ACTOR_B, {})
     await storage.upsert_graph_edge(GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {})

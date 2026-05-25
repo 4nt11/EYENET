@@ -20,7 +20,8 @@ from eyenet.contracts.attribution import (
 from eyenet.contracts.enums import ValueKind
 from eyenet.contracts.observation import ObservationRow
 from eyenet.engine.engine import Engine
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _TS = datetime(2026, 5, 1, tzinfo=UTC)
 _TRACEPARENT = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
@@ -76,8 +77,8 @@ def _fake_observation_payload(primitive: str, evidence_ref: str) -> bytes:
 
 
 @pytest.fixture
-def tmp_storage(tmp_path: Path) -> SQLiteStorage:
-    return SQLiteStorage(tmp_path)
+def tmp_storage(tmp_path: Path) -> BaseRepository:
+    return get_repository(data_dir=tmp_path)
 
 
 @pytest.fixture
@@ -87,7 +88,7 @@ def bus() -> MemoryBus:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_candidate_emits_on_slot_update(tmp_storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_candidate_emits_on_slot_update(tmp_storage: BaseRepository, bus: MemoryBus) -> None:
     received_candidates: list[ProfileCandidateEnvelope] = []
 
     async def _sniff(subject: str, payload: bytes, headers: dict[str, str]) -> None:
@@ -121,7 +122,7 @@ async def test_candidate_emits_on_slot_update(tmp_storage: SQLiteStorage, bus: M
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_current_suppressed_on_duplicate_value(
-    tmp_storage: SQLiteStorage, bus: MemoryBus
+    tmp_storage: BaseRepository, bus: MemoryBus
 ) -> None:
     """Second observation with same slot value should NOT emit a new ProfileCurrent."""
     received_currents: list[ProfileCurrentEnvelope] = []
@@ -172,7 +173,7 @@ async def test_current_suppressed_on_duplicate_value(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_current_emits_on_changed_value(tmp_storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_current_emits_on_changed_value(tmp_storage: BaseRepository, bus: MemoryBus) -> None:
     """Different slot value should emit a new ProfileCurrent."""
     received_currents: list[ProfileCurrentEnvelope] = []
 
@@ -219,7 +220,7 @@ async def test_current_emits_on_changed_value(tmp_storage: SQLiteStorage, bus: M
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_unknown_primitive_does_not_emit(tmp_storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_unknown_primitive_does_not_emit(tmp_storage: BaseRepository, bus: MemoryBus) -> None:
     received: list[bytes] = []
 
     async def _sniff(_s: str, payload: bytes, _h: dict[str, str]) -> None:

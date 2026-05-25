@@ -14,7 +14,7 @@ from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 _FIXTURE = Path(__file__).resolve().parents[3] / "fixtures/corpora/synthetic_matrix.jsonl"
 
@@ -39,7 +39,7 @@ async def test_stub_emits_matrix_envelopes(tmp_path: Path) -> None:
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
 
     captured: list[tuple[str, bytes]] = []
 
@@ -79,7 +79,7 @@ def test_stub_instance_id_distinct_from_telegram(tmp_path: Path) -> None:
     cfg_path = _setup_pool(tmp_path, "alpha")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     mx = MatrixCollectorStub(
         bus=bus, storage=storage, pool=pool, identity_name="alpha", fixture_path=None
     )

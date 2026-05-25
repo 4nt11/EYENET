@@ -22,7 +22,7 @@ from eyenet.contracts.enums import SourceKind
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 # --- fake nio surface ----------------------------------------------------
 
@@ -214,7 +214,7 @@ async def test_on_subscribe_raises_when_required_fields_missing(
     cfg_path = _setup_pool(tmp_path, "alpha_mx", missing={"matrix_access_token"})
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="matrix_access_token"):
         await coll.on_subscribe()
@@ -237,7 +237,7 @@ async def test_on_subscribe_raises_when_token_rejected(
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="matrix_access_token rejected"):
         await coll.on_subscribe()
@@ -260,7 +260,7 @@ async def test_on_subscribe_raises_when_user_id_mismatch(
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="does not match the token"):
         await coll.on_subscribe()
@@ -283,7 +283,7 @@ async def test_on_subscribe_raises_on_homeserver_unreachable(
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="did not respond to"):
         await coll.on_subscribe()
@@ -299,7 +299,7 @@ async def test_on_subscribe_wires_callbacks_and_resolves_aliases(
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     await coll.on_subscribe()
 
@@ -330,7 +330,7 @@ async def test_ingest_event_publishes_envelope_and_persists(
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
 
     captured: list[tuple[str, bytes]] = []
 
@@ -398,7 +398,7 @@ async def test_backfill_refuses_without_monitor_rooms(
     dump(IdentityFile(identities=[entry]), cfg_path)
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     coll = MatrixCollector(
         bus=bus, storage=storage, pool=pool, identity_name="alpha_mx", backfill=True
     )
@@ -437,7 +437,7 @@ async def test_backfill_pages_room_history(tmp_path: Path, monkeypatch: pytest.M
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
 
     captured: list[str] = []
 
@@ -514,7 +514,7 @@ async def test_self_echo_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     cfg_path = _setup_pool(tmp_path, "alpha_mx")
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     captured: list[str] = []
 
     async def _recorder(subject: str, _p: bytes, _h: dict[str, str]) -> None:

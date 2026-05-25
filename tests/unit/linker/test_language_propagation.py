@@ -24,7 +24,7 @@ from eyenet.contracts.attribution import (
     ProfileCurrentEnvelope,
 )
 from eyenet.linker.linker import Linker
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 24, 12, 0, 0, tzinfo=UTC)
@@ -57,7 +57,7 @@ def _profile_env(actor_id: UUID, fw_hash: str, language: str | None) -> ProfileC
 async def test_proposal_carries_slot_language() -> None:
     """When the comparator reports a slot_language, it lands in evidence."""
     bus = MemoryBus()
-    storage = SQLiteStorage(Path(tempfile.mkdtemp()))
+    storage = get_repository(data_dir=Path(tempfile.mkdtemp()))
     proposals: list[LinkageProposedEnvelope] = []
 
     async def _capture(_s: str, payload: bytes, _h: dict[str, str]) -> None:
@@ -90,7 +90,7 @@ async def test_proposal_carries_slot_language() -> None:
 async def test_proposal_omits_language_when_slot_has_none() -> None:
     """Profile without slot language → evidence has no `language` key."""
     bus = MemoryBus()
-    storage = SQLiteStorage(Path(tempfile.mkdtemp()))
+    storage = get_repository(data_dir=Path(tempfile.mkdtemp()))
     proposals: list[LinkageProposedEnvelope] = []
 
     async def _capture(_s: str, payload: bytes, _h: dict[str, str]) -> None:

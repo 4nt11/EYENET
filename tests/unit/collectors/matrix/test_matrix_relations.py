@@ -18,8 +18,7 @@ from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
 from eyenet.models import MessageTable, ReactionTable
-from eyenet.storage import SQLiteStorage
-from eyenet.storage.engines import StoreName
+from eyenet.storage.factory import get_repository
 
 from .test_matrix_collector_unit import _FakeAsyncClient, _FakeRoom
 
@@ -60,7 +59,7 @@ async def _setup_collector(
     dump(IdentityFile(identities=[entry]), cfg_path)
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     captured: list[bytes] = []
 
     async def _recorder(_subject: str, payload: bytes, _h: dict[str, str]) -> None:
@@ -111,9 +110,9 @@ async def test_reply_to_platform_msgid_published(
     assert child_env.reply_to_platform_msgid == "$parent"
 
     # FK resolved on insert because parent landed first.
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        rows = s.exec(select(MessageTable).order_by(MessageTable.platform_msgid)).all()
+    async with storage.session() as s:
+        _res = await s.exec(select(MessageTable).order_by(MessageTable.platform_msgid))
+        rows = _res.all()
         by_id = {r.platform_msgid: r for r in rows}
         assert by_id["$child"].reply_to_msg_id == by_id["$parent"].id
 
@@ -146,9 +145,9 @@ async def test_reply_pending_when_parent_unknown(
     )
     await coll._on_message(room, child)
 
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        row = s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$child")).first()
+    async with storage.session() as s:
+        _res = await s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$child"))
+        row = _res.first()
         assert row is not None
         assert row.reply_to_msg_id is None
         assert row.source_specific.get("pending_reply_to") == "$missing"
@@ -190,9 +189,9 @@ async def test_edit_replaces_body_and_keeps_history(
     await coll._on_message(room, original)
     await coll._on_message(room, edit)
 
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        row = s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$orig")).first()
+    async with storage.session() as s:
+        _res = await s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$orig"))
+        row = _res.first()
         assert row is not None
         assert row.body == "second draft"
         edits = row.source_specific.get("edits") or []
@@ -239,9 +238,9 @@ async def test_reaction_inserted_into_reaction_table(
     )
     await coll._on_reaction(room, reaction)
 
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        rows = s.exec(select(ReactionTable)).all()
+    async with storage.session() as s:
+        _res = await s.exec(select(ReactionTable))
+        rows = _res.all()
         assert len(rows) == 1
         assert rows[0].emoji == "👍"
         assert rows[0].evidence_ref == "matrix:!room:example.org:$rxn1"
@@ -305,9 +304,9 @@ async def test_reaction_dropped_when_target_unknown(
     )
     await coll._on_reaction(room, reaction)
 
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        rows = s.exec(select(ReactionTable)).all()
+    async with storage.session() as s:
+        _res = await s.exec(select(ReactionTable))
+        rows = _res.all()
         assert rows == []
 
     await coll.shutdown()

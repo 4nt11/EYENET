@@ -10,23 +10,24 @@ from uuid import UUID, uuid4
 import pytest
 
 from eyenet.contracts.attribution import LinkageRow
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 
-async def _propose(storage: SQLiteStorage, a: UUID, b: UUID) -> LinkageRow:
+async def _propose(storage: BaseRepository, a: UUID, b: UUID) -> LinkageRow:
     row = await storage.insert_proposed_linkage(a, b, "t", 0.5, {})
     assert isinstance(row, LinkageRow)
     return row
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
-    return SQLiteStorage(Path(tempfile.mkdtemp()))
+def storage() -> BaseRepository:
+    return get_repository(data_dir=Path(tempfile.mkdtemp()))
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_record_inserts_and_orders_pair(storage: SQLiteStorage) -> None:
+async def test_record_inserts_and_orders_pair(storage: BaseRepository) -> None:
     a, b = sorted([uuid4(), uuid4()])
     linkage = await _propose(storage, a, b)
     now = datetime.now(tz=UTC)
@@ -45,7 +46,7 @@ async def test_record_inserts_and_orders_pair(storage: SQLiteStorage) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_record_idempotent_on_linkage_id_overwrites(storage: SQLiteStorage) -> None:
+async def test_record_idempotent_on_linkage_id_overwrites(storage: BaseRepository) -> None:
     a, b = sorted([uuid4(), uuid4()])
     linkage = await _propose(storage, a, b)
     now = datetime.now(tz=UTC)
@@ -76,7 +77,7 @@ async def test_record_idempotent_on_linkage_id_overwrites(storage: SQLiteStorage
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_invalid_ground_truth_raises(storage: SQLiteStorage) -> None:
+async def test_invalid_ground_truth_raises(storage: BaseRepository) -> None:
     a, b = sorted([uuid4(), uuid4()])
     linkage = await _propose(storage, a, b)
     with pytest.raises(ValueError, match="ground_truth must be one of"):
@@ -92,7 +93,7 @@ async def test_invalid_ground_truth_raises(storage: SQLiteStorage) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_all_pairs_returns_recorded_truth(storage: SQLiteStorage) -> None:
+async def test_all_pairs_returns_recorded_truth(storage: BaseRepository) -> None:
     now = datetime.now(tz=UTC)
     truths: list[str] = []
     for _ in range(3):
