@@ -7,8 +7,8 @@ from uuid import UUID
 import pytest
 
 from eyenet.contracts.attribution import PersonaRow
-from eyenet.storage.engines import StoreName, create_all_for, open_in_memory_engine
-from eyenet.storage.personas import SQLitePersonaStore
+from eyenet.storage.repository import BaseRepository
+from eyenet.storage.factory import get_repository
 
 _A = UUID("00000000-0000-0000-0000-000000000001")
 _B = UUID("00000000-0000-0000-0000-000000000002")
@@ -20,8 +20,8 @@ _LID2 = UUID("00000000-0000-0000-0000-000000000098")
 
 @pytest.fixture
 def store() -> SQLitePersonaStore:
-    engine = open_in_memory_engine()
-    create_all_for(StoreName.MAIN, engine)
+    storage = get_repository(in_memory=True)
+    return storage
     # Seed linkage rows so FK constraints on via_linkage_id are satisfied
     from datetime import UTC, datetime
 
@@ -58,7 +58,7 @@ def store() -> SQLitePersonaStore:
             )
         )
         session.commit()
-    return SQLitePersonaStore(engine)
+    return storage
 
 
 # --- Case 1: neither actor has a persona ---
@@ -66,16 +66,16 @@ def store() -> SQLitePersonaStore:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case1_creates_new_persona(store: SQLitePersonaStore) -> None:
-    persona = await store.merge_actors(_A, _B, via_linkage_id=_LID)
+async def test_merge_case1_creates_new_persona(store: BaseRepository) -> None:
+    persona = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
     assert isinstance(persona, PersonaRow)
     assert set(persona.member_actor_ids) == {_A, _B}
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case1_membership_reverse_index(store: SQLitePersonaStore) -> None:
-    persona = await store.merge_actors(_A, _B, via_linkage_id=_LID)
+async def test_merge_case1_membership_reverse_index(store: BaseRepository) -> None:
+    persona = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
     pa = await store.persona_for_actor(_A)
     pb = await store.persona_for_actor(_B)
     assert pa is not None
@@ -89,18 +89,18 @@ async def test_merge_case1_membership_reverse_index(store: SQLitePersonaStore) -
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case2a_adds_actor_to_existing(store: SQLitePersonaStore) -> None:
-    existing = await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    updated = await store.merge_actors(_A, _C, via_linkage_id=_LID2)
+async def test_merge_case2a_adds_actor_to_existing(store: BaseRepository) -> None:
+    existing = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    updated = await store.merge_actors_into_persona(_A, _C, via_linkage_id=_LID2)
     assert updated.id == existing.id
     assert set(updated.member_actor_ids) == {_A, _B, _C}
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case2b_adds_actor_to_existing_reversed(store: SQLitePersonaStore) -> None:
-    existing = await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    updated = await store.merge_actors(_C, _A, via_linkage_id=_LID2)
+async def test_merge_case2b_adds_actor_to_existing_reversed(store: BaseRepository) -> None:
+    existing = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    updated = await store.merge_actors_into_persona(_C, _A, via_linkage_id=_LID2)
     assert updated.id == existing.id
     assert _C in updated.member_actor_ids
 
@@ -110,9 +110,9 @@ async def test_merge_case2b_adds_actor_to_existing_reversed(store: SQLitePersona
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case3_same_persona_is_noop(store: SQLitePersonaStore) -> None:
-    existing = await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    again = await store.merge_actors(_A, _B, via_linkage_id=_LID2)
+async def test_merge_case3_same_persona_is_noop(store: BaseRepository) -> None:
+    existing = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    again = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID2)
     assert again.id == existing.id
     assert len(again.member_actor_ids) == 2
 
@@ -122,21 +122,21 @@ async def test_merge_case3_same_persona_is_noop(store: SQLitePersonaStore) -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case4_merges_two_clusters(store: SQLitePersonaStore) -> None:
-    pa = await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    pb = await store.merge_actors(_C, _D, via_linkage_id=_LID2)
+async def test_merge_case4_merges_two_clusters(store: BaseRepository) -> None:
+    pa = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    pb = await store.merge_actors_into_persona(_C, _D, via_linkage_id=_LID2)
     assert pa.id != pb.id
 
-    merged = await store.merge_actors(_A, _C, via_linkage_id=_LID)
+    merged = await store.merge_actors_into_persona(_A, _C, via_linkage_id=_LID)
     assert set(merged.member_actor_ids) == {_A, _B, _C, _D}
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case4_absorbed_persona_deleted(store: SQLitePersonaStore) -> None:
-    await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    await store.merge_actors(_C, _D, via_linkage_id=_LID2)
-    merged = await store.merge_actors(_A, _C, via_linkage_id=_LID)
+async def test_merge_case4_absorbed_persona_deleted(store: BaseRepository) -> None:
+    await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    await store.merge_actors_into_persona(_C, _D, via_linkage_id=_LID2)
+    merged = await store.merge_actors_into_persona(_A, _C, via_linkage_id=_LID)
 
     all_personas = await store.all_personas()
     ids = {p.id for p in all_personas}
@@ -147,10 +147,10 @@ async def test_merge_case4_absorbed_persona_deleted(store: SQLitePersonaStore) -
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_merge_case4_reverse_membership_updated(store: SQLitePersonaStore) -> None:
-    await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    await store.merge_actors(_C, _D, via_linkage_id=_LID2)
-    merged = await store.merge_actors(_A, _C, via_linkage_id=_LID)
+async def test_merge_case4_reverse_membership_updated(store: BaseRepository) -> None:
+    await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    await store.merge_actors_into_persona(_C, _D, via_linkage_id=_LID2)
+    merged = await store.merge_actors_into_persona(_A, _C, via_linkage_id=_LID)
 
     for actor in (_A, _B, _C, _D):
         persona = await store.persona_for_actor(actor)
@@ -163,9 +163,9 @@ async def test_merge_case4_reverse_membership_updated(store: SQLitePersonaStore)
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_split_removes_actor_from_persona(store: SQLitePersonaStore) -> None:
-    await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    await store.split_actor(_B)
+async def test_split_removes_actor_from_persona(store: BaseRepository) -> None:
+    await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    await store.split_actor_from_persona(_B)
     persona_a = await store.persona_for_actor(_A)
     persona_b = await store.persona_for_actor(_B)
     assert persona_b is None
@@ -175,8 +175,8 @@ async def test_split_removes_actor_from_persona(store: SQLitePersonaStore) -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_split_actor_not_in_persona_is_noop(store: SQLitePersonaStore) -> None:
-    result = await store.split_actor(_A)
+async def test_split_actor_not_in_persona_is_noop(store: BaseRepository) -> None:
+    result = await store.split_actor_from_persona(_A)
     assert result is None
 
 
@@ -185,8 +185,8 @@ async def test_split_actor_not_in_persona_is_noop(store: SQLitePersonaStore) -> 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_persona_returns_row(store: SQLitePersonaStore) -> None:
-    created = await store.merge_actors(_A, _B, via_linkage_id=_LID)
+async def test_get_persona_returns_row(store: BaseRepository) -> None:
+    created = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
     fetched = await store.get_persona(created.id)
     assert fetched is not None
     assert fetched.id == created.id
@@ -194,28 +194,28 @@ async def test_get_persona_returns_row(store: SQLitePersonaStore) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_persona_returns_none_for_unknown(store: SQLitePersonaStore) -> None:
+async def test_get_persona_returns_none_for_unknown(store: BaseRepository) -> None:
     result = await store.get_persona(UUID("00000000-0000-0000-0000-999999999999"))
     assert result is None
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_members_returns_actor_ids(store: SQLitePersonaStore) -> None:
-    persona = await store.merge_actors(_A, _B, via_linkage_id=_LID)
-    members = await store.members(persona.id)
+async def test_members_returns_actor_ids(store: BaseRepository) -> None:
+    persona = await store.merge_actors_into_persona(_A, _B, via_linkage_id=_LID)
+    members = await store.persona_members(persona.id)
     assert set(members) == {_A, _B}
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_all_personas_empty_initially(store: SQLitePersonaStore) -> None:
+async def test_all_personas_empty_initially(store: BaseRepository) -> None:
     result = await store.all_personas()
     assert result == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_persona_for_actor_returns_none_initially(store: SQLitePersonaStore) -> None:
+async def test_persona_for_actor_returns_none_initially(store: BaseRepository) -> None:
     result = await store.persona_for_actor(_A)
     assert result is None

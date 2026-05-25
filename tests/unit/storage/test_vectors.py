@@ -6,8 +6,9 @@ from uuid import UUID
 
 import pytest
 
-from eyenet.storage.engines import StoreName, create_all_for, open_in_memory_engine
-from eyenet.storage.vectors import SQLiteVectorIndex, _hex_to_int, _int_to_hex
+from eyenet.storage.repository import BaseRepository
+from eyenet.storage.factory import get_repository
+from eyenet.storage.sqlmodel_repo.vectors import _hex_to_int, _int_to_hex
 
 _ACTOR_A = UUID("00000000-0000-0000-0000-000000000001")
 _ACTOR_B = UUID("00000000-0000-0000-0000-000000000002")
@@ -23,17 +24,15 @@ _DIST64 = "ffffffffffffffff"  # 64 bits from BASE
 
 
 @pytest.fixture
-def index() -> SQLiteVectorIndex:
-    engine = open_in_memory_engine()
-    create_all_for(StoreName.MAIN, engine)
-    return SQLiteVectorIndex(engine)
+def index() -> BaseRepository:
+    return get_repository(in_memory=True)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upsert_and_nearest_returns_match(index: SQLiteVectorIndex) -> None:
+async def test_upsert_and_nearest_returns_match(index: BaseRepository) -> None:
     await index.upsert_simhash(_ACTOR_A, _PRIM, _BASE)
-    matches = await index.nearest(_PRIM, _DIST1, max_distance=8)
+    matches = await index.nearest_simhashes(_PRIM, _DIST1, max_distance=8)
     assert len(matches) == 1
     assert matches[0].actor_id == _ACTOR_A
     assert matches[0].distance == 1
@@ -41,21 +40,21 @@ async def test_upsert_and_nearest_returns_match(index: SQLiteVectorIndex) -> Non
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_nearest_returns_correct_simhash_hex(index: SQLiteVectorIndex) -> None:
+async def test_nearest_returns_correct_simhash_hex(index: BaseRepository) -> None:
     await index.upsert_simhash(_ACTOR_A, _PRIM, _BASE)
-    matches = await index.nearest(_PRIM, _DIST1, max_distance=8)
+    matches = await index.nearest_simhashes(_PRIM, _DIST1, max_distance=8)
     assert matches[0].simhash_hex == _BASE
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_nearest_respects_max_distance(index: SQLiteVectorIndex) -> None:
+async def test_nearest_respects_max_distance(index: BaseRepository) -> None:
     await index.upsert_simhash(_ACTOR_A, _PRIM, _BASE)  # distance 0
     await index.upsert_simhash(_ACTOR_B, _PRIM, _DIST1)  # distance 1
     await index.upsert_simhash(_ACTOR_C, _PRIM, _DIST4)  # distance 4
     await index.upsert_simhash(_ACTOR_D, _PRIM, _DIST64)  # distance 64
 
-    matches = await index.nearest(_PRIM, _BASE, max_distance=4)
+    matches = await index.nearest_simhashes(_PRIM, _BASE, max_distance=4)
     actor_ids = {m.actor_id for m in matches}
     assert _ACTOR_A in actor_ids
     assert _ACTOR_B in actor_ids
@@ -65,11 +64,11 @@ async def test_nearest_respects_max_distance(index: SQLiteVectorIndex) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_nearest_excludes_specified_actor(index: SQLiteVectorIndex) -> None:
+async def test_nearest_excludes_specified_actor(index: BaseRepository) -> None:
     await index.upsert_simhash(_ACTOR_A, _PRIM, _BASE)
     await index.upsert_simhash(_ACTOR_B, _PRIM, _DIST1)
 
-    matches = await index.nearest(_PRIM, _BASE, max_distance=8, exclude_actor_id=_ACTOR_A)
+    matches = await index.nearest_simhashes(_PRIM, _BASE, max_distance=8, exclude_actor_id=_ACTOR_A)
     actor_ids = {m.actor_id for m in matches}
     assert _ACTOR_A not in actor_ids
     assert _ACTOR_B in actor_ids
@@ -77,54 +76,54 @@ async def test_nearest_excludes_specified_actor(index: SQLiteVectorIndex) -> Non
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_nearest_returns_empty_on_no_data(index: SQLiteVectorIndex) -> None:
-    matches = await index.nearest(_PRIM, _BASE, max_distance=8)
+async def test_nearest_returns_empty_on_no_data(index: BaseRepository) -> None:
+    matches = await index.nearest_simhashes(_PRIM, _BASE, max_distance=8)
     assert matches == []
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_nearest_sorted_by_distance_ascending(index: SQLiteVectorIndex) -> None:
+async def test_nearest_sorted_by_distance_ascending(index: BaseRepository) -> None:
     await index.upsert_simhash(_ACTOR_A, _PRIM, _DIST4)  # distance 4
     await index.upsert_simhash(_ACTOR_B, _PRIM, _DIST1)  # distance 1
 
-    matches = await index.nearest(_PRIM, _BASE, max_distance=8)
+    matches = await index.nearest_simhashes(_PRIM, _BASE, max_distance=8)
     distances = [m.distance for m in matches]
     assert distances == sorted(distances)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upsert_is_idempotent(index: SQLiteVectorIndex) -> None:
+async def test_upsert_is_idempotent(index: BaseRepository) -> None:
     await index.upsert_simhash(_ACTOR_A, _PRIM, _BASE)
     await index.upsert_simhash(_ACTOR_A, _PRIM, _DIST1)  # overwrite
-    matches = await index.nearest(_PRIM, _BASE, max_distance=8)
+    matches = await index.nearest_simhashes(_PRIM, _BASE, max_distance=8)
     assert len(matches) == 1
     assert matches[0].simhash_hex == _DIST1  # updated
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_different_primitives_are_isolated(index: SQLiteVectorIndex) -> None:
+async def test_different_primitives_are_isolated(index: BaseRepository) -> None:
     other_prim = "character_ngram_simhash"
     await index.upsert_simhash(_ACTOR_A, _PRIM, _BASE)
     await index.upsert_simhash(_ACTOR_B, other_prim, _DIST1)
 
-    matches = await index.nearest(_PRIM, _DIST1, max_distance=8)
+    matches = await index.nearest_simhashes(_PRIM, _DIST1, max_distance=8)
     assert all(m.actor_id == _ACTOR_A for m in matches)
 
-    matches_other = await index.nearest(other_prim, _DIST1, max_distance=8)
+    matches_other = await index.nearest_simhashes(other_prim, _DIST1, max_distance=8)
     assert all(m.actor_id == _ACTOR_B for m in matches_other)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_nearest_respects_limit(index: SQLiteVectorIndex) -> None:
+async def test_nearest_respects_limit(index: BaseRepository) -> None:
     actors = [UUID(f"00000000-0000-0000-0000-{i:012d}") for i in range(1, 11)]
     for actor in actors:
         await index.upsert_simhash(actor, _PRIM, _DIST1)
 
-    matches = await index.nearest(_PRIM, _BASE, max_distance=8, limit=3)
+    matches = await index.nearest_simhashes(_PRIM, _BASE, max_distance=8, limit=3)
     assert len(matches) <= 3
 
 

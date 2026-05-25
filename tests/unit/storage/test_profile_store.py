@@ -10,8 +10,8 @@ import pytest
 
 from eyenet.contracts._base import _new_uuid7
 from eyenet.contracts.attribution import ProfileRow
-from eyenet.storage.engines import StoreName, create_all_for, open_in_memory_engine
-from eyenet.storage.profiles import SQLiteProfileStore
+from eyenet.storage.repository import BaseRepository
+from eyenet.storage.factory import get_repository
 
 _ACTOR = UUID("00000000-0000-0000-0000-000000000001")
 _NOW = datetime(2026, 5, 1, tzinfo=UTC)
@@ -39,24 +39,24 @@ def _profile(actor_id: UUID, version: int, mattr: float = 0.5) -> ProfileRow:
 
 @pytest.fixture
 def store() -> SQLiteProfileStore:
-    engine = open_in_memory_engine()
-    create_all_for(StoreName.MAIN, engine)
-    return SQLiteProfileStore(engine)
+    storage = get_repository(in_memory=True)
+    return storage
+    return storage
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_current_returns_none_when_empty(store: SQLiteProfileStore) -> None:
-    result = await store.get_current(_ACTOR)
+async def test_get_current_returns_none_when_empty(store: BaseRepository) -> None:
+    result = await store.get_current_profile(_ACTOR)
     assert result is None
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upsert_current_sets_is_current(store: SQLiteProfileStore) -> None:
+async def test_upsert_current_sets_is_current(store: BaseRepository) -> None:
     row = _profile(_ACTOR, version=1)
-    await store.upsert_current(row)
-    current = await store.get_current(_ACTOR)
+    await store.upsert_current_profile(row)
+    current = await store.get_current_profile(_ACTOR)
     assert current is not None
     from eyenet.models import ProfileTable
 
@@ -66,23 +66,23 @@ async def test_upsert_current_sets_is_current(store: SQLiteProfileStore) -> None
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_upsert_current_demotes_previous(store: SQLiteProfileStore) -> None:
+async def test_upsert_current_demotes_previous(store: BaseRepository) -> None:
     row1 = _profile(_ACTOR, version=1, mattr=0.4)
     row2 = _profile(_ACTOR, version=2, mattr=0.6)
-    await store.upsert_current(row1)
-    await store.upsert_current(row2)
+    await store.upsert_current_profile(row1)
+    await store.upsert_current_profile(row2)
 
-    current = await store.get_current(_ACTOR)
+    current = await store.get_current_profile(_ACTOR)
     assert current is not None
     assert cast("ProfileRow", current).version == 2
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_history_returns_ordered_versions(store: SQLiteProfileStore) -> None:
+async def test_history_returns_ordered_versions(store: BaseRepository) -> None:
     for v in [1, 2, 3]:
-        await store.upsert_current(_profile(_ACTOR, version=v))
-    history = await store.history(_ACTOR)
+        await store.upsert_current_profile(_profile(_ACTOR, version=v))
+    history = await store.profile_history(_ACTOR)
     assert len(history) == 3
 
     versions = [cast("ProfileRow", row).version for row in history]
@@ -91,22 +91,20 @@ async def test_history_returns_ordered_versions(store: SQLiteProfileStore) -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_only_one_current_per_actor(store: SQLiteProfileStore) -> None:
-    from sqlmodel import Session, col, select
+async def test_only_one_current_per_actor(store: BaseRepository) -> None:
+    from sqlmodel import col, select
 
     from eyenet.models import ProfileTable
 
     for v in [1, 2, 3]:
-        await store.upsert_current(_profile(_ACTOR, version=v))
+        await store.upsert_current_profile(_profile(_ACTOR, version=v))
 
-    engine = store._engine
-    with Session(engine) as session:
-        currents = list(
-            session.exec(
-                select(ProfileTable)
-                .where(ProfileTable.actor_id == _ACTOR)
-                .where(col(ProfileTable.is_current).is_(True))
-            )
+    async with store.session() as session:
+        result = await session.exec(
+            select(ProfileTable)
+            .where(ProfileTable.actor_id == _ACTOR)
+            .where(col(ProfileTable.is_current).is_(True))
         )
+        currents = list(result.all())
     assert len(currents) == 1
     assert currents[0].version == 3
