@@ -1,27 +1,23 @@
-"""SQLite storage layer.
+"""SQLite storage layer (DECNET-pattern flat repository).
 
-This package is mid-restructure. Two surfaces coexist for now:
+Public surface:
 
-  * **Legacy** (pre-restructure): the flat per-domain modules below
-    (``actors``, ``audit``, ``cursors``, ..., ``sqlite.SQLiteStorage``)
-    and the sub-store ABCs in :mod:`eyenet.contracts.storage`. All
-    current callers still target this surface.
-  * **New** (DECNET pattern): :class:`BaseRepository` flat ABC in
-    :mod:`eyenet.storage.repository` with one concrete impl in
-    :mod:`eyenet.storage.sqlite_repo`, dispatched via
-    :func:`get_repository`. Caller migration happens in a follow-up.
+  * :class:`BaseRepository` — flat ABC (~80 abstract methods)
+  * :func:`get_repository` — env-dispatched factory
+    (`EYENET_STORAGE_TYPE`, default `sqlite`)
+  * `attachment_root` / `store_attachment` — blob-on-disk helpers
+  * Error types — `CaseError`, `ClearanceGrantError`, `ReclassifyDemotionError`
+  * `MAX_GRANT_DURATION` constant
 
-The new surface is additive — the legacy exports below remain so
-existing imports keep working until the caller sweep lands.
+The concrete SQLite implementation lives in :mod:`eyenet.storage.sqlite_repo`
+and is reachable only through the factory. The per-domain mixins live in
+:mod:`eyenet.storage.sqlmodel_repo` and are the shared generic layer that
+future MySQL/Postgres backends will compose with their own overrides.
 """
 
 from __future__ import annotations
 
-from .actors import resolve_actor_id, upsert_actor, upsert_group, upsert_source
 from .attachments import attachment_root, store_attachment
-from .audit import SQLiteAuditStore
-from .cursors import SQLiteCursorStore
-from .engines import StoreName, open_all, open_engine, open_in_memory_engine
 from .errors import (
     MAX_GRANT_DURATION,
     CaseError,
@@ -29,13 +25,7 @@ from .errors import (
     ReclassifyDemotionError,
 )
 from .factory import get_repository
-from .feedback import SQLiteFeedbackPairStore
-from .linkages import SQLiteLinkageStore
-from .personas import SQLitePersonaStore
 from .repository import BaseRepository
-from .sqlite import SQLiteStorage
-from .syslog import SQLiteSystemLogStore
-from .vectors import SQLiteVectorIndex, VectorMatch
 
 __all__ = [
     "MAX_GRANT_DURATION",
@@ -43,24 +33,7 @@ __all__ = [
     "CaseError",
     "ClearanceGrantError",
     "ReclassifyDemotionError",
-    "SQLiteAuditStore",
-    "SQLiteCursorStore",
-    "SQLiteFeedbackPairStore",
-    "SQLiteLinkageStore",
-    "SQLitePersonaStore",
-    "SQLiteStorage",
-    "SQLiteSystemLogStore",
-    "SQLiteVectorIndex",
-    "StoreName",
-    "VectorMatch",
     "attachment_root",
     "get_repository",
-    "open_all",
-    "open_engine",
-    "open_in_memory_engine",
-    "resolve_actor_id",
     "store_attachment",
-    "upsert_actor",
-    "upsert_group",
-    "upsert_source",
 ]

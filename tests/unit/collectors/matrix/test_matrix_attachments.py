@@ -18,6 +18,7 @@ from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEnt
 from eyenet.identity_pool.loader import dump
 from eyenet.models import AttachmentTable
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 from .test_matrix_collector_unit import _FakeAsyncClient, _FakeRoom
 
@@ -47,7 +48,7 @@ class _FakeMegolmEvent:
 
 async def _setup_collector(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[MatrixCollector, MemoryBus, SQLiteStorage, list[bytes]]:
+) -> tuple[MatrixCollector, MemoryBus, BaseRepository, list[bytes]]:
     monkeypatch.setattr(matrix_real, "AsyncClient", _FakeAsyncClient)
     entry = IdentityFileEntry(
         name="alpha_mx",
