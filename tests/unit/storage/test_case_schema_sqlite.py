@@ -16,7 +16,8 @@ from eyenet.contracts.enums import (
     SensitivityTier,
 )
 from eyenet.models.case import CaseCollaboratorTable, CaseMemberTable, CaseTable
-from eyenet.storage.engines import StoreName, create_all_for, open_in_memory_engine
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository  # noqa: F401
 
 _NOW = datetime(2026, 5, 24, tzinfo=UTC)
 _REASON = "initial evidence intake from collector pass 1"
@@ -24,9 +25,10 @@ _REASON = "initial evidence intake from collector pass 1"
 
 @pytest.fixture
 def session() -> Session:
-    engine = open_in_memory_engine()
-    create_all_for(StoreName.MAIN, engine)
-    return Session(engine)
+    import os
+    os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
+    storage = get_repository(in_memory=True)
+    return Session(storage.sync_engine)
 
 
 def _case(session: Session, **overrides: object) -> UUID:
