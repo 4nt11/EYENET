@@ -14,7 +14,8 @@ from typer.testing import CliRunner
 from eyenet.cli.main import app
 from eyenet.contracts.attribution import LinkageRow
 from eyenet.contracts.enums import LinkageState
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _ACTOR_A = UUID("00000000-0000-0000-0000-000000000001")
 _ACTOR_B = UUID("00000000-0000-0000-0000-000000000002")
@@ -28,15 +29,15 @@ def data_dir() -> Path:
 
 
 @pytest.fixture
-def storage(data_dir: Path) -> SQLiteStorage:
-    return SQLiteStorage(data_dir)
+def storage(data_dir: Path) -> BaseRepository:
+    return get_repository(data_dir=data_dir)
 
 
-def _insert_proposed(storage: SQLiteStorage) -> UUID:
+def _insert_proposed(storage: BaseRepository) -> UUID:
     async def _run() -> UUID:
         row = cast(
             "LinkageRow",
-            await storage.linkages.insert_proposed(
+            await storage.insert_proposed_linkage(
                 _ACTOR_A, _ACTOR_B, method="function_word_simhash_hamming", score=0.9, evidence={}
             ),
         )
@@ -46,7 +47,7 @@ def _insert_proposed(storage: SQLiteStorage) -> UUID:
 
 
 @pytest.mark.unit
-def test_linkage_list_shows_row(data_dir: Path, storage: SQLiteStorage) -> None:
+def test_linkage_list_shows_row(data_dir: Path, storage: BaseRepository) -> None:
     _insert_proposed(storage)
     result = runner.invoke(app, ["linkage", "list", "--data-dir", str(data_dir)])
     assert result.exit_code == 0
@@ -61,7 +62,7 @@ def test_linkage_list_empty(data_dir: Path) -> None:
 
 
 @pytest.mark.unit
-def test_linkage_list_filters_by_state(data_dir: Path, storage: SQLiteStorage) -> None:
+def test_linkage_list_filters_by_state(data_dir: Path, storage: BaseRepository) -> None:
     _insert_proposed(storage)
     result = runner.invoke(
         app, ["linkage", "list", "--data-dir", str(data_dir), "--state", "confirmed"]
@@ -71,7 +72,7 @@ def test_linkage_list_filters_by_state(data_dir: Path, storage: SQLiteStorage) -
 
 
 @pytest.mark.unit
-def test_linkage_suspect_transitions_state(data_dir: Path, storage: SQLiteStorage) -> None:
+def test_linkage_suspect_transitions_state(data_dir: Path, storage: BaseRepository) -> None:
     lid = _insert_proposed(storage)
     result = runner.invoke(
         app,
@@ -89,7 +90,7 @@ def test_linkage_suspect_transitions_state(data_dir: Path, storage: SQLiteStorag
     assert result.exit_code == 0
 
     async def _check() -> LinkageState:
-        row = await storage.linkages.get(lid)
+        row = await storage.get_linkage(lid)
         assert row is not None
         return cast("LinkageRow", row).state
 
@@ -98,7 +99,7 @@ def test_linkage_suspect_transitions_state(data_dir: Path, storage: SQLiteStorag
 
 
 @pytest.mark.unit
-def test_linkage_confirm_transitions_state(data_dir: Path, storage: SQLiteStorage) -> None:
+def test_linkage_confirm_transitions_state(data_dir: Path, storage: BaseRepository) -> None:
     lid = _insert_proposed(storage)
     result = runner.invoke(
         app,
@@ -116,7 +117,7 @@ def test_linkage_confirm_transitions_state(data_dir: Path, storage: SQLiteStorag
     assert result.exit_code == 0
 
     async def _check() -> LinkageState:
-        row = await storage.linkages.get(lid)
+        row = await storage.get_linkage(lid)
         assert row is not None
         return cast("LinkageRow", row).state
 
@@ -125,7 +126,7 @@ def test_linkage_confirm_transitions_state(data_dir: Path, storage: SQLiteStorag
 
 
 @pytest.mark.unit
-def test_linkage_reject_transitions_state(data_dir: Path, storage: SQLiteStorage) -> None:
+def test_linkage_reject_transitions_state(data_dir: Path, storage: BaseRepository) -> None:
     lid = _insert_proposed(storage)
     result = runner.invoke(
         app,
@@ -143,7 +144,7 @@ def test_linkage_reject_transitions_state(data_dir: Path, storage: SQLiteStorage
     assert result.exit_code == 0
 
     async def _check() -> LinkageState:
-        row = await storage.linkages.get(lid)
+        row = await storage.get_linkage(lid)
         assert row is not None
         return cast("LinkageRow", row).state
 
@@ -171,11 +172,11 @@ def test_linkage_suspect_not_found(data_dir: Path) -> None:
 
 
 @pytest.mark.unit
-def test_linkage_confirm_illegal_transition(data_dir: Path, storage: SQLiteStorage) -> None:
+def test_linkage_confirm_illegal_transition(data_dir: Path, storage: BaseRepository) -> None:
     lid = _insert_proposed(storage)
 
     async def _confirm() -> None:
-        await storage.linkages.transition(lid, LinkageState.CONFIRMED, decided_by="anti")
+        await storage.transition_linkage(lid, LinkageState.CONFIRMED, decided_by="anti")
 
     asyncio.run(_confirm())
 

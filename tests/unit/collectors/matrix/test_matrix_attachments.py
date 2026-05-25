@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from eyenet.bus import MemoryBus
 from eyenet.collectors.matrix import real as matrix_real
@@ -17,8 +17,8 @@ from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
 from eyenet.models import AttachmentTable
-from eyenet.storage import SQLiteStorage
-from eyenet.storage.engines import StoreName
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 from .test_matrix_collector_unit import _FakeAsyncClient, _FakeRoom
 
@@ -48,7 +48,7 @@ class _FakeMegolmEvent:
 
 async def _setup_collector(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[MatrixCollector, MemoryBus, SQLiteStorage, list[bytes]]:
+) -> tuple[MatrixCollector, MemoryBus, BaseRepository, list[bytes]]:
     monkeypatch.setattr(matrix_real, "AsyncClient", _FakeAsyncClient)
     entry = IdentityFileEntry(
         name="alpha_mx",
@@ -63,7 +63,7 @@ async def _setup_collector(
     dump(IdentityFile(identities=[entry]), cfg_path)
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     captured: list[bytes] = []
 
     async def _recorder(_subject: str, payload: bytes, _h: dict[str, str]) -> None:
@@ -106,9 +106,9 @@ async def test_cleartext_image_attachment_downloaded_and_persisted(
     # dispatcher).
     await coll._ingest_media_event(room, event)
 
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        rows = s.exec(select(AttachmentTable)).all()
+    async with storage.session() as s:
+        _res = await s.exec(select(AttachmentTable))
+        rows = _res.all()
         assert len(rows) == 1
         row = rows[0]
         assert row.kind == AttachmentKind.IMAGE
@@ -167,12 +167,13 @@ async def test_attachment_with_failing_integrity_flags_source_specific(
     )
     await coll._ingest_media_event(room, event)
 
-    engine = storage._engines[StoreName.MAIN]
-    with Session(engine) as s:
-        msg = s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$enc1")).first()
+    async with storage.session() as s:
+        _res = await s.exec(select(MessageTable).where(MessageTable.platform_msgid == "$enc1"))
+        msg = _res.first()
         assert msg is not None
         assert msg.source_specific.get("attachment_integrity_failed") is True
-        atts = s.exec(select(AttachmentTable)).all()
+        _res = await s.exec(select(AttachmentTable))
+        atts = _res.all()
         # Attachment row exists but storage_uri is None (blob NOT persisted
         # because integrity check failed).
         assert len(atts) == 1

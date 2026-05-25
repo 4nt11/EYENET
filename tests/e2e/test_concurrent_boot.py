@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 from eyenet.contracts.audit import GENESIS_PREV_HASH
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 pytestmark = [
     pytest.mark.e2e,
@@ -108,12 +108,12 @@ async def test_linker_and_graph_concurrent_boot_chain_intact(tmp_path: Path) -> 
 
         # Walk the audit chain end-to-end. No forks allowed; both services
         # must have produced start + stop pairs.
-        storage = SQLiteStorage(data_dir)
+        storage = get_repository(data_dir=data_dir)
         try:
             # `audit.all()` already orders by id asc (= commit order under
             # `BEGIN IMMEDIATE`). Re-sorting by `at` would scramble the
             # chain because `at` is emit time, not write-commit time.
-            rows = await storage.audit.all()
+            rows = await storage.all_audit()
         finally:
             await storage.close()
 

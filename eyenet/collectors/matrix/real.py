@@ -65,7 +65,8 @@ from nio import (
 )
 from nio.crypto.attachments import decrypt_attachment
 from opentelemetry import trace
-from sqlmodel import Session, select
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import select
 
 from eyenet.collectors.base.skeleton import CollectorSkeleton
 from eyenet.contracts._base import TraceContext
@@ -83,16 +84,8 @@ from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.identity_pool.loader import IdentityFileEntry
 from eyenet.models import AttachmentTable, GroupTable, MessageTable, ReactionTable
 from eyenet.models._base import new_uuid7
-from eyenet.storage import (
-    SQLiteStorage,
-    resolve_message_id,
-    store_attachment,
-    upsert_actor,
-    upsert_group,
-    upsert_source,
-)
-from eyenet.storage.engines import StoreName
-from eyenet.storage.messages import SQLiteMessageStore
+from eyenet.storage import store_attachment
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
 
 _log = structlog.get_logger()
@@ -146,7 +139,7 @@ class MatrixCollector(CollectorSkeleton):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
         pool: IdentityPool,
         identity_name: str,
         backfill: bool = False,
@@ -177,10 +170,6 @@ class MatrixCollector(CollectorSkeleton):
         self._badevent_count: int = 0
         self._badevent_by_type: dict[str, int] = {}
 
-    @property
-    def _msg_store(self) -> SQLiteMessageStore:
-        return self._storage._messages
-
     def _resolve_device_store_path(self, entry: IdentityFileEntry) -> Path:
         """Resolve the on-disk device store path for this identity.
 
@@ -189,7 +178,7 @@ class MatrixCollector(CollectorSkeleton):
         """
         if entry.matrix_device_store_path:
             return Path(entry.matrix_device_store_path)
-        return self._storage.data_dir / "matrix" / entry.name / "store"
+        return cast("Path", self._storage.data_dir) / "matrix" / entry.name / "store"
 
     def _build_client(self, entry: IdentityFileEntry) -> AsyncClient:
         """Construct the AsyncClient with E2EE config and persistent store."""
@@ -273,16 +262,12 @@ class MatrixCollector(CollectorSkeleton):
             if resolved is not None:
                 self._monitor_room_ids.add(resolved)
 
-        messages_engine = self._storage._engines[StoreName.MAIN]
-        with Session(messages_engine) as session:
-            self._source_uuid = upsert_source(
-                session,
-                kind=SourceKind.MATRIX,
-                display_name=f"matrix:{entry.name}",
-                base_url=homeserver,
-                created_at=datetime.now(tz=UTC),
-            )
-            session.commit()
+        self._source_uuid = await self._storage.upsert_source(
+            kind=SourceKind.MATRIX,
+            display_name=f"matrix:{entry.name}",
+            base_url=homeserver,
+            created_at=datetime.now(tz=UTC),
+        )
 
         async def _on_panic(_subject: str, _payload: bytes, _headers: dict[str, str]) -> None:
             _log.warning("collector.panic_received", identity=self._identity_name)
@@ -613,10 +598,8 @@ class MatrixCollector(CollectorSkeleton):
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 
         edited_at = datetime.fromtimestamp(event.server_timestamp / 1000.0, tz=UTC)
-        messages_engine = self._storage._engines[StoreName.MAIN]
-        with Session(messages_engine) as session:
-            # Find the target message in the same room.
-            group = self._lookup_group_uuid(session, room.room_id)
+        async with self._storage.session() as session:
+            group = await self._lookup_group_uuid(session, room.room_id)
             if group is None:
                 _log.warning(
                     "collector.edit_target_room_unknown",
@@ -624,8 +607,7 @@ class MatrixCollector(CollectorSkeleton):
                     target_event_id=target_event_id,
                 )
                 return
-            target_uuid = resolve_message_id(
-                session,
+            target_uuid = await self._storage.resolve_message_id(
                 source_id=self._source_uuid,
                 group_id=group,
                 platform_msgid=target_event_id,
@@ -637,12 +619,11 @@ class MatrixCollector(CollectorSkeleton):
                     target_event_id=target_event_id,
                 )
                 return
-            target = session.get(MessageTable, target_uuid)
+            target = await session.get(MessageTable, target_uuid)
             if target is None:
                 return
             edits = list(target.source_specific.get("edits", []))
             if not edits:
-                # Seed with the original body so the audit chain is complete.
                 edits.append(
                     {
                         "event_id": target.platform_msgid,
@@ -662,7 +643,7 @@ class MatrixCollector(CollectorSkeleton):
             target.length_chars = len(new_body)
             target.length_words = len(new_body.split())
             session.add(target)
-            session.commit()
+            await session.commit()
 
         _log.info(
             "collector.edit_applied",
@@ -671,13 +652,14 @@ class MatrixCollector(CollectorSkeleton):
             edit_event_id=event.event_id,
         )
 
-    def _lookup_group_uuid(self, session: Session, platform_groupid: str) -> UUID | None:
-        row = session.exec(
+    async def _lookup_group_uuid(self, session: Any, platform_groupid: str) -> UUID | None:
+        result = await session.exec(
             select(GroupTable.id).where(
                 GroupTable.source_id == self._source_uuid,
                 GroupTable.platform_groupid == platform_groupid,
             )
-        ).first()
+        )
+        row = result.first()
         if row is None:
             return None
         return UUID(str(row))
@@ -713,45 +695,37 @@ class MatrixCollector(CollectorSkeleton):
         group_title = room.display_name or room.machine_name or None
         group_kind = GroupKind.MATRIX_ROOM
 
-        messages_engine = self._storage._engines[StoreName.MAIN]
         if self._source_uuid is None:
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 
         display_name = room.user_name(event.sender) or None
         reply_to_platform_msgid = self._extract_reply_to(event)
 
-        with Session(messages_engine) as session:
-            group_id = upsert_group(
-                session,
+        group_id = await self._storage.upsert_group(
+            source_id=self._source_uuid,
+            platform_groupid=platform_groupid,
+            kind=group_kind,
+            title=group_title,
+            seen_at=collected_at,
+        )
+        actor_id = await self._storage.upsert_actor(
+            source_id=self._source_uuid,
+            actor_key=actor_key,
+            platform_userid=event.sender,
+            handle=event.sender,
+            display_name=display_name,
+            seen_at=sent_at,
+        )
+        reply_to_msg_id: UUID | None = None
+        source_specific: dict[str, Any] = {}
+        if reply_to_platform_msgid is not None:
+            reply_to_msg_id = await self._storage.resolve_message_id(
                 source_id=self._source_uuid,
-                platform_groupid=platform_groupid,
-                kind=group_kind,
-                title=group_title,
-                seen_at=collected_at,
+                group_id=group_id,
+                platform_msgid=reply_to_platform_msgid,
             )
-            actor_id = upsert_actor(
-                session,
-                source_id=self._source_uuid,
-                actor_key=actor_key,
-                platform_userid=event.sender,
-                handle=event.sender,
-                display_name=display_name,
-                seen_at=sent_at,
-            )
-            # Best-effort reply FK resolution. Out-of-order arrivals keep
-            # the FK None and stash the platform id in source_specific.
-            reply_to_msg_id: UUID | None = None
-            source_specific: dict[str, Any] = {}
-            if reply_to_platform_msgid is not None:
-                reply_to_msg_id = resolve_message_id(
-                    session,
-                    source_id=self._source_uuid,
-                    group_id=group_id,
-                    platform_msgid=reply_to_platform_msgid,
-                )
-                if reply_to_msg_id is None:
-                    source_specific["pending_reply_to"] = reply_to_platform_msgid
-            session.commit()
+            if reply_to_msg_id is None:
+                source_specific["pending_reply_to"] = reply_to_platform_msgid
 
         evidence_ref = f"matrix:{platform_groupid}:{platform_msgid}"
         body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -775,7 +749,7 @@ class MatrixCollector(CollectorSkeleton):
             source_specific=source_specific,
         )
 
-        written = await self._msg_store.put_message(msg_row, [])
+        written = await self._storage.put_message(msg_row, [])
 
         traceparent = current_traceparent() or _zero_traceparent()
         env = RawMessageEnvelope(
@@ -959,40 +933,34 @@ class MatrixCollector(CollectorSkeleton):
         group_title = room.display_name or room.machine_name or None
         body = getattr(event, "body", "") or ""
 
-        messages_engine = self._storage._engines[StoreName.MAIN]
         display_name = room.user_name(event.sender) or None
         reply_to_platform_msgid = self._extract_reply_to(event)
 
-        with Session(messages_engine) as session:
-            group_id = upsert_group(
-                session,
+        group_id = await self._storage.upsert_group(
+            source_id=self._source_uuid,
+            platform_groupid=platform_groupid,
+            kind=GroupKind.MATRIX_ROOM,
+            title=group_title,
+            seen_at=collected_at,
+        )
+        actor_id = await self._storage.upsert_actor(
+            source_id=self._source_uuid,
+            actor_key=actor_key,
+            platform_userid=event.sender,
+            handle=event.sender,
+            display_name=display_name,
+            seen_at=sent_at,
+        )
+        reply_to_msg_id: UUID | None = None
+        source_specific: dict[str, Any] = {}
+        if reply_to_platform_msgid is not None:
+            reply_to_msg_id = await self._storage.resolve_message_id(
                 source_id=self._source_uuid,
-                platform_groupid=platform_groupid,
-                kind=GroupKind.MATRIX_ROOM,
-                title=group_title,
-                seen_at=collected_at,
+                group_id=group_id,
+                platform_msgid=reply_to_platform_msgid,
             )
-            actor_id = upsert_actor(
-                session,
-                source_id=self._source_uuid,
-                actor_key=actor_key,
-                platform_userid=event.sender,
-                handle=event.sender,
-                display_name=display_name,
-                seen_at=sent_at,
-            )
-            reply_to_msg_id: UUID | None = None
-            source_specific: dict[str, Any] = {}
-            if reply_to_platform_msgid is not None:
-                reply_to_msg_id = resolve_message_id(
-                    session,
-                    source_id=self._source_uuid,
-                    group_id=group_id,
-                    platform_msgid=reply_to_platform_msgid,
-                )
-                if reply_to_msg_id is None:
-                    source_specific["pending_reply_to"] = reply_to_platform_msgid
-            session.commit()
+            if reply_to_msg_id is None:
+                source_specific["pending_reply_to"] = reply_to_platform_msgid
 
         sha256: str | None = None
         storage_uri: str | None = None
@@ -1044,7 +1012,7 @@ class MatrixCollector(CollectorSkeleton):
             storage_uri=storage_uri,
         )
 
-        written = await self._msg_store.put_message(msg_row, [attachment_row])
+        written = await self._storage.put_message(msg_row, [attachment_row])
 
         traceparent = current_traceparent() or _zero_traceparent()
         env = RawMessageEnvelope(
@@ -1102,52 +1070,50 @@ class MatrixCollector(CollectorSkeleton):
         actor_key = "actor:" + hashlib.sha256(f"matrix||{event.sender}".encode()).hexdigest()
         evidence_ref = f"matrix:{room.room_id}:{event.event_id}"
 
-        messages_engine = self._storage._engines[StoreName.MAIN]
-        with Session(messages_engine) as session:
-            group_uuid = self._lookup_group_uuid(session, room.room_id)
-            if group_uuid is None:
-                _log.warning(
-                    "collector.reaction_target_room_unknown",
-                    room_id=room.room_id,
-                    target=target_event_id,
-                )
-                return
-            target_uuid = resolve_message_id(
-                session,
-                source_id=self._source_uuid,
-                group_id=group_uuid,
-                platform_msgid=target_event_id,
+        async with self._storage.session() as lookup_session:
+            group_uuid = await self._lookup_group_uuid(lookup_session, room.room_id)
+        if group_uuid is None:
+            _log.warning(
+                "collector.reaction_target_room_unknown",
+                room_id=room.room_id,
+                target=target_event_id,
             )
-            if target_uuid is None:
-                _log.warning(
-                    "collector.reaction_target_unknown",
-                    room_id=room.room_id,
-                    target=target_event_id,
-                )
-                return
-            actor_id = upsert_actor(
-                session,
-                source_id=self._source_uuid,
-                actor_key=actor_key,
-                platform_userid=event.sender,
-                handle=event.sender,
-                display_name=room.user_name(event.sender) or None,
-                seen_at=reacted_at,
+            return
+        target_uuid = await self._storage.resolve_message_id(
+            source_id=self._source_uuid,
+            group_id=group_uuid,
+            platform_msgid=target_event_id,
+        )
+        if target_uuid is None:
+            _log.warning(
+                "collector.reaction_target_unknown",
+                room_id=room.room_id,
+                target=target_event_id,
             )
-            row = ReactionTable(
-                id=new_uuid7(),
-                message_id=target_uuid,
-                actor_id=actor_id,
-                emoji=emoji,
-                reacted_at=reacted_at,
-                evidence_ref=evidence_ref,
-            )
+            return
+        actor_id = await self._storage.upsert_actor(
+            source_id=self._source_uuid,
+            actor_key=actor_key,
+            platform_userid=event.sender,
+            handle=event.sender,
+            display_name=room.user_name(event.sender) or None,
+            seen_at=reacted_at,
+        )
+        row = ReactionTable(
+            id=new_uuid7(),
+            message_id=target_uuid,
+            actor_id=actor_id,
+            emoji=emoji,
+            reacted_at=reacted_at,
+            evidence_ref=evidence_ref,
+        )
+        async with self._storage.session() as session:
             session.add(row)
             try:
-                session.commit()
-            except Exception:
+                await session.commit()
+            except IntegrityError:
                 # Unique evidence_ref collision -> idempotent re-delivery.
-                session.rollback()
+                await session.rollback()
                 return
 
         _log.info(

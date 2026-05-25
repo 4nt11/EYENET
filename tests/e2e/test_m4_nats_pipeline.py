@@ -43,8 +43,7 @@ from eyenet.contracts.enums import LinkageState
 from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.models.graph import GraphEdgeType
-from eyenet.storage import SQLiteStorage
-from eyenet.storage.personas import SQLitePersonaStore
+from eyenet.storage.factory import get_repository
 
 pytestmark = [
     pytest.mark.e2e,
@@ -102,7 +101,7 @@ async def test_full_m4_pipeline_over_real_nats(tmp_path: Path) -> None:  # noqa:
         bus_graph = await NATSBus.connect(url)
         bus_capture = await NATSBus.connect(url)
         bus_publisher = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             proposals: list[LinkageProposedEnvelope] = []
             persona_updates: list[PersonaUpdatedEnvelope] = []
@@ -145,18 +144,18 @@ async def test_full_m4_pipeline_over_real_nats(tmp_path: Path) -> None:  # noqa:
 
             assert len(proposals) >= 1, "Linker should have proposed a linkage over NATS"
 
-            rows = await storage.linkages.list_linkages()
+            rows = await storage.list_linkages()
             assert len(rows) >= 1
             linkage_row = cast("LinkageRow", rows[0])
             assert linkage_row.state == LinkageState.PROPOSED
 
-            edges = await storage.graph.edges_by_type(GraphEdgeType.LINKED_TO)
+            edges = await storage.graph_edges_by_type(GraphEdgeType.LINKED_TO)
             assert len(edges) >= 1
 
             # Step 2 — operator confirms the linkage; publish `linkage.confirmed`.
             updated = cast(
                 "LinkageRow",
-                await storage.linkages.transition(
+                await storage.transition_linkage(
                     linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"
                 ),
             )
@@ -176,14 +175,14 @@ async def test_full_m4_pipeline_over_real_nats(tmp_path: Path) -> None:  # noqa:
             await asyncio.sleep(0.8)
 
             # Step 3 — Persona created.
-            personas = await cast("SQLitePersonaStore", storage.personas).all_personas()
+            personas = await storage.all_personas()
             assert len(personas) >= 1
             persona = personas[0]
             assert set(persona.member_actor_ids) == {_ACTOR_A, _ACTOR_B}
 
             # Step 4 — PersonaMembership reverse index resolves both actors.
-            p_a = cast("PersonaRow | None", await storage.personas.persona_for_actor(_ACTOR_A))
-            p_b = cast("PersonaRow | None", await storage.personas.persona_for_actor(_ACTOR_B))
+            p_a = cast("PersonaRow | None", await storage.persona_for_actor(_ACTOR_A))
+            p_b = cast("PersonaRow | None", await storage.persona_for_actor(_ACTOR_B))
             assert p_a is not None
             assert p_a.id == persona.id
             assert p_b is not None
@@ -196,9 +195,9 @@ async def test_full_m4_pipeline_over_real_nats(tmp_path: Path) -> None:  # noqa:
             assert set(pu.member_actor_ids) == {_ACTOR_A, _ACTOR_B}
 
             # Step 6 — Graph has Persona node + BelongsToPersona edges.
-            stats = await storage.graph.stats()
+            stats = await storage.graph_stats()
             assert stats["personas"] >= 1
-            belongs_edges = await storage.graph.edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
+            belongs_edges = await storage.graph_edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
             assert len(belongs_edges) >= 2
         finally:
             await bus_linker.close()

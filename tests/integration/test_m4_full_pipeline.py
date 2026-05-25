@@ -39,8 +39,8 @@ from eyenet.contracts.enums import LinkageState
 from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.models.graph import GraphEdgeType
-from eyenet.storage import SQLiteStorage
-from eyenet.storage.personas import SQLitePersonaStore
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -53,9 +53,9 @@ _HASH_B = "0000000000000001"  # 1-bit Hamming distance
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
+def storage() -> BaseRepository:
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 def _profile_env(actor_id: UUID, fw_hash: str) -> ProfileCurrentEnvelope:
@@ -73,7 +73,7 @@ def _profile_env(actor_id: UUID, fw_hash: str) -> ProfileCurrentEnvelope:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: SQLiteStorage) -> None:
+async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: BaseRepository) -> None:
     bus = MemoryBus()
     proposals: list[LinkageProposedEnvelope] = []
     persona_updates: list[PersonaUpdatedEnvelope] = []
@@ -106,21 +106,19 @@ async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: SQLiteS
     assert len(proposals) >= 1, "Linker should have proposed a linkage"
 
     # Verify linkage row was persisted
-    rows = await storage.linkages.list_linkages()
+    rows = await storage.list_linkages()
     assert len(rows) >= 1
     linkage_row = cast("LinkageRow", rows[0])
     assert linkage_row.state == LinkageState.PROPOSED
 
     # Verify graph has LinkedTo edge
-    edges = await storage.graph.edges_by_type(GraphEdgeType.LINKED_TO)
+    edges = await storage.graph_edges_by_type(GraphEdgeType.LINKED_TO)
     assert len(edges) >= 1
 
     # Step 2: Confirm the linkage
     updated = cast(
         "LinkageRow",
-        await storage.linkages.transition(
-            linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"
-        ),
+        await storage.transition_linkage(linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"),
     )
     assert updated.state == LinkageState.CONFIRMED
 
@@ -137,14 +135,14 @@ async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: SQLiteS
     await asyncio.sleep(0.3)
 
     # Step 3: Verify Persona was created
-    personas = await cast("SQLitePersonaStore", storage.personas).all_personas()
+    personas = await storage.all_personas()
     assert len(personas) >= 1
     persona = personas[0]
     assert set(persona.member_actor_ids) == {_ACTOR_A, _ACTOR_B}
 
     # Step 4: Verify PersonaMembership reverse index
-    p_a = cast("PersonaRow | None", await storage.personas.persona_for_actor(_ACTOR_A))
-    p_b = cast("PersonaRow | None", await storage.personas.persona_for_actor(_ACTOR_B))
+    p_a = cast("PersonaRow | None", await storage.persona_for_actor(_ACTOR_A))
+    p_b = cast("PersonaRow | None", await storage.persona_for_actor(_ACTOR_B))
     assert p_a is not None
     assert p_a.id == persona.id
     assert p_b is not None
@@ -157,7 +155,7 @@ async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: SQLiteS
     assert set(pu.member_actor_ids) == {_ACTOR_A, _ACTOR_B}
 
     # Step 6: Verify graph has Persona node + BelongsToPersona edges
-    stats = await storage.graph.stats()
+    stats = await storage.graph_stats()
     assert stats["personas"] >= 1
-    belongs_edges = await storage.graph.edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
+    belongs_edges = await storage.graph_edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
     assert len(belongs_edges) >= 2

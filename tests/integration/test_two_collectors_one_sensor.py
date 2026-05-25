@@ -19,7 +19,7 @@ from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEnt
 from eyenet.identity_pool.loader import dump
 from eyenet.sensor.skeleton import SensorSkeleton
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 _FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures/corpora/synthetic_small.jsonl"
 
@@ -49,7 +49,7 @@ async def test_two_collectors_one_sensor(tmp_path: Path) -> None:
     pool = FileIdentityPool(cfg_path)
 
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
 
     fixture = _FIXTURE_PATH
 
@@ -98,7 +98,7 @@ async def test_two_collectors_one_sensor(tmp_path: Path) -> None:
     assert any(coll_a.instance_id in s for s in subjects)
     assert any(coll_b.instance_id in s for s in subjects)
 
-    rows = await storage.audit.all()
+    rows = await storage.all_audit()
     services = {r.service for r in rows}
     assert {"sensor", "collector.telegram"} <= services
 

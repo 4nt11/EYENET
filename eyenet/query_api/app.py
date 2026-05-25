@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 if TYPE_CHECKING:
-    from eyenet.storage.sqlite import SQLiteStorage
+    from eyenet.storage.repository import BaseRepository
 
 from . import deps
 from .routes import router
 
 
-def create_app(storage: SQLiteStorage) -> FastAPI:
+def create_app(storage: BaseRepository) -> FastAPI:
     """Build and return a read-only FastAPI app with storage injected."""
 
     app = FastAPI(

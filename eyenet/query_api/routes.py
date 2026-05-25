@@ -10,7 +10,7 @@ from uuid import UUID  # noqa: TC003
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from eyenet.storage.sqlite import SQLiteStorage
+from eyenet.storage.repository import BaseRepository
 
 if TYPE_CHECKING:
     from eyenet.contracts.attribution import LinkageRow, PersonaRow, ProfileRow
@@ -27,7 +27,7 @@ from .models import (
 
 router = APIRouter()
 
-StorageDep = Annotated[SQLiteStorage, Depends(get_storage)]
+StorageDep = Annotated[BaseRepository, Depends(get_storage)]
 
 
 def _profile_to_summary(profile: ProfileRow, persona_id: UUID | None) -> ActorSummary:
@@ -62,11 +62,11 @@ async def healthz() -> HealthResponse:
 
 @router.get("/actor/{actor_id}", response_model=ActorSummary)
 async def get_actor(actor_id: UUID, storage: StorageDep) -> ActorSummary:
-    profile_raw = await storage.profiles.get_current(actor_id)
+    profile_raw = await storage.get_current_profile(actor_id)
     if profile_raw is None:
         raise HTTPException(status_code=404, detail="actor not found")
     profile = cast("ProfileRow", profile_raw)
-    persona_raw = await storage.personas.persona_for_actor(actor_id)
+    persona_raw = await storage.persona_for_actor(actor_id)
     persona_id = cast("PersonaRow", persona_raw).id if persona_raw is not None else None
     return _profile_to_summary(profile, persona_id)
 
@@ -78,7 +78,7 @@ async def get_actor_neighbors(
     edge_type: str | None = Query(default=None),
     state: str | None = Query(default=None),
 ) -> list[NeighborEdge]:
-    edges = await storage.graph.neighbors(actor_id, edge_type=edge_type)
+    edges = await storage.graph_neighbors(actor_id, edge_type=edge_type)
     result = [
         NeighborEdge(neighbor_id=nid, edge_type=etype, attrs=attrs) for nid, etype, attrs in edges
     ]
@@ -89,13 +89,13 @@ async def get_actor_neighbors(
 
 @router.get("/persona/{persona_id}", response_model=PersonaSummary)
 async def get_persona(persona_id: UUID, storage: StorageDep) -> PersonaSummary:
-    persona_raw = await storage.personas.get_persona(persona_id)
+    persona_raw = await storage.get_persona(persona_id)
     if persona_raw is None:
         raise HTTPException(status_code=404, detail="persona not found")
     persona = cast("PersonaRow", persona_raw)
     member_actors: list[ActorSummary] = []
     for actor_id in persona.member_actor_ids:
-        profile_raw = await storage.profiles.get_current(actor_id)
+        profile_raw = await storage.get_current_profile(actor_id)
         if profile_raw is not None:
             member_actors.append(_profile_to_summary(cast("ProfileRow", profile_raw), persona_id))
         else:
@@ -117,15 +117,13 @@ async def list_linkages(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[LinkageSummary]:
-    rows = await storage.linkages.list_linkages(
-        actor_id=actor_id, state=state, limit=limit, offset=offset
-    )
+    rows = await storage.list_linkages(actor_id=actor_id, state=state, limit=limit, offset=offset)
     return [_linkage_to_summary(cast("LinkageRow", r)) for r in rows]
 
 
 @router.get("/graph/stats", response_model=GraphStats)
 async def graph_stats(storage: StorageDep) -> GraphStats:
-    counts = await storage.graph.stats()
+    counts = await storage.graph_stats()
     return GraphStats(**counts)
 
 

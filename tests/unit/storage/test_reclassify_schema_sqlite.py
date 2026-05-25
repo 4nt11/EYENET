@@ -22,24 +22,29 @@ from eyenet.contracts.enums import (
 )
 from eyenet.models.message import AttachmentTable, MessageTable
 from eyenet.models.observation import ObservationTable
-from eyenet.storage.engines import StoreName, create_all_for, open_in_memory_engine
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository  # noqa: F401
 
 _NOW = datetime(2026, 5, 24, tzinfo=UTC)
 
 
 @pytest.fixture
 def obs_session() -> Session:
-    engine = open_in_memory_engine()
-    create_all_for(StoreName.MAIN, engine)
-    return Session(engine)
+    import os
+
+    os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
+    storage = get_repository(in_memory=True)
+    return Session(storage.sync_engine)
 
 
 @pytest.fixture
 def msg_session() -> Session:
     """Sessions for AttachmentTable need MessageTable's FK target available."""
-    engine = open_in_memory_engine()
-    create_all_for(StoreName.MAIN, engine)
-    return Session(engine)
+    import os
+
+    os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
+    storage = get_repository(in_memory=True)
+    return Session(storage.sync_engine)
 
 
 def _obs(**overrides: object) -> ObservationTable:

@@ -30,6 +30,18 @@ class ObservationsMixin:
             session.add(table)
             await session.commit()
 
+    async def put_observations_bulk(self, observation_rows: list[object]) -> None:
+        """Persist many ObservationRows in ONE session. Used by the
+        StylometricSensor dispatch loop to amortize per-primitive session
+        overhead under the async pool."""
+        if not observation_rows:
+            return
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            for r in observation_rows:
+                row = cast("ObservationRow", r)
+                session.add(ObservationTable(**row.model_dump()))
+            await session.commit()
+
     async def latest_observations(
         self,
         actor_id: UUID,

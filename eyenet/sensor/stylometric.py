@@ -14,22 +14,20 @@ import asyncio
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 import structlog
 from behave_text.spec import PRIMITIVE_REGISTRY, ValueTypeSpec
 from opentelemetry import trace
-from sqlmodel import Session
 
 from eyenet.contracts.enums import ValueKind
 from eyenet.contracts.observation import ObservationEnvelope, ObservationRow
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.contracts.sensor import SensorBase
-from eyenet.contracts.storage import MessageStore
 from eyenet.sensor.primitives import PRIMITIVES, PrimitiveSpec
 from eyenet.service import ServiceBase
-from eyenet.storage.actors import resolve_actor_id
-from eyenet.storage.engines import StoreName
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import attach_from_headers
 
 _tracer = trace.get_tracer("eyenet.sensor.stylometric")
@@ -89,16 +87,12 @@ class StylometricSensor(ServiceBase, SensorBase):
             await self._process(env)
 
     async def _process(self, env: RawMessageEnvelope) -> None:
-        messages_engine = self._storage._engines[StoreName.MAIN]
-
-        with Session(messages_engine) as session:
-            actor_id = resolve_actor_id(session, env.actor_key)
+        actor_id = await self._storage.resolve_actor_id(env.actor_key)
 
         if actor_id is None:
             # Race: collector may not have committed the actor row yet.
             await asyncio.sleep(_RETRY_DELAY)
-            with Session(messages_engine) as session:
-                actor_id = resolve_actor_id(session, env.actor_key)
+            actor_id = await self._storage.resolve_actor_id(env.actor_key)
             if actor_id is None:
                 _log.warning(
                     "sensor.actor_not_found",
@@ -107,7 +101,7 @@ class StylometricSensor(ServiceBase, SensorBase):
                 )
                 return
 
-        body_bytes = await self._storage.messages.get_by_evidence_ref(env.evidence_ref)
+        body_bytes = await self._storage.get_message_body(env.evidence_ref)
         if body_bytes is None:
             _log.warning("sensor.body_not_found", evidence_ref=env.evidence_ref)
             return
@@ -135,18 +129,23 @@ class StylometricSensor(ServiceBase, SensorBase):
             await self._run_primitives(actor_id, env, body_bytes.decode("utf-8"))
 
     async def _run_primitives(self, actor_id: UUID, env: RawMessageEnvelope, _body: str) -> None:
-        cursor_store = self._storage.cursors
-        obs_store = self._storage.observations
-        messages_engine = self._storage._engines[StoreName.MAIN]
-
-        # Per-actor cache for the full-corpus fetch + body batch. Lazy:
-        # populated on the first ``requires_full_corpus`` primitive that
-        # needs it, reused by all subsequent ones. Saves ~10 SQLite reads
-        # + ~10 body batch fetches per actor when meta.* (x8) and the
-        # M6.5 trio (x3) all run in the same dispatch.
         _full_corpus: list[tuple[datetime, UUID, str]] | None = None
         _full_bodies: dict[str, str] | None = None
 
+        _cursor_names = [s.name for s in PRIMITIVES if not s.requires_full_corpus]
+        _cursor_cache = await self._storage.get_cursors_bulk(actor_id, _cursor_names)
+
+        # Resolve current-evidence_ref → msg_id once for the dispatch.
+        # Every primitive that succeeds advances its cursor to this point;
+        # batching this one lookup saves a session per primitive.
+        _current_msg_id = await self._storage.get_message_id_by_evidence_ref(env.evidence_ref)
+        if _current_msg_id is None:
+            from eyenet.models._base import new_uuid7  # noqa: PLC0415
+
+            _current_msg_id = new_uuid7()
+
+        _cursor_updates: list[tuple[str, datetime, UUID]] = []
+        _observation_rows: list[ObservationRow] = []
         succeeded = failed = 0
 
         for spec in PRIMITIVES:
@@ -161,12 +160,8 @@ class StylometricSensor(ServiceBase, SensorBase):
             ) as span:
                 try:
                     t0 = time.monotonic()
-                    # Lazy-populate the per-actor full-corpus + bodies
-                    # cache when the first requires_full_corpus spec
-                    # needs them. Subsequent requires_full_corpus specs
-                    # skip the SQLite + MessageStore round-trips.
                     if spec.requires_full_corpus and _full_corpus is None:
-                        _full_corpus = await self._storage.corpus.iter_since(
+                        _full_corpus = await self._storage.iter_corpus_since(
                             actor_id, _EPOCH, _NULL_UUID
                         )
                     if (
@@ -175,20 +170,18 @@ class StylometricSensor(ServiceBase, SensorBase):
                         and _full_bodies is None
                         and _full_corpus is not None
                     ):
-                        _full_bodies = await _batch_fetch_bodies(
-                            self._storage.messages, _full_corpus
-                        )
+                        _full_bodies = await _batch_fetch_bodies(self._storage, _full_corpus)
                     obs = await self._compute_primitive(
                         spec,
                         actor_id,
                         env,
-                        messages_engine,
                         _precomputed_corpus=_full_corpus if spec.requires_full_corpus else None,
                         _precomputed_bodies=(
                             _full_bodies
                             if spec.requires_full_corpus and spec.requires_bodies
                             else None
                         ),
+                        _cursor=_cursor_cache.get(spec.name),
                     )
                     duration_ms = (time.monotonic() - t0) * 1000
                     span.set_attribute("primitive.duration_ms", duration_ms)
@@ -205,21 +198,12 @@ class StylometricSensor(ServiceBase, SensorBase):
                         span.set_attribute("primitive.outcome", "ok")
                         span.set_attribute("primitive.value", str(obs.value)[:120])
 
-                        # Publish observation envelope
                         await self.publisher.publish_observation(obs)
 
-                        # Persist observation row
                         row = _observation_to_row(obs, actor_id, self.instance_id, spec.version)
-                        await obs_store.put(row)
+                        _observation_rows.append(row)
 
-                        # Advance cursor to the current message
-                        _advance_cursor(
-                            cursor_store,
-                            actor_id,
-                            spec.name,
-                            env,
-                            self._storage.messages,
-                        )
+                        _cursor_updates.append((spec.name, env.sent_at_source, _current_msg_id))
 
                         succeeded += 1
                 except Exception as exc:
@@ -232,6 +216,11 @@ class StylometricSensor(ServiceBase, SensorBase):
                         actor_id=str(actor_id),
                         error=str(exc),
                     )
+
+        if _observation_rows:
+            await self._storage.put_observations_bulk(cast("list[object]", _observation_rows))
+        if _cursor_updates:
+            await self._storage.set_cursors_bulk(actor_id, _cursor_updates)
 
         _log.info(
             "sensor.dispatch.complete",
@@ -246,22 +235,22 @@ class StylometricSensor(ServiceBase, SensorBase):
         spec: PrimitiveSpec,
         actor_id: UUID,
         _env: RawMessageEnvelope,
-        _messages_engine: object,
         *,
         _precomputed_corpus: list[tuple[datetime, UUID, str]] | None = None,
         _precomputed_bodies: dict[str, str] | None = None,
+        _cursor: tuple[datetime, UUID] | None = None,
     ) -> ObservationEnvelope | None:
-        cursor_store = self._storage.cursors
-
         # Meta primitives need the actor's full history, not the
         # since-cursor delta — override with epoch sentinels.
         if spec.requires_full_corpus:
             since_ts, since_msg_id = _EPOCH, _NULL_UUID
+        elif _cursor is not None:
+            since_ts, since_msg_id = _cursor
         else:
-            since_ts, since_msg_id = cursor_store.get(actor_id, spec.name)
+            since_ts, since_msg_id = await self._storage.get_cursor(actor_id, spec.name)
 
         if spec.requires_reply_corpus and spec.compute_with_reply is not None:
-            corpus_reply = await self._storage.corpus.iter_since_with_reply(
+            corpus_reply = await self._storage.iter_corpus_since_with_reply(
                 actor_id, since_ts, since_msg_id
             )
             if not corpus_reply:
@@ -271,39 +260,28 @@ class StylometricSensor(ServiceBase, SensorBase):
         if _precomputed_corpus is not None:
             corpus = _precomputed_corpus
         else:
-            corpus = await self._storage.corpus.iter_since(actor_id, since_ts, since_msg_id)
+            corpus = await self._storage.iter_corpus_since(actor_id, since_ts, since_msg_id)
         if not corpus:
             return None
 
-        # Bodies handling:
-        #   * ``requires_bodies=False`` primitives (meta.*) get an empty dict.
-        #   * Precomputed bodies (from the per-actor cache) are reused.
-        #   * Otherwise, batch-fetch bodies for the window's evidence_refs.
         bodies: dict[str, str]
         if not spec.requires_bodies:
             bodies = {}
         elif _precomputed_bodies is not None:
             bodies = _precomputed_bodies
         else:
-            bodies = await _batch_fetch_bodies(self._storage.messages, corpus)
+            bodies = await _batch_fetch_bodies(self._storage, corpus)
 
         return spec.compute(corpus=corpus, bodies=bodies)
 
 
 async def _batch_fetch_bodies(
-    messages_store: MessageStore,
+    storage: BaseRepository,
     corpus: list[tuple[datetime, UUID, str]],
 ) -> dict[str, str]:
-    """Fetch the body text for every evidence_ref in ``corpus``.
-
-    Returns a dict mapping ``evidence_ref → body_text`` for refs whose
-    body is present in the MessageStore; refs with missing bodies are
-    silently skipped (the primitive's kernel filters them out a second
-    time and the count is observable via traces).
-    """
     bodies: dict[str, str] = {}
     for _ts, _mid, ref in corpus:
-        b = await messages_store.get_by_evidence_ref(ref)
+        b = await storage.get_message_body(ref)
         if b is not None:
             bodies[ref] = b.decode("utf-8")
     return bodies
@@ -366,33 +344,6 @@ def _observation_to_row(
         window_end=window_end,
         observed_at=datetime.now(tz=UTC),
         sensor_instance=sensor_instance,
-    )
-
-
-def _advance_cursor(
-    cursor_store: object,
-    actor_id: UUID,
-    primitive_name: str,
-    env: RawMessageEnvelope,
-    messages_store: object,
-) -> None:
-    """Advance the corpus cursor to the current message's position."""
-    from eyenet.models._base import new_uuid7  # noqa: PLC0415
-    from eyenet.storage.cursors import SQLiteCursorStore  # noqa: PLC0415
-    from eyenet.storage.messages import SQLiteMessageStore  # noqa: PLC0415
-
-    if not isinstance(cursor_store, SQLiteCursorStore):
-        return
-
-    msg_id: UUID | None = None
-    if isinstance(messages_store, SQLiteMessageStore):
-        msg_id = messages_store.get_id_by_evidence_ref(env.evidence_ref)
-
-    cursor_store.set(
-        actor_id,
-        primitive_name,
-        env.sent_at_source,
-        msg_id or new_uuid7(),
     )
 
 

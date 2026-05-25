@@ -20,7 +20,8 @@ from eyenet.contracts.attribution import (
     ProfileCurrentEnvelope,
 )
 from eyenet.linker.linker import Linker
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _TC = TraceContext(traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01")
 _NOW = datetime(2026, 5, 20, 12, 0, 0, tzinfo=UTC)
@@ -34,12 +35,12 @@ _BASE_HASH = "0000000000000000"
 
 
 @pytest.fixture
-def storage(tmp_path: object) -> SQLiteStorage:
+def storage(tmp_path: object) -> BaseRepository:
     import tempfile
     from pathlib import Path
 
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 @pytest.fixture
@@ -69,7 +70,7 @@ def _profile_envelope(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linker_proposes_close_actors(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linker_proposes_close_actors(storage: BaseRepository, bus: MemoryBus) -> None:
     """Pre-seed actor B's simhash. Publish actor A with close hash → proposal emitted."""
     proposed_envelopes: list[LinkageProposedEnvelope] = []
 
@@ -79,9 +80,7 @@ async def test_linker_proposes_close_actors(storage: SQLiteStorage, bus: MemoryB
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed actor B so it's in the index
-    await storage.vector_index.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _BASE_HASH)
 
     # Create linker with default thresholds (fw = 8)
     linker = Linker(bus=bus, storage=storage)
@@ -104,7 +103,7 @@ async def test_linker_proposes_close_actors(storage: SQLiteStorage, bus: MemoryB
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linker_no_proposal_when_far(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linker_no_proposal_when_far(storage: BaseRepository, bus: MemoryBus) -> None:
     """Pre-seed actor B with a hash that is beyond threshold → no proposal."""
     proposed_envelopes: list[object] = []
 
@@ -114,9 +113,7 @@ async def test_linker_no_proposal_when_far(storage: SQLiteStorage, bus: MemoryBu
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed B with a hash very far from the one A will use
-    await storage.vector_index.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _FAR_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _FAR_HASH)
 
     linker = Linker(bus=bus, storage=storage)
     await linker.on_subscribe()
@@ -130,7 +127,7 @@ async def test_linker_no_proposal_when_far(storage: SQLiteStorage, bus: MemoryBu
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linker_no_self_proposal(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linker_no_self_proposal(storage: BaseRepository, bus: MemoryBus) -> None:
     """Actor should never propose a linkage to itself."""
     proposed_envelopes: list[object] = []
 
@@ -153,11 +150,9 @@ async def test_linker_no_self_proposal(storage: SQLiteStorage, bus: MemoryBus) -
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linker_persists_proposed_row(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linker_persists_proposed_row(storage: BaseRepository, bus: MemoryBus) -> None:
     """Proposed linkage is persisted to storage.linkages."""
-    await storage.vector_index.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _BASE_HASH)
 
     linker = Linker(bus=bus, storage=storage)
     await linker.on_subscribe()
@@ -166,7 +161,7 @@ async def test_linker_persists_proposed_row(storage: SQLiteStorage, bus: MemoryB
     await bus.publish(SUBJECT_PROFILE_CURRENT, env_a.model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    rows = await storage.linkages.list_linkages()
+    rows = await storage.list_linkages()
     assert len(rows) >= 1
     row = cast("LinkageRow", rows[0])
     assert {row.actor_a_id, row.actor_b_id} == {_ACTOR_A, _ACTOR_B}
@@ -174,7 +169,7 @@ async def test_linker_persists_proposed_row(storage: SQLiteStorage, bus: MemoryB
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linker_skips_missing_slot(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linker_skips_missing_slot(storage: BaseRepository, bus: MemoryBus) -> None:
     """Profile with no stylometric slots emits no proposals and does not error."""
     proposed: list[object] = []
 
@@ -195,7 +190,7 @@ async def test_linker_skips_missing_slot(storage: SQLiteStorage, bus: MemoryBus)
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linker_respects_config_threshold(storage: SQLiteStorage, bus: MemoryBus) -> None:
+async def test_linker_respects_config_threshold(storage: BaseRepository, bus: MemoryBus) -> None:
     """With threshold=0, only identical hashes match."""
     proposed: list[object] = []
 
@@ -205,9 +200,7 @@ async def test_linker_respects_config_threshold(storage: SQLiteStorage, bus: Mem
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed B with distance-1 hash
-    await storage.vector_index.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _CLOSE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _CLOSE_HASH)
 
     # Zero threshold means only distance=0 matches
     cfg = LinkerConfig(thresholds=LinkerThresholds(function_word_simhash_hamming=0))
@@ -224,7 +217,7 @@ async def test_linker_respects_config_threshold(storage: SQLiteStorage, bus: Mem
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_linker_skips_comparator_disabled_for_language(
-    storage: SQLiteStorage, bus: MemoryBus
+    storage: BaseRepository, bus: MemoryBus
 ) -> None:
     """A None per-language threshold disables the comparator for that language.
 
@@ -241,9 +234,7 @@ async def test_linker_skips_comparator_disabled_for_language(
 
     # Pre-seed actor B with a CLOSE hash — under default thresholds this
     # would absolutely emit a proposal. The Spanish disable must override.
-    await storage.vector_index.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _BASE_HASH)
 
     cfg = LinkerConfig(
         thresholds=LinkerThresholds(

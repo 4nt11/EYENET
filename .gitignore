@@ -47,6 +47,8 @@ bench.json
 # OPSEC — these MUST NEVER be committed
 identities.toml
 identities/
+# Exception: this is a code path under eyenet/, not an OPSEC blob
+!eyenet/api/v1/identities/
 *.session
 *.session-journal
 sessions/

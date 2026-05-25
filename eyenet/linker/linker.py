@@ -30,8 +30,8 @@ from eyenet.contracts.attribution import (
 )
 from eyenet.contracts.bus import Bus
 from eyenet.service import ServiceBase
-from eyenet.storage.sqlite import SQLiteStorage
-from eyenet.storage.vectors import VectorMatch
+from eyenet.storage.repository import BaseRepository
+from eyenet.storage.sqlmodel_repo.vectors import VectorMatch
 from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
 
 from .comparators import REGISTRY, Comparator, ComparisonResult
@@ -45,7 +45,7 @@ class Linker(ServiceBase):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
         config: LinkerConfig | None = None,
     ) -> None:
         super().__init__(bus=bus, storage=storage)
@@ -138,9 +138,9 @@ class Linker(ServiceBase):
             )
             return
 
-        await self._storage.vector_index.upsert_simhash(actor_id, comparator.primitive_name, value)
+        await self._storage.upsert_simhash(actor_id, comparator.primitive_name, value)
 
-        matches: list[VectorMatch] = await self._storage.vector_index.nearest(
+        matches: list[VectorMatch] = await self._storage.nearest_simhashes(
             comparator.primitive_name,
             value,
             max_distance=threshold,
@@ -190,7 +190,7 @@ class Linker(ServiceBase):
         # Verifier) transition the row by linkage_id and need it visible
         # by the time they read the bus message. The opposite order races
         # on real NATS.
-        await self._storage.linkages.insert_proposed(
+        await self._storage.insert_proposed_linkage(
             actor_a=envelope.actor_id,
             actor_b=other_actor_id,
             method=method,

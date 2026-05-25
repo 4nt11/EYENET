@@ -23,7 +23,6 @@ from uuid import UUID
 
 import structlog
 from opentelemetry import trace
-from sqlmodel import Session
 from telethon import TelegramClient, events
 from telethon.tl.types import (
     Channel,
@@ -52,9 +51,7 @@ from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.identity_pool.loader import IdentityFileEntry
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
-from eyenet.storage.engines import StoreName
-from eyenet.storage.messages import SQLiteMessageStore
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
 
 _log = structlog.get_logger()
@@ -77,7 +74,7 @@ class TelegramCollector(CollectorSkeleton):
         self,
         *,
         bus: Bus,
-        storage: SQLiteStorage,
+        storage: BaseRepository,
         pool: IdentityPool,
         identity_name: str,
         backfill: bool = False,
@@ -98,10 +95,6 @@ class TelegramCollector(CollectorSkeleton):
         self._monitor_raw_ids: set[int] | None = None
         self._backfill = backfill
         self._recent: deque[float] = deque(maxlen=3600)
-
-    @property
-    def _msg_store(self) -> SQLiteMessageStore:
-        return self._storage._messages
 
     async def on_subscribe(self) -> None:
         await super().on_subscribe()
@@ -145,17 +138,12 @@ class TelegramCollector(CollectorSkeleton):
             if resolved:
                 self._monitor_raw_ids = resolved
 
-        # Ensure a SourceTable row exists for this identity.
-        messages_engine = self._storage._engines[StoreName.MAIN]
-        with Session(messages_engine) as session:
-            self._source_uuid = upsert_source(
-                session,
-                kind=SourceKind.TELEGRAM,
-                display_name=f"telegram:{entry.name}",
-                base_url="https://t.me",
-                created_at=datetime.now(tz=UTC),
-            )
-            session.commit()
+        self._source_uuid = await self._storage.upsert_source(
+            kind=SourceKind.TELEGRAM,
+            display_name=f"telegram:{entry.name}",
+            base_url="https://t.me",
+            created_at=datetime.now(tz=UTC),
+        )
 
         # Subscribe to panic kill-switch (PLAN §6.2).
         async def _on_panic(_subject: str, _payload: bytes, _headers: dict[str, str]) -> None:
@@ -321,29 +309,24 @@ class TelegramCollector(CollectorSkeleton):
         group_kind = _chat_kind(chat)
         group_title: str | None = getattr(chat, "title", None)
 
-        messages_engine = self._storage._engines[StoreName.MAIN]
         if self._source_uuid is None:
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 
-        with Session(messages_engine) as session:
-            group_id = upsert_group(
-                session,
-                source_id=self._source_uuid,
-                platform_groupid=platform_groupid,
-                kind=group_kind,
-                title=group_title,
-                seen_at=collected_at,
-            )
-            actor_id = upsert_actor(
-                session,
-                source_id=self._source_uuid,
-                actor_key=actor_key,
-                platform_userid=str(sender_id),
-                handle=handle,
-                display_name=display_name,
-                seen_at=sent_at,
-            )
-            session.commit()
+        group_id = await self._storage.upsert_group(
+            source_id=self._source_uuid,
+            platform_groupid=platform_groupid,
+            kind=group_kind,
+            title=group_title,
+            seen_at=collected_at,
+        )
+        actor_id = await self._storage.upsert_actor(
+            source_id=self._source_uuid,
+            actor_key=actor_key,
+            platform_userid=str(sender_id),
+            handle=handle,
+            display_name=display_name,
+            seen_at=sent_at,
+        )
 
         platform_msgid = str(msg.id)
         evidence_ref = f"telegram:{platform_groupid}:{platform_msgid}"
@@ -381,7 +364,7 @@ class TelegramCollector(CollectorSkeleton):
         for att in attachments:
             att.message_id = msg_row.id
 
-        written = await self._msg_store.put_message(msg_row, attachments)
+        written = await self._storage.put_message(msg_row, attachments)
 
         # Always publish to the bus — sensor uses corpus cursors for deduplication,
         # not bus delivery. This ensures backfill re-publishes already-stored messages

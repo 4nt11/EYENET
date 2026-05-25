@@ -36,7 +36,8 @@ from eyenet.contracts.attribution import (
     ProfileCurrentEnvelope,
 )
 from eyenet.graph.graph import Graph
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
 _TRACE_ID_HEX = "0af7651916cd43dd8448eb211c80319d"  # pragma: allowlist secret
@@ -49,8 +50,8 @@ _ACTOR_B = UUID("00000000-0000-0000-0000-000000000012")
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
-    return SQLiteStorage(Path(tempfile.mkdtemp()))
+def storage() -> BaseRepository:
+    return get_repository(data_dir=Path(tempfile.mkdtemp()))
 
 
 def _span_names(exporter: InMemorySpanExporter) -> list[str]:
@@ -89,7 +90,7 @@ async def test_bus_publish_and_deliver_spans(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_publisher_emits_bus_publish_span(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
     bus = MemoryBus()
@@ -117,7 +118,7 @@ async def test_publisher_emits_bus_publish_span(
 
 
 async def _drive_graph(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     bus: MemoryBus,
     subject: str,
     envelope: object,
@@ -135,7 +136,7 @@ async def _drive_graph(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_graph_handle_suspected_emits_upsert_span(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
     env = LinkageSuspectedEnvelope.from_pair(
@@ -155,7 +156,7 @@ async def test_graph_handle_suspected_emits_upsert_span(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_graph_handle_rejected_emits_upsert_span(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
     env = LinkageRejectedEnvelope.from_pair(
@@ -175,7 +176,7 @@ async def test_graph_handle_rejected_emits_upsert_span(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_graph_persona_updated_emits_upsert_span(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
     env = PersonaUpdatedEnvelope(
@@ -199,11 +200,11 @@ async def test_graph_persona_updated_emits_upsert_span(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_storage_graph_upsert_emits_spans(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
-    await storage.graph.upsert_node("actor", _ACTOR_A, {"k": "v"})
-    await storage.graph.upsert_edge("linked_to", _ACTOR_A, _ACTOR_B, {"state": "proposed"})
+    await storage.upsert_graph_node("actor", _ACTOR_A, {"k": "v"})
+    await storage.upsert_graph_edge("linked_to", _ACTOR_A, _ACTOR_B, {"state": "proposed"})
 
     names = _span_names(span_exporter)
     assert "storage.graph.upsert_node" in names, names
@@ -213,11 +214,11 @@ async def test_storage_graph_upsert_emits_spans(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_storage_vectors_spans(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
-    await storage.vector_index.upsert_simhash(_ACTOR_A, "function_word_simhash", "0" * 16)
-    matches = await storage.vector_index.nearest(
+    await storage.upsert_simhash(_ACTOR_A, "function_word_simhash", "0" * 16)
+    matches = await storage.nearest_simhashes(
         "function_word_simhash",
         "0" * 16,
         max_distance=4,
@@ -238,14 +239,14 @@ async def test_storage_vectors_spans(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_audit_emit_span(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
 ) -> None:
     bus = MemoryBus()
     publisher = BusEnvelopePublisher(bus=bus)
     emitter = AuditEmitter(
         publisher=publisher,
-        store=storage.audit,
+        store=storage,
         service="test",
         instance_id="t-1",
     )

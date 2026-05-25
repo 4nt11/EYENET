@@ -303,6 +303,10 @@ class BaseRepository(ABC):
     # =================================================================
 
     @abstractmethod
+    async def put_observations_bulk(self, observation_rows: list[object]) -> None:
+        """Persist many observation rows in one session."""
+
+    @abstractmethod
     async def put_observation(self, observation_row: object) -> None:
         """Persist an :class:`ObservationRow`. Type-erased to avoid
         contract-layer coupling at the ABC."""
@@ -382,10 +386,20 @@ class BaseRepository(ABC):
     async def put_message(
         self,
         row: object,
-        attachments: list[object] | None = None,
+        attachments: Any = None,
     ) -> bool:
         """Persist MessageTable + AttachmentTable rows in one transaction.
         Returns True on insert, False if `evidence_ref` already exists."""
+
+    @abstractmethod
+    async def recent_message_bodies_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """Return up to ``limit`` recent non-empty bodies for an actor,
+        oldest-first. Used by the Verifier window-corpus loader."""
 
     @abstractmethod
     async def resolve_message_id(
@@ -439,6 +453,14 @@ class BaseRepository(ABC):
     # =================================================================
 
     @abstractmethod
+    async def get_cursors_bulk(
+        self,
+        actor_id: UUID,
+        primitive_names: Any,
+    ) -> dict[str, Any]:
+        """Bulk-read cursors for several primitives in one round-trip."""
+
+    @abstractmethod
     async def get_cursor(
         self,
         actor_id: UUID,
@@ -446,6 +468,14 @@ class BaseRepository(ABC):
     ) -> tuple[datetime, UUID]:
         """Return `(last_processed_msg_ts, last_processed_msg_id)` or
         the epoch/nil-UUID sentinel pair."""
+
+    @abstractmethod
+    async def set_cursors_bulk(
+        self,
+        actor_id: UUID,
+        updates: Any,
+    ) -> None:
+        """Apply many cursor updates in one session."""
 
     @abstractmethod
     async def set_cursor(
@@ -674,6 +704,20 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
+
+    # =================================================================
+    # ESCAPE HATCH (collector-side custom transactions)
+    # =================================================================
+
+    @abstractmethod
+    def session(self) -> Any:
+        """Open an async session on the main engine.
+
+        Returns an ``AsyncContextManager[AsyncSession]``. Use the typed
+        flat methods first; this escape hatch is for transactions that
+        can't be expressed as a single repo call (Matrix edit patching,
+        reaction insertion).
+        """
 
     # =================================================================
     # LIFECYCLE

@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 
 from eyenet.contracts.enums import SystemLogLevel
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_allowlisted_lifecycle_persists(tmp_path: Path) -> None:
-    s = SQLiteStorage(tmp_path)
+    s = get_repository(data_dir=tmp_path)
     try:
-        ok = await s.syslog.append(
+        ok = await s.append_syslog(
             level=SystemLogLevel.LIFECYCLE,
             service="engine",
             instance_id="eng_1",
@@ -30,9 +30,9 @@ async def test_allowlisted_lifecycle_persists(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_off_allowlist_lifecycle_dropped(tmp_path: Path) -> None:
-    s = SQLiteStorage(tmp_path)
+    s = get_repository(data_dir=tmp_path)
     try:
-        ok = await s.syslog.append(
+        ok = await s.append_syslog(
             level=SystemLogLevel.LIFECYCLE,
             service="engine",
             instance_id="eng_1",
@@ -47,9 +47,9 @@ async def test_off_allowlist_lifecycle_dropped(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_warn_always_persists(tmp_path: Path) -> None:
-    s = SQLiteStorage(tmp_path)
+    s = get_repository(data_dir=tmp_path)
     try:
-        ok = await s.syslog.append(
+        ok = await s.append_syslog(
             level=SystemLogLevel.WARN,
             service="engine",
             instance_id="eng_1",

@@ -11,7 +11,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import typer
-from sqlmodel import Session, col, select
+from sqlmodel import col, select
 
 from eyenet import __version__
 from eyenet.bus import MemoryBus, NATSBus
@@ -45,9 +45,8 @@ from eyenet.models.profile import ProfileTable
 from eyenet.sensor.skeleton import SensorSkeleton
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import ServiceBase, run_service
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
-from eyenet.storage.engines import StoreName
-from eyenet.storage.messages import SQLiteMessageStore
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.verifier.service import VerifierService
 
 app = typer.Typer(
@@ -89,7 +88,7 @@ def _run(
 ) -> None:  # pragma: no cover
     async def _main() -> None:
         bus = await _connect_bus(cfg)
-        storage = SQLiteStorage(cfg.data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
         try:
             svc: ServiceBase = service_factory(bus, storage)  # type: ignore[operator]
             await run_service(svc, tick_interval=tick)
@@ -101,43 +100,33 @@ def _run(
 
 
 async def _seed_fixture(  # pragma: no cover
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     records: list[dict[str, Any]],
     now: datetime,
 ) -> None:
     """Seed MessageTable rows from fixture records, setting reply_to_msg_id."""
-    messages_engine = storage._engines[StoreName.MAIN]
-    store = SQLiteMessageStore(messages_engine)
-
-    with Session(messages_engine) as session:
-        source_id = upsert_source(
-            session, kind=SourceKind.TELEGRAM, display_name="telegram:tg_alpha", created_at=now
-        )
-        group_id = upsert_group(
-            session,
-            source_id=source_id,
-            platform_groupid="-100",
-            kind=GroupKind.CHAT,
-            title="Smoke",
-            seen_at=now,
-        )
-        actor_ids: dict[str, object] = {}
-        for rec in records:
-            ak = rec["actor_key"]
-            if ak not in actor_ids:
-                actor_ids[ak] = upsert_actor(
-                    session,
-                    source_id=source_id,
-                    actor_key=ak,
-                    platform_userid=ak[-8:],
-                    handle=None,
-                    display_name=None,
-                    seen_at=now,
-                )
-        session.commit()
-        committed_source_id = source_id
-        committed_group_id = group_id
-        committed_actor_ids = dict(actor_ids)
+    source_id = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:tg_alpha", created_at=now
+    )
+    group_id = await storage.upsert_group(
+        source_id=source_id,
+        platform_groupid="-100",
+        kind=GroupKind.CHAT,
+        title="Smoke",
+        seen_at=now,
+    )
+    actor_ids: dict[str, object] = {}
+    for rec in records:
+        ak = rec["actor_key"]
+        if ak not in actor_ids:
+            actor_ids[ak] = await storage.upsert_actor(
+                source_id=source_id,
+                actor_key=ak,
+                platform_userid=ak[-8:],
+                handle=None,
+                display_name=None,
+                seen_at=now,
+            )
 
     platform_to_uuid: dict[str, object] = {}
     for rec in records:
@@ -148,9 +137,9 @@ async def _seed_fixture(  # pragma: no cover
         sent = datetime.fromisoformat(sent_raw) if sent_raw else now
         row = MessageTable(
             id=new_uuid7(),
-            source_id=committed_source_id,
-            group_id=committed_group_id,
-            actor_id=committed_actor_ids[rec["actor_key"]],  # type: ignore[arg-type]
+            source_id=source_id,
+            group_id=group_id,
+            actor_id=actor_ids[rec["actor_key"]],  # type: ignore[arg-type]
             platform_msgid=msgid,
             evidence_ref=ref,
             body=body,
@@ -159,21 +148,22 @@ async def _seed_fixture(  # pragma: no cover
             sent_at_source=sent,
             ingested_at=now,
         )
-        await store.put_message(row)
+        await storage.put_message(row)
         platform_to_uuid[msgid] = row.id
 
-    with Session(messages_engine) as session:
+    async with storage.session() as session:
         for rec in records:
             rkey = rec.get("reply_to_platform_msgid")
             if rkey and rkey in platform_to_uuid:
                 ref = f"telegram:-100:{rec['platform_msgid']}"
-                msg = session.exec(
+                result = await session.exec(
                     select(MessageTable).where(MessageTable.evidence_ref == ref)
-                ).first()
+                )
+                msg = result.first()
                 if msg is not None:
-                    msg.reply_to_msg_id = platform_to_uuid[rkey]  # type: ignore[assignment]
+                    msg.reply_to_msg_id = platform_to_uuid[rkey]
                     session.add(msg)
-        session.commit()
+        await session.commit()
 
 
 async def _smoke_run(  # pragma: no cover
@@ -185,7 +175,7 @@ async def _smoke_run(  # pragma: no cover
 ) -> None:
     """Smoke-test mode: Collector+Sensor+Engine against a JSONL fixture."""
     bus = await _connect_bus(cfg)
-    storage = SQLiteStorage(cfg.data_dir)
+    storage = get_repository(data_dir=cfg.data_dir)
     now = datetime.now(tz=UTC)
 
     try:
@@ -218,13 +208,13 @@ async def _smoke_run(  # pragma: no cover
         await asyncio.gather(sensor_task, engine_task, collector_task)
 
         if dump_profiles:
-            profiles_engine = storage._engines[StoreName.MAIN]
-            with Session(profiles_engine) as session:
-                rows = session.exec(
+            async with storage.session() as session:
+                result = await session.exec(
                     select(ProfileTable)
                     .where(col(ProfileTable.is_current).is_(True))
                     .order_by(col(ProfileTable.derived_at))
-                ).all()
+                )
+                rows = list(result.all())
             for row in rows:
                 print(json.dumps(row.model_dump(), default=str))
 
@@ -307,7 +297,7 @@ def collector_run(  # pragma: no cover
 
     if collector == "telegram":
 
-        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return TelegramCollector(
                 bus=bus,
                 storage=storage,
@@ -319,7 +309,7 @@ def collector_run(  # pragma: no cover
         _run(_factory, cfg, tick=0.0)
     elif collector == "matrix":
 
-        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return MatrixCollector(
                 bus=bus,
                 storage=storage,
@@ -331,7 +321,7 @@ def collector_run(  # pragma: no cover
         _run(_factory, cfg, tick=0.0)
     elif collector == "matrix-stub":
 
-        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return MatrixCollectorStub(
                 bus=bus,
                 storage=storage,
@@ -343,7 +333,7 @@ def collector_run(  # pragma: no cover
         _run(_factory, cfg, tick=tick)
     else:  # telegram-stub
 
-        def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return TelegramCollectorStub(
                 bus=bus,
                 storage=storage,
@@ -430,7 +420,7 @@ def verifier_run(  # pragma: no cover
         else (default_pool if default_pool.exists() else None)
     )
 
-    def _factory(bus: Bus, storage: SQLiteStorage) -> ServiceBase:
+    def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
         return VerifierService(
             bus=bus,
             storage=storage,
@@ -475,7 +465,7 @@ def graph_api_serve(  # pragma: no cover
         )
 
     cfg = RuntimeConfig.from_env(data_dir=data_dir)
-    storage = SQLiteStorage(cfg.data_dir)
+    storage = get_repository(data_dir=cfg.data_dir)
 
     from eyenet.query_api.app import create_app  # noqa: PLC0415
 
@@ -516,10 +506,10 @@ def linkage_list(
     """List linkage rows."""
 
     cfg = RuntimeConfig.from_env(data_dir=data_dir)
-    storage = SQLiteStorage(cfg.data_dir)
+    storage = get_repository(data_dir=cfg.data_dir)
 
     async def _main() -> None:
-        rows = await storage.linkages.list_linkages(actor_id=actor_id, state=state, limit=limit)
+        rows = await storage.list_linkages(actor_id=actor_id, state=state, limit=limit)
         if not rows:
             typer.echo("no linkages found")
             return
@@ -548,17 +538,17 @@ def _decision_command(
     cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
 
     async def _main() -> None:
-        storage = SQLiteStorage(cfg.data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
         bus = await _connect_bus(cfg)
         try:
-            row = await storage.linkages.get(linkage_id)
+            row = await storage.get_linkage(linkage_id)
             if row is None:
                 typer.echo(f"ERROR: linkage {linkage_id} not found", err=True)
                 raise typer.Exit(code=1)
 
             r = row
 
-            await storage.linkages.transition(
+            await storage.transition_linkage(
                 linkage_id, new_state, decided_by=decided_by, notes=notes
             )
 
@@ -574,7 +564,7 @@ def _decision_command(
             }.get(new_state)
             if feedback_truth is not None:
                 try:
-                    await storage.feedback_pairs.record(
+                    await storage.record_feedback_pair(
                         linkage_id=linkage_id,
                         actor_a=r.actor_a_id,
                         actor_b=r.actor_b_id,

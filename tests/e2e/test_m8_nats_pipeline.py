@@ -24,7 +24,6 @@ from typing import cast
 from uuid import UUID
 
 import pytest
-from sqlmodel import Session
 
 from eyenet.bus import NATSBus
 from eyenet.cli.config import VerifierConfig, VerifierThresholds
@@ -42,9 +41,8 @@ from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
 from eyenet.linker.linker import Linker
 from eyenet.models._base import new_uuid7
 from eyenet.models.message import MessageTable
-from eyenet.storage import SQLiteStorage, upsert_actor, upsert_group, upsert_source
-from eyenet.storage.engines import StoreName
-from eyenet.storage.messages import SQLiteMessageStore
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.verifier.service import VerifierService
 
 pytestmark = [
@@ -79,42 +77,33 @@ async def _nats_url() -> AsyncIterator[str]:
         yield url
 
 
-async def _seed_actor(storage: SQLiteStorage, bodies: list[str], *, msg_prefix: str) -> UUID:
-    engine = storage._engines[StoreName.MAIN]
-    store = SQLiteMessageStore(engine)
-    with Session(engine) as session:
-        source_id = upsert_source(
-            session,
-            kind=SourceKind.TELEGRAM,
-            display_name=f"telegram:{msg_prefix}",
-            created_at=_NOW,
-        )
-        group_id = upsert_group(
-            session,
-            source_id=source_id,
-            platform_groupid=f"-100-{msg_prefix}",
-            kind=GroupKind.CHAT,
-            title="test",
-            seen_at=_NOW,
-        )
-        actor_id = upsert_actor(
-            session,
-            source_id=source_id,
-            actor_key=f"actor:e2e:{msg_prefix}",
-            platform_userid=msg_prefix,
-            handle=None,
-            display_name=None,
-            seen_at=_NOW,
-        )
-        session.commit()
-        committed_source_id = source_id
-        committed_group_id = group_id
+async def _seed_actor(storage: BaseRepository, bodies: list[str], *, msg_prefix: str) -> UUID:
+    source_id = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM,
+        display_name=f"telegram:{msg_prefix}",
+        created_at=_NOW,
+    )
+    group_id = await storage.upsert_group(
+        source_id=source_id,
+        platform_groupid=f"-100-{msg_prefix}",
+        kind=GroupKind.CHAT,
+        title="test",
+        seen_at=_NOW,
+    )
+    actor_id = await storage.upsert_actor(
+        source_id=source_id,
+        actor_key=f"actor:e2e:{msg_prefix}",
+        platform_userid=msg_prefix,
+        handle=None,
+        display_name=None,
+        seen_at=_NOW,
+    )
 
     for i, body in enumerate(bodies):
         row = MessageTable(
             id=new_uuid7(),
-            source_id=committed_source_id,
-            group_id=committed_group_id,
+            source_id=source_id,
+            group_id=group_id,
             actor_id=actor_id,
             platform_msgid=f"{msg_prefix}-{i}",
             evidence_ref=f"{msg_prefix}:-100:{i}",
@@ -124,7 +113,7 @@ async def _seed_actor(storage: SQLiteStorage, bodies: list[str], *, msg_prefix: 
             sent_at_source=_NOW,
             ingested_at=_NOW,
         )
-        await store.put_message(row)
+        await storage.put_message(row)
     return actor_id
 
 
@@ -152,7 +141,7 @@ async def test_m8_propose_verify_suspect_over_real_nats(tmp_path: Path) -> None:
         bus_verifier = await NATSBus.connect(url)
         bus_capture = await NATSBus.connect(url)
         bus_publisher = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             proposals: list[LinkageProposedEnvelope] = []
             suspicions: list[LinkageSuspectedEnvelope] = []
@@ -207,16 +196,16 @@ async def test_m8_propose_verify_suspect_over_real_nats(tmp_path: Path) -> None:
             assert suspicions, "Verifier should have promoted to SUSPECTED"
             assert proposals[0].evidence.get("language") == "en"
 
-            rows = await storage.linkages.list_linkages()
+            rows = await storage.list_linkages()
             assert len(rows) >= 1
             linkage_row = cast("LinkageRow", rows[0])
             assert linkage_row.state == LinkageState.SUSPECTED
 
             # Operator confirm → FeedbackPair side-effect.
-            await storage.linkages.transition(
+            await storage.transition_linkage(
                 linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"
             )
-            await storage.feedback_pairs.record(
+            await storage.record_feedback_pair(
                 linkage_id=linkage_row.id,
                 actor_a=linkage_row.actor_a_id,
                 actor_b=linkage_row.actor_b_id,
@@ -224,7 +213,7 @@ async def test_m8_propose_verify_suspect_over_real_nats(tmp_path: Path) -> None:
                 decided_by="anti",
                 decided_at=datetime.now(tz=UTC),
             )
-            feedback = await storage.feedback_pairs.get(linkage_row.id)
+            feedback = await storage.get_feedback_pair(linkage_row.id)
             assert feedback is not None
             assert feedback.ground_truth == "same"
         finally:
@@ -246,7 +235,7 @@ async def test_m8_diff_author_no_promotion_over_real_nats(tmp_path: Path) -> Non
         bus_verifier = await NATSBus.connect(url)
         bus_capture = await NATSBus.connect(url)
         bus_publisher = await NATSBus.connect(url)
-        storage = SQLiteStorage(tmp_path / "data")
+        storage = get_repository(data_dir=tmp_path / "data")
         try:
             suspicions: list[bytes] = []
 
@@ -288,7 +277,7 @@ async def test_m8_diff_author_no_promotion_over_real_nats(tmp_path: Path) -> Non
 
             assert not suspicions, "Verifier must not promote diff-author pair"
 
-            rows = await storage.linkages.list_linkages()
+            rows = await storage.list_linkages()
             assert len(rows) >= 1
             assert cast("LinkageRow", rows[0]).state == LinkageState.PROPOSED
         finally:

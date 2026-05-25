@@ -16,7 +16,7 @@ from eyenet.identity_pool.loader import dump
 from eyenet.linker.linker import Linker
 from eyenet.sensor.skeleton import SensorSkeleton
 from eyenet.service import run_service
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
 
 _FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures/corpora/synthetic_small.jsonl"
 
@@ -43,7 +43,7 @@ async def test_full_fleet_lifecycle(tmp_path: Path) -> None:
     pool = FileIdentityPool(cfg_path)
 
     bus = MemoryBus()
-    storage = SQLiteStorage(tmp_path / "data")
+    storage = get_repository(data_dir=tmp_path / "data")
     fixture = _FIXTURE_PATH
 
     services = [
@@ -70,7 +70,7 @@ async def test_full_fleet_lifecycle(tmp_path: Path) -> None:
         await s.shutdown()
     await asyncio.gather(*tasks)
 
-    rows = await storage.audit.all()
+    rows = await storage.all_audit()
     services_seen = {r.service for r in rows}
     assert services_seen >= {"sensor", "engine", "linker", "graph", "collector.telegram"}
 

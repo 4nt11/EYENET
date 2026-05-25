@@ -42,7 +42,8 @@ from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
 from eyenet.sensor.stylometric import StylometricSensor
-from eyenet.storage import SQLiteStorage
+from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.verifier.service import VerifierService
 
 # Known W3C traceparent — trace_id portion is what subscribers must inherit.
@@ -59,9 +60,9 @@ _TC = TraceContext(traceparent=_TRACEPARENT)
 
 
 @pytest.fixture
-def storage() -> SQLiteStorage:
+def storage() -> BaseRepository:
     d = tempfile.mkdtemp()
-    return SQLiteStorage(Path(d))
+    return get_repository(data_dir=Path(d))
 
 
 def _probe_tracer() -> otel_trace.Tracer:
@@ -76,7 +77,7 @@ def _probe_tracer() -> otel_trace.Tracer:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_sensor_inherits_trace_from_raw_message_headers(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -125,7 +126,7 @@ async def test_sensor_inherits_trace_from_raw_message_headers(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_engine_inherits_trace_from_observation_headers(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -171,7 +172,7 @@ async def test_engine_inherits_trace_from_observation_headers(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_linker_inherits_trace_from_profile_current_headers(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -217,7 +218,7 @@ async def test_linker_inherits_trace_from_profile_current_headers(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_verifier_inherits_trace_from_linkage_proposed_headers(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -263,7 +264,7 @@ async def test_verifier_inherits_trace_from_linkage_proposed_headers(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_graph_profile_current_inherits_trace(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -304,7 +305,7 @@ async def test_graph_profile_current_inherits_trace(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_graph_linkage_event_inherits_trace(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -345,7 +346,7 @@ async def test_graph_linkage_event_inherits_trace(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_graph_persona_updated_inherits_trace(
-    storage: SQLiteStorage,
+    storage: BaseRepository,
     span_exporter: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
