@@ -245,7 +245,7 @@ async def test_audit_emit_span(
     publisher = BusEnvelopePublisher(bus=bus)
     emitter = AuditEmitter(
         publisher=publisher,
-        store=storage.audit,
+        store=storage,
         service="test",
         instance_id="t-1",
     )
