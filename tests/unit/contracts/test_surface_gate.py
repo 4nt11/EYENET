@@ -45,7 +45,6 @@ _INTERFACE_MODULES: frozenset[str] = frozenset(
     {
         "eyenet.contracts.audit_subjects",
         "eyenet.contracts.bus",
-        "eyenet.contracts.storage",
         "eyenet.contracts.identity_pool",
         "eyenet.contracts.collector",
         "eyenet.contracts.sensor",
