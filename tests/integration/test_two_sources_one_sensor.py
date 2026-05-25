@@ -147,7 +147,7 @@ async def test_two_sources_one_sensor(tmp_path: Path) -> None:
     assert all(r.startswith("matrix:") for r in by_source[SourceKind.MATRIX])
 
     # Audit log: each collector wrote service.start under its own name.
-    rows = await storage.audit.all()
+    rows = await storage.all_audit()
     services = {r.service for r in rows}
     assert {"sensor", "collector.telegram", "collector.matrix"} <= services
 

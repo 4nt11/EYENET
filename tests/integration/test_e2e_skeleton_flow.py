@@ -70,7 +70,7 @@ async def test_full_fleet_lifecycle(tmp_path: Path) -> None:
         await s.shutdown()
     await asyncio.gather(*tasks)
 
-    rows = await storage.audit.all()
+    rows = await storage.all_audit()
     services_seen = {r.service for r in rows}
     assert services_seen >= {"sensor", "engine", "linker", "graph", "collector.telegram"}
 

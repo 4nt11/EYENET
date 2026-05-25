@@ -14,7 +14,7 @@ from eyenet.storage import SQLiteStorage
 
 
 async def _propose(storage: SQLiteStorage, a: UUID, b: UUID) -> LinkageRow:
-    row = await storage.linkages.insert_proposed(a, b, "t", 0.5, {})
+    row = await storage.insert_proposed_linkage(a, b, "t", 0.5, {})
     assert isinstance(row, LinkageRow)
     return row
 
@@ -30,7 +30,7 @@ async def test_record_inserts_and_orders_pair(storage: SQLiteStorage) -> None:
     a, b = sorted([uuid4(), uuid4()])
     linkage = await _propose(storage, a, b)
     now = datetime.now(tz=UTC)
-    row = await storage.feedback_pairs.record(
+    row = await storage.record_feedback_pair(
         linkage_id=linkage.id,
         actor_a=b,  # swapped — store must reorder
         actor_b=a,
@@ -50,7 +50,7 @@ async def test_record_idempotent_on_linkage_id_overwrites(storage: SQLiteStorage
     linkage = await _propose(storage, a, b)
     now = datetime.now(tz=UTC)
 
-    await storage.feedback_pairs.record(
+    await storage.record_feedback_pair(
         linkage_id=linkage.id,
         actor_a=a,
         actor_b=b,
@@ -58,7 +58,7 @@ async def test_record_idempotent_on_linkage_id_overwrites(storage: SQLiteStorage
         decided_by="op1",
         decided_at=now,
     )
-    await storage.feedback_pairs.record(
+    await storage.record_feedback_pair(
         linkage_id=linkage.id,
         actor_a=a,
         actor_b=b,
@@ -67,7 +67,7 @@ async def test_record_idempotent_on_linkage_id_overwrites(storage: SQLiteStorage
         decided_at=now,
         notes="override",
     )
-    fetched = await storage.feedback_pairs.get(linkage.id)
+    fetched = await storage.get_feedback_pair(linkage.id)
     assert fetched is not None
     assert fetched.ground_truth == "diff"
     assert fetched.decided_by == "op2"
@@ -80,7 +80,7 @@ async def test_invalid_ground_truth_raises(storage: SQLiteStorage) -> None:
     a, b = sorted([uuid4(), uuid4()])
     linkage = await _propose(storage, a, b)
     with pytest.raises(ValueError, match="ground_truth must be one of"):
-        await storage.feedback_pairs.record(
+        await storage.record_feedback_pair(
             linkage_id=linkage.id,
             actor_a=a,
             actor_b=b,
@@ -98,7 +98,7 @@ async def test_all_pairs_returns_recorded_truth(storage: SQLiteStorage) -> None:
     for _ in range(3):
         a, b = sorted([uuid4(), uuid4()])
         linkage = await _propose(storage, a, b)
-        await storage.feedback_pairs.record(
+        await storage.record_feedback_pair(
             linkage_id=linkage.id,
             actor_a=a,
             actor_b=b,
@@ -107,7 +107,7 @@ async def test_all_pairs_returns_recorded_truth(storage: SQLiteStorage) -> None:
             decided_at=now,
         )
         truths.append("same")
-    pairs = await storage.feedback_pairs.all_pairs()
+    pairs = await storage.all_feedback_pairs()
     assert len(pairs) == 3
     assert all(gt == "same" for _, _, gt in pairs)
     # Ordered-pair invariant

@@ -135,7 +135,7 @@ async def test_proposal_persisted_to_storage(storage: SQLiteStorage) -> None:
     )
     await asyncio.sleep(0.1)
 
-    rows = await storage.linkages.list_linkages()
+    rows = await storage.list_linkages()
     assert len(rows) >= 1
     row = cast("LinkageRow", rows[0])
     assert {row.actor_a_id, row.actor_b_id} == {_ACTOR_A, _ACTOR_B}

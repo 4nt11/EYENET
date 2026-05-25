@@ -96,7 +96,7 @@ async def test_verifier_error_branch_caught_and_logged(
     storage: SQLiteStorage,
 ) -> None:
     bus = MemoryBus()
-    linkage = await storage.linkages.insert_proposed(_A, _B, method="test", score=0.5, evidence={})
+    linkage = await storage.insert_proposed_linkage(_A, _B, method="test", score=0.5, evidence={})
     stub = _StubVerifier(raises=RuntimeError("boom"))
     service = VerifierService(bus=bus, storage=storage, verifiers=(stub,))
     await service.on_subscribe()
@@ -115,7 +115,7 @@ async def test_verifier_error_branch_caught_and_logged(
     assert err_log["error"] == "boom"
 
     # No promotion — row stays PROPOSED.
-    row = await storage.linkages.get(linkage.id)
+    row = await storage.get_linkage(linkage.id)
     assert row is not None
     assert row.state == LinkageState.PROPOSED
 
@@ -124,7 +124,7 @@ async def test_verifier_error_branch_caught_and_logged(
 @pytest.mark.asyncio
 async def test_no_qualified_results_branch(storage: SQLiteStorage) -> None:
     bus = MemoryBus()
-    linkage = await storage.linkages.insert_proposed(_A, _B, method="test", score=0.5, evidence={})
+    linkage = await storage.insert_proposed_linkage(_A, _B, method="test", score=0.5, evidence={})
     skipped = VerificationResult(
         method="stub",
         score=0.0,
@@ -144,7 +144,7 @@ async def test_no_qualified_results_branch(storage: SQLiteStorage) -> None:
         await asyncio.sleep(0.1)
 
     assert "verifier.no_qualified_results" in _events(caplog)
-    row = await storage.linkages.get(linkage.id)
+    row = await storage.get_linkage(linkage.id)
     assert row is not None
     assert row.state == LinkageState.PROPOSED
 
@@ -153,9 +153,9 @@ async def test_no_qualified_results_branch(storage: SQLiteStorage) -> None:
 @pytest.mark.asyncio
 async def test_skip_promotion_illegal_transition(storage: SQLiteStorage) -> None:
     bus = MemoryBus()
-    linkage = await storage.linkages.insert_proposed(_A, _B, method="test", score=0.5, evidence={})
+    linkage = await storage.insert_proposed_linkage(_A, _B, method="test", score=0.5, evidence={})
     # Operator beat the verifier to it — already terminal.
-    await storage.linkages.transition(linkage.id, LinkageState.CONFIRMED, decided_by="anti")
+    await storage.transition_linkage(linkage.id, LinkageState.CONFIRMED, decided_by="anti")
 
     # Score well above floor so we reach _promote_to_suspected.
     strong = VerificationResult(
@@ -175,6 +175,6 @@ async def test_skip_promotion_illegal_transition(storage: SQLiteStorage) -> None
         await asyncio.sleep(0.1)
 
     assert "verifier.skip_promotion_illegal_transition" in _events(caplog)
-    row = await storage.linkages.get(linkage.id)
+    row = await storage.get_linkage(linkage.id)
     assert row is not None
     assert row.state == LinkageState.CONFIRMED  # untouched

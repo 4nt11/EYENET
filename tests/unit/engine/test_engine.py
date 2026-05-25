@@ -104,7 +104,7 @@ async def test_candidate_emits_on_slot_update(tmp_storage: SQLiteStorage, bus: M
     primitive = "lexical.vocabulary_richness"
     row = _obs_row(_ACTOR_UUID, primitive, value_numeric=0.72)
     row = row.model_copy(update={"evidence_ref": evidence_ref})
-    await tmp_storage.observations.put(row)
+    await tmp_storage.put_observation(row)
 
     payload = _fake_observation_payload(primitive, evidence_ref)
     headers = {"traceparent": _TRACEPARENT}
@@ -141,11 +141,11 @@ async def test_current_suppressed_on_duplicate_value(
 
     row1 = _obs_row(_ACTOR_UUID, primitive, value_numeric=0.72)
     row1 = row1.model_copy(update={"evidence_ref": evidence_ref_1})
-    await tmp_storage.observations.put(row1)
+    await tmp_storage.put_observation(row1)
 
     row2 = _obs_row(_ACTOR_UUID, primitive, value_numeric=0.72)  # same value
     row2 = row2.model_copy(update={"evidence_ref": evidence_ref_2})
-    await tmp_storage.observations.put(row2)
+    await tmp_storage.put_observation(row2)
 
     headers = {"traceparent": _TRACEPARENT}
 
@@ -191,11 +191,11 @@ async def test_current_emits_on_changed_value(tmp_storage: SQLiteStorage, bus: M
 
     row1 = _obs_row(_ACTOR_UUID, primitive, value_numeric=0.72)
     row1 = row1.model_copy(update={"evidence_ref": evidence_ref_1})
-    await tmp_storage.observations.put(row1)
+    await tmp_storage.put_observation(row1)
 
     row2 = _obs_row(_ACTOR_UUID, primitive, value_numeric=0.55)  # different value
     row2 = row2.model_copy(update={"evidence_ref": evidence_ref_2})
-    await tmp_storage.observations.put(row2)
+    await tmp_storage.put_observation(row2)
 
     headers = {"traceparent": _TRACEPARENT}
 
@@ -235,7 +235,7 @@ async def test_unknown_primitive_does_not_emit(tmp_storage: SQLiteStorage, bus: 
     evidence_ref = "test:ref:unknown:1"
     row = _obs_row(_ACTOR_UUID, primitive, value_numeric=0.5)
     row = row.model_copy(update={"evidence_ref": evidence_ref})
-    await tmp_storage.observations.put(row)
+    await tmp_storage.put_observation(row)
 
     await bus.publish(
         "actor.observation.text.unknown",

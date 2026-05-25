@@ -113,7 +113,7 @@ async def test_linker_and_graph_concurrent_boot_chain_intact(tmp_path: Path) -> 
             # `audit.all()` already orders by id asc (= commit order under
             # `BEGIN IMMEDIATE`). Re-sorting by `at` would scramble the
             # chain because `at` is emit time, not write-commit time.
-            rows = await storage.audit.all()
+            rows = await storage.all_audit()
         finally:
             await storage.close()
 

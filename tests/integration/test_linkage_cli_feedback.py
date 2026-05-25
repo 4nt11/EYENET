@@ -28,7 +28,7 @@ def _seed_proposed_linkage(data_dir: Path) -> str:
         storage = SQLiteStorage(data_dir)
         a, b = sorted([uuid4(), uuid4()])
         try:
-            row = await storage.linkages.insert_proposed(
+            row = await storage.insert_proposed_linkage(
                 a, b, "test_method", 0.6, {"language": "es"}
             )
             return str(row.id)
@@ -50,10 +50,10 @@ def _assert_state_and_feedback(
         storage = SQLiteStorage(data_dir)
         try:
             lid = UUID(linkage_id)
-            row = await storage.linkages.get(lid)
+            row = await storage.get_linkage(lid)
             assert row is not None
             assert row.state == expected_state
-            feedback = await storage.feedback_pairs.get(lid)
+            feedback = await storage.get_feedback_pair(lid)
             if expected_ground_truth is None:
                 assert feedback is None
             else:

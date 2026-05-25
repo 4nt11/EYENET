@@ -98,7 +98,7 @@ async def test_two_collectors_one_sensor(tmp_path: Path) -> None:
     assert any(coll_a.instance_id in s for s in subjects)
     assert any(coll_b.instance_id in s for s in subjects)
 
-    rows = await storage.audit.all()
+    rows = await storage.all_audit()
     services = {r.service for r in rows}
     assert {"sensor", "collector.telegram"} <= services
 

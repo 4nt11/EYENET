@@ -33,7 +33,7 @@ def _append_worker(args: tuple[str, str, int]) -> str:
 
     async def run() -> None:
         for _ in range(n):
-            await storage.audit.append(
+            await storage.append_audit(
                 {
                     "event": "service.start",
                     "service": service,
@@ -75,7 +75,7 @@ def test_four_processes_append_audit_chain_linear(tmp_path: Path) -> None:
     storage = SQLiteStorage(tmp_path)
 
     async def read_chain() -> list[tuple[str, str, str]]:
-        rows = await storage.audit.all()
+        rows = await storage.all_audit()
         return [(r.event, r.prev_hash, r.self_hash) for r in rows]
 
     chain = asyncio.run(read_chain())

@@ -39,7 +39,7 @@ async def test_start_to_stop_clean(tmp_path: Path) -> None:
     await svc.shutdown()
     await asyncio.wait_for(task, timeout=2.0)
 
-    rows = await storage.audit.all()
+    rows = await storage.all_audit()
     events = [r.event for r in rows]
     assert "service.start" in events
     assert "service.stop" in events

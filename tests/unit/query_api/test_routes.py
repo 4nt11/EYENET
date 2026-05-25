@@ -65,7 +65,7 @@ def test_healthz_returns_ok(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_get_actor_returns_summary(storage: SQLiteStorage, client: TestClient) -> None:
     row = _profile_row(_ACTOR_A)
-    await storage.profiles.upsert_current(row)
+    await storage.upsert_current_profile(row)
 
     resp = client.get(f"/actor/{_ACTOR_A}")
     assert resp.status_code == 200
@@ -77,9 +77,9 @@ async def test_get_actor_returns_summary(storage: SQLiteStorage, client: TestCli
 @pytest.mark.asyncio
 async def test_get_actor_includes_persona_id(storage: SQLiteStorage, client: TestClient) -> None:
     row = _profile_row(_ACTOR_A)
-    await storage.profiles.upsert_current(row)
+    await storage.upsert_current_profile(row)
     persona = cast(
-        "PersonaRow", await storage.personas.merge_actors(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
+        "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
     )
 
     resp = client.get(f"/actor/{_ACTOR_A}")
@@ -100,7 +100,7 @@ def test_get_actor_404_when_missing(client: TestClient) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_get_neighbors_returns_edges(storage: SQLiteStorage, client: TestClient) -> None:
-    await storage.graph.upsert_edge(
+    await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {"state": "proposed"}
     )
 
@@ -124,10 +124,10 @@ async def test_get_neighbors_empty_when_no_edges(
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_get_neighbors_filter_by_state(storage: SQLiteStorage, client: TestClient) -> None:
-    await storage.graph.upsert_edge(
+    await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {"state": "proposed"}
     )
-    await storage.graph.upsert_edge(
+    await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO,
         _ACTOR_A,
         UUID("00000000-0000-0000-0000-000000000003"),
@@ -147,7 +147,7 @@ async def test_get_neighbors_filter_by_state(storage: SQLiteStorage, client: Tes
 @pytest.mark.asyncio
 async def test_get_persona_returns_summary(storage: SQLiteStorage, client: TestClient) -> None:
     persona = cast(
-        "PersonaRow", await storage.personas.merge_actors(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
+        "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
     )
 
     resp = client.get(f"/persona/{persona.id}")
@@ -169,7 +169,7 @@ def test_get_persona_404_when_missing(client: TestClient) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_list_linkages_returns_rows(storage: SQLiteStorage, client: TestClient) -> None:
-    await storage.linkages.insert_proposed(_ACTOR_A, _ACTOR_B, method="m", score=0.9, evidence={})
+    await storage.insert_proposed_linkage(_ACTOR_A, _ACTOR_B, method="m", score=0.9, evidence={})
 
     resp = client.get("/linkages")
     assert resp.status_code == 200
@@ -193,11 +193,11 @@ async def test_list_linkages_filter_by_state(storage: SQLiteStorage, client: Tes
 
     row = cast(
         "LinkageRow",
-        await storage.linkages.insert_proposed(
+        await storage.insert_proposed_linkage(
             _ACTOR_A, _ACTOR_B, method="m", score=0.9, evidence={}
         ),
     )
-    await storage.linkages.transition(row.id, LinkageState.CONFIRMED, decided_by="anti")
+    await storage.transition_linkage(row.id, LinkageState.CONFIRMED, decided_by="anti")
 
     resp = client.get("/linkages?state=confirmed")
     assert resp.status_code == 200
@@ -211,9 +211,9 @@ async def test_list_linkages_filter_by_state(storage: SQLiteStorage, client: Tes
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_graph_stats_returns_counts(storage: SQLiteStorage, client: TestClient) -> None:
-    await storage.graph.upsert_node(GraphNodeType.ACTOR, _ACTOR_A, {})
-    await storage.graph.upsert_node(GraphNodeType.ACTOR, _ACTOR_B, {})
-    await storage.graph.upsert_edge(GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {})
+    await storage.upsert_graph_node(GraphNodeType.ACTOR, _ACTOR_A, {})
+    await storage.upsert_graph_node(GraphNodeType.ACTOR, _ACTOR_B, {})
+    await storage.upsert_graph_edge(GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {})
 
     resp = client.get("/graph/stats")
     assert resp.status_code == 200

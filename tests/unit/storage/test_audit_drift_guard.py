@@ -39,6 +39,9 @@ def test_drift_guard_raises_when_audit_row_fields_diverge(tmp_path: Path) -> Non
         "at": datetime.now(tz=UTC),
     }
 
+    # Drift guard is a property of the legacy SQLiteAuditStore raw-SQL
+    # INSERT path; the new SQLModel ORM path generates the column list
+    # from the table schema and has its own freshness guarantee.
     with (
         patch("eyenet.storage.audit._AUDIT_INSERT_COLS", bad_cols),
         pytest.raises(RuntimeError, match="drifted from _AUDIT_INSERT_COLS"),

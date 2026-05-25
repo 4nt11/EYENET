@@ -202,8 +202,8 @@ async def test_storage_graph_upsert_emits_spans(
     storage: SQLiteStorage,
     span_exporter: InMemorySpanExporter,
 ) -> None:
-    await storage.graph.upsert_node("actor", _ACTOR_A, {"k": "v"})
-    await storage.graph.upsert_edge("linked_to", _ACTOR_A, _ACTOR_B, {"state": "proposed"})
+    await storage.upsert_graph_node("actor", _ACTOR_A, {"k": "v"})
+    await storage.upsert_graph_edge("linked_to", _ACTOR_A, _ACTOR_B, {"state": "proposed"})
 
     names = _span_names(span_exporter)
     assert "storage.graph.upsert_node" in names, names
@@ -216,8 +216,8 @@ async def test_storage_vectors_spans(
     storage: SQLiteStorage,
     span_exporter: InMemorySpanExporter,
 ) -> None:
-    await storage.vector_index.upsert_simhash(_ACTOR_A, "function_word_simhash", "0" * 16)
-    matches = await storage.vector_index.nearest(
+    await storage.upsert_simhash(_ACTOR_A, "function_word_simhash", "0" * 16)
+    matches = await storage.nearest_simhashes(
         "function_word_simhash",
         "0" * 16,
         max_distance=4,

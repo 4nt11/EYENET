@@ -207,16 +207,16 @@ async def test_m8_propose_verify_suspect_over_real_nats(tmp_path: Path) -> None:
             assert suspicions, "Verifier should have promoted to SUSPECTED"
             assert proposals[0].evidence.get("language") == "en"
 
-            rows = await storage.linkages.list_linkages()
+            rows = await storage.list_linkages()
             assert len(rows) >= 1
             linkage_row = cast("LinkageRow", rows[0])
             assert linkage_row.state == LinkageState.SUSPECTED
 
             # Operator confirm → FeedbackPair side-effect.
-            await storage.linkages.transition(
+            await storage.transition_linkage(
                 linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"
             )
-            await storage.feedback_pairs.record(
+            await storage.record_feedback_pair(
                 linkage_id=linkage_row.id,
                 actor_a=linkage_row.actor_a_id,
                 actor_b=linkage_row.actor_b_id,
@@ -224,7 +224,7 @@ async def test_m8_propose_verify_suspect_over_real_nats(tmp_path: Path) -> None:
                 decided_by="anti",
                 decided_at=datetime.now(tz=UTC),
             )
-            feedback = await storage.feedback_pairs.get(linkage_row.id)
+            feedback = await storage.get_feedback_pair(linkage_row.id)
             assert feedback is not None
             assert feedback.ground_truth == "same"
         finally:
@@ -288,7 +288,7 @@ async def test_m8_diff_author_no_promotion_over_real_nats(tmp_path: Path) -> Non
 
             assert not suspicions, "Verifier must not promote diff-author pair"
 
-            rows = await storage.linkages.list_linkages()
+            rows = await storage.list_linkages()
             assert len(rows) >= 1
             assert cast("LinkageRow", rows[0]).state == LinkageState.PROPOSED
         finally:

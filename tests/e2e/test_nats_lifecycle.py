@@ -48,7 +48,7 @@ async def test_two_services_against_real_nats(tmp_path: Path) -> None:
             await linker.shutdown()
             await asyncio.gather(engine_task, linker_task)
 
-            rows = await storage.audit.all()
+            rows = await storage.all_audit()
             services = {r.service for r in rows}
             assert {"engine", "linker"} <= services
         finally:

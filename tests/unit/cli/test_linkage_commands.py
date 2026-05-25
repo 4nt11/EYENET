@@ -36,7 +36,7 @@ def _insert_proposed(storage: SQLiteStorage) -> UUID:
     async def _run() -> UUID:
         row = cast(
             "LinkageRow",
-            await storage.linkages.insert_proposed(
+            await storage.insert_proposed_linkage(
                 _ACTOR_A, _ACTOR_B, method="function_word_simhash_hamming", score=0.9, evidence={}
             ),
         )
@@ -89,7 +89,7 @@ def test_linkage_suspect_transitions_state(data_dir: Path, storage: SQLiteStorag
     assert result.exit_code == 0
 
     async def _check() -> LinkageState:
-        row = await storage.linkages.get(lid)
+        row = await storage.get_linkage(lid)
         assert row is not None
         return cast("LinkageRow", row).state
 
@@ -116,7 +116,7 @@ def test_linkage_confirm_transitions_state(data_dir: Path, storage: SQLiteStorag
     assert result.exit_code == 0
 
     async def _check() -> LinkageState:
-        row = await storage.linkages.get(lid)
+        row = await storage.get_linkage(lid)
         assert row is not None
         return cast("LinkageRow", row).state
 
@@ -143,7 +143,7 @@ def test_linkage_reject_transitions_state(data_dir: Path, storage: SQLiteStorage
     assert result.exit_code == 0
 
     async def _check() -> LinkageState:
-        row = await storage.linkages.get(lid)
+        row = await storage.get_linkage(lid)
         assert row is not None
         return cast("LinkageRow", row).state
 
@@ -175,7 +175,7 @@ def test_linkage_confirm_illegal_transition(data_dir: Path, storage: SQLiteStora
     lid = _insert_proposed(storage)
 
     async def _confirm() -> None:
-        await storage.linkages.transition(lid, LinkageState.CONFIRMED, decided_by="anti")
+        await storage.transition_linkage(lid, LinkageState.CONFIRMED, decided_by="anti")
 
     asyncio.run(_confirm())
 

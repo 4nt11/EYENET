@@ -79,7 +79,7 @@ async def test_linker_proposes_close_actors(storage: SQLiteStorage, bus: MemoryB
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed actor B so it's in the index
-    await storage.vector_index.upsert_simhash(
+    await storage.upsert_simhash(
         _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
     )
 
@@ -114,7 +114,7 @@ async def test_linker_no_proposal_when_far(storage: SQLiteStorage, bus: MemoryBu
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed B with a hash very far from the one A will use
-    await storage.vector_index.upsert_simhash(
+    await storage.upsert_simhash(
         _ACTOR_B, "function_word_distribution_top50", _FAR_HASH
     )
 
@@ -155,7 +155,7 @@ async def test_linker_no_self_proposal(storage: SQLiteStorage, bus: MemoryBus) -
 @pytest.mark.asyncio
 async def test_linker_persists_proposed_row(storage: SQLiteStorage, bus: MemoryBus) -> None:
     """Proposed linkage is persisted to storage.linkages."""
-    await storage.vector_index.upsert_simhash(
+    await storage.upsert_simhash(
         _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
     )
 
@@ -166,7 +166,7 @@ async def test_linker_persists_proposed_row(storage: SQLiteStorage, bus: MemoryB
     await bus.publish(SUBJECT_PROFILE_CURRENT, env_a.model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    rows = await storage.linkages.list_linkages()
+    rows = await storage.list_linkages()
     assert len(rows) >= 1
     row = cast("LinkageRow", rows[0])
     assert {row.actor_a_id, row.actor_b_id} == {_ACTOR_A, _ACTOR_B}
@@ -205,7 +205,7 @@ async def test_linker_respects_config_threshold(storage: SQLiteStorage, bus: Mem
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed B with distance-1 hash
-    await storage.vector_index.upsert_simhash(
+    await storage.upsert_simhash(
         _ACTOR_B, "function_word_distribution_top50", _CLOSE_HASH
     )
 
@@ -241,7 +241,7 @@ async def test_linker_skips_comparator_disabled_for_language(
 
     # Pre-seed actor B with a CLOSE hash — under default thresholds this
     # would absolutely emit a proposal. The Spanish disable must override.
-    await storage.vector_index.upsert_simhash(
+    await storage.upsert_simhash(
         _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
     )
 

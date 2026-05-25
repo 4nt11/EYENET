@@ -124,7 +124,7 @@ async def test_profile_current_upserts_actor_node(storage: SQLiteStorage, bus: M
     await bus.publish(SUBJECT_PROFILE_CURRENT, env.model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    stats = await storage.graph.stats()
+    stats = await storage.graph_stats()
     assert stats["actors"] >= 1
 
 
@@ -138,7 +138,7 @@ async def test_linkage_proposed_upserts_both_actor_nodes(
     await bus.publish(SUBJECT_LINKAGE_PROPOSED, env.model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    stats = await storage.graph.stats()
+    stats = await storage.graph_stats()
     assert stats["actors"] >= 2
 
 
@@ -152,7 +152,7 @@ async def test_linkage_proposed_upserts_linked_to_edge(
     await bus.publish(SUBJECT_LINKAGE_PROPOSED, env.model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    edges = await storage.graph.edges_by_type(GraphEdgeType.LINKED_TO)
+    edges = await storage.graph_edges_by_type(GraphEdgeType.LINKED_TO)
     assert len(edges) >= 1
 
 
@@ -167,7 +167,7 @@ async def test_linkage_suspected_updates_edge_state(storage: SQLiteStorage, bus:
     await bus.publish(SUBJECT_LINKAGE_SUSPECTED, _suspected_env().model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    edges = await storage.graph.edges_by_type(GraphEdgeType.LINKED_TO)
+    edges = await storage.graph_edges_by_type(GraphEdgeType.LINKED_TO)
     assert any(e[2].get("state") == "suspected" for e in edges)
 
 
@@ -181,7 +181,7 @@ async def test_linkage_rejected_updates_edge_state(storage: SQLiteStorage, bus: 
     await bus.publish(SUBJECT_LINKAGE_REJECTED, _rejected_env().model_dump_json().encode())
     await asyncio.sleep(0.05)
 
-    edges = await storage.graph.edges_by_type(GraphEdgeType.LINKED_TO)
+    edges = await storage.graph_edges_by_type(GraphEdgeType.LINKED_TO)
     assert any(e[2].get("state") == "rejected" for e in edges)
 
 
@@ -192,7 +192,7 @@ async def test_linkage_confirmed_creates_persona(storage: SQLiteStorage, bus: Me
 
     # Pre-seed the linkage row first — Graph's confirm handler calls personas.merge_actors
     # which requires the linkage UUID to already exist in storage.
-    await storage.linkages.insert_proposed(
+    await storage.insert_proposed_linkage(
         _ACTOR_A, _ACTOR_B, method="function_word_simhash_hamming", score=0.9, evidence={}
     )
 
@@ -220,7 +220,7 @@ async def test_linkage_confirmed_emits_persona_updated(
     await bus.subscribe(SUBJECT_PERSONA_UPDATED, _capture)
     await _start_graph(bus, storage)
 
-    await storage.linkages.insert_proposed(
+    await storage.insert_proposed_linkage(
         _ACTOR_A, _ACTOR_B, method="function_word_simhash_hamming", score=0.9, evidence={}
     )
     await bus.publish(SUBJECT_LINKAGE_PROPOSED, _proposed_env().model_dump_json().encode())
@@ -237,7 +237,7 @@ async def test_linkage_confirmed_upserts_persona_node(
     storage: SQLiteStorage, bus: MemoryBus
 ) -> None:
     await _start_graph(bus, storage)
-    await storage.linkages.insert_proposed(
+    await storage.insert_proposed_linkage(
         _ACTOR_A, _ACTOR_B, method="function_word_simhash_hamming", score=0.9, evidence={}
     )
     await bus.publish(SUBJECT_LINKAGE_PROPOSED, _proposed_env().model_dump_json().encode())
@@ -245,8 +245,8 @@ async def test_linkage_confirmed_upserts_persona_node(
     await bus.publish(SUBJECT_LINKAGE_CONFIRMED, _confirmed_env().model_dump_json().encode())
     await asyncio.sleep(0.1)
 
-    stats = await storage.graph.stats()
+    stats = await storage.graph_stats()
     assert stats["actors"] >= 2
     assert stats["personas"] >= 1
-    belongs_edges = await storage.graph.edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
+    belongs_edges = await storage.graph_edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
     assert len(belongs_edges) >= 2

@@ -133,7 +133,7 @@ async def test_same_author_promoted_to_suspected(storage: SQLiteStorage) -> None
     actor_a, actor_b = (a1, a2) if a1 < a2 else (a2, a1)
 
     # Seed a real PROPOSED linkage row so the transition has a target
-    linkage = await storage.linkages.insert_proposed(
+    linkage = await storage.insert_proposed_linkage(
         actor_a, actor_b, "test_method", 0.5, {"language": "es"}
     )
 
@@ -155,7 +155,7 @@ async def test_same_author_promoted_to_suspected(storage: SQLiteStorage) -> None
     assert suspected[0].decided_by == "verifier"
 
     # State machine: linkage row now SUSPECTED
-    row = await storage.linkages.get(linkage.id)
+    row = await storage.get_linkage(linkage.id)
     assert row is not None
     assert row.state == LinkageState.SUSPECTED
 
@@ -177,7 +177,7 @@ async def test_diff_author_not_promoted(storage: SQLiteStorage) -> None:
     a2 = await _seed_corpus_async(storage, body_b, msg_prefix="b")
     actor_a, actor_b = (a1, a2) if a1 < a2 else (a2, a1)
 
-    linkage = await storage.linkages.insert_proposed(
+    linkage = await storage.insert_proposed_linkage(
         actor_a, actor_b, "test_method", 0.5, {"language": None}
     )
 
@@ -196,7 +196,7 @@ async def test_diff_author_not_promoted(storage: SQLiteStorage) -> None:
     await asyncio.sleep(0.3)
 
     assert len(suspected) == 0
-    row = await storage.linkages.get(linkage.id)
+    row = await storage.get_linkage(linkage.id)
     assert row is not None
     assert row.state == LinkageState.PROPOSED
 
@@ -216,7 +216,7 @@ async def test_short_corpus_skips_verifier(storage: SQLiteStorage) -> None:
     a2 = await _seed_corpus_async(storage, ["two"] * 5, msg_prefix="b")
     actor_a, actor_b = (a1, a2) if a1 < a2 else (a2, a1)
 
-    linkage = await storage.linkages.insert_proposed(
+    linkage = await storage.insert_proposed_linkage(
         actor_a, actor_b, "test", 0.5, {"language": "es"}
     )
 
@@ -231,6 +231,6 @@ async def test_short_corpus_skips_verifier(storage: SQLiteStorage) -> None:
 
     assert len(suspected) == 0
     # Linkage stays PROPOSED — verifier couldn't speak
-    row = await storage.linkages.get(linkage.id)
+    row = await storage.get_linkage(linkage.id)
     assert row is not None
     assert row.state == LinkageState.PROPOSED

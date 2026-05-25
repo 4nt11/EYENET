@@ -63,29 +63,29 @@ async def test_full_actor_persona_flow(storage: SQLiteStorage, client: TestClien
     """Seed actor profiles + persona, verify all endpoints return coherent data."""
 
     # Seed profiles
-    await storage.profiles.upsert_current(_profile_row(_ACTOR_A))
-    await storage.profiles.upsert_current(_profile_row(_ACTOR_B))
+    await storage.upsert_current_profile(_profile_row(_ACTOR_A))
+    await storage.upsert_current_profile(_profile_row(_ACTOR_B))
 
     # Create persona
     persona = cast(
-        "PersonaRow", await storage.personas.merge_actors(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
+        "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
     )
 
     # Seed graph
-    await storage.graph.upsert_node(GraphNodeType.ACTOR, _ACTOR_A, {"role_signal": None})
-    await storage.graph.upsert_node(GraphNodeType.ACTOR, _ACTOR_B, {"role_signal": None})
-    await storage.graph.upsert_edge(
+    await storage.upsert_graph_node(GraphNodeType.ACTOR, _ACTOR_A, {"role_signal": None})
+    await storage.upsert_graph_node(GraphNodeType.ACTOR, _ACTOR_B, {"role_signal": None})
+    await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {"state": "confirmed"}
     )
 
     # Seed linkage
     row = cast(
         "LinkageRow",
-        await storage.linkages.insert_proposed(
+        await storage.insert_proposed_linkage(
             _ACTOR_A, _ACTOR_B, method="function_word_simhash_hamming", score=0.95, evidence={}
         ),
     )
-    await storage.linkages.transition(row.id, LinkageState.CONFIRMED, decided_by="anti")
+    await storage.transition_linkage(row.id, LinkageState.CONFIRMED, decided_by="anti")
 
     # GET /actor/A
     resp = client.get(f"/actor/{_ACTOR_A}")
@@ -146,10 +146,10 @@ def test_empty_graph_stats(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_neighbor_edge_type_filter(storage: SQLiteStorage, client: TestClient) -> None:
     persona_id = UUID("00000000-0000-0000-0000-000000000010")
-    await storage.graph.upsert_edge(
+    await storage.upsert_graph_edge(
         GraphEdgeType.LINKED_TO, _ACTOR_A, _ACTOR_B, {"state": "proposed"}
     )
-    await storage.graph.upsert_edge(GraphEdgeType.BELONGS_TO_PERSONA, _ACTOR_A, persona_id, {})
+    await storage.upsert_graph_edge(GraphEdgeType.BELONGS_TO_PERSONA, _ACTOR_A, persona_id, {})
 
     resp = client.get(f"/actor/{_ACTOR_A}/neighbors?edge_type=linked_to")
     assert resp.status_code == 200
