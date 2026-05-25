@@ -1,4 +1,12 @@
-"""`SQLiteStorage` aggregate — wires all sub-stores to per-store engines."""
+"""`SQLiteStorage` aggregate — legacy compat surface, extends SQLiteRepository.
+
+Phase 5 transition: every test fixture instantiates SQLiteStorage and either
+uses the legacy sub-store accessors (`storage.audit.append`,
+`storage.linkages.transition`, etc.) OR the new flat methods inherited from
+SQLiteRepository (`storage.append_audit`, `storage.transition_linkage`, etc.).
+Production code targets only the flat surface. Once tests are migrated
+(Phase 5 cont.), this class collapses into `SQLiteRepository`.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +23,9 @@ from eyenet.contracts.storage import (
     ObservationStore,
     PersonaStore,
     ProfileStore,
-    Storage,
     VectorIndex,
 )
+from eyenet.storage.sqlite_repo.repository import SQLiteRepository
 
 from .audit import SQLiteAuditStore
 from .corpus import SQLiteCorpusStore
@@ -34,12 +42,11 @@ from .syslog import SQLiteSystemLogStore
 from .vectors import SQLiteVectorIndex
 
 
-class SQLiteStorage(Storage):
-    """Aggregate `Storage` impl. Holds per-store engines; sub-stores are
-    instantiated lazily on attribute access and reused thereafter.
-    """
+class SQLiteStorage(SQLiteRepository):
+    """Legacy aggregate with sub-store accessors AND flat repo methods."""
 
     def __init__(self, data_dir: Path) -> None:
+        super().__init__(data_dir=data_dir)
         self._data_dir = data_dir
         self._engines: dict[StoreName, Engine] = open_all(data_dir)
         self._messages = SQLiteMessageStore(self._engines[StoreName.MAIN])
@@ -112,6 +119,7 @@ class SQLiteStorage(Storage):
 
     async def close(self) -> None:
         close_all(self._engines.values())
+        await super().close()
 
 
 __all__ = ["SQLiteStorage"]
