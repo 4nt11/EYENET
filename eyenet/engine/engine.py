@@ -88,15 +88,14 @@ class Engine(ServiceBase):
             _log.debug("engine.observation_no_evidence_ref", primitive=env.primitive)
             return
 
-        obs_store = self._storage.observations
-
-        # Resolve ObservationRow (may race with sensor persistence)
-        obs_row: object | None = await obs_store.by_evidence_and_primitive(
+        obs_row: object | None = await self._storage.observation_by_evidence_and_primitive(
             evidence_ref, env.primitive
         )
         if obs_row is None:
             await asyncio.sleep(_RETRY_DELAY)
-            obs_row = await obs_store.by_evidence_and_primitive(evidence_ref, env.primitive)
+            obs_row = await self._storage.observation_by_evidence_and_primitive(
+                evidence_ref, env.primitive
+            )
         if obs_row is None:
             _log.warning(
                 "engine.observation_row_not_found",
@@ -148,8 +147,7 @@ class Engine(ServiceBase):
 
         block_name, slot_key, slot_dict_template = mapped
 
-        profile_store = self._storage.profiles
-        raw = await profile_store.get_current(actor_id)
+        raw = await self._storage.get_current_profile(actor_id)
         prev: ProfileRow | None = cast("ProfileRow | None", raw)
 
         new_profile = _build_next_profile(prev, actor_id, block_name, slot_key, slot_dict_template)
@@ -171,7 +169,7 @@ class Engine(ServiceBase):
             )
 
         if _materially_differs(prev, new_profile):
-            await profile_store.upsert_current(new_profile)
+            await self._storage.upsert_current_profile(new_profile)
             await self._emit_current(new_profile)
             await self.audit.emit(
                 event="profile_current_updated",
