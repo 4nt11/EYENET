@@ -26,6 +26,7 @@ _REASON = "initial evidence intake from collector pass 1"
 @pytest.fixture
 def session() -> Session:
     import os
+
     os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
     storage = get_repository(in_memory=True)
     return Session(storage.sync_engine)

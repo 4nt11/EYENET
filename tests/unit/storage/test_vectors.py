@@ -6,8 +6,8 @@ from uuid import UUID
 
 import pytest
 
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 from eyenet.storage.sqlmodel_repo.vectors import _hex_to_int, _int_to_hex
 
 _ACTOR_A = UUID("00000000-0000-0000-0000-000000000001")

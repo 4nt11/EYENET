@@ -117,9 +117,7 @@ async def list_linkages(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[LinkageSummary]:
-    rows = await storage.list_linkages(
-        actor_id=actor_id, state=state, limit=limit, offset=offset
-    )
+    rows = await storage.list_linkages(actor_id=actor_id, state=state, limit=limit, offset=offset)
     return [_linkage_to_summary(cast("LinkageRow", r)) for r in rows]
 
 

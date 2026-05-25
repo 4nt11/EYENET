@@ -25,9 +25,7 @@ def storage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> BaseRepository:
 
 
 @pytest.fixture
-def storage_with_ndjson(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> BaseRepository:
+def storage_with_ndjson(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> BaseRepository:
     monkeypatch.setenv("EYENET_STORAGE_TYPE", "sqlite")
     return get_repository(data_dir=tmp_path, ndjson_path=tmp_path / "audit.ndjson")
 
@@ -57,9 +55,7 @@ async def test_chain_holds_over_100_events(storage: BaseRepository) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_ndjson_mirror(
-    storage_with_ndjson: BaseRepository, tmp_path: Path
-) -> None:
+async def test_ndjson_mirror(storage_with_ndjson: BaseRepository, tmp_path: Path) -> None:
     try:
         await storage_with_ndjson.append_audit(
             {

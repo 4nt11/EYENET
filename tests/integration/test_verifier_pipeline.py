@@ -14,7 +14,6 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from sqlmodel import Session
 
 from eyenet.bus import MemoryBus
 from eyenet.cli.config import VerifierConfig, VerifierThresholds

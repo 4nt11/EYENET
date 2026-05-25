@@ -178,7 +178,7 @@ class MatrixCollector(CollectorSkeleton):
         """
         if entry.matrix_device_store_path:
             return Path(entry.matrix_device_store_path)
-        return self._storage.data_dir / "matrix" / entry.name / "store"
+        return cast("Path", self._storage.data_dir) / "matrix" / entry.name / "store"
 
     def _build_client(self, entry: IdentityFileEntry) -> AsyncClient:
         """Construct the AsyncClient with E2EE config and persistent store."""

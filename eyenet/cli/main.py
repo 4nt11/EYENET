@@ -161,7 +161,7 @@ async def _seed_fixture(  # pragma: no cover
                 )
                 msg = result.first()
                 if msg is not None:
-                    msg.reply_to_msg_id = platform_to_uuid[rkey]  # type: ignore[assignment]
+                    msg.reply_to_msg_id = platform_to_uuid[rkey]
                     session.add(msg)
         await session.commit()
 

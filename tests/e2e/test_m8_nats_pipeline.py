@@ -24,7 +24,6 @@ from typing import cast
 from uuid import UUID
 
 import pytest
-from sqlmodel import Session
 
 from eyenet.bus import NATSBus
 from eyenet.cli.config import VerifierConfig, VerifierThresholds

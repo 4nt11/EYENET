@@ -7,8 +7,8 @@ from uuid import UUID
 import pytest
 
 from eyenet.contracts.attribution import PersonaRow
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _A = UUID("00000000-0000-0000-0000-000000000001")
 _B = UUID("00000000-0000-0000-0000-000000000002")
@@ -19,45 +19,14 @@ _LID2 = UUID("00000000-0000-0000-0000-000000000098")
 
 
 @pytest.fixture
-def store() -> BaseRepository:
-    storage = get_repository(in_memory=True)
-    return storage
-    # Seed linkage rows so FK constraints on via_linkage_id are satisfied
-    from datetime import UTC, datetime
-
-    from sqlmodel import Session
-
+async def store() -> BaseRepository:
+    """Seed two PROPOSED linkages so persona merges have a valid
+    ``via_linkage_id`` FK target."""
     import eyenet.models  # noqa: F401
-    from eyenet.contracts.enums import LinkageState
-    from eyenet.models.linkage import LinkageTable
 
-    now = datetime(2026, 5, 20, tzinfo=UTC)
-    with Session(engine) as session:
-        session.add(
-            LinkageTable(
-                id=_LID,
-                actor_a_id=_A,
-                actor_b_id=_B,
-                state=LinkageState.PROPOSED,
-                method="m",
-                score=0.5,
-                evidence={},
-                proposed_at=now,
-            )
-        )
-        session.add(
-            LinkageTable(
-                id=_LID2,
-                actor_a_id=_A,
-                actor_b_id=_C,
-                state=LinkageState.PROPOSED,
-                method="m",
-                score=0.5,
-                evidence={},
-                proposed_at=now,
-            )
-        )
-        session.commit()
+    storage = get_repository(in_memory=True)
+    await storage.insert_proposed_linkage(_A, _B, "m", 0.5, {}, linkage_id=_LID)
+    await storage.insert_proposed_linkage(_A, _C, "m", 0.5, {}, linkage_id=_LID2)
     return storage
 
 

@@ -31,6 +31,7 @@ _NOW = datetime(2026, 5, 24, tzinfo=UTC)
 @pytest.fixture
 def obs_session() -> Session:
     import os
+
     os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
     storage = get_repository(in_memory=True)
     return Session(storage.sync_engine)
@@ -40,6 +41,7 @@ def obs_session() -> Session:
 def msg_session() -> Session:
     """Sessions for AttachmentTable need MessageTable's FK target available."""
     import os
+
     os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
     storage = get_repository(in_memory=True)
     return Session(storage.sync_engine)

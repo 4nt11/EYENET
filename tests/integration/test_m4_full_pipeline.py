@@ -118,9 +118,7 @@ async def test_full_m4_pipeline_linkage_propose_confirm_persona(storage: BaseRep
     # Step 2: Confirm the linkage
     updated = cast(
         "LinkageRow",
-        await storage.transition_linkage(
-            linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"
-        ),
+        await storage.transition_linkage(linkage_row.id, LinkageState.CONFIRMED, decided_by="anti"),
     )
     assert updated.state == LinkageState.CONFIRMED
 

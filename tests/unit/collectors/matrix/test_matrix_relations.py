@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from eyenet.bus import MemoryBus
 from eyenet.collectors.matrix import real as matrix_real

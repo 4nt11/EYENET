@@ -29,6 +29,7 @@ _VALID_REASON = "court-defensible justification text"  # 35 chars
 @pytest.fixture
 def session() -> Session:
     import os
+
     os.environ.setdefault("EYENET_STORAGE_TYPE", "sqlite")
     storage = get_repository(in_memory=True)
     return Session(storage.sync_engine)

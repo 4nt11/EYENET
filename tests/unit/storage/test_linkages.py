@@ -9,8 +9,8 @@ import pytest
 
 from eyenet.contracts.attribution import LinkageRow
 from eyenet.contracts.enums import LinkageState
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _A = UUID("00000000-0000-0000-0000-000000000001")
 _B = UUID("00000000-0000-0000-0000-000000000002")
@@ -19,8 +19,7 @@ _C = UUID("00000000-0000-0000-0000-000000000003")
 
 @pytest.fixture
 def store() -> BaseRepository:
-    storage = get_repository(in_memory=True)
-    return storage
+    return get_repository(in_memory=True)
 
 
 @pytest.mark.unit
@@ -70,7 +69,9 @@ async def test_insert_proposed_honors_passed_linkage_id(
     Verifier-over-the-wire path depends on this — M8 debugged it on
     2026-05-24. Pin it so a future refactor cannot silently revert."""
     forced = UUID("00000000-0000-0000-0000-0000000000aa")
-    row = await store.insert_proposed_linkage(_A, _B, method="m", score=0.5, evidence={}, linkage_id=forced)
+    row = await store.insert_proposed_linkage(
+        _A, _B, method="m", score=0.5, evidence={}, linkage_id=forced
+    )
     assert row.id == forced
     fetched = await store.get_linkage(forced)
     assert fetched is not None

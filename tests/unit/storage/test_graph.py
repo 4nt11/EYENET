@@ -7,8 +7,8 @@ from uuid import UUID
 import pytest
 
 from eyenet.models.graph import GraphEdgeType, GraphNodeType
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _A = UUID("00000000-0000-0000-0000-000000000001")
 _B = UUID("00000000-0000-0000-0000-000000000002")
@@ -18,8 +18,7 @@ _P = UUID("00000000-0000-0000-0000-000000000010")
 
 @pytest.fixture
 def store() -> BaseRepository:
-    storage = get_repository(in_memory=True)
-    return storage
+    return get_repository(in_memory=True)
 
 
 @pytest.mark.unit

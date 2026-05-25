@@ -47,7 +47,7 @@ def _pool(tmp_path: Path, name: str = "tg_alpha") -> FileIdentityPool:
 async def _seed_messages(storage: BaseRepository) -> None:
     """Pre-populate actor + message rows for the fixture so the sensor can
     dereference evidence_refs. Stub collector only publishes envelopes."""
-    from tests._seed import seed_telegram_fixture  # noqa: PLC0415
+    from tests._seed import seed_telegram_fixture
 
     records = []
     with _FIXTURE.open() as fh:

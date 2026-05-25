@@ -47,17 +47,14 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from sqlmodel import Session
 
 from eyenet.bus import MemoryBus
 from eyenet.contracts._base import TraceContext
-from eyenet.contracts.enums import GroupKind, SourceKind
+from eyenet.contracts.enums import SourceKind
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
 from eyenet.linker.linker import Linker
-from eyenet.models import MessageTable
-from eyenet.models._base import new_uuid7
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -102,7 +99,7 @@ def _install_otlp_exporter() -> tuple[TracerProvider, BatchSpanProcessor]:
 async def _seed_fixture(storage: BaseRepository) -> list[dict[str, Any]]:
     """Seed actor + message rows from the M2 synthetic fixture. Returns the
     list of records so the test can publish their envelopes in order."""
-    from tests._seed import seed_telegram_fixture  # noqa: PLC0415
+    from tests._seed import seed_telegram_fixture
 
     records = [json.loads(line) for line in _FIXTURE.read_text().splitlines() if line.strip()]
     await seed_telegram_fixture(

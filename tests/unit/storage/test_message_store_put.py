@@ -10,8 +10,8 @@ import pytest
 from eyenet.contracts.enums import AttachmentKind, GroupKind, SourceKind
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _NOW = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
 

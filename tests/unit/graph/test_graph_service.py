@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import cast
 from uuid import UUID
 
 import pytest
@@ -158,7 +157,9 @@ async def test_linkage_proposed_upserts_linked_to_edge(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_linkage_suspected_updates_edge_state(storage: BaseRepository, bus: MemoryBus) -> None:
+async def test_linkage_suspected_updates_edge_state(
+    storage: BaseRepository, bus: MemoryBus
+) -> None:
     await _start_graph(bus, storage)
 
     # First propose, then suspect

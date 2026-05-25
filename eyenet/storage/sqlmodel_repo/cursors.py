@@ -3,10 +3,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
-
-from collections.abc import Sequence
 
 from sqlmodel import col, select
 
@@ -40,9 +39,7 @@ class CursorsMixin:
                 )
             )
             rows = list(result.all())
-        out: dict[str, tuple[datetime, UUID]] = {
-            name: (_EPOCH, _NULL_UUID) for name in primitive_names
-        }
+        out: dict[str, tuple[datetime, UUID]] = dict.fromkeys(primitive_names, (_EPOCH, _NULL_UUID))
         for r in rows:
             out[r.primitive_name] = (r.last_processed_msg_ts, r.last_processed_msg_id)
         return out

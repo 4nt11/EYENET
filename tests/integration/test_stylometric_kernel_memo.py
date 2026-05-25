@@ -24,15 +24,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from sqlmodel import Session
 
 from eyenet.bus import MemoryBus
 from eyenet.collectors.telegram.stub import TelegramCollectorStub
-from eyenet.contracts.enums import GroupKind, SourceKind
+from eyenet.contracts.enums import SourceKind
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
-from eyenet.models import MessageTable
-from eyenet.models._base import new_uuid7
 from eyenet.sensor.primitives import _locale_morph_kernel as kernel
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import run_service
@@ -56,7 +53,7 @@ def _pool(tmp_path: Path) -> FileIdentityPool:
 
 async def _seed_messages(storage: BaseRepository) -> int:
     """Reuse the synthetic_m2 fixture; return the message count."""
-    from tests._seed import seed_telegram_fixture  # noqa: PLC0415
+    from tests._seed import seed_telegram_fixture
 
     records = []
     with _FIXTURE.open() as fh:

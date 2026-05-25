@@ -386,7 +386,7 @@ class BaseRepository(ABC):
     async def put_message(
         self,
         row: object,
-        attachments: list[object] | None = None,
+        attachments: Any = None,
     ) -> bool:
         """Persist MessageTable + AttachmentTable rows in one transaction.
         Returns True on insert, False if `evidence_ref` already exists."""

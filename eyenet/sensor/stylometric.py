@@ -141,6 +141,7 @@ class StylometricSensor(ServiceBase, SensorBase):
         _current_msg_id = await self._storage.get_message_id_by_evidence_ref(env.evidence_ref)
         if _current_msg_id is None:
             from eyenet.models._base import new_uuid7  # noqa: PLC0415
+
             _current_msg_id = new_uuid7()
 
         _cursor_updates: list[tuple[str, datetime, UUID]] = []
@@ -169,9 +170,7 @@ class StylometricSensor(ServiceBase, SensorBase):
                         and _full_bodies is None
                         and _full_corpus is not None
                     ):
-                        _full_bodies = await _batch_fetch_bodies(
-                            self._storage, _full_corpus
-                        )
+                        _full_bodies = await _batch_fetch_bodies(self._storage, _full_corpus)
                     obs = await self._compute_primitive(
                         spec,
                         actor_id,
@@ -219,9 +218,7 @@ class StylometricSensor(ServiceBase, SensorBase):
                     )
 
         if _observation_rows:
-            await self._storage.put_observations_bulk(
-                cast(list[object], _observation_rows)
-            )
+            await self._storage.put_observations_bulk(cast("list[object]", _observation_rows))
         if _cursor_updates:
             await self._storage.set_cursors_bulk(actor_id, _cursor_updates)
 
@@ -276,6 +273,7 @@ class StylometricSensor(ServiceBase, SensorBase):
             bodies = await _batch_fetch_bodies(self._storage, corpus)
 
         return spec.compute(corpus=corpus, bodies=bodies)
+
 
 async def _batch_fetch_bodies(
     storage: BaseRepository,

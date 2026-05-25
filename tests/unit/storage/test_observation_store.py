@@ -10,8 +10,8 @@ import pytest
 from eyenet.contracts._base import _new_uuid7
 from eyenet.contracts.enums import ValueKind
 from eyenet.contracts.observation import ObservationRow
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _ACTOR = UUID("00000000-0000-0000-0000-000000000001")
 _TS = datetime(2026, 5, 1, tzinfo=UTC)
@@ -39,8 +39,7 @@ def _row(
 
 @pytest.fixture
 def store() -> BaseRepository:
-    storage = get_repository(in_memory=True)
-    return storage
+    return get_repository(in_memory=True)
 
 
 @pytest.mark.unit
@@ -85,12 +84,16 @@ async def test_by_evidence_and_primitive_found(store: BaseRepository) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_by_evidence_and_primitive_not_found(store: BaseRepository) -> None:
-    result = await store.observation_by_evidence_and_primitive("nonexistent:ref", "lexical.vocabulary_richness")
+    result = await store.observation_by_evidence_and_primitive(
+        "nonexistent:ref", "lexical.vocabulary_richness"
+    )
     assert result is None
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_latest_empty_returns_empty_list(store: BaseRepository) -> None:
-    results = await store.latest_observations(_ACTOR, "stylometric.character_ngram_simhash", limit=5)
+    results = await store.latest_observations(
+        _ACTOR, "stylometric.character_ngram_simhash", limit=5
+    )
     assert results == []

@@ -80,9 +80,7 @@ async def test_linker_proposes_close_actors(storage: BaseRepository, bus: Memory
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed actor B so it's in the index
-    await storage.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _BASE_HASH)
 
     # Create linker with default thresholds (fw = 8)
     linker = Linker(bus=bus, storage=storage)
@@ -115,9 +113,7 @@ async def test_linker_no_proposal_when_far(storage: BaseRepository, bus: MemoryB
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed B with a hash very far from the one A will use
-    await storage.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _FAR_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _FAR_HASH)
 
     linker = Linker(bus=bus, storage=storage)
     await linker.on_subscribe()
@@ -156,9 +152,7 @@ async def test_linker_no_self_proposal(storage: BaseRepository, bus: MemoryBus) 
 @pytest.mark.asyncio
 async def test_linker_persists_proposed_row(storage: BaseRepository, bus: MemoryBus) -> None:
     """Proposed linkage is persisted to storage.linkages."""
-    await storage.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _BASE_HASH)
 
     linker = Linker(bus=bus, storage=storage)
     await linker.on_subscribe()
@@ -206,9 +200,7 @@ async def test_linker_respects_config_threshold(storage: BaseRepository, bus: Me
     await bus.subscribe(SUBJECT_LINKAGE_PROPOSED, _capture)
 
     # Pre-seed B with distance-1 hash
-    await storage.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _CLOSE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _CLOSE_HASH)
 
     # Zero threshold means only distance=0 matches
     cfg = LinkerConfig(thresholds=LinkerThresholds(function_word_simhash_hamming=0))
@@ -242,9 +234,7 @@ async def test_linker_skips_comparator_disabled_for_language(
 
     # Pre-seed actor B with a CLOSE hash — under default thresholds this
     # would absolutely emit a proposal. The Spanish disable must override.
-    await storage.upsert_simhash(
-        _ACTOR_B, "function_word_distribution_top50", _BASE_HASH
-    )
+    await storage.upsert_simhash(_ACTOR_B, "function_word_distribution_top50", _BASE_HASH)
 
     cfg = LinkerConfig(
         thresholds=LinkerThresholds(

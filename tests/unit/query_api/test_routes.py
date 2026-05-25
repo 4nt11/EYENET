@@ -80,7 +80,8 @@ async def test_get_actor_includes_persona_id(storage: BaseRepository, client: Te
     row = _profile_row(_ACTOR_A)
     await storage.upsert_current_profile(row)
     persona = cast(
-        "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
+        "PersonaRow",
+        await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID),
     )
 
     resp = client.get(f"/actor/{_ACTOR_A}")
@@ -148,7 +149,8 @@ async def test_get_neighbors_filter_by_state(storage: BaseRepository, client: Te
 @pytest.mark.asyncio
 async def test_get_persona_returns_summary(storage: BaseRepository, client: TestClient) -> None:
     persona = cast(
-        "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
+        "PersonaRow",
+        await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID),
     )
 
     resp = client.get(f"/persona/{persona.id}")

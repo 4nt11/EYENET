@@ -69,7 +69,8 @@ async def test_full_actor_persona_flow(storage: BaseRepository, client: TestClie
 
     # Create persona
     persona = cast(
-        "PersonaRow", await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID)
+        "PersonaRow",
+        await storage.merge_actors_into_persona(_ACTOR_A, _ACTOR_B, via_linkage_id=_LID),
     )
 
     # Seed graph

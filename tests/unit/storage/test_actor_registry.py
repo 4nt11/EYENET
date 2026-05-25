@@ -96,9 +96,7 @@ async def test_upsert_updates_handle(storage: BaseRepository, source_id: UUID) -
         seen_at=_NOW,
     )
     async with storage.session() as session:
-        result = await session.exec(
-            select(ActorTable).where(ActorTable.actor_key == actor_key)
-        )
+        result = await session.exec(select(ActorTable).where(ActorTable.actor_key == actor_key))
         row = result.first()
     assert row is not None
     assert row.current_handle == "@new"

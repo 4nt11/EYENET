@@ -66,9 +66,7 @@ async def _seed_messages(storage: BaseRepository) -> dict[str, UUID]:
             if line.strip():
                 records.append(json.loads(line))
 
-    _, _, actor_ids = await seed_telegram_fixture(
-        storage, records, _NOW, group_title="Test M3"
-    )
+    _, _, actor_ids = await seed_telegram_fixture(storage, records, _NOW, group_title="Test M3")
     return actor_ids
 
 

@@ -28,7 +28,6 @@ from eyenet.contracts.audit import (
     compute_self_hash,
 )
 from eyenet.models import CorpusCursorTable
-from eyenet.storage.sqlmodel_repo._helpers import safe_session
 from eyenet.storage.sqlite_repo.database import (
     get_async_engine,
     get_sync_engine,
@@ -39,6 +38,7 @@ from eyenet.storage.sqlite_repo.database import (
     open_in_memory_sync_engine,
 )
 from eyenet.storage.sqlmodel_repo import SQLModelRepository
+from eyenet.storage.sqlmodel_repo._helpers import safe_session
 
 _AUDIT_INSERT_SQL = (
     "INSERT INTO audit_log ("
@@ -215,7 +215,7 @@ class SQLiteRepository(SQLModelRepository):
             },
         )
         async with safe_session(self._session_factory) as session:
-            await session.exec(stmt)  # type: ignore[arg-type]
+            await session.exec(stmt)
             await session.commit()
 
     async def close(self) -> None:

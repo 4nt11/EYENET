@@ -10,8 +10,8 @@ import pytest
 
 from eyenet.contracts._base import _new_uuid7
 from eyenet.contracts.attribution import ProfileRow
-from eyenet.storage.repository import BaseRepository
 from eyenet.storage.factory import get_repository
+from eyenet.storage.repository import BaseRepository
 
 _ACTOR = UUID("00000000-0000-0000-0000-000000000001")
 _NOW = datetime(2026, 5, 1, tzinfo=UTC)
@@ -39,8 +39,7 @@ def _profile(actor_id: UUID, version: int, mattr: float = 0.5) -> ProfileRow:
 
 @pytest.fixture
 def store() -> BaseRepository:
-    storage = get_repository(in_memory=True)
-    return storage
+    return get_repository(in_memory=True)
 
 
 @pytest.mark.unit
