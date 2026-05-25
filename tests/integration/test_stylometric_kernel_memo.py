@@ -36,10 +36,8 @@ from eyenet.models._base import new_uuid7
 from eyenet.sensor.primitives import _locale_morph_kernel as kernel
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import run_service
-from eyenet.storage import upsert_actor, upsert_group, upsert_source
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
-from eyenet.storage.engines import StoreName
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures/corpora/synthetic_m2.jsonl"
 _NOW = datetime(2026, 5, 4, 10, 0, tzinfo=UTC)
@@ -58,7 +56,7 @@ def _pool(tmp_path: Path) -> FileIdentityPool:
 
 async def _seed_messages(storage: BaseRepository) -> int:
     """Reuse the synthetic_m2 fixture; return the message count."""
-    from eyenet.storage.messages import SQLiteMessageStore
+    from tests._seed import seed_telegram_fixture  # noqa: PLC0415
 
     records = []
     with _FIXTURE.open() as fh:
@@ -66,57 +64,7 @@ async def _seed_messages(storage: BaseRepository) -> int:
             if line.strip():
                 records.append(json.loads(line))
 
-    engine = storage._engines[StoreName.MAIN]
-    store = SQLiteMessageStore(engine)
-
-    with Session(engine) as session:
-        source_id = upsert_source(
-            session, kind=SourceKind.TELEGRAM, display_name="telegram:tg_alpha", created_at=_NOW
-        )
-        group_id = upsert_group(
-            session,
-            source_id=source_id,
-            platform_groupid="-100",
-            kind=GroupKind.CHAT,
-            title="Test",
-            seen_at=_NOW,
-        )
-        actor_ids: dict[str, object] = {}
-        for rec in records:
-            ak = rec["actor_key"]
-            if ak not in actor_ids:
-                actor_ids[ak] = upsert_actor(
-                    session,
-                    source_id=source_id,
-                    actor_key=ak,
-                    platform_userid=ak[-8:],
-                    handle=None,
-                    display_name=None,
-                    seen_at=_NOW,
-                )
-        session.commit()
-        committed_source_id = source_id
-        committed_group_id = group_id
-        committed_actor_ids = dict(actor_ids)
-
-    for rec in records:
-        ref = f"telegram:{rec['platform_groupid']}:{rec['platform_msgid']}"
-        body = rec.get("body", "")
-        sent = datetime.fromisoformat(rec["sent_at_source"])
-        row = MessageTable(
-            id=new_uuid7(),
-            source_id=committed_source_id,
-            group_id=committed_group_id,
-            actor_id=committed_actor_ids[rec["actor_key"]],  # type: ignore[arg-type]
-            platform_msgid=rec["platform_msgid"],
-            evidence_ref=ref,
-            body=body,
-            length_chars=len(body),
-            length_words=len(body.split()),
-            sent_at_source=sent,
-            ingested_at=_NOW,
-        )
-        await store.put_message(row)
+    await seed_telegram_fixture(storage, records, _NOW)
     return len(records)
 
 
@@ -210,7 +158,7 @@ async def test_full_corpus_fetched_once_per_dispatch(tmp_path: Path) -> None:
 
     sensor._process = _patched  # type: ignore[method-assign]
 
-    real_iter_since = storage.corpus.iter_since
+    real_iter_since = storage.iter_corpus_since
     iter_since_calls = 0
 
     async def counting_iter_since(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -218,7 +166,7 @@ async def test_full_corpus_fetched_once_per_dispatch(tmp_path: Path) -> None:
         iter_since_calls += 1
         return await real_iter_since(*args, **kwargs)
 
-    with patch.object(storage.corpus, "iter_since", side_effect=counting_iter_since):
+    with patch.object(storage, "iter_corpus_since", side_effect=counting_iter_since):
         sensor_task = asyncio.create_task(run_service(sensor))
         collector_task = asyncio.create_task(run_service(collector, tick_interval=0.001))
 

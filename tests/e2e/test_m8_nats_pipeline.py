@@ -42,11 +42,8 @@ from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
 from eyenet.linker.linker import Linker
 from eyenet.models._base import new_uuid7
 from eyenet.models.message import MessageTable
-from eyenet.storage import upsert_actor, upsert_group, upsert_source
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
-from eyenet.storage.engines import StoreName
-from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.verifier.service import VerifierService
 
 pytestmark = [
@@ -82,41 +79,32 @@ async def _nats_url() -> AsyncIterator[str]:
 
 
 async def _seed_actor(storage: BaseRepository, bodies: list[str], *, msg_prefix: str) -> UUID:
-    engine = storage._engines[StoreName.MAIN]
-    store = SQLiteMessageStore(engine)
-    with Session(engine) as session:
-        source_id = upsert_source(
-            session,
-            kind=SourceKind.TELEGRAM,
-            display_name=f"telegram:{msg_prefix}",
-            created_at=_NOW,
-        )
-        group_id = upsert_group(
-            session,
-            source_id=source_id,
-            platform_groupid=f"-100-{msg_prefix}",
-            kind=GroupKind.CHAT,
-            title="test",
-            seen_at=_NOW,
-        )
-        actor_id = upsert_actor(
-            session,
-            source_id=source_id,
-            actor_key=f"actor:e2e:{msg_prefix}",
-            platform_userid=msg_prefix,
-            handle=None,
-            display_name=None,
-            seen_at=_NOW,
-        )
-        session.commit()
-        committed_source_id = source_id
-        committed_group_id = group_id
+    source_id = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM,
+        display_name=f"telegram:{msg_prefix}",
+        created_at=_NOW,
+    )
+    group_id = await storage.upsert_group(
+        source_id=source_id,
+        platform_groupid=f"-100-{msg_prefix}",
+        kind=GroupKind.CHAT,
+        title="test",
+        seen_at=_NOW,
+    )
+    actor_id = await storage.upsert_actor(
+        source_id=source_id,
+        actor_key=f"actor:e2e:{msg_prefix}",
+        platform_userid=msg_prefix,
+        handle=None,
+        display_name=None,
+        seen_at=_NOW,
+    )
 
     for i, body in enumerate(bodies):
         row = MessageTable(
             id=new_uuid7(),
-            source_id=committed_source_id,
-            group_id=committed_group_id,
+            source_id=source_id,
+            group_id=group_id,
             actor_id=actor_id,
             platform_msgid=f"{msg_prefix}-{i}",
             evidence_ref=f"{msg_prefix}:-100:{i}",
@@ -126,7 +114,7 @@ async def _seed_actor(storage: BaseRepository, bodies: list[str], *, msg_prefix:
             sent_at_source=_NOW,
             ingested_at=_NOW,
         )
-        await store.put_message(row)
+        await storage.put_message(row)
     return actor_id
 
 

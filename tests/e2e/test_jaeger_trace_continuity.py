@@ -59,11 +59,8 @@ from eyenet.linker.linker import Linker
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.sensor.stylometric import StylometricSensor
-from eyenet.storage import upsert_actor, upsert_group, upsert_source
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
-from eyenet.storage.engines import StoreName
-from eyenet.storage.messages import SQLiteMessageStore
 from eyenet.telemetry.propagation import current_traceparent
 
 _log = structlog.get_logger()
@@ -105,59 +102,12 @@ def _install_otlp_exporter() -> tuple[TracerProvider, BatchSpanProcessor]:
 async def _seed_fixture(storage: BaseRepository) -> list[dict[str, Any]]:
     """Seed actor + message rows from the M2 synthetic fixture. Returns the
     list of records so the test can publish their envelopes in order."""
+    from tests._seed import seed_telegram_fixture  # noqa: PLC0415
 
     records = [json.loads(line) for line in _FIXTURE.read_text().splitlines() if line.strip()]
-    engine = storage._engines[StoreName.MAIN]
-    store = SQLiteMessageStore(engine)
-
-    with Session(engine) as session:
-        source_id = upsert_source(
-            session, kind=SourceKind.TELEGRAM, display_name="telegram:e2e", created_at=_NOW
-        )
-        group_id = upsert_group(
-            session,
-            source_id=source_id,
-            platform_groupid="-100",
-            kind=GroupKind.CHAT,
-            title="E2E",
-            seen_at=_NOW,
-        )
-        actor_ids: dict[str, object] = {}
-        for rec in records:
-            ak = rec["actor_key"]
-            if ak not in actor_ids:
-                actor_ids[ak] = upsert_actor(
-                    session,
-                    source_id=source_id,
-                    actor_key=ak,
-                    platform_userid=ak[-8:],
-                    handle=None,
-                    display_name=None,
-                    seen_at=_NOW,
-                )
-        session.commit()
-        committed_source = source_id
-        committed_group = group_id
-        committed_actors = dict(actor_ids)
-
-    for rec in records:
-        ref = f"telegram:{rec['platform_groupid']}:{rec['platform_msgid']}"
-        body = rec.get("body", "")
-        sent = datetime.fromisoformat(rec["sent_at_source"])
-        row = MessageTable(
-            id=new_uuid7(),
-            source_id=committed_source,
-            group_id=committed_group,
-            actor_id=committed_actors[rec["actor_key"]],  # type: ignore[arg-type]
-            platform_msgid=rec["platform_msgid"],
-            evidence_ref=ref,
-            body=body,
-            length_chars=len(body),
-            length_words=len(body.split()),
-            sent_at_source=sent,
-            ingested_at=_NOW,
-        )
-        await store.put_message(row)
+    await seed_telegram_fixture(
+        storage, records, _NOW, source_display_name="telegram:e2e", group_title="E2E"
+    )
     return records
 
 
