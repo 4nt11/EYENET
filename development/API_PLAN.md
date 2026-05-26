@@ -2863,7 +2863,7 @@ Independent of A, B, F, G, H. Lands the schema half of every concept modelled th
 - **Files touched:** `eyenet/models/collector.py`, `eyenet/models/identity.py` (role extension), `eyenet/storage/sqlmodel_repo/collectors.py`, `eyenet/storage/repository.py`, `tests/unit/storage/test_collectors.py`
 - **DoD:** `identity_id` uniqueness enforced (one identity = one collector); redacted config matches §4.11 sensitivity contract; desired/observed state transitions tested.
 
-#### M9.C4 — GroupCandidate + GroupCandidateMention storage
+#### M9.C4 — GroupCandidate + GroupCandidateMention storage ✅ SHIPPED (`4416c86`)
 - Tables: `GroupCandidate` (MODELS.md §2.20) — 8-state machine `discovered→queued→approved→joining→joined/rejected/failed/parked`. `GroupCandidateMention` (§2.21) with `seed_root_id`, `depth_from_root`.
 - Storage mixin: `eyenet/storage/sqlmodel_repo/candidates.py` — `record_candidate_mention` (upserts candidate, appends mention), `list_queued_candidates`, `transition_candidate` (state guard), `compute_eligibility_inputs` (returns reachable roots, active memberships, available scouts for a candidate).
 - State transitions audited.
@@ -2871,14 +2871,14 @@ Independent of A, B, F, G, H. Lands the schema half of every concept modelled th
 - **Files touched:** `eyenet/models/candidates.py`, `eyenet/storage/sqlmodel_repo/candidates.py`, `tests/unit/storage/test_candidates.py`
 - **DoD:** every illegal transition raises; mention upsert is idempotent on `(candidate_id, evidence_ref)`; `depth_from_root` materialized correctly across multi-hop chains.
 
-#### M9.C5 — CollectorGroupMembership + MessageObservation
+#### M9.C5 — CollectorGroupMembership + MessageObservation ✅ SHIPPED (`d2fc512`)
 - Tables: `CollectorGroupMembership` (§2.22) — `joined_via` discriminator, `left_at`/`left_reason`. `MessageObservation` (§2.23) — `was_first_sighting` materialized per `(message_evidence_ref, collector_id)`.
 - Storage mixin: `eyenet/storage/sqlmodel_repo/memberships.py` — `open_membership`, `close_membership`, `list_active_memberships`, `record_observation` (atomically sets `was_first_sighting` based on existing rows for the same `evidence_ref`).
 - **Depends on:** M9.C3
 - **Files touched:** `eyenet/models/membership.py`, `eyenet/storage/sqlmodel_repo/memberships.py`, `tests/unit/storage/test_memberships.py`
 - **DoD:** two collectors recording the same `evidence_ref` → first gets `was_first_sighting=True`, second gets `False`; race tested via `asyncio.gather`.
 
-#### M9.C6 — GroupAccessArtifact + InfrastructureArtifact bridge
+#### M9.C6 — GroupAccessArtifact + InfrastructureArtifact bridge ✅ SHIPPED (`83436f8`)
 - New table: `GroupAccessArtifact` (§2.24) — `kind ∈ {public_identifier, invite_link, qr_code, direct_invite, paid_subscription, access_blocked, restricted_other}`, `kind_preference` ordering.
 - Extension: `InfrastructureArtifact.resolved_to_source_id` + `.resolution_state` (§2.7 extension).
 - Bridge resolution invariant (§2.25) lives in `sqlmodel_repo/artifacts.py` — Path A (artifact-write side) and Path B (source-create side) both fire inside the same transaction that creates the artifact or source. No async job, no operator tool.
