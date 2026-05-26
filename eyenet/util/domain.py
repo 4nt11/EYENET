@@ -19,9 +19,20 @@ layer without acquiring a session, a clock, or a logger.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import idna
 
-from eyenet.contracts.enums import SourceDomainPatternKind
+from eyenet.contracts.enums import InfrastructureKind, SourceDomainPatternKind
+
+# Artifact kinds whose value carries a host that can resolve to a Source.
+BRIDGEABLE_KINDS: frozenset[InfrastructureKind] = frozenset(
+    {
+        InfrastructureKind.DOMAIN,
+        InfrastructureKind.ONION,
+        InfrastructureKind.PASTE_URL,
+    },
+)
 
 _MAX_ASCII_CODEPOINT = 127
 
@@ -167,4 +178,43 @@ def _parents_reach_overlap(a: str, b: str) -> bool:
     return a == b or _is_strict_subdomain(a, b) or _is_strict_subdomain(b, a)
 
 
-__all__ = ["normalize_host", "pattern_matches_host", "patterns_intersect"]
+def artifact_value_to_host(kind: InfrastructureKind, value: str) -> str | None:
+    """Extract the canonical host from an artifact value, or ``None`` if the
+    artifact kind carries no resolvable host (MODELS §2.25 bridge resolution).
+
+    Behavior by kind:
+
+    * ``DOMAIN`` / ``ONION`` — the value IS the host; normalize directly.
+    * ``PASTE_URL`` — parse the URL, extract ``netloc``, normalize.
+    * Anything else — return ``None`` (wallets, PGP keys, emails, phones,
+      cross-platform handles all carry no resolvable host).
+
+    Bad input (empty value, malformed URL, IDNA error in
+    :func:`normalize_host`) returns ``None`` rather than raising — callers
+    use the return value to decide whether to attempt resolution.
+    """
+    if kind not in BRIDGEABLE_KINDS:
+        return None
+    if kind is InfrastructureKind.PASTE_URL:
+        parsed = urlparse(value)
+        host = parsed.hostname or ""
+        if not host:
+            return None
+        try:
+            return normalize_host(host)
+        except ValueError:
+            return None
+    # DOMAIN / ONION — value is already a bare hostname.
+    try:
+        return normalize_host(value)
+    except ValueError:
+        return None
+
+
+__all__ = [
+    "BRIDGEABLE_KINDS",
+    "artifact_value_to_host",
+    "normalize_host",
+    "pattern_matches_host",
+    "patterns_intersect",
+]

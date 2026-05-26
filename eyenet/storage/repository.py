@@ -21,24 +21,29 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.attribution import LinkageRow
     from eyenet.contracts.audit import AuditLogRow
-    from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
-    from eyenet.contracts.clearance import SystemUserClearanceGrantRow
     from eyenet.contracts.candidate import (
         EligibilityInputs,
         GroupCandidateMentionRow,
         GroupCandidateRow,
     )
+    from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
+    from eyenet.contracts.clearance import SystemUserClearanceGrantRow
     from eyenet.contracts.collector import CollectorRow
     from eyenet.contracts.enums import (
+        ArtifactSubjectKind,
+        ArtifactValidationState,
         CandidateState,
         CaseRoleOnCase,
         CaseSubjectKind,
         ClearanceScope,
         CollectorDesiredState,
         CollectorObservedState,
+        GroupAccessKind,
         GroupKind,
+        InfrastructureKind,
         JoinedVia,
         MentionKind,
         SensitivityTier,
@@ -46,8 +51,9 @@ if TYPE_CHECKING:
         SourceKind,
         SystemLogLevel,
     )
-    from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.feedback import FeedbackPairRow
+    from eyenet.contracts.infrastructure import InfrastructureArtifactRow
+    from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
     from eyenet.contracts.source import SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
@@ -1011,6 +1017,64 @@ class BaseRepository(ABC):
 
         ``was_first_sighting`` is True iff this is the first call for this
         ``message_id``. Idempotent on ``(message_id, collector_id)``.
+        """
+
+    # =================================================================
+    # ARTIFACTS (MODELS §2.7, §2.24, §2.25 bridge resolution, M9.C6)
+    # =================================================================
+
+    @abstractmethod
+    async def put_infrastructure_artifact(
+        self,
+        *,
+        kind: InfrastructureKind,
+        value: str,
+        first_seen_at_ingest: datetime,
+        last_seen_at_ingest: datetime,
+    ) -> InfrastructureArtifactRow:
+        """Upsert an InfrastructureArtifact and run §2.25 Path A inline.
+
+        Resolution against existing SourceDomain rows runs in the same
+        transaction; ``resolution_state`` + ``resolved_to_source_id`` are
+        set before COMMIT. Idempotent on ``value_hash``.
+        """
+
+    @abstractmethod
+    async def get_infrastructure_artifact(
+        self,
+        artifact_id: UUID,
+    ) -> InfrastructureArtifactRow | None:
+        """Return one InfrastructureArtifactRow by id, or ``None``."""
+
+    @abstractmethod
+    async def list_artifacts_for_source(
+        self,
+        source_id: UUID,
+    ) -> list[InfrastructureArtifactRow]:
+        """Return InfrastructureArtifacts resolved to ``source_id``."""
+
+    @abstractmethod
+    async def add_group_access_artifact(
+        self,
+        *,
+        subject_kind: ArtifactSubjectKind,
+        group_id: UUID | None,
+        candidate_id: UUID | None,
+        kind: GroupAccessKind,
+        value: str | None,
+        discovered_at_ingest: datetime,
+        details: dict[str, Any] | None = None,
+        discovered_via_mention_id: UUID | None = None,
+        validation_state: ArtifactValidationState | None = None,
+        requires_admin_approval: bool = False,
+        expires_at: datetime | None = None,
+    ) -> GroupAccessArtifactRow:
+        """Insert a GroupAccessArtifact (MODELS §2.24).
+
+        Exactly one of (group_id, candidate_id) must be populated; the CHECK
+        constraint at the SQL layer is the durable backstop.
+
+        ``validation_state`` defaults to ``UNVERIFIED`` when ``None``.
         """
 
     # =================================================================

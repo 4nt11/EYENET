@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from sqlmodel import SQLModel
 
+from .access_artifact import GroupAccessArtifactTable
 from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
 from .candidates import GroupCandidateMentionTable, GroupCandidateTable
@@ -50,6 +51,7 @@ __all__ = [
     "CaseTable",
     "CollectorGroupMembershipTable",
     "CollectorTable",
+    "GroupAccessArtifactTable",
     "GroupCandidateMentionTable",
     "GroupCandidateTable",
     "MessageObservationTable",

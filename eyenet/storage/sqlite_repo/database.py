@@ -60,6 +60,7 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "collector",
         "infrastructure_artifact",
         "actor_artifact",
+        "group_access_artifact",
         "system_user",
         # observations
         "observation",

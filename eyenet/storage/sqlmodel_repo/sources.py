@@ -92,6 +92,17 @@ class SourcesMixin:
                 notes=notes,
             )
             session.add(table)
+            await session.flush()
+            # §2.25 Path B: retroactively resolve prior UNRESOLVED bridgeable
+            # artifacts whose host matches the just-added pattern. Runs inside
+            # this transaction so the SourceDomain insert + artifact updates
+            # commit atomically.
+            await self._resolve_existing_artifacts_for_new_domain_in_session(  # type: ignore[attr-defined]
+                session,
+                new_pattern=pattern_norm,
+                new_pattern_kind=pattern_kind,
+                new_source_id=source_id,
+            )
             await session.commit()
             await session.refresh(table)
             return _row(table)

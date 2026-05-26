@@ -366,6 +366,60 @@ class MentionKind(StrEnum):
     OTHER = "other"
 
 
+class ResolutionState(StrEnum):
+    """Bridge-resolution state for InfrastructureArtifact (MODELS §2.25).
+
+    ``unresolved`` — no Source's SourceDomain matches the artifact's host yet.
+    ``resolved`` — exactly one Source matches; ``resolved_to_source_id``
+    populated. ``ambiguous`` — multiple Sources match (operator mistake;
+    overlap detection in C1 should prevent this, but the state exists for
+    defensive completeness). ``not_applicable`` — artifact ``kind`` carries
+    no host (wallets, PGP keys, emails, phones, etc.).
+    """
+
+    UNRESOLVED = "unresolved"
+    RESOLVED = "resolved"
+    AMBIGUOUS = "ambiguous"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ArtifactSubjectKind(StrEnum):
+    """GroupAccessArtifact subject discriminator (MODELS §2.24)."""
+
+    GROUP = "group"
+    CANDIDATE = "candidate"
+
+
+class GroupAccessKind(StrEnum):
+    """Platform-neutral access-vector taxonomy (MODELS §2.24).
+
+    Preference ordering (lowest = cheapest / lowest OPSEC cost / most stable):
+    public_identifier < invite_link < qr_code < direct_invite <
+    paid_subscription < restricted_other. ``access_blocked`` is a known-bad
+    state — the artifact records that access is denied for this identity.
+    """
+
+    PUBLIC_IDENTIFIER = "public_identifier"
+    INVITE_LINK = "invite_link"
+    QR_CODE = "qr_code"
+    DIRECT_INVITE = "direct_invite"
+    PAID_SUBSCRIPTION = "paid_subscription"
+    ACCESS_BLOCKED = "access_blocked"
+    RESTRICTED_OTHER = "restricted_other"
+
+
+class ArtifactValidationState(StrEnum):
+    """GroupAccessArtifact validation lifecycle (MODELS §2.24)."""
+
+    UNVERIFIED = "unverified"
+    VALID = "valid"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+    USAGE_EXHAUSTED = "usage_exhausted"
+    BLOCKED_FOR_OUR_IDENTITY = "blocked_for_our_identity"
+    UNKNOWN_FAILURE = "unknown_failure"
+
+
 class JoinedVia(StrEnum):
     """How a CollectorGroupMembership was established (MODELS §2.22).
 
@@ -384,9 +438,13 @@ class JoinedVia(StrEnum):
 
 __all__ = [
     "ActorAliasKind",
+    "ArtifactSubjectKind",
+    "ArtifactValidationState",
     "AttachmentKind",
     "CandidateState",
+    "GroupAccessKind",
     "JoinedVia",
+    "ResolutionState",
     "CaseRoleOnCase",
     "CaseStatus",
     "CaseSubjectKind",
