@@ -59,8 +59,13 @@ paths:
       tags: [auth]
       operationId: auth_login
       security: []
-      summary: Exchange username + password for an access JWT and refresh token.
-      description: Public endpoint. Subject to per-IP throttling (see §12.3).
+      summary: Exchange username + password for an access JWT — OR an MFA challenge.
+      description: |
+        Public endpoint. Subject to per-IP throttling (see §12.3).
+
+        For users who have completed MFA enrollment, the 200 body short-
+        circuits to an `MfaLoginChallenge` (`mfa_required: true`) instead
+        of a `TokenPair`. Client must follow with `POST /v1/auth/login/verify`.
       requestBody:
         required: true
         content:
@@ -68,13 +73,109 @@ paths:
             schema: { $ref: '#/components/schemas/LoginRequest' }
       responses:
         "200":
-          description: Credentials accepted.
+          description: Credentials accepted. Body is either a TokenPair OR an MFA challenge.
+          content:
+            application/json:
+              schema:
+                # Inlined to match the FastAPI emission of the
+                # Annotated[TokenPair | MfaLoginChallenge, discriminator='kind']
+                # response_model — FastAPI does not produce a top-level $ref
+                # for discriminated unions, so referencing #/LoginResponse here
+                # would drift from the generated spec. The LoginResponse
+                # schema is retained under components/schemas as documentation.
+                oneOf:
+                  - { $ref: '#/components/schemas/TokenPair' }
+                  - { $ref: '#/components/schemas/MfaLoginChallenge' }
+                discriminator:
+                  propertyName: kind
+                  mapping:
+                    token_pair:   '#/components/schemas/TokenPair'
+                    mfa_required: '#/components/schemas/MfaLoginChallenge'
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v1/auth/login/verify:
+    post:
+      tags: [auth]
+      operationId: auth_login_verify
+      security: []
+      summary: Complete an MFA login challenge. Returns the TokenPair on success.
+      description: |
+        The `mfa_challenge_id` IS the auth context — this endpoint takes
+        no bearer token. Single-use: the challenge row is consumed on
+        success and rejected on replay. 5 failed verifies in 15 minutes
+        silently lock the user via the same 401 surface as a wrong code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaLoginVerifyRequest' }
+      responses:
+        "200":
+          description: MFA accepted; new JWT pair issued.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TokenPair' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "422": { $ref: '#/components/responses/Validation' }
         "429": { $ref: '#/components/responses/RateLimited' }
+
+  /v1/auth/mfa/enroll:
+    post:
+      tags: [auth]
+      operationId: auth_mfa_enroll
+      summary: Mint a fresh TOTP secret. Not persisted until /verify-enroll confirms.
+      description: |
+        Returns the `otpauth://` URI for QR-code rendering AND the raw
+        `secret_b32`. The client MUST echo `secret_b32` back in the
+        following `POST /v1/auth/mfa/verify-enroll` request — the server
+        does not stage it.
+      responses:
+        "200":
+          description: TOTP secret minted (transient).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaEnrollResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/mfa/verify-enroll:
+    post:
+      tags: [auth]
+      operationId: auth_mfa_verify_enroll
+      summary: Confirm enrollment by proving you can produce a code from the secret.
+      description: |
+        On success, the encrypted secret is written to `system_user_credential`
+        and the user is MFA-enrolled. A wrong code persists nothing — the
+        user can rerun `/enroll` cleanly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaVerifyEnrollRequest' }
+      responses:
+        "204": { description: MFA secret persisted; user is now enrolled. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/auth/mfa:
+    delete:
+      tags: [auth]
+      operationId: auth_mfa_disable
+      summary: Disable MFA after primary-factor (password) re-auth.
+      description: |
+        Requires both a valid bearer token AND `current_password` in the
+        body — defeats "attacker steals laptop, leaves MFA off via the
+        stolen session alone."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaDisableRequest' }
+      responses:
+        "204": { description: MFA disabled; user reverts to single-factor login. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "422": { $ref: '#/components/responses/Validation' }
 
   /v1/auth/refresh:
     post:
@@ -1821,13 +1922,62 @@ components:
     TokenPair:
       type: object
       additionalProperties: false
-      required: [access_token, access_expires_at, refresh_token, refresh_expires_at, token_type]
+      required: [kind, access_token, access_expires_at, refresh_token, refresh_expires_at, token_type]
       properties:
+        kind:               { type: string, enum: [token_pair], default: token_pair }
         access_token:       { type: string }
         access_expires_at:  { type: string, format: date-time }
         refresh_token:      { type: string }
         refresh_expires_at: { type: string, format: date-time }
         token_type:         { type: string, enum: [Bearer] }
+    MfaLoginChallenge:
+      type: object
+      additionalProperties: false
+      required: [kind, mfa_required, mfa_challenge_id]
+      properties:
+        kind:             { type: string, enum: [mfa_required], default: mfa_required }
+        mfa_required:     { type: boolean, enum: [true] }
+        mfa_challenge_id: { type: string, format: uuid }
+    LoginResponse:
+      description: |
+        Discriminated union surface of `POST /v1/auth/login`. The `kind`
+        field discriminates between the two outcomes — clients that ignore
+        it fall back to inspecting `mfa_required` per spec §M9.A3.
+      oneOf:
+        - { $ref: '#/components/schemas/TokenPair' }
+        - { $ref: '#/components/schemas/MfaLoginChallenge' }
+      discriminator:
+        propertyName: kind
+        mapping:
+          token_pair:   '#/components/schemas/TokenPair'
+          mfa_required: '#/components/schemas/MfaLoginChallenge'
+    MfaEnrollResponse:
+      type: object
+      additionalProperties: false
+      required: [provisioning_uri, secret_b32]
+      properties:
+        provisioning_uri: { type: string, minLength: 1, maxLength: 2048 }
+        secret_b32:       { type: string, minLength: 16, maxLength: 128 }
+    MfaVerifyEnrollRequest:
+      type: object
+      additionalProperties: false
+      required: [secret_b32, code]
+      properties:
+        secret_b32: { type: string, minLength: 16, maxLength: 128 }
+        code:       { type: string, pattern: '^\d{6}$' }
+    MfaLoginVerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [mfa_challenge_id, code]
+      properties:
+        mfa_challenge_id: { type: string, format: uuid }
+        code:             { type: string, pattern: '^\d{6}$' }
+    MfaDisableRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password]
+      properties:
+        current_password: { type: string, minLength: 1, maxLength: 1024, format: password }
     SystemUserRole:
       description: Operator-tier role (MODELS §2.17).
       type: string

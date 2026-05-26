@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Final, cast
+from typing import TYPE_CHECKING, Annotated, Final, cast
 from uuid import UUID
 
 from fastapi import Depends, Header, Request
@@ -27,6 +27,9 @@ from eyenet.api.auth import (
     VerifyingKey,
     decode_access_token,
 )
+
+if TYPE_CHECKING:
+    from cryptography.fernet import Fernet
 from eyenet.contracts.enums import SystemUserRole
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -82,6 +85,15 @@ def get_auth_cache(request: Request) -> AuthCache:
     if cache is None:
         raise RuntimeError("app.state.auth_cache is not configured")
     return cast("AuthCache", cache)
+
+
+def get_mfa_key(request: Request) -> Fernet:
+    fernet = getattr(request.app.state, "mfa_key", None)
+    if fernet is None:
+        raise RuntimeError("app.state.mfa_key is not configured")
+    from cryptography.fernet import Fernet as _Fernet  # noqa: PLC0415
+
+    return cast("_Fernet", fernet)
 
 
 def get_verifying_keys(request: Request) -> dict[str, VerifyingKey]:
@@ -156,6 +168,7 @@ __all__ = [
     "get_audit",
     "get_auth_cache",
     "get_current_user",
+    "get_mfa_key",
     "get_storage",
     "get_verifying_keys",
 ]

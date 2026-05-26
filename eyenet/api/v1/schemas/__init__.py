@@ -36,7 +36,9 @@ from .audit import AuditChainBreak, AuditRow, AuditVerifyResult, CursorPageAudit
 from .auth import (
     CursorPagePATSummary,
     LoginRequest,
+    LoginResponse,
     LogoutRequest,
+    MfaLoginChallenge,
     PATMinted,
     PATMintRequest,
     PATSummary,
@@ -97,6 +99,12 @@ from .linkages import (
     LinkageDetail,
     LinkageEvidence,
     LinkageSummary,
+)
+from .mfa import (
+    MfaDisableRequest,
+    MfaEnrollResponse,
+    MfaLoginVerifyRequest,
+    MfaVerifyEnrollRequest,
 )
 from .pagination import CursorPage
 from .personas import CursorPagePersonaMember, PersonaDetail, PersonaMember, PersonaSummary
@@ -180,7 +188,13 @@ __all__ = [
     "LinkedToAttrs",
     "LinkedToEdge",
     "LoginRequest",
+    "LoginResponse",
     "LogoutRequest",
+    "MfaDisableRequest",
+    "MfaEnrollResponse",
+    "MfaLoginChallenge",
+    "MfaLoginVerifyRequest",
+    "MfaVerifyEnrollRequest",
     "NeighborEdge",
     "NeighborList",
     "ObservationSummary",

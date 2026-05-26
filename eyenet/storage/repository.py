@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
+    from eyenet.contracts.mfa import MfaChallengeRow
     from eyenet.contracts.source import SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
     from eyenet.contracts.system_user import SystemUserRow
@@ -1190,6 +1191,63 @@ class BaseRepository(ABC):
         user_id: UUID,
     ) -> list[SystemUserScopeRow]:
         """Return all explicit scope grants for a user, ordered by ``granted_at``."""
+
+    # =================================================================
+    # MFA (API_PLAN §M9.A3 — TOTP login challenge)
+    # =================================================================
+
+    @abstractmethod
+    async def create_mfa_challenge(
+        self,
+        *,
+        user_id: UUID,
+        issued_at: datetime,
+        expires_at: datetime,
+    ) -> MfaChallengeRow:
+        """Issue a fresh one-shot TOTP login challenge."""
+
+    @abstractmethod
+    async def get_mfa_challenge(self, challenge_id: UUID) -> MfaChallengeRow | None:
+        """Return one challenge row by id, or ``None``."""
+
+    @abstractmethod
+    async def consume_mfa_challenge(
+        self,
+        *,
+        challenge_id: UUID,
+        consumed_at: datetime,
+    ) -> MfaChallengeRow:
+        """Mark a challenge consumed (login/verify success).
+
+        Raises :class:`ValueError` if the challenge doesn't exist OR if it
+        has already been consumed (callers treat the second case as replay).
+        """
+
+    @abstractmethod
+    async def bump_mfa_challenge_failures(self, challenge_id: UUID) -> int:
+        """Atomically increment ``failed_attempts`` for a challenge. Returns
+        the new count. Raises :class:`ValueError` if the challenge is unknown."""
+
+    @abstractmethod
+    async def count_recent_mfa_failures(
+        self,
+        *,
+        user_id: UUID,
+        since: datetime,
+    ) -> int:
+        """Number of challenge rows for ``user_id`` with ``failed_attempts > 0``
+        AND ``issued_at >= since``. Drives the 5-fail / 15-min lockout window."""
+
+    @abstractmethod
+    async def clear_mfa_failures(
+        self,
+        *,
+        user_id: UUID,
+        since: datetime,
+    ) -> int:
+        """Zero ``failed_attempts`` on all of ``user_id``'s rows with
+        ``issued_at >= since``. Returns rows touched. Backs the operator
+        unlock path (``eyenet user unlock-mfa``)."""
 
     # =================================================================
     # SYSTEM USERS (MODELS §2.17 — operator accounts)

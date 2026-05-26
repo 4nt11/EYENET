@@ -13,7 +13,7 @@ API_PLAN §3.1, §4.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -49,13 +49,34 @@ class LogoutRequest(ApiSchema):
 
 
 class TokenPair(ApiSchema):
-    """200 response from `/v1/auth/login`."""
+    """200 response from `/v1/auth/login` (no MFA) or `/v1/auth/login/verify`.
 
+    ``kind`` is the discriminator for :data:`LoginResponse` — additive to
+    spec §M9.A2, ignored by clients that don't read it.
+    """
+
+    kind: Literal["token_pair"] = "token_pair"
     access_token: str
     access_expires_at: datetime
     refresh_token: str
     refresh_expires_at: datetime
     token_type: Literal["Bearer"] = "Bearer"
+
+
+class MfaLoginChallenge(ApiSchema):
+    """200 response from `/v1/auth/login` when the user is MFA-enrolled.
+
+    Client must follow up with `POST /v1/auth/login/verify` carrying the
+    ``mfa_challenge_id`` and the 6-digit TOTP code (API_PLAN §M9.A3).
+    """
+
+    kind: Literal["mfa_required"] = "mfa_required"
+    mfa_required: Literal[True] = True
+    mfa_challenge_id: UUID
+
+
+LoginResponse = Annotated[TokenPair | MfaLoginChallenge, Field(discriminator="kind")]
+"""Discriminated union surface of `POST /v1/auth/login`."""
 
 
 class UserMe(ApiSchema):
@@ -143,7 +164,9 @@ class CursorPagePATSummary(CursorPage[PATSummary]):
 __all__ = [
     "CursorPagePATSummary",
     "LoginRequest",
+    "LoginResponse",
     "LogoutRequest",
+    "MfaLoginChallenge",
     "PATMintRequest",
     "PATMinted",
     "PATSummary",

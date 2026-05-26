@@ -23,6 +23,8 @@ from ._jwt import (
     mint_access_token,
     mint_refresh_secret,
 )
+from ._mfa import generate_secret, provisioning_uri, verify_code
+from ._mfa_key import MfaKeyError, decrypt_secret, encrypt_secret, load_mfa_key
 from ._passwords import hash_password, verify_password
 from ._permissions import ROLE_BASELINE, resolve_effective_scopes
 
@@ -34,15 +36,22 @@ __all__ = [
     "AuthCache",
     "AuthContext",
     "JwtError",
+    "MfaKeyError",
     "SigningKey",
     "VerifyingKey",
     "decode_access_token",
+    "decrypt_secret",
+    "encrypt_secret",
+    "generate_secret",
     "hash_password",
     "hash_refresh_secret",
+    "load_mfa_key",
     "load_signing_keypair",
     "load_verifying_keys",
     "mint_access_token",
     "mint_refresh_secret",
+    "provisioning_uri",
     "resolve_effective_scopes",
+    "verify_code",
     "verify_password",
 ]

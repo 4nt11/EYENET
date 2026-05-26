@@ -58,6 +58,10 @@ app = typer.Typer(
 linkage_app = typer.Typer(name="linkage", help="Manage linkage lifecycle.", no_args_is_help=True)
 app.add_typer(linkage_app, name="linkage")
 
+from eyenet.cli.user import user_app  # noqa: E402
+
+app.add_typer(user_app, name="user")
+
 
 @app.callback()
 def _root() -> None:

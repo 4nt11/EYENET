@@ -2,9 +2,10 @@
 
 Four new tables that make A2's JWT login/refresh/logout/me handlers possible:
 
-* :class:`SystemUserCredentialTable` — argon2id password hash + age-encrypted
-  MFA secret, separated from the user profile so credentials and profile have
-  different access patterns / audit scopes.
+* :class:`SystemUserCredentialTable` — argon2id password hash + Fernet-encrypted
+  MFA secret (see :mod:`eyenet.api.auth._mfa_key`), separated from the user
+  profile so credentials and profile have different access patterns / audit
+  scopes.
 * :class:`RefreshTokenTable` — opaque-secret-hash chain with self-referential
   ``replaced_by`` FK for rotation tracking. CHECK constraint enforces
   replacement-implies-revocation; admin-revoked-but-not-replaced (logout) is

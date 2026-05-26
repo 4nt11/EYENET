@@ -45,6 +45,7 @@ dependencies = [
   "pyjwt[crypto]>=2.8",     # M9.A2 RS256 JWT sign/verify (crypto extra → cryptography backend)
   "cachetools>=5.3",        # M9.A2 auth resolver TTL cache
   "types-cachetools>=5.5",  # type stubs for the above
+  "pyotp>=2.9",             # M9.A3 TOTP RFC 6238
 
   # domain normalization — IDNA2008 + UTS46 (stdlib codec is IDNA2003 only,
   # silently NFKC-folds adversarial input and defeats homograph defense).

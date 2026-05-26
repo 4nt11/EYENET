@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy.sql import func, update
 from sqlmodel import col, select
 
 from eyenet.contracts.auth import (
@@ -23,12 +24,14 @@ from eyenet.contracts.auth import (
     SystemUserCredentialRow,
     SystemUserScopeRow,
 )
+from eyenet.contracts.mfa import MfaChallengeRow
 from eyenet.models.auth import (
     JwtDenylistTable,
     RefreshTokenTable,
     SystemUserCredentialTable,
     SystemUserScopeTable,
 )
+from eyenet.models.mfa import MfaChallengeTable
 
 from ._helpers import safe_session
 
@@ -63,6 +66,13 @@ def _scope_row(table: SystemUserScopeTable) -> SystemUserScopeRow:
     data = table.model_dump()
     data["granted_at"] = _coerce_utc(data.get("granted_at"))
     return SystemUserScopeRow.model_validate(data)
+
+
+def _mfa_row(table: MfaChallengeTable) -> MfaChallengeRow:
+    data = table.model_dump()
+    for k in ("issued_at", "expires_at", "consumed_at"):
+        data[k] = _coerce_utc(data.get(k))
+    return MfaChallengeRow.model_validate(data)
 
 
 class AuthMixin:
@@ -264,6 +274,98 @@ class AuthMixin:
             )
             result = await session.exec(stmt)
             return [_scope_row(r) for r in list(result)]
+
+    # =================================================================
+    # MFA challenges (M9.A3)
+    # =================================================================
+
+    async def create_mfa_challenge(
+        self,
+        *,
+        user_id: UUID,
+        issued_at: datetime,
+        expires_at: datetime,
+    ) -> MfaChallengeRow:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = MfaChallengeTable(
+                user_id=user_id,
+                issued_at=issued_at,
+                expires_at=expires_at,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _mfa_row(row)
+
+    async def get_mfa_challenge(self, challenge_id: UUID) -> MfaChallengeRow | None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(MfaChallengeTable, challenge_id)
+            return _mfa_row(row) if row is not None else None
+
+    async def consume_mfa_challenge(
+        self,
+        *,
+        challenge_id: UUID,
+        consumed_at: datetime,
+    ) -> MfaChallengeRow:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(MfaChallengeTable, challenge_id)
+            if row is None:
+                raise ValueError(f"mfa_challenge {challenge_id} not found")
+            if row.consumed_at is not None:
+                raise ValueError(f"mfa_challenge {challenge_id} already consumed")
+            row.consumed_at = consumed_at
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _mfa_row(row)
+
+    async def bump_mfa_challenge_failures(self, challenge_id: UUID) -> int:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(MfaChallengeTable, challenge_id)
+            if row is None:
+                raise ValueError(f"mfa_challenge {challenge_id} not found")
+            row.failed_attempts += 1
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return int(row.failed_attempts)
+
+    async def count_recent_mfa_failures(
+        self,
+        *,
+        user_id: UUID,
+        since: datetime,
+    ) -> int:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(func.count()).where(
+                MfaChallengeTable.user_id == user_id,
+                MfaChallengeTable.issued_at >= since,
+                MfaChallengeTable.failed_attempts > 0,
+            )
+            result = await session.exec(stmt)
+            total = result.one()
+            return int(total)
+
+    async def clear_mfa_failures(
+        self,
+        *,
+        user_id: UUID,
+        since: datetime,
+    ) -> int:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                update(MfaChallengeTable)
+                .where(
+                    MfaChallengeTable.user_id == user_id,  # type: ignore[arg-type]
+                    MfaChallengeTable.issued_at >= since,  # type: ignore[arg-type]
+                    MfaChallengeTable.failed_attempts > 0,  # type: ignore[arg-type]
+                )
+                .values(failed_attempts=0)
+            )
+            result = await session.exec(stmt)
+            await session.commit()
+            return int(result.rowcount or 0)
 
 
 __all__ = ["AuthMixin"]

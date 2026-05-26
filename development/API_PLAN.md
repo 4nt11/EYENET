@@ -2761,7 +2761,7 @@ Plus one repo helper: `recent_message_bodies_for_actor(actor_id, limit=N)` — t
 
 Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5), but the group as a whole is parallel-safe against B, C, D, E, F, G, H. The `messages.db` schema additions in A1 don't touch any table read by B/C/F.
 
-#### M9.A1 — Auth tables (no handlers)
+#### M9.A1 — Auth tables (no handlers) ✅ DONE
 - New tables in `messages.db`: `system_user_credential`, `refresh_token`, `jwt_denylist`, `system_user_scope`. STRIPS inline `password_hash` / `mfa_secret_encrypted` from `SystemUserTable`.
 - Storage mixin: `eyenet/storage/sqlmodel_repo/auth.py` — `get_credential`, `set_credential`, `record_refresh_token`, `revoke_refresh_chain`, `denylist_jti`, `is_jti_denied`, `set_user_scopes`, `get_user_scopes`. ANSI SQL only; SQLite-specific UPSERT (if needed) goes on `SQLiteRepository` per CLAUDE.md §2.3 Rule 1.
 - Tests in `tests/unit/storage/test_auth_sqlmodel.py` against `get_repository(in_memory=True)`.
@@ -2769,7 +2769,7 @@ Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5), but the 
 - **Files touched:** `eyenet/models/auth.py`, `eyenet/storage/sqlmodel_repo/{__init__.py,auth.py}`, `eyenet/storage/repository.py`, `tests/unit/storage/test_auth_sqlmodel.py`
 - **DoD:** new tests pass; `mypy --strict` clean; CHECK on `refresh_token.replaced_by` (replacement chain) enforced.
 
-#### M9.A2 — JWT + login/refresh/logout/me handlers
+#### M9.A2 — JWT + login/refresh/logout/me handlers ✅ DONE
 - `eyenet/api/auth/jwt.py` — RS256 sign/verify, kid rotation hooks.
 - Handlers: `/v1/auth/login`, `/refresh`, `/logout`, `/me`.
 - `eyenet/api/v1/schemas/auth.py` — `LoginRequest`, `TokenPair`, `AccessToken`, `UserMe` (each with `MODELS.md §2.17` docstring per §9.5).

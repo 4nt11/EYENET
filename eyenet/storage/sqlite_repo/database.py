@@ -88,6 +88,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "refresh_token",
         "jwt_denylist",
         "system_user_scope",
+        # M9.A3 — MFA TOTP login challenge
+        "mfa_challenge",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset({"audit_log"})

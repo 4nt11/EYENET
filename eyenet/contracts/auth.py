@@ -31,7 +31,8 @@ class SystemUserCredentialRow(BaseModel):
     mfa_secret_encrypted: str | None = Field(
         default=None,
         max_length=512,
-        description="age-encrypted TOTP secret; None if MFA not enrolled",
+        description="Fernet-encrypted TOTP secret (see eyenet.api.auth._mfa_key); "
+        "None if MFA not enrolled",
     )
 
 

@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from eyenet.api.app import create_app
-from eyenet.api.auth import hash_password
+from eyenet.api.auth import encrypt_secret, hash_password, load_mfa_key
 from eyenet.contracts.enums import SystemUserRole
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -53,6 +53,7 @@ async def _seed(
     role: SystemUserRole,
     now: datetime,
     is_active: bool = True,
+    mfa_secret_encrypted: str | None = None,
 ) -> UUID:
     user_id = uuid4()
     await storage.put_system_user(
@@ -67,21 +68,32 @@ async def _seed(
         user_id=user_id,
         password_hash=hash_password(password),
         password_updated_at=now,
+        mfa_secret_encrypted=mfa_secret_encrypted,
     )
     return user_id
 
 
 @pytest.fixture
-def seed_user(storage: BaseRepository, now: datetime):
-    """Return an async helper that seeds an active user+credential."""
+def seed_user(storage: BaseRepository, data_dir: Path, now: datetime):
+    """Return an async helper that seeds an active user+credential.
+
+    Pass ``mfa_secret_b32`` to provision an MFA-enrolled user — the
+    plaintext is Fernet-encrypted against the same ``mfa_key`` the app
+    will load on startup (in this fixture's ``data_dir``).
+    """
 
     async def _make(
         *,
         username: str = "operator",
-        password: str = "correct horse battery staple",  # noqa: S107 — fixture default, not a real cred
+        password: str = "correct horse battery staple",  # noqa: S107 — fixture default
         role: SystemUserRole = SystemUserRole.ADMIN,
         is_active: bool = True,
+        mfa_secret_b32: str | None = None,
     ) -> UUID:
+        ciphertext: str | None = None
+        if mfa_secret_b32 is not None:
+            fernet = load_mfa_key(data_dir)
+            ciphertext = encrypt_secret(fernet, mfa_secret_b32)
         return await _seed(
             storage,
             username=username,
@@ -89,6 +101,7 @@ def seed_user(storage: BaseRepository, now: datetime):
             role=role,
             now=now,
             is_active=is_active,
+            mfa_secret_encrypted=ciphertext,
         )
 
     return _make

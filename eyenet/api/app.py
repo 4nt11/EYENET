@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from eyenet.api.auth import AuthCache, load_verifying_keys
+from eyenet.api.auth import AuthCache, load_mfa_key, load_verifying_keys
 from eyenet.api.deps import AuthError, ScopeForbidden
 from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
@@ -74,6 +74,7 @@ def create_app(
         instance_id=instance_id,
     )
     app.state.verifying_keys = load_verifying_keys(data_dir)
+    app.state.mfa_key = load_mfa_key(data_dir)
     app.state.data_dir = data_dir
     app.state.auth_cache = AuthCache.from_env()
 

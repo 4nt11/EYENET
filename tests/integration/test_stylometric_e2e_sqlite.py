@@ -85,9 +85,7 @@ async def test_stylometric_e2e(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     data_dir = tmp_path / "data"
     storage = get_repository(data_dir=data_dir)
 
-    records = [
-        json.loads(line) for line in _FIXTURE.read_text().splitlines()[:30] if line.strip()
-    ]
+    records = [json.loads(line) for line in _FIXTURE.read_text().splitlines()[:30] if line.strip()]
     from tests._seed import seed_telegram_fixture
 
     await seed_telegram_fixture(storage, records, _NOW)
@@ -160,9 +158,7 @@ async def test_dispatch_drains_under_primitive_failure(
     # Seed only the first N fixture records — enough to demonstrate the
     # broken primitive doesn't deadlock the pipeline, small enough to drain
     # under the suite-level pytest-timeout without a per-test override.
-    records = [
-        json.loads(line) for line in _FIXTURE.read_text().splitlines()[:30] if line.strip()
-    ]
+    records = [json.loads(line) for line in _FIXTURE.read_text().splitlines()[:30] if line.strip()]
     from tests._seed import seed_telegram_fixture
 
     await seed_telegram_fixture(storage, records, _NOW)

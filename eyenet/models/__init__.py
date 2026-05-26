@@ -21,7 +21,6 @@ from .auth import (
 )
 from .candidates import GroupCandidateMentionTable, GroupCandidateTable
 from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
-from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .clearance import SystemUserClearanceGrantTable
 from .collector import CollectorTable
 from .corpus import CorpusCursorTable
@@ -35,7 +34,9 @@ from .identity import (
 )
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
+from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .message import AttachmentTable, MessageTable
+from .mfa import MfaChallengeTable
 from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
 from .profile import ProfileTable
@@ -57,10 +58,6 @@ __all__ = [
     "CaseTable",
     "CollectorGroupMembershipTable",
     "CollectorTable",
-    "GroupAccessArtifactTable",
-    "GroupCandidateMentionTable",
-    "GroupCandidateTable",
-    "MessageObservationTable",
     "CorpusCursorTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",
@@ -69,6 +66,9 @@ __all__ = [
     "GraphEdgeType",
     "GraphNodeTable",
     "GraphNodeType",
+    "GroupAccessArtifactTable",
+    "GroupCandidateMentionTable",
+    "GroupCandidateTable",
     "GroupSnapshotTable",
     "GroupTable",
     "IdentityLabelTable",
@@ -77,7 +77,9 @@ __all__ = [
     "JwtDenylistTable",
     "LinkageTable",
     "MembershipTable",
+    "MessageObservationTable",
     "MessageTable",
+    "MfaChallengeTable",
     "ObservationTable",
     "PersonaMembershipTable",
     "PersonaTable",
