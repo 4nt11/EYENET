@@ -34,9 +34,9 @@ from .attachments import (
 )
 from .audit import AuditChainBreak, AuditRow, AuditVerifyResult, CursorPageAuditRow
 from .auth import (
-    AccessToken,
     CursorPagePATSummary,
     LoginRequest,
+    LogoutRequest,
     PATMinted,
     PATMintRequest,
     PATSummary,
@@ -113,7 +113,6 @@ from .stream import (
 from .writes import WriteAccepted
 
 __all__ = [
-    "AccessToken",
     "ActorDetail",
     "ActorSummary",
     "Anchor",
@@ -181,6 +180,7 @@ __all__ = [
     "LinkedToAttrs",
     "LinkedToEdge",
     "LoginRequest",
+    "LogoutRequest",
     "NeighborEdge",
     "NeighborList",
     "ObservationSummary",

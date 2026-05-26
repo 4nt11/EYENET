@@ -1,31 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """FastAPI app factory for EYENET v1 HTTP API.
 
-`create_app()` is the canonical entry point. It mounts `v1_router` and wires
-the two skeleton-tier exception handlers required for §7 (`application/problem+json`):
+``create_app(*, storage, data_dir, publisher=None)`` is the canonical
+entry point. It mounts ``v1_router`` and wires the exception handlers
+required for §7 (``application/problem+json``):
 
-- `NotImplementedError` → 501 ProblemDetail. Every M9.0 stub raises this; the
-  handler exists so Schemathesis and the §14.4 surface-diff test get a real
-  HTTP response with the documented error envelope instead of FastAPI's
-  default 500 plain-JSON.
-- `RequestValidationError` → 422 ProblemDetail (populates `errors[]`).
-  Replaces FastAPI's default `{"detail": [...]}` shape with our `ValidationError`
-  rows so the wire shape conforms to the OpenAPI for free.
+- ``NotImplementedError`` → 501 ProblemDetail (skeleton routes).
+- ``RequestValidationError`` → 422 ProblemDetail with per-field rows.
+- ``AuthError`` → 401 ProblemDetail (no ``WWW-Authenticate`` header —
+  bearer-token API clients don't key off it, and omitting it removes one
+  deployment-info surface).
+- ``ScopeForbidden`` → 403 ProblemDetail with the required scope in
+  ``payload.required_scope``.
 
-Auth, audit, tracing, rate-limit, request-id middleware land in M9.1+.
-For now `request_id` is sourced from the `X-Request-Id` header or a fresh
-ULID-shaped placeholder so ProblemDetail's required field is always populated.
+Storage, audit emitter, JWT verifying keys, and the auth cache live on
+``app.state`` so dependencies in :mod:`eyenet.api.deps` can read them.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from eyenet.api.auth import AuthCache, load_verifying_keys
+from eyenet.api.deps import AuthError, ScopeForbidden
 from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
+from eyenet.bus.memory import MemoryBus
+from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.storage.repository import BaseRepository
+from eyenet.telemetry.audit import AuditEmitter
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -42,7 +50,13 @@ def _problem_response(problem: ProblemDetail, status_code: int) -> JSONResponse:
     )
 
 
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    storage: BaseRepository,
+    data_dir: Path,
+    publisher: BusEnvelopePublisher | None = None,
+    instance_id: str = "api-0",
+) -> FastAPI:
     app = FastAPI(
         title="EYENET API",
         version="0.0.0",
@@ -50,6 +64,18 @@ def create_app() -> FastAPI:
         docs_url=None,
         redoc_url=None,
     )
+
+    bus_publisher = publisher or BusEnvelopePublisher(MemoryBus())
+    app.state.storage = storage
+    app.state.audit = AuditEmitter(
+        bus_publisher,
+        storage,
+        service="api",
+        instance_id=instance_id,
+    )
+    app.state.verifying_keys = load_verifying_keys(data_dir)
+    app.state.data_dir = data_dir
+    app.state.auth_cache = AuthCache.from_env()
 
     @app.exception_handler(NotImplementedError)
     async def _not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:
@@ -83,6 +109,30 @@ def create_app() -> FastAPI:
             errors=errors,
         )
         return _problem_response(problem, 422)
+
+    @app.exception_handler(AuthError)
+    async def _auth_error(request: Request, exc: AuthError) -> JSONResponse:  # noqa: ARG001 — FastAPI handler signature
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Unauthorized",
+            status=401,
+            detail="authentication failed",
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 401)
+
+    @app.exception_handler(ScopeForbidden)
+    async def _scope_forbidden(request: Request, exc: ScopeForbidden) -> JSONResponse:
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Forbidden",
+            status=403,
+            detail=f"missing required scope: {exc.scope}",
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 403)
 
     app.include_router(v1_router)
     return app

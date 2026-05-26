@@ -9,8 +9,8 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from eyenet.api.v1.schemas import (
-    AccessToken,
     LoginRequest,
+    LogoutRequest,
     PATMinted,
     PATMintRequest,
     PATSummary,
@@ -73,7 +73,7 @@ def test_refresh_request_min_length() -> None:
     RefreshRequest(refresh_token="x" * 16)
 
 
-# --- TokenPair / AccessToken -----------------------------------------------
+# --- TokenPair / LogoutRequest ----------------------------------------------
 
 
 def test_token_pair_defaults_token_type(now: datetime) -> None:
@@ -86,9 +86,19 @@ def test_token_pair_defaults_token_type(now: datetime) -> None:
     assert pair.token_type == "Bearer"
 
 
-def test_access_token_only(now: datetime) -> None:
-    tok = AccessToken(access_token="a", access_expires_at=now)
-    assert tok.token_type == "Bearer"
+def test_logout_request_accepts_empty_body() -> None:
+    req = LogoutRequest()
+    assert req.refresh_token is None
+
+
+def test_logout_request_accepts_refresh_token() -> None:
+    req = LogoutRequest(refresh_token="x" * 16)
+    assert req.refresh_token == "x" * 16
+
+
+def test_logout_request_rejects_short_refresh_token() -> None:
+    with pytest.raises(PydanticValidationError):
+        LogoutRequest(refresh_token="short")
 
 
 def test_token_pair_rejects_other_token_type(now: datetime) -> None:

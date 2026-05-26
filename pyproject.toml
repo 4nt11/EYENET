@@ -41,6 +41,10 @@ dependencies = [
 
   # crypto / opsec
   "cryptography>=43",
+  "argon2-cffi>=23.1",      # M9.A2 password hashing
+  "pyjwt[crypto]>=2.8",     # M9.A2 RS256 JWT sign/verify (crypto extra → cryptography backend)
+  "cachetools>=5.3",        # M9.A2 auth resolver TTL cache
+  "types-cachetools>=5.5",  # type stubs for the above
 
   # domain normalization — IDNA2008 + UTS46 (stdlib codec is IDNA2003 only,
   # silently NFKC-folds adversarial input and defeats homograph defense).

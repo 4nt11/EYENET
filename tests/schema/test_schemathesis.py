@@ -13,12 +13,15 @@ To run ad-hoc without removing the skip:
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import pytest
 import schemathesis
 
 from eyenet.api.app import create_app
+from eyenet.storage.factory import get_repository
 
 pytestmark = [
     pytest.mark.schema,
@@ -26,7 +29,9 @@ pytestmark = [
 ]
 
 
-_app = create_app()
+_storage = get_repository(in_memory=True)
+_tmpdir = tempfile.mkdtemp(prefix="eyenet-schemathesis-")
+_app = create_app(storage=_storage, data_dir=Path(_tmpdir))
 schema = schemathesis.openapi.from_asgi("/v1/openapi.json", _app)
 
 

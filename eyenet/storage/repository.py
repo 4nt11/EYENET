@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         SourceDomainPatternKind,
         SourceKind,
         SystemLogLevel,
+        SystemUserRole,
     )
     from eyenet.contracts.feedback import FeedbackPairRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.message import AttachmentRow
     from eyenet.contracts.source import SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
+    from eyenet.contracts.system_user import SystemUserRow
 
 
 class BaseRepository(ABC):
@@ -1188,6 +1190,48 @@ class BaseRepository(ABC):
         user_id: UUID,
     ) -> list[SystemUserScopeRow]:
         """Return all explicit scope grants for a user, ordered by ``granted_at``."""
+
+    # =================================================================
+    # SYSTEM USERS (MODELS §2.17 — operator accounts)
+    # =================================================================
+
+    @abstractmethod
+    async def put_system_user(
+        self,
+        *,
+        user_id: UUID,
+        username: str,
+        display_name: str,
+        role: SystemUserRole,
+        created_at: datetime,
+        email: str | None = None,
+        is_active: bool = True,
+        notes: str | None = None,
+    ) -> SystemUserRow:
+        """Upsert a system user row keyed by ``user_id``.
+
+        Profile-only — credentials live in :meth:`put_credential`. The
+        upsert preserves ``last_login_at`` on update (use
+        :meth:`record_system_user_login` to bump it explicitly).
+        """
+
+    @abstractmethod
+    async def get_system_user_by_id(self, user_id: UUID) -> SystemUserRow | None:
+        """Look up a system user by primary key."""
+
+    @abstractmethod
+    async def get_system_user_by_username(self, username: str) -> SystemUserRow | None:
+        """Look up a system user by the unique ``username`` index."""
+
+    @abstractmethod
+    async def record_system_user_login(
+        self,
+        *,
+        user_id: UUID,
+        at: datetime,
+    ) -> SystemUserRow:
+        """Bump ``last_login_at`` on a successful authentication. Raises
+        :class:`ValueError` if the user doesn't exist."""
 
     # =================================================================
     # ESCAPE HATCH (collector-side custom transactions)

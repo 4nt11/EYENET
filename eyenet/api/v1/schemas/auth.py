@@ -5,8 +5,8 @@ The backing storage tables (`system_user_credential`, `refresh_token`,
 until then these schemas declare the wire shape only and `from_domain()`
 translators are documented TODOs.
 
-OpenAPI: `contracts/openapi/eyenet.v1.yaml` — Login*, Refresh*, TokenPair,
-AccessToken, UserMe, PAT*, StreamToken*.
+OpenAPI: `contracts/openapi/eyenet.v1.yaml` — Login*, Refresh*, Logout*,
+TokenPair, UserMe, PAT*, StreamToken*.
 API_PLAN §3.1, §4.
 """
 
@@ -36,6 +36,18 @@ class RefreshRequest(ApiSchema):
     refresh_token: str = Field(min_length=16, max_length=256)
 
 
+class LogoutRequest(ApiSchema):
+    """Body for `POST /v1/auth/logout` — refresh token is optional.
+
+    When present, the matching refresh row is revoked alongside the
+    access JWT denylist write. When omitted, only the access JWT is
+    denylisted (use this from a UI that has already discarded the
+    refresh secret).
+    """
+
+    refresh_token: str | None = Field(default=None, min_length=16, max_length=256)
+
+
 class TokenPair(ApiSchema):
     """200 response from `/v1/auth/login`."""
 
@@ -43,14 +55,6 @@ class TokenPair(ApiSchema):
     access_expires_at: datetime
     refresh_token: str
     refresh_expires_at: datetime
-    token_type: Literal["Bearer"] = "Bearer"
-
-
-class AccessToken(ApiSchema):
-    """200 response from `/v1/auth/refresh` — refresh rotates separately."""
-
-    access_token: str
-    access_expires_at: datetime
     token_type: Literal["Bearer"] = "Bearer"
 
 
@@ -137,9 +141,9 @@ class CursorPagePATSummary(CursorPage[PATSummary]):
 
 
 __all__ = [
-    "AccessToken",
     "CursorPagePATSummary",
     "LoginRequest",
+    "LogoutRequest",
     "PATMintRequest",
     "PATMinted",
     "PATSummary",
