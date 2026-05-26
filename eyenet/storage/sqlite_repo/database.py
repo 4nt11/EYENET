@@ -41,6 +41,7 @@ _MAIN_TABLES: frozenset[str] = frozenset(
     {
         # social / message graph
         "source",
+        "source_domain",
         "actor",
         "group_",
         "message",

@@ -241,6 +241,31 @@ class ActorAliasKind(StrEnum):
     USERNAME = "username"
 
 
+class SourceDomainPatternKind(StrEnum):
+    """How a ``SourceDomain.pattern`` is matched against a hostname (MODELS §2.26).
+
+    Specificity order for ``find_source_for_host``:
+    ``exact`` > ``subdomain_wildcard`` > ``suffix_match``.
+
+    Storage convention: ``pattern`` is stored post-normalize_host (lowercase
+    ASCII punycode, no trailing dot, no ``*`` literal). For
+    ``subdomain_wildcard``, the pattern holds **the parent only** — never the
+    ``*.`` prefix; a CHECK at the SQL layer rejects any ``*`` in the column.
+
+    Matching semantics:
+
+    - ``exact "foo.com"`` matches **exactly** ``foo.com``.
+    - ``subdomain_wildcard "foo.com"`` matches any strict subdomain
+      (``x.foo.com``, ``a.b.foo.com``) but **not** ``foo.com`` itself.
+    - ``suffix_match "foo.com"`` matches ``foo.com`` itself **and** any
+      subdomain (strictly stronger than ``subdomain_wildcard``).
+    """
+
+    EXACT = "exact"
+    SUBDOMAIN_WILDCARD = "subdomain_wildcard"
+    SUFFIX_MATCH = "suffix_match"
+
+
 class CollectorState(StrEnum):
     """Collector health state (PLAN §2.1)."""
 
@@ -271,6 +296,7 @@ __all__ = [
     "MembershipRole",
     "ReclassificationSubjectKind",
     "SensitivityTier",
+    "SourceDomainPatternKind",
     "SourceKind",
     "SystemLogLevel",
     "SystemUserRole",

@@ -29,6 +29,7 @@ from .messages import MessagesMixin
 from .observations import ObservationsMixin
 from .personas import PersonasMixin
 from .profiles import ProfilesMixin
+from .sources import SourcesMixin
 from .syslog import SyslogMixin
 from .vectors import VectorsMixin
 
@@ -53,6 +54,7 @@ class SQLModelRepository(
     ObservationsMixin,
     PersonasMixin,
     ProfilesMixin,
+    SourcesMixin,
     SyslogMixin,
     VectorsMixin,
     BaseRepository,

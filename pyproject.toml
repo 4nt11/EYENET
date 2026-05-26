@@ -42,6 +42,10 @@ dependencies = [
   # crypto / opsec
   "cryptography>=43",
 
+  # domain normalization — IDNA2008 + UTS46 (stdlib codec is IDNA2003 only,
+  # silently NFKC-folds adversarial input and defeats homograph defense).
+  "idna>=3.7",
+
   # cli
   "typer>=0.12",
   "rich>=13.7",

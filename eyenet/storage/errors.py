@@ -8,6 +8,7 @@ the same exception type, so it stays at the storage-module root.
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import UUID
 
 MAX_GRANT_DURATION = timedelta(days=90)
 
@@ -33,9 +34,32 @@ class ReclassifyDemotionError(Exception):
     """
 
 
+class SourceDomainOverlapError(Exception):
+    """In-transaction overlap rejection from ``add_source_domain`` (MODELS §2.26).
+
+    Raised before INSERT when the candidate ``(pattern, pattern_kind)``
+    can match any hostname also matched by an existing non-removed
+    SourceDomain row. The conflict is global across all Sources — a
+    wildcard belonging to Source A blocks Source B's exact in the same
+    DNS region (no ambiguous routing).
+
+    ``conflicting_id`` and ``conflict_kind`` give the API layer enough to
+    build the 409 problem-details body without re-querying.
+    """
+
+    def __init__(self, conflicting_id: UUID, conflict_kind: str) -> None:
+        self.conflicting_id = conflicting_id
+        self.conflict_kind = conflict_kind
+        super().__init__(
+            f"source_domain overlaps existing {conflict_kind} row "
+            f"({conflicting_id})"
+        )
+
+
 __all__ = [
     "MAX_GRANT_DURATION",
     "CaseError",
     "ClearanceGrantError",
     "ReclassifyDemotionError",
+    "SourceDomainOverlapError",
 ]

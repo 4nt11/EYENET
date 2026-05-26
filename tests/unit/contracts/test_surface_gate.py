@@ -28,6 +28,7 @@ _BUS_MODULES: frozenset[str] = frozenset(
 _DB_ONLY_MODULES: frozenset[str] = frozenset(
     {
         "eyenet.contracts.source",
+        "eyenet.contracts.source_domain",
         "eyenet.contracts.actor",
         "eyenet.contracts.group",
         "eyenet.contracts.message",

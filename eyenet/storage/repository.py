@@ -31,11 +31,13 @@ if TYPE_CHECKING:
         ClearanceScope,
         GroupKind,
         SensitivityTier,
+        SourceDomainPatternKind,
         SourceKind,
         SystemLogLevel,
     )
     from eyenet.contracts.feedback import FeedbackPairRow
     from eyenet.contracts.message import AttachmentRow
+    from eyenet.contracts.source_domain import SourceDomainRow
 
 
 class BaseRepository(ABC):
@@ -704,6 +706,57 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
+
+    # =================================================================
+    # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
+    # =================================================================
+
+    @abstractmethod
+    async def add_source_domain(
+        self,
+        *,
+        source_id: UUID,
+        pattern: str,
+        pattern_kind: SourceDomainPatternKind,
+        is_primary: bool,
+        created_at: datetime,
+        created_by_user_id: UUID | None = None,
+        notes: str | None = None,
+    ) -> SourceDomainRow:
+        """Normalize pattern, detect overlap in-transaction, insert.
+
+        Raises :exc:`eyenet.storage.errors.SourceDomainOverlapError` if the
+        candidate ``(pattern, pattern_kind)`` can match any hostname also
+        matched by an existing non-removed SourceDomain row (global across
+        all Sources — no ambiguous routing).
+
+        Raises :class:`ValueError` if ``pattern`` is not a valid hostname
+        (delegates to :func:`eyenet.util.domain.normalize_host`).
+        """
+
+    @abstractmethod
+    async def remove_source_domain(
+        self,
+        *,
+        domain_id: UUID,
+        removed_at: datetime,
+        removed_by_user_id: UUID,
+    ) -> SourceDomainRow:
+        """Soft-delete: set ``removed_at`` + ``removed_by_user_id``.
+
+        Row remains for audit. Re-adding the same pattern post-removal is
+        allowed (it's a new claim, fresh ``id``, fresh ``created_at``).
+        """
+
+    @abstractmethod
+    async def find_source_for_host(self, host: str) -> SourceDomainRow | None:
+        """Return the SourceDomain row owning ``host``, or ``None``.
+
+        ``host`` is normalized via :func:`eyenet.util.domain.normalize_host`
+        before lookup. Specificity order: ``exact`` > ``subdomain_wildcard``
+        > ``suffix_match``. Ties within a kind broken by ``created_at ASC``
+        (oldest claim wins).
+        """
 
     # =================================================================
     # ESCAPE HATCH (collector-side custom transactions)

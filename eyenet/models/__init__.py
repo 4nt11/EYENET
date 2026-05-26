@@ -32,6 +32,7 @@ from .profile import ProfileTable
 from .reaction import ReactionTable
 from .social_graph import MembershipTable
 from .source import SourceTable
+from .source_domain import SourceDomainTable
 from .syslog import SystemLogTable
 from .system_user import SystemUserTable
 
@@ -66,6 +67,7 @@ __all__ = [
     "ProfileTable",
     "ReactionTable",
     "SQLModel",
+    "SourceDomainTable",
     "SourceTable",
     "SystemLogTable",
     "SystemUserClearanceGrantTable",
