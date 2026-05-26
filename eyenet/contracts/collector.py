@@ -7,6 +7,11 @@ NO SALT. The same `(identity_name, source_kind)` MUST produce the same
 hosts. Two collector implementations diverging on this hash silently breaks
 bus-subject filtering and OPSEC correlation — treat it as a load-bearing
 constant. Asserted by `test_instance_id` against a fixed input/output pair.
+
+Also home to :class:`CollectorRow` — the persisted shape returned from
+the storage layer (M9.C3 / API_PLAN §4.11.1) — and :func:`redact_config`,
+the pure helper that strips sensitive ``config`` keys for callers without
+the ``read:collectors_config`` grant.
 """
 
 from __future__ import annotations
@@ -14,10 +19,18 @@ from __future__ import annotations
 import hashlib
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .enums import CollectorState, SourceKind
+from ._base import DbRowBase
+from .enums import (
+    CollectorDesiredState,
+    CollectorObservedState,
+    CollectorState,
+    SourceKind,
+)
 
 
 def compute_instance_id(identity_name: str, source_kind: SourceKind | str) -> str:
@@ -76,4 +89,66 @@ class CollectorBase(ABC):
     async def health(self) -> CollectorHealth: ...
 
 
-__all__ = ["CollectorBase", "CollectorHealth", "compute_instance_id"]
+class CollectorRow(DbRowBase):
+    """Persisted Collector row (API_PLAN §4.11.1, MODELS §2.19).
+
+    The ``config`` blob is opaque at this layer; the API surface
+    (M9.D2) validates it against the discriminated union and applies
+    :func:`redact_config` for callers without
+    ``read:collectors_config``. See API_PLAN §4.11.4 for the full
+    sensitivity contract.
+    """
+
+    instance_name: str = Field(min_length=3, max_length=128)
+    kind: SourceKind
+    source_id: UUID
+    identity_id: UUID
+    config: dict[str, Any] = Field(default_factory=dict)
+    desired_state: CollectorDesiredState = CollectorDesiredState.STOPPED
+    observed_state: CollectorObservedState = CollectorObservedState.STOPPED
+    restart_count: int = Field(default=0, ge=0)
+    last_heartbeat_at: datetime | None = None
+    last_error_type: str | None = Field(default=None, max_length=128)
+    last_error_message: str | None = Field(default=None, max_length=4096)
+    created_at: datetime
+    created_by_user_id: UUID
+    notes: str | None = Field(default=None, max_length=1024)
+
+
+# Sentinel surfaced in the redacted shape so the UI can render the
+# correct config widget even when it can't see the body. Stable wire
+# string — part of the API_PLAN §4.11.4 contract.
+_REDACTED_MARKER: dict[str, Any] = {"__redacted__": True}
+
+
+def redact_config(
+    config: dict[str, Any],
+    *,
+    has_read_grant: bool,
+) -> dict[str, Any]:
+    """Return ``config`` if the caller has ``read:collectors_config``, else
+    a stub preserving only the ``kind`` discriminator (API_PLAN §4.11.4).
+
+    Pure function — no I/O, no logging, no side effects. Suitable for
+    use both in API response serialization and in audit payload
+    construction (where the redacted form is what gets persisted).
+
+    When the input lacks ``kind``, the output still carries
+    ``__redacted__: True`` so a downstream consumer never confuses a
+    malformed blob for a fully-readable one.
+    """
+    if has_read_grant:
+        return config
+    redacted: dict[str, Any] = dict(_REDACTED_MARKER)
+    if "kind" in config:
+        redacted["kind"] = config["kind"]
+    return redacted
+
+
+__all__ = [
+    "CollectorBase",
+    "CollectorHealth",
+    "CollectorRow",
+    "compute_instance_id",
+    "redact_config",
+]

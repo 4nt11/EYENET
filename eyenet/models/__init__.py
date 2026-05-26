@@ -14,6 +14,7 @@ from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
 from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
 from .clearance import SystemUserClearanceGrantTable
+from .collector import CollectorTable
 from .corpus import CorpusCursorTable
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
@@ -45,6 +46,7 @@ __all__ = [
     "CaseCollaboratorTable",
     "CaseMemberTable",
     "CaseTable",
+    "CollectorTable",
     "CorpusCursorTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",

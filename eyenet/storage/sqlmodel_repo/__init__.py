@@ -20,6 +20,7 @@ from .attachments import AttachmentsMixin
 from .audit import AuditMixin
 from .cases import CasesMixin
 from .clearance import ClearanceMixin
+from .collectors import CollectorsMixin
 from .corpus import CorpusMixin
 from .cursors import CursorsMixin
 from .feedback import FeedbackMixin
@@ -45,6 +46,7 @@ class SQLModelRepository(
     AuditMixin,
     CasesMixin,
     ClearanceMixin,
+    CollectorsMixin,
     CorpusMixin,
     CursorsMixin,
     FeedbackMixin,

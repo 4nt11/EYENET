@@ -53,6 +53,7 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "identity",
         "identity_label",
         "engagement_authorization",
+        "collector",
         "infrastructure_artifact",
         "actor_artifact",
         "system_user",

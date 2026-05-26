@@ -25,10 +25,13 @@ if TYPE_CHECKING:
     from eyenet.contracts.audit import AuditLogRow
     from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
+    from eyenet.contracts.collector import CollectorRow
     from eyenet.contracts.enums import (
         CaseRoleOnCase,
         CaseSubjectKind,
         ClearanceScope,
+        CollectorDesiredState,
+        CollectorObservedState,
         GroupKind,
         SensitivityTier,
         SourceDomainPatternKind,
@@ -783,6 +786,86 @@ class BaseRepository(ABC):
         before lookup. Specificity order: ``exact`` > ``subdomain_wildcard``
         > ``suffix_match``. Ties within a kind broken by ``created_at ASC``
         (oldest claim wins).
+        """
+
+    # =================================================================
+    # COLLECTORS (MODELS §2.19, API_PLAN §4.11)
+    # =================================================================
+
+    @abstractmethod
+    async def create_collector(
+        self,
+        *,
+        instance_name: str,
+        kind: SourceKind,
+        source_id: UUID,
+        identity_id: UUID,
+        config: dict[str, Any],
+        created_at: datetime,
+        created_by_user_id: UUID,
+        notes: str | None = None,
+    ) -> CollectorRow:
+        """Insert a new :class:`CollectorRow`.
+
+        Fresh rows start with ``desired_state=STOPPED`` and
+        ``observed_state=STOPPED``. The operator transitions the
+        ``desired_state`` after creation (M9.D2's ``POST .../start``).
+
+        Raises :class:`IntegrityError` if ``identity_id`` is already
+        bound to another collector (one-to-one is enforced by the
+        column-level unique constraint per API_PLAN §4.11.3) or
+        ``instance_name`` collides.
+        """
+
+    @abstractmethod
+    async def get_collector(self, collector_id: UUID) -> CollectorRow | None:
+        """Return one collector row by id, or ``None``."""
+
+    @abstractmethod
+    async def list_collectors(self) -> list[CollectorRow]:
+        """Return every collector row. Order: ``created_at ASC``."""
+
+    @abstractmethod
+    async def set_collector_desired_state(
+        self,
+        *,
+        collector_id: UUID,
+        desired_state: CollectorDesiredState,
+    ) -> CollectorRow:
+        """Mutate ``desired_state`` (operator-initiated, API_PLAN §4.11.2).
+
+        ``observed_state`` is never written by this call — the supervisor
+        owns that column. Raises :class:`ValueError` if the collector
+        doesn't exist.
+        """
+
+    @abstractmethod
+    async def record_collector_observed_state(
+        self,
+        *,
+        collector_id: UUID,
+        observed_state: CollectorObservedState,
+        last_heartbeat_at: datetime | None = None,
+        last_error_type: str | None = None,
+        last_error_message: str | None = None,
+        restart_count: int | None = None,
+    ) -> CollectorRow:
+        """Supervisor-only write of ``observed_state`` and ancillary fields.
+
+        Fields left as ``None`` are NOT cleared — pass an explicit value
+        to overwrite. The exception is the ``last_error_*`` pair, which
+        is always written as a pair (both ``None`` clears, both set
+        records). Raises :class:`ValueError` if the collector doesn't
+        exist.
+        """
+
+    @abstractmethod
+    async def delete_collector(self, collector_id: UUID) -> None:
+        """Hard delete (API_PLAN §4.11 — ``DELETE`` row).
+
+        The API layer (M9.D2) gates this on
+        ``observed_state == stopped``; the storage layer just executes.
+        Raises :class:`ValueError` if the collector doesn't exist.
         """
 
     # =================================================================

@@ -267,7 +267,12 @@ class SourceDomainPatternKind(StrEnum):
 
 
 class CollectorState(StrEnum):
-    """Collector health state (PLAN §2.1)."""
+    """In-process collector health state (PLAN §2.1).
+
+    Reported by :class:`CollectorBase.health` — NOT persisted. The
+    persisted lifecycle uses :class:`CollectorDesiredState` (operator
+    intent) and :class:`CollectorObservedState` (supervisor reconcile).
+    """
 
     STARTING = "starting"
     RUNNING = "running"
@@ -277,6 +282,51 @@ class CollectorState(StrEnum):
     STOPPED = "stopped"
 
 
+class CollectorDesiredState(StrEnum):
+    """Operator-expressed collector lifecycle intent (API_PLAN §4.11.2).
+
+    The API mutates ``desired_state``; the supervisor reconciles to
+    ``observed_state``. ``disabled`` is a hard stop the supervisor will
+    refuse to start until an explicit operator transition to ``stopped``.
+    """
+
+    RUNNING = "running"
+    STOPPED = "stopped"
+    DISABLED = "disabled"
+
+
+class CollectorObservedState(StrEnum):
+    """Supervisor-reported collector lifecycle state (API_PLAN §4.11.2).
+
+    Supervisor-written, server-readable, **never** accepted in API
+    request bodies. ``cooling`` is the post-crash backoff window;
+    duration is ``min(2^restart_count, 600)`` seconds.
+    """
+
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    COOLING = "cooling"
+    CRASHED = "crashed"
+
+
+class IdentityRole(StrEnum):
+    """Identity's operational role in the discovery loop (API_PLAN §4.12).
+
+    ``monitor`` is the long-running watcher (the default — every identity
+    that observes traffic in an established group). ``scout`` is a
+    short-lived probe that joins a freshly-approved
+    :class:`GroupCandidate` and observes for 7 days before graduating to
+    ``monitor`` (M9.E4). ``quarantine`` is a terminal role for identities
+    that were detected/banned/burned during scout duty — they never
+    re-enter rotation.
+    """
+
+    MONITOR = "monitor"
+    SCOUT = "scout"
+    QUARANTINE = "quarantine"
+
+
 __all__ = [
     "ActorAliasKind",
     "AttachmentKind",
@@ -284,12 +334,15 @@ __all__ = [
     "CaseStatus",
     "CaseSubjectKind",
     "ClearanceScope",
+    "CollectorDesiredState",
+    "CollectorObservedState",
     "CollectorState",
     "ConfidenceTier",
     "EngagementScope",
     "EngagementSubjectKind",
     "FileServedVia",
     "GroupKind",
+    "IdentityRole",
     "IdentityState",
     "InfrastructureKind",
     "LinkageState",

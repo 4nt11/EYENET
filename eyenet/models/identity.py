@@ -16,6 +16,7 @@ from eyenet.contracts.enums import (
     ConfidenceTier,
     EngagementScope,
     EngagementSubjectKind,
+    IdentityRole,
     IdentityState,
 )
 
@@ -24,6 +25,12 @@ from ._base import new_uuid7
 
 class IdentityTable(SQLModel, table=True):
     __tablename__ = "identity"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('MONITOR', 'SCOUT', 'QUARANTINE')",
+            name="ck_identity_role",
+        ),
+    )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     name: str = Field(unique=True, index=True)
@@ -33,6 +40,12 @@ class IdentityTable(SQLModel, table=True):
     cooldown_seconds: int = 21_600
     last_used_at: datetime | None = None
     state: IdentityState = IdentityState.AVAILABLE
+    # Discovery-loop role (API_PLAN §4.12). Existing identities default
+    # to MONITOR — scouts are explicitly promoted by the
+    # CollectorSupervisor (M9.E4) when joining freshly-approved
+    # GroupCandidates, and graduate back to MONITOR after a 7-day
+    # observation window.
+    role: IdentityRole = Field(default=IdentityRole.MONITOR, index=True)
     notes: str | None = None
 
 
