@@ -129,6 +129,29 @@ def patterns_intersect(
     raise AssertionError(f"unhandled pattern kind pair {pair!r}")
 
 
+def pattern_matches_host(
+    pattern: str,
+    pattern_kind: SourceDomainPatternKind,
+    host: str,
+) -> bool:
+    """True iff ``host`` is matched by the ``(pattern, pattern_kind)`` rule.
+
+    Inputs are assumed canonical (output of :func:`normalize_host`). The
+    semantics mirror :data:`SourceDomainPatternKind`'s docstring:
+
+    * ``exact`` — string equality
+    * ``subdomain_wildcard`` — host is a strict subdomain of the pattern
+    * ``suffix_match`` — host equals the pattern or is a strict subdomain
+    """
+    if pattern_kind is SourceDomainPatternKind.EXACT:
+        return host == pattern
+    if pattern_kind is SourceDomainPatternKind.SUBDOMAIN_WILDCARD:
+        return _is_strict_subdomain(host, pattern)
+    if pattern_kind is SourceDomainPatternKind.SUFFIX_MATCH:
+        return host == pattern or _is_strict_subdomain(host, pattern)
+    raise AssertionError(f"unhandled pattern kind {pattern_kind!r}")
+
+
 def _is_strict_subdomain(host: str, parent: str) -> bool:
     """True iff ``host`` is a strict subdomain of ``parent`` (label-boundary safe)."""
     return host.endswith("." + parent) and host != parent
@@ -144,4 +167,4 @@ def _parents_reach_overlap(a: str, b: str) -> bool:
     return a == b or _is_strict_subdomain(a, b) or _is_strict_subdomain(b, a)
 
 
-__all__ = ["normalize_host", "patterns_intersect"]
+__all__ = ["normalize_host", "pattern_matches_host", "patterns_intersect"]

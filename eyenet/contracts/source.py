@@ -15,11 +15,16 @@ from .enums import SourceKind
 
 
 class SourceRow(DbRowBase):
-    """Persisted Source row."""
+    """Persisted Source row (MODELS §1.1).
+
+    ``canonical_url`` is display-only — when set, the host portion must
+    match the Source's primary :class:`SourceDomainRow` pattern. The
+    storage layer enforces this via ``set_source_canonical_url`` (M9.C2).
+    """
 
     kind: SourceKind
     display_name: str
-    base_url: str | None = None
+    canonical_url: str | None = None
     created_at: datetime
     notes: str | None = None
 

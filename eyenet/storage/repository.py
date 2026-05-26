@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     )
     from eyenet.contracts.feedback import FeedbackPairRow
     from eyenet.contracts.message import AttachmentRow
+    from eyenet.contracts.source import SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
 
 
@@ -677,9 +678,16 @@ class BaseRepository(ABC):
         *,
         kind: SourceKind,
         display_name: str,
-        base_url: str | None = None,
         created_at: datetime,
-    ) -> UUID: ...
+    ) -> UUID:
+        """Upsert a :class:`SourceTable` row by ``(kind, display_name)``.
+
+        ``canonical_url`` is never set here — it's operator-bound via
+        :meth:`set_source_canonical_url` after a primary
+        :class:`SourceDomainTable` row exists. Collectors call this on
+        startup to ensure their Source exists; the operator wires the
+        display URL later.
+        """
 
     @abstractmethod
     async def upsert_group(
@@ -746,6 +754,25 @@ class BaseRepository(ABC):
 
         Row remains for audit. Re-adding the same pattern post-removal is
         allowed (it's a new claim, fresh ``id``, fresh ``created_at``).
+        """
+
+    @abstractmethod
+    async def set_source_canonical_url(
+        self,
+        *,
+        source_id: UUID,
+        canonical_url: str | None,
+    ) -> SourceRow:
+        """Set or clear ``Source.canonical_url`` with primary-domain validation.
+
+        When ``canonical_url`` is not None, the URL's host (normalized via
+        :func:`eyenet.util.domain.normalize_host`) must fall under the
+        source's active primary :class:`SourceDomainRow`. Raises
+        :exc:`eyenet.storage.errors.SourceCanonicalUrlError` otherwise
+        with a stable ``reason`` tag (``invalid_url`` /
+        ``no_primary_domain`` / ``host_not_owned``).
+
+        Passing ``canonical_url=None`` always clears the field.
         """
 
     @abstractmethod

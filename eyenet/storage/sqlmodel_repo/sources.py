@@ -14,16 +14,19 @@ per-source advisory lock — see the TODO inside
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 from uuid import UUID
 
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from eyenet.contracts.enums import SourceDomainPatternKind
+from eyenet.contracts.source import SourceRow
 from eyenet.contracts.source_domain import SourceDomainRow
+from eyenet.models.source import SourceTable
 from eyenet.models.source_domain import SourceDomainTable
-from eyenet.storage.errors import SourceDomainOverlapError
-from eyenet.util.domain import normalize_host, patterns_intersect
+from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
+from eyenet.util.domain import normalize_host, pattern_matches_host, patterns_intersect
 
 from ._helpers import safe_session
 
@@ -42,6 +45,12 @@ def _row(table: SourceDomainTable) -> SourceDomainRow:
     for k in ("created_at", "removed_at"):
         data[k] = _coerce_utc(data.get(k))
     return SourceDomainRow.model_validate(data)
+
+
+def _source_row(table: SourceTable) -> SourceRow:
+    data = table.model_dump()
+    data["created_at"] = _coerce_utc(data.get("created_at"))
+    return SourceRow.model_validate(data)
 
 
 # Lookup order for find_source_for_host. Lower index = higher specificity.
@@ -114,7 +123,11 @@ class SourcesMixin:
                 col(SourceDomainTable.removed_at).is_(None),
             )
             result = await session.exec(stmt)
-            candidates = [r for r in list(result) if _matches(r, host_norm)]
+            candidates = [
+                r
+                for r in list(result)
+                if pattern_matches_host(r.pattern, r.pattern_kind, host_norm)
+            ]
             if not candidates:
                 return None
             candidates.sort(
@@ -124,6 +137,66 @@ class SourcesMixin:
                 ),
             )
             return _row(candidates[0])
+
+    async def set_source_canonical_url(
+        self,
+        *,
+        source_id: UUID,
+        canonical_url: str | None,
+    ) -> SourceRow:
+        if canonical_url is None:
+            return await self._update_source_canonical_url(source_id, None)
+        # Parse + validate URL host BEFORE acquiring a session — keeps the
+        # validation cost off the connection pool.
+        host_norm = _validate_url_host(canonical_url, source_id=source_id)
+        primary = await self._active_primary_domain_for(source_id)
+        if primary is None:
+            raise SourceCanonicalUrlError(
+                "no_primary_domain",
+                source_id=source_id,
+                detail="source has no active primary SourceDomain",
+            )
+        if not pattern_matches_host(primary.pattern, primary.pattern_kind, host_norm):
+            raise SourceCanonicalUrlError(
+                "host_not_owned",
+                source_id=source_id,
+                detail=(
+                    f"host {host_norm!r} does not match primary domain "
+                    f"({primary.pattern_kind.value} {primary.pattern!r})"
+                ),
+            )
+        return await self._update_source_canonical_url(source_id, canonical_url)
+
+    async def _active_primary_domain_for(
+        self,
+        source_id: UUID,
+    ) -> SourceDomainTable | None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(SourceDomainTable).where(
+                col(SourceDomainTable.source_id) == source_id,
+                col(SourceDomainTable.is_primary).is_(True),
+                col(SourceDomainTable.removed_at).is_(None),
+            )
+            result = await session.exec(stmt)
+            return result.first()
+
+    async def _update_source_canonical_url(
+        self,
+        source_id: UUID,
+        canonical_url: str | None,
+    ) -> SourceRow:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(SourceTable, source_id)
+            if table is None:
+                raise SourceCanonicalUrlError(
+                    "source_not_found",
+                    source_id=source_id,
+                )
+            table.canonical_url = canonical_url
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _source_row(table)
 
     async def _detect_overlap_in_session(
         self,
@@ -158,18 +231,34 @@ class SourcesMixin:
                 )
 
 
-def _matches(row: SourceDomainTable, host: str) -> bool:
-    """True iff `row.pattern_kind` matches the normalized `host`."""
-    kind = row.pattern_kind
-    pattern = row.pattern
-    if kind is SourceDomainPatternKind.EXACT:
-        return host == pattern
-    if kind is SourceDomainPatternKind.SUBDOMAIN_WILDCARD:
-        return host.endswith("." + pattern) and host != pattern
-    if kind is SourceDomainPatternKind.SUFFIX_MATCH:
-        return host == pattern or host.endswith("." + pattern)
-    # StrEnum is exhaustive at runtime; unreachable.
-    raise AssertionError(f"unhandled pattern kind {kind!r}")
+def _validate_url_host(url: str, *, source_id: UUID) -> str:
+    """Extract + normalize the host portion of ``url``.
+
+    Raises :exc:`SourceCanonicalUrlError(reason='invalid_url')` if the
+    value lacks a host or the host fails IDN/punycode normalization.
+    """
+    try:
+        parsed = urlparse(url)
+    except (TypeError, ValueError) as exc:
+        raise SourceCanonicalUrlError(
+            "invalid_url",
+            source_id=source_id,
+            detail=f"unparseable URL: {exc}",
+        ) from exc
+    if not parsed.hostname:
+        raise SourceCanonicalUrlError(
+            "invalid_url",
+            source_id=source_id,
+            detail="URL has no host component",
+        )
+    try:
+        return normalize_host(parsed.hostname)
+    except ValueError as exc:
+        raise SourceCanonicalUrlError(
+            "invalid_url",
+            source_id=source_id,
+            detail=str(exc),
+        ) from exc
 
 
 __all__ = ["SourcesMixin"]
