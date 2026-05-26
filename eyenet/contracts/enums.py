@@ -366,10 +366,27 @@ class MentionKind(StrEnum):
     OTHER = "other"
 
 
+class JoinedVia(StrEnum):
+    """How a CollectorGroupMembership was established (MODELS §2.22).
+
+    ``seed`` — operator-configured initial scope at collector startup.
+    ``candidate`` — came through the §2.20-§2.21 discovery loop;
+    ``joined_via_candidate_id`` is populated. ``manual`` — operator added
+    mid-investigation via the UI. ``restored`` — collector was banned, a
+    replacement identity rejoined the same group.
+    """
+
+    SEED = "seed"
+    CANDIDATE = "candidate"
+    MANUAL = "manual"
+    RESTORED = "restored"
+
+
 __all__ = [
     "ActorAliasKind",
     "AttachmentKind",
     "CandidateState",
+    "JoinedVia",
     "CaseRoleOnCase",
     "CaseStatus",
     "CaseSubjectKind",

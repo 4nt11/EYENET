@@ -39,12 +39,14 @@ if TYPE_CHECKING:
         CollectorDesiredState,
         CollectorObservedState,
         GroupKind,
+        JoinedVia,
         MentionKind,
         SensitivityTier,
         SourceDomainPatternKind,
         SourceKind,
         SystemLogLevel,
     )
+    from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.feedback import FeedbackPairRow
     from eyenet.contracts.message import AttachmentRow
     from eyenet.contracts.source import SourceRow
@@ -947,6 +949,68 @@ class BaseRepository(ABC):
         """Return pre-computed eligibility inputs for ``candidate_id``.
 
         Raises :class:`ValueError` if the candidate doesn't exist.
+        """
+
+    # =================================================================
+    # MEMBERSHIPS (MODELS §2.22-2.23, M9.C5)
+    # =================================================================
+
+    @abstractmethod
+    async def open_membership(
+        self,
+        *,
+        collector_id: UUID,
+        group_id: UUID,
+        joined_at: datetime,
+        joined_via: JoinedVia,
+        joined_via_candidate_id: UUID | None = None,
+    ) -> CollectorGroupMembershipRow:
+        """Record that a collector joined a group.
+
+        Raises :class:`ValueError` if the collector already has an active
+        (``left_at IS NULL``) membership for this group.
+        """
+
+    @abstractmethod
+    async def close_membership(
+        self,
+        *,
+        collector_id: UUID,
+        group_id: UUID,
+        left_at: datetime,
+        left_reason: str,
+    ) -> CollectorGroupMembershipRow:
+        """Mark a membership as departed (set ``left_at`` + ``left_reason``).
+
+        Raises :class:`ValueError` if no active membership exists.
+        """
+
+    @abstractmethod
+    async def list_active_memberships(
+        self,
+        *,
+        collector_id: UUID | None = None,
+        group_id: UUID | None = None,
+    ) -> list[CollectorGroupMembershipRow]:
+        """Return active memberships (``left_at IS NULL``).
+
+        Filter by ``collector_id`` to answer "what is this collector in?",
+        by ``group_id`` to answer "who is currently in this group?", or omit
+        both for all active memberships.
+        """
+
+    @abstractmethod
+    async def record_observation(
+        self,
+        *,
+        message_id: UUID,
+        collector_id: UUID,
+        observed_at_ingest: datetime,
+    ) -> MessageObservationRow:
+        """Record that a collector observed a message; set ``was_first_sighting``.
+
+        ``was_first_sighting`` is True iff this is the first call for this
+        ``message_id``. Idempotent on ``(message_id, collector_id)``.
         """
 
     # =================================================================

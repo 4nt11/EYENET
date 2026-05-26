@@ -14,6 +14,7 @@ from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
 from .candidates import GroupCandidateMentionTable, GroupCandidateTable
 from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
+from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .clearance import SystemUserClearanceGrantTable
 from .collector import CollectorTable
 from .corpus import CorpusCursorTable
@@ -47,9 +48,11 @@ __all__ = [
     "CaseCollaboratorTable",
     "CaseMemberTable",
     "CaseTable",
+    "CollectorGroupMembershipTable",
     "CollectorTable",
     "GroupCandidateMentionTable",
     "GroupCandidateTable",
+    "MessageObservationTable",
     "CorpusCursorTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",

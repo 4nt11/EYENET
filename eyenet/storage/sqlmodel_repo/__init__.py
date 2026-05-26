@@ -27,6 +27,7 @@ from .cursors import CursorsMixin
 from .feedback import FeedbackMixin
 from .graph import GraphMixin
 from .linkages import LinkagesMixin
+from .memberships import MembershipsMixin
 from .messages import MessagesMixin
 from .observations import ObservationsMixin
 from .personas import PersonasMixin
@@ -54,6 +55,7 @@ class SQLModelRepository(
     FeedbackMixin,
     GraphMixin,
     LinkagesMixin,
+    MembershipsMixin,
     MessagesMixin,
     ObservationsMixin,
     PersonasMixin,

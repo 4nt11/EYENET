@@ -44,6 +44,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "source_domain",
         "group_candidate",
         "group_candidate_mention",
+        "collector_group_membership",
+        "message_observation",
         "actor",
         "group_",
         "message",
