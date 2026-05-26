@@ -2759,7 +2759,7 @@ Plus one repo helper: `recent_message_bodies_for_actor(actor_id, limit=N)` — t
 
 ### Group A — Auth & tokens
 
-Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5), but the group as a whole is parallel-safe against B, C, D, E, F, G, H. The `messages.db` schema additions in A1 don't touch any table read by B/C/F.
+Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5 → A6), but the group as a whole is parallel-safe against B, C, D, E, F, G, H. The `messages.db` schema additions in A1 don't touch any table read by B/C/F.
 
 #### M9.A1 — Auth tables (no handlers)
 - New tables in `messages.db`: `system_user_credential`, `refresh_token`, `jwt_denylist`, `system_user_scope`. STRIPS inline `password_hash` / `mfa_secret_encrypted` from `SystemUserTable`.
@@ -2779,30 +2779,45 @@ Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5), but the 
 - **Files touched:** `eyenet/api/auth/jwt.py`, `eyenet/api/v1/{auth.py,schemas/auth.py,__init__.py}`, `eyenet/api/deps.py`
 - **DoD:** login → refresh → logout round-trip; jti denylist hit on revoked token blocks reuse; Schemathesis stateful pass on the four endpoints; contract `expected_routes.json` updated.
 
-#### M9.A3 — Personal Access Token surface
+#### M9.A3 — MFA enrollment + login challenge
+- Opt-in TOTP second factor per RFC 6238 (SHA-1 HMAC, 30s window, 6 digits). Secret stored encrypted at rest in `system_user_credential.mfa_secret_encrypted` (column already provisioned by A1).
+- **Encryption-at-rest:** symmetric Fernet key in `<data_dir>/jwt/mfa_key`, mode 0600, generated on first boot alongside the JWT signing keypair. Same lifecycle (`eyenet init`) and same backup story (operator-owned file on disk, never in a DB). Key rotation is a manual operator procedure (out of scope for A3; documented in `development/MFA_OPS.md`).
+- **Enrollment flow:** `POST /v1/auth/mfa/enroll` (authenticated) → server mints a fresh TOTP secret, returns `{ provisioning_uri, secret_b32 }` for QR encoding by the client. Secret is NOT persisted yet. `POST /v1/auth/mfa/verify-enroll { code }` confirms the user can produce a valid code from the secret they just received; server writes the encrypted secret to `system_user_credential` and emits `eyenet.audit.auth.mfa.enrolled`.
+- **Login challenge flow:** `POST /v1/auth/login` for an MFA-enrolled user returns **HTTP 200** with `{ mfa_required: true, mfa_challenge_id }` instead of the token pair. Client follows with `POST /v1/auth/login/verify { mfa_challenge_id, code }` to receive the `TokenPair`. Failed verify increments a per-user counter; 5 consecutive failures within 15 min locks MFA-verify for that user for 15 min (`mfa_lockout`).
+- **Disable:** `DELETE /v1/auth/mfa` requires password re-auth in the same request body (`{ current_password }`) — proves the disabling caller still holds the primary factor.
+- **New table:** `mfa_challenge` in `messages.db` — `(challenge_id UUID PK, user_id, issued_at, expires_at, consumed_at NULL, failed_attempts int default 0)`. Challenge TTL is 90 seconds. CHECK: `consumed_at IS NULL OR consumed_at >= issued_at`; row deleted on success, retained briefly on consume for replay-detection (purge sweep alongside `jwt_denylist`).
+- **Dependencies added:** `pyotp>=2.9` (TOTP), `cryptography>=43` (already pinned for Fernet).
+- **Recovery codes:** out of scope for A3. The MVP recovery path is the user-management CLI (A6) running `eyenet user reset-mfa <username>` — operator-only, audited. Recovery codes get their own follow-up slice if needed.
+- **Login-flow exception:** the `mfa_required` response is intentionally HTTP 200, not 401, because the credential check itself succeeded. 401 reserved for password failure / account disabled.
+- Audit subjects: `eyenet.audit.auth.mfa.{enrolled,enroll_failed,verified,verify_failed,disabled,locked_out}`.
+- **Depends on:** M9.A2
+- **Files touched:** `eyenet/api/auth/{mfa.py,totp.py,mfa_key.py}`, `eyenet/api/v1/{auth.py,auth_mfa.py,schemas/auth.py,schemas/mfa.py}`, `eyenet/models/mfa.py` (`mfa_challenge` table), `eyenet/storage/sqlmodel_repo/auth.py` (`mfa_challenge` helpers + credential MFA-secret writes), `eyenet/storage/repository.py`, `development/MFA_OPS.md`, `tests/unit/api/test_auth_mfa.py`, `tests/unit/storage/test_mfa_challenge.py`
+- **DoD:** enrollment round-trip (mint → verify-enroll → encrypted secret persisted); login → `mfa_required` → verify → token pair; replay of consumed challenge rejected; 5 failed verifies trigger lockout; disable requires correct password; Schemathesis stateful pass on `/v1/auth/mfa/*` + the extended login flow; `mypy --strict` clean.
+
+#### M9.A4 — Personal Access Token surface
 - New table: `personal_access_token` in `messages.db` (already declared in §16/A1 scope-list — split as own milestone for surface isolation).
 - Handlers: `POST /v1/auth/tokens`, `GET /v1/auth/tokens`, `DELETE /v1/auth/tokens/{id}`.
 - PAT auth path joins the same middleware as JWT (same `current_user` contract).
 - `admin:tokens` scope wired.
 - Audit subjects: `eyenet.audit.auth.token.{minted,revoked}`.
 - M9.2-era PAT docs: copy-pasteable Prometheus least-privilege `read:metrics` scrape recipe in `development/PAT_RECIPES.md`.
-- **Depends on:** M9.A2
+- **Depends on:** M9.A2 (MFA enforcement on PAT mint is optional per-operator; gated on the calling user's MFA status, not on A3 shipping)
 - **Files touched:** `eyenet/models/auth.py` (PAT table), `eyenet/storage/sqlmodel_repo/auth.py` (PAT helpers), `eyenet/api/v1/auth_tokens.py`, `eyenet/api/v1/schemas/tokens.py`, `development/PAT_RECIPES.md`
 - **DoD:** PAT mint → use → revoke round-trip; PAT-scoped scrape against `/v1/metrics` works once M9.I3 lands (forward compat OK).
 
-#### M9.A4 — Stream-token + EventSource fallback
+#### M9.A5 — Stream-token + EventSource fallback
 - `/v1/auth/stream-token` mint (short-TTL, single-stream-bound JWT) for browser `EventSource` without `Authorization` header.
 - Polyfill primary path documented in §6.4.1.
 - **Depends on:** M9.A2
 - **Files touched:** `eyenet/api/v1/auth_stream.py`, `eyenet/api/auth/stream_token.py`
 - **DoD:** browser EventSource with stream-token can connect to `/v1/stream/audit`; token rejects on second connection (single-use binding).
 
-#### M9.A5 — User-management CLI
-- `eyenet user create`, `eyenet user reset-password`, `eyenet user scopes`.
-- Same audit shape as M9.A2 handlers (no CLI/API divergence).
-- **Depends on:** M9.A1
+#### M9.A6 — User-management CLI
+- `eyenet user create`, `eyenet user reset-password`, `eyenet user scopes`, `eyenet user reset-mfa`.
+- Same audit shape as M9.A2 / M9.A3 handlers (no CLI/API divergence — including the `mfa.disabled` subject on `reset-mfa`).
+- **Depends on:** M9.A1 (storage); MFA reset flag depends on M9.A3 column being present
 - **Files touched:** `eyenet/cli/user.py`
-- **DoD:** create → set scopes → reset password round-trip; emitted audit rows match the API path byte-for-byte.
+- **DoD:** create → set scopes → reset password → reset MFA round-trip; emitted audit rows match the API path byte-for-byte.
 
 ---
 
@@ -3122,7 +3137,7 @@ Depends on F + G + H. Sequence within group is not strict — each milestone tou
 - Cardinality contract test in `tests/contract/api/`.
 - Example Grafana dashboard in `operations/dashboards/` (marketing-grade polish per session-saved feedback memory).
 - Prom alert rules in `operations/alerts/`.
-- **Depends on:** M9.A3 (PAT for scrape)
+- **Depends on:** M9.A4 (PAT for scrape)
 - **Files touched:** `eyenet/api/v1/metrics.py`, `operations/dashboards/eyenet-overview.json`, `operations/alerts/eyenet.yml`
 - **DoD:** scrape via PAT works; cardinality contract test green; dashboard renders in Grafana without empty panels.
 
@@ -3153,7 +3168,7 @@ Concretely:
 - Commits inside the worktree carry the slice id in the subject: `feat(api): M9.A2 — JWT + login/refresh/logout/me handlers`.
 - Each commit must independently satisfy its slice's `DoD:` before the next commit lands. Slice DoD becomes a commit-level gate, not a PR-level gate. This preserves bisectability — `git bisect` lands on the slice boundary that broke things.
 - The full pre-merge battery (ruff format + check, `mypy --strict`, bandit, detect-secrets, deptry, full pytest with `EYENET_E2E=1` if NATS is available) runs at the **last commit** of the series, before `ExitWorktree(action="keep")` and the `--no-ff` merge.
-- Merge message names the group: `Merge Group A: auth & tokens (M9.A1..M9.A5)`.
+- Merge message names the group: `Merge Group A: auth & tokens (M9.A1..M9.A6)`.
 
 **Why this beats both extremes:**
 
@@ -3166,7 +3181,7 @@ Concretely:
 **Carve-outs — when to break the rule:**
 
 1. **Solo-operator parallelism.** When *you* are the only operator, batch by group (9 worktrees over the M9 chain, not 38). When two operators are working concurrently, slice-level worktrees on different groups are fine, and slice-level worktrees on the *same* group are fine if the `Files touched:` sets are disjoint (e.g. M9.E1 ‖ M9.E2 — the two sensor primitives touch zero common files).
-2. **Hot slices.** A security-grade fix to an already-merged slice (e.g. a CVE patch on M9.A3 after Group A merged) ships as its own worktree, one commit, on a branch named after the slice (`hotfix-M9.A3-pat-prefix-leak`). Don't reopen Group A's worktree.
+2. **Hot slices.** A security-grade fix to an already-merged slice (e.g. a CVE patch on M9.A4 after Group A merged) ships as its own worktree, one commit, on a branch named after the slice (`hotfix-M9.A4-pat-prefix-leak`). Don't reopen Group A's worktree.
 3. **Spec-only slices.** Slices that touch only `development/*.md` (rare; most spec lives in the same PR as code) can ship in a dedicated `docs-*` worktree to keep them off the code review's critical path.
 4. **Sequential dependency inside a group.** When slice N+1 *cannot start* until N has merged (rare; usually internal-group slices can chain on disk in one worktree), use two consecutive worktrees off the same branch. Document the chain in the second worktree's first commit message.
 
