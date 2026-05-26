@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
+# ruff: noqa: RUF002 — Unicode digit examples are intentional in docstrings
 """TOTP helpers (RFC 6238) — M9.A3.
 
 Thin :mod:`pyotp` wrapper. Defaults: SHA-1 HMAC, 30-second step, 6 digits
@@ -50,15 +51,17 @@ def provisioning_uri(*, secret_b32: str, username: str, issuer: str = ISSUER) ->
 def verify_code(*, secret_b32: str, code: str, now: datetime) -> bool:
     """Verify a 6-digit TOTP against ``secret_b32`` at ``now`` with ±1 step tolerance.
 
-    Gate is ASCII-only on the digit set — :py:meth:`str.isdigit` returns
-    ``True`` for Unicode digit categories (e.g. Arabic-Indic ``٠١٢٣٤٥``),
-    so an unguarded check would let exotic inputs reach pyotp. pyotp's
-    own equality comparison would still reject them, but the explicit
-    ASCII gate keeps the failure shape predictable.
+    Gate is ASCII-only on the digit set: ``str.isdigit`` alone returns
+    ``True`` for Unicode digit categories (Arabic-Indic ``٠١٢٣٤٥``,
+    Devanagari ``१२३४५६``, mathematical bold ``𝟏𝟐𝟑𝟒𝟓𝟔``), so we pair it
+    with :py:meth:`str.isascii` to clamp to plain `0`–`9`. Defense in
+    depth behind the schema regex; pyotp's own equality would also
+    reject exotic inputs but the explicit gate keeps the failure shape
+    predictable for direct callers (CLI, future internal code).
     """
     if len(code) != _DIGITS:
         return False
-    if not all("0" <= ch <= "9" for ch in code):
+    if not (code.isascii() and code.isdigit()):
         return False
     totp = pyotp.TOTP(secret_b32, digits=_DIGITS, interval=_STEP_SECONDS)
     return bool(totp.verify(code, for_time=now, valid_window=_TOLERANCE_STEPS))

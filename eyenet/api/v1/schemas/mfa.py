@@ -12,9 +12,25 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ._base import ApiSchema
+
+
+def _enforce_ascii_digits(value: str) -> str:
+    """Belt + suspenders behind the regex pattern.
+
+    The schema regex `^[0-9]{6}$` already rejects everything non-ASCII,
+    but Pydantic v2's regex backend has historically had Unicode-class
+    surprises (see the M9.A3 hardening commit). This validator pairs
+    ``str.isascii`` with ``str.isdigit`` so any future regex-engine
+    change that re-introduces Unicode awareness still fails at this
+    layer.
+    """
+    if not (value.isascii() and value.isdigit()):
+        raise ValueError("code must contain only ASCII digits 0-9")
+    return value
+
 
 # ASCII-only on purpose. Pydantic v2's Rust regex `\d` matches Unicode
 # digit categories (Arabic-Indic ٠–٩, Devanagari ०–९, mathematical bold,
@@ -52,12 +68,16 @@ class MfaVerifyEnrollRequest(ApiSchema):
     secret_b32: str = Field(min_length=_SECRET_B32_MIN, max_length=_SECRET_B32_MAX)
     code: str = Field(pattern=_TOTP_CODE_PATTERN)
 
+    _ascii_code = field_validator("code")(_enforce_ascii_digits)
+
 
 class MfaLoginVerifyRequest(ApiSchema):
     """Body for `POST /v1/auth/login/verify` (challenge_id IS the auth)."""
 
     mfa_challenge_id: UUID
     code: str = Field(pattern=_TOTP_CODE_PATTERN)
+
+    _ascii_code = field_validator("code")(_enforce_ascii_digits)
 
 
 class MfaDisableRequest(ApiSchema):

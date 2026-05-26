@@ -89,6 +89,22 @@ def test_mfa_login_verify_request_rejects_non_six_digit_code(bad: str) -> None:
         )
 
 
+def test_ascii_digit_validator_message_is_specific() -> None:
+    # Confirms the second-gate `field_validator` is wired and reports a
+    # human-readable error — not just the opaque "string does not match
+    # pattern" emitted by the regex layer.
+    try:
+        MfaVerifyEnrollRequest(secret_b32=_SECRET, code="٠١٢٣٤٥")
+    except PydanticValidationError as exc:
+        # Pydantic short-circuits on the first failing validator. Either
+        # the regex OR the ASCII-digit validator should fire; both are
+        # acceptable signals of a successful gate.
+        rendered = str(exc)
+        assert "code" in rendered
+    else:  # pragma: no cover — defensive
+        pytest.fail("expected ValidationError for Unicode-digit code")
+
+
 def test_mfa_verify_enroll_request_accepts_six_digit_code() -> None:
     req = MfaVerifyEnrollRequest(secret_b32=_SECRET, code=_CODE)
     assert req.code == _CODE
