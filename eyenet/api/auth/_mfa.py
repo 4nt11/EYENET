@@ -48,8 +48,17 @@ def provisioning_uri(*, secret_b32: str, username: str, issuer: str = ISSUER) ->
 
 
 def verify_code(*, secret_b32: str, code: str, now: datetime) -> bool:
-    """Verify a 6-digit TOTP against ``secret_b32`` at ``now`` with ±1 step tolerance."""
-    if len(code) != _DIGITS or not code.isdigit():
+    """Verify a 6-digit TOTP against ``secret_b32`` at ``now`` with ±1 step tolerance.
+
+    Gate is ASCII-only on the digit set — :py:meth:`str.isdigit` returns
+    ``True`` for Unicode digit categories (e.g. Arabic-Indic ``٠١٢٣٤٥``),
+    so an unguarded check would let exotic inputs reach pyotp. pyotp's
+    own equality comparison would still reject them, but the explicit
+    ASCII gate keeps the failure shape predictable.
+    """
+    if len(code) != _DIGITS:
+        return False
+    if not all("0" <= ch <= "9" for ch in code):
         return False
     totp = pyotp.TOTP(secret_b32, digits=_DIGITS, interval=_STEP_SECONDS)
     return bool(totp.verify(code, for_time=now, valid_window=_TOLERANCE_STEPS))

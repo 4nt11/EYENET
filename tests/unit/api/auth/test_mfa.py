@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001, RUF003 — Unicode lookalike chars are intentional test inputs
 """Unit tests for the TOTP helpers in ``eyenet.api.auth._mfa``."""
 
 from __future__ import annotations
@@ -63,12 +64,47 @@ def test_verify_code_rejects_wrong_code() -> None:
 
 
 @pytest.mark.unit
-def test_verify_code_rejects_malformed() -> None:
+@pytest.mark.parametrize(
+    "bad",
+    [
+        # Length
+        "",
+        "1",
+        "12345",
+        "1234567",
+        "1234567890",
+        # Alpha / mixed
+        "abcdef",
+        "ABCDEF",
+        "12345a",
+        "a12345",
+        "12 456",
+        # Whitespace / control
+        "      ",
+        "\t\t\t\t\t\t",
+        "123456\n",
+        "\n123456",
+        "12\x0034",  # NUL embedded
+        # Unicode digits — isdigit() True, but pyotp + our ASCII gate reject
+        "٠١٢٣٤٥",  # Arabic-Indic 0–5
+        "१२३४५६",  # Devanagari 1–6
+        "𝟏𝟐𝟑𝟒𝟓𝟔",  # mathematical bold digits (surrogate pairs)
+        # Emoji / symbols
+        "🔢🔢🔢🔢🔢🔢",
+        "──────",
+        # Signed / floats
+        "-12345",
+        "12.456",
+        "+12345",
+        # Punctuation noise
+        "1,2,3,4,5,6",
+        "1-2-3-4",
+    ],
+)
+def test_verify_code_rejects_malformed(bad: str) -> None:
     secret = generate_secret()
     now = datetime(2026, 5, 26, 12, 0, 0, tzinfo=UTC)
-    assert verify_code(secret_b32=secret, code="abcdef", now=now) is False
-    assert verify_code(secret_b32=secret, code="12345", now=now) is False
-    assert verify_code(secret_b32=secret, code="1234567", now=now) is False
+    assert verify_code(secret_b32=secret, code=bad, now=now) is False
 
 
 @pytest.mark.unit

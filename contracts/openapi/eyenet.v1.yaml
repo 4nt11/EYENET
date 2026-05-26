@@ -1964,14 +1964,14 @@ components:
       required: [secret_b32, code]
       properties:
         secret_b32: { type: string, minLength: 16, maxLength: 128 }
-        code:       { type: string, pattern: '^\d{6}$' }
+        code:       { type: string, pattern: '^[0-9]{6}$' }
     MfaLoginVerifyRequest:
       type: object
       additionalProperties: false
       required: [mfa_challenge_id, code]
       properties:
         mfa_challenge_id: { type: string, format: uuid }
-        code:             { type: string, pattern: '^\d{6}$' }
+        code:             { type: string, pattern: '^[0-9]{6}$' }
     MfaDisableRequest:
       type: object
       additionalProperties: false

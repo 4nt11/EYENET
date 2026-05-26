@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001 — Unicode lookalike chars are intentional test inputs
 """Shape tests for MFA wire schemas (M9.A3)."""
 
 from __future__ import annotations
@@ -37,10 +38,55 @@ def test_mfa_enroll_response_rejects_short_secret() -> None:
         MfaEnrollResponse(provisioning_uri="otpauth://x", secret_b32="short")
 
 
-def test_mfa_verify_enroll_request_rejects_non_six_digit_code() -> None:
-    for bad in ("12345", "1234567", "abcdef", "12 456"):
-        with pytest.raises(PydanticValidationError):
-            MfaVerifyEnrollRequest(secret_b32=_SECRET, code=bad)
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "12345",
+        "1234567",
+        "abcdef",
+        "ABCDEF",
+        "12 456",
+        "      ",
+        "123456\n",
+        "\n123456",
+        "12\x0034",
+        # Unicode digits — Rust regex \d is ASCII-only by default; these reject.
+        "٠١٢٣٤٥",
+        "१२३४५६",
+        "𝟏𝟐𝟑𝟒𝟓𝟔",
+        "🔢🔢🔢🔢🔢🔢",
+        "-12345",
+        "12.456",
+        "12345a",
+        "1,2,3,4,5,6",
+    ],
+)
+def test_mfa_verify_enroll_request_rejects_non_six_digit_code(bad: str) -> None:
+    with pytest.raises(PydanticValidationError):
+        MfaVerifyEnrollRequest(secret_b32=_SECRET, code=bad)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "12345",
+        "1234567",
+        "abcdef",
+        "      ",
+        "123456\n",
+        "٠١٢٣٤٥",
+        "𝟏𝟐𝟑𝟒𝟓𝟔",
+        "🔢🔢🔢🔢🔢🔢",
+        "-12345",
+    ],
+)
+def test_mfa_login_verify_request_rejects_non_six_digit_code(bad: str) -> None:
+    with pytest.raises(PydanticValidationError):
+        MfaLoginVerifyRequest.model_validate(
+            {"mfa_challenge_id": "01906f00-0000-7000-8000-000000000001", "code": bad},
+        )
 
 
 def test_mfa_verify_enroll_request_accepts_six_digit_code() -> None:

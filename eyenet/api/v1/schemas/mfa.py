@@ -1,3 +1,4 @@
+# ruff: noqa: RUF003 — Unicode digit examples are intentional in the pattern docstring
 """MFA-surface schemas (API_PLAN §M9.A3).
 
 Wire shapes for enroll / verify-enroll / login-verify / disable. The
@@ -15,7 +16,12 @@ from pydantic import Field
 
 from ._base import ApiSchema
 
-_TOTP_CODE_PATTERN = r"^\d{6}$"
+# ASCII-only on purpose. Pydantic v2's Rust regex `\d` matches Unicode
+# digit categories (Arabic-Indic ٠–٩, Devanagari ०–९, mathematical bold,
+# etc.) — pyotp's internal comparison would still reject them, but a
+# defense-in-depth ASCII gate at the schema boundary keeps exotic inputs
+# from ever reaching the verifier.
+_TOTP_CODE_PATTERN = r"^[0-9]{6}$"
 _SECRET_B32_MIN = 16  # 80 bits — RFC 4226 §4 floor
 _SECRET_B32_MAX = 128
 
