@@ -115,7 +115,7 @@ Every method on the repository is dotless: `storage.create_case(...)`, not
 (`storage.X.method`) is **gone**. Naming convention: `<verb>_<domain>`
 (`append_audit`, `put_observation`, `transition_linkage`,
 `merge_actors_into_persona`, `graph_stats`, `upsert_graph_node`).
-See `API_PLAN.md §M9.1a.5` for the full naming map.
+See `development/API_PLAN.md §M9.1a.5` for the full naming map.
 
 ### 2.5 Async by default; sync only at boot
 
@@ -362,12 +362,13 @@ when a correction or non-obvious confirmation comes in.
 ## 8. Reading order for a new session
 
 1. `PLAN.md` — milestone roadmap (M1..M8 done, M9 in progress)
-2. `API_PLAN.md` — M9 HTTP API spec (the source of truth for v1 routes)
+2. `development/API_PLAN.md` — M9 HTTP API spec (the source of truth for v1 routes)
    - §M9.1a.5 specifically — the storage cutover this CLAUDE.md codifies
-3. `MODELS.md` — table-by-table schema reference
-4. `eyenet/storage/repository.py` — the flat ABC; methods document themselves
-5. `eyenet/storage/sqlmodel_repo/__init__.py` — mixin composition order
-6. The active memory files in
+3. `development/MODELS.md` — table-by-table schema reference
+4. `development/eyenet-erd.drawio` — visual ERD generated from MODELS.md; open in drawio
+5. `eyenet/storage/repository.py` — the flat ABC; methods document themselves
+6. `eyenet/storage/sqlmodel_repo/__init__.py` — mixin composition order
+7. The active memory files in
    `~/.claude/projects/-home-anti-Tools-EYENET/memory/MEMORY.md`
 
 ---

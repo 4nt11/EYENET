@@ -131,6 +131,58 @@ The `control` stream surfaces panic, global freeze, and other system-wide operat
 
 The same readiness signals are mirrored as Prometheus gauges (`eyenet_api_healthy`, `eyenet_api_ready{component=...}`, see §11.7.2) so ops teams running Prometheus do not need a separate Blackbox-exporter probe.
 
+### 3.7 Collectors (`/v1/collectors/`)
+
+The runtime fleet — the only place the UI can spin up, configure, start, stop, or inspect a live collector. See §4.11 for the full lifecycle/auth/supervisor contract.
+
+| Method | Path | Purpose | Scope |
+|---|---|---|---|
+| GET | `/v1/collectors` | list fleet — paginated; redacted `config` for viewers | `read:collectors` |
+| GET | `/v1/collectors/{id}` | single collector — full config requires `read:collectors_config` | `read:collectors` |
+| POST | `/v1/collectors` | create — body validated by Pydantic discriminated union on `kind`; leases an Identity | `write:collectors` |
+| PATCH | `/v1/collectors/{id}` | update `config`, `instance_name`, `notes`, `desired_state` only — never `observed_state` | `write:collectors` |
+| POST | `/v1/collectors/{id}/start` | sugar for `PATCH {desired_state: "running"}`; 202 Accepted, supervisor reconciles | `write:collectors` |
+| POST | `/v1/collectors/{id}/stop` | sugar for `PATCH {desired_state: "stopped"}` | `write:collectors` |
+| DELETE | `/v1/collectors/{id}` | hard delete; row must be in `observed_state=stopped` — server refuses live deletion | `admin:collectors` |
+| GET | `/v1/collectors/{id}/memberships` | which groups this collector is currently in (filtered `left_at IS NULL`); historical with `?include_left=true` | `read:collectors` |
+| GET | `/v1/stream/collectors` | SSE — `collector.*` lifecycle events for the dashboard fleet view | `stream:collectors` |
+| GET | `/v1/stream/collectors/{id}` | SSE — events scoped to one collector (the detail panel) | `stream:collectors` |
+| GET | `/v1/collectors/health` | fleet snapshot — count by `observed_state`, oldest stale heartbeat, restart-storm leaders | `read:collectors` |
+
+### 3.8 Sources & SourceDomains (`/v1/sources/`)
+
+The operator-configured platform registry. A `Source` is the configured platform/forum; `SourceDomain` rows are the hostname patterns it owns (multi-domain by design — see MODELS.md §1.1 / §2.26). Mutation here drives bridge resolution (§2.25) and candidate eligibility (§4.12.3); endpoints reflect that the storage layer enforces invariants in-transaction, not asynchronously.
+
+| Method | Path | Purpose | Scope |
+|---|---|---|---|
+| GET | `/v1/sources` | list configured sources; includes count of active SourceDomains per row | `read:sources` |
+| GET | `/v1/sources/{id}` | single Source with its active SourceDomain rows inlined and a summary of resolved-artifact counts | `read:sources` |
+| POST | `/v1/sources` | create a Source; body MAY include an initial `domains` list (each with `pattern`, `pattern_kind`, `is_primary`, `is_onion`) — server validates the set as if added one-by-one and rejects overlap conflicts | `write:sources` |
+| PATCH | `/v1/sources/{id}` | update `display_name`, `canonical_url`, `notes` — canonical_url change validates against the current primary SourceDomain per MODELS.md §1.1 | `write:sources` |
+| DELETE | `/v1/sources/{id}` | refused while any `Collector.source_id` references the row OR while any `InfrastructureArtifact.resolved_to_source_id` references it — operator must reassign or accept FK SET NULL via `?force=true` (requires `admin:sources`) | `admin:sources` |
+| GET | `/v1/sources/{id}/domains` | list all SourceDomain rows for this Source; `?include_removed=true` returns soft-deleted rows for audit views | `read:sources` |
+| POST | `/v1/sources/{id}/domains` | add a SourceDomain; 409 with `SourceDomainOverlap` payload on conflict; `?force=true` requires `admin:sources` and marks both sides ambiguous in the bridge resolver (audited as `source_domain.overlap_forced`) | `write:sources` |
+| PATCH | `/v1/sources/{id}/domains/{domain_id}` | update `is_primary` (swap primary; triggers canonical_url re-validation per MODELS.md §2.26) or `notes`; `pattern` and `pattern_kind` are immutable post-create (remove + re-add instead, preserves audit trail) | `write:sources` |
+| DELETE | `/v1/sources/{id}/domains/{domain_id}` | soft-delete by default (`removed_at` populated, row retained); `?hard=true` requires `admin:sources` and fully drops the row + breaks audit chain on resolutions that referenced it | `write:sources` |
+| GET | `/v1/sources/{id}/bridge-summary` | resolution counts: `{resolved, unresolved, ambiguous, irrelevant, pending_source}` aggregated across `InfrastructureArtifact` rows that target this Source | `read:sources` |
+
+### 3.9 Discovery loop (`/v1/candidates/`, `/v1/cases/{id}/seed-roots`)
+
+The candidate triage queue and seed-root management for the recursive-discovery loop. See §4.12 for the full lifecycle, eligibility model, and supervisor command channel. Candidate rows are populated by the discovery-driving sensor primitives defined in MODELS.md §2.27 (`channel_reference_extraction`, `url_extraction`) — operators do not write candidates by hand.
+
+| Method | Path | Purpose | Scope |
+|---|---|---|---|
+| GET | `/v1/candidates` | paginated triage queue; filter by `state`, `source_id`, `case_id`, `min_score`; sorted `score DESC, last_observed_at_ingest DESC` | `read:candidates` |
+| GET | `/v1/candidates/{id}` | single candidate — full mention list, score breakdown, per-collector eligibility precomputed | `read:candidates` |
+| POST | `/v1/candidates/{id}/approve` | transition `queued → approved`; body picks `assigned_collector_id` (server validates eligibility) | `write:candidates` |
+| POST | `/v1/candidates/{id}/reject` | transition `queued → rejected`; body requires `reason` | `write:candidates` |
+| POST | `/v1/candidates/{id}/park` | transition `joined → parked` (operator-initiated leave); body requires `reason` | `write:candidates` |
+| POST | `/v1/candidates/{id}/retry` | transition `failed → queued`; requires `admin:candidates` because retries on platform-rejected joins can burn identities | `admin:candidates` |
+| GET | `/v1/cases/{id}/seed-roots` | list seed-root groups for a Case (`Case.seed_root_group_ids`) | `read:cases` |
+| PUT | `/v1/cases/{id}/seed-roots` | replace the seed-root list — emits `case.seed_roots_changed`; recomputes candidate eligibility | `write:cases` |
+| POST | `/v1/cases/{id}/seed-roots/{group_id}` | promote an existing Group to a seed root (resets depth-from-root for downstream candidates) | `admin:case` |
+| GET | `/v1/stream/candidates` | SSE — `candidate.*` lifecycle events; the operator's triage feed | `stream:candidates` |
+
 ---
 
 ## 4. Auth model
@@ -188,13 +240,25 @@ Scopes are flat strings. Authority resolves from `ROLE_BASELINE[user.role] ∪ s
 read:actors        read:personas       read:linkages
 read:observations  read:audit          read:graph         read:metrics
 read:cases                                                             # §4.10 list visible cases, read case detail for collaborated cases
+read:collectors                                                        # §4.11 list/inspect collectors; config redacted unless read:collectors_config
+read:collectors_config                                                 # §4.11 view full `config` JSON (chat IDs, proxy URIs) — grant-only, restricted-tier
+read:candidates                                                        # §4.12 list/inspect the discovery triage queue
+read:sources                                                           # §4.13 list/inspect Sources and their SourceDomains
 read:restricted    read:classified                                       # §4.7 sensitivity tiers — grant-only, never in baseline
 write:linkage_decision  write:identity  write:panic
 write:cases                                                            # §4.10 create cases, manage members/metadata on owned cases
+write:collectors                                                       # §4.11 create/update/start/stop collectors
+write:candidates                                                       # §4.12 approve/reject/park candidate joins
+write:sources                                                          # §4.13 create/update Sources, add/remove/repurpose SourceDomains
 stream:linkages    stream:personas     stream:audit    stream:control
+stream:collectors                                                      # §4.11 SSE on collector lifecycle events
+stream:candidates                                                      # §4.12 SSE on candidate triage events
 admin:users        admin:tokens        admin:clearance                   # admin:clearance is required to grant/revoke §4.8 clearances
 admin:reclassify                                                       # §4.9 sensitivity-tier promotion — grant-only, never in baseline
 admin:case                                                             # §4.10 archive/reopen, force-collaborator, archived-case access — grant-only
+admin:collectors                                                       # §4.11 delete collectors, force-release leased Identity, override cooling
+admin:candidates                                                       # §4.12 retry failed candidates, force-bypass dual-cover, depth-override
+admin:sources                                                          # §4.13 force-overlap SourceDomain adds, force-delete Sources, hard-delete SourceDomain rows
 ```
 
 Permission check is a FastAPI dependency factory: `RequireScope("write:linkage_decision")`. Returns 403 with problem+json if missing.
@@ -672,6 +736,445 @@ Audit subjects' payloads gain `case_refs` everywhere a reason is recorded. Court
 > "Who accessed passport-blob-X on 2026-05-24 12:14:33?" → file_access_journal row → audit_event → `case_refs: [APT-29]` → case_collaborator on APT-29 at that time → SystemUser → granted_by chain → bootstrap.
 
 The chain is now structural, not textual.
+
+---
+
+### 4.11 Collectors — the runtime fleet
+
+`Collector` (MODELS.md §2.19) is a first-class API resource because the UI is the operator's only entry point for spinning up, configuring, and supervising the things that pull bytes off platforms. A `Collector` is the binding of:
+
+- a `Source` (which platform — telegram/matrix/...),
+- an `Identity` (which credential — exclusive lease),
+- a `kind`-specific `config` blob (which chats/rooms, rate caps, proxy overrides),
+- an operator-expressed `desired_state` (running / stopped / disabled),
+- and a supervisor-reported `observed_state` (stopped / starting / running / cooling / crashed).
+
+#### 4.11.1 Process model — in-process async supervisor
+
+A single `CollectorSupervisor` service runs inside the EYENET process group (next to the bus, the storage, the API). It owns the live fleet:
+
+```python
+# eyenet/services/collector_supervisor.py — sketch
+class CollectorSupervisor(ServiceBase):
+    name = "collector_supervisor"
+    _tasks: dict[UUID, asyncio.Task[None]]   # collector_id → live task
+    _leases: dict[UUID, UUID]                # collector_id → identity_id
+
+    async def tick(self) -> None:
+        # Reconcile desired_state → observed_state for every row.
+        # Start tasks for rows that want running but aren't.
+        # Stop tasks for rows that want stopped but are running.
+        # Mark observed_state=crashed and emit collector.crashed on task exception.
+        # Apply exponential backoff (restart_count) before re-starting crashed rows.
+```
+
+**One supervisor per EYENET instance. Not configurable.** Multi-host fleets are out of scope for v0 — small-operator scope (CLAUDE.md §1). When that changes, a per-supervisor `host_id` column gates the reconcile predicate; the API contract here does not change.
+
+Default backend is `asyncio.Task` (Telethon and `nio` are both fully async — no fork needed). A future `subprocess.Popen` backend behind the same `CollectorBackend` interface is reserved for collectors that need OS isolation (a C extension that segfaults, an embedded browser for forum scraping). The API contract above is backend-agnostic.
+
+#### 4.11.2 Lifecycle
+
+```
+       ┌──────────┐  start  ┌──────────┐  ready  ┌─────────┐
+       │ stopped  │────────▶│ starting │────────▶│ running │
+       └──────────┘         └──────────┘         └─────────┘
+            ▲                    │                    │
+            │ stop               │ start fail         │ crash
+            │                    ▼                    ▼
+            │              ┌──────────┐  cooldown  ┌─────────┐
+            └──────────────│ crashed  │◀───────────│ cooling │
+                           └──────────┘            └─────────┘
+       ┌──────────┐
+       │ disabled │  (operator parked — supervisor never touches)
+       └──────────┘
+```
+
+- `desired_state` is the only column the API mutates for lifecycle. `observed_state` is supervisor-written, server-readable, and **never** accepted in request bodies — the API layer strips it from `PATCH` payloads and 400s if explicitly provided.
+- `disabled` is a hard stop: supervisor refuses to start the row even on operator request, until the operator explicitly transitions to `stopped`. This is the parking lot for burned/quarantined collectors.
+- `cooling` is a soft backoff between crash and next restart attempt. Duration: `min(2^restart_count, 600)` seconds; capped at 10 minutes. Operator can force-exit cooling via `POST /v1/collectors/{id}/start` (audited as `collector.cooling_overridden`, requires `admin:collectors`).
+- `start` and `stop` are **202 Accepted, not 200 OK**. The endpoint sets `desired_state` and returns; the supervisor reconciles on its next tick (≤2s). The UI uses the SSE stream to observe the resulting transition. Pretending these are synchronous would be a lie — and lies in operator software are how people lose evidence.
+
+#### 4.11.3 Identity leasing — exclusive
+
+`Identity` (MODELS.md §2.1) carries `state ∈ {available, in_use, cooling, frozen, burned}`. The supervisor is the single writer of `state=in_use` for collector-bound identities:
+
+1. On collector start: supervisor opens a transaction, asserts `Identity.state = "available"`, sets it to `"in_use"`, writes `Collector.identity_id` (unique constraint enforces one-to-one). Conflict → start fails with `IdentityUnavailable`, collector goes to `crashed` with `last_error_type="IdentityUnavailable"`.
+2. On collector stop or crash: supervisor releases the lease — `Identity.state="available"` (or `"cooling"` if `cooldown_seconds > 0`), emits `collector.identity_lease_released`.
+3. `admin:collectors` can force-release a lease via `POST /v1/collectors/{id}/force-release-identity` when the supervisor is wedged. Audited heavily. This is the escape hatch, not the happy path.
+
+**No two collectors share an Identity. Ever.** The unique constraint on `Collector.identity_id` is the durable truth. Two simultaneously logged-in Telegram sessions on the same account is how you get banned, and how the operator's OPSEC posture leaks into the platform's anti-abuse signals.
+
+#### 4.11.4 Config — discriminated union, validated, sensitive
+
+`Collector.config` is a JSON blob whose schema is a Pydantic discriminated union on `kind`:
+
+```python
+# eyenet/api/v1/schemas/collectors.py — sketch
+class TelegramCollectorConfig(BaseModel):
+    kind: Literal["telegram"]
+    monitor_chat_ids: list[int]
+    rate_limit_per_min: int = 60
+    proxy_uri_override: str | None = None  # falls back to Identity.proxy_uri
+
+class MatrixCollectorConfig(BaseModel):
+    kind: Literal["matrix"]
+    monitor_rooms: list[str]
+    homeserver_url: str
+    initial_sync_limit: int = 100
+
+CollectorConfig = Annotated[
+    TelegramCollectorConfig | MatrixCollectorConfig,
+    Field(discriminator="kind"),
+]
+```
+
+`POST` and `PATCH` validate against the union; unknown `kind` is 400. New collector kinds = one new arm in the union + one new collector implementation behind `CollectorBase` (the existing collector abstraction — see CLAUDE.md §4.4). The API surface does not change.
+
+**Sensitivity:** `config` is `restricted` tier by default. The full blob is only returned when the caller has `read:collectors_config`. Without it, `GET /v1/collectors/{id}` returns a redacted form:
+
+```json
+{
+  "id": "...",
+  "instance_name": "tg_alpha_collector_01",
+  "kind": "telegram",
+  "source_id": "...",
+  "identity_id": "...",
+  "desired_state": "running",
+  "observed_state": "running",
+  "last_heartbeat_at": "2026-05-25T14:00:01Z",
+  "config": { "kind": "telegram", "__redacted__": true },
+  ...
+}
+```
+
+Rationale: `monitor_chat_ids` and `monitor_rooms` are themselves intelligence — they reveal who EYENET is watching. A `viewer` who can read the chat-ID list can correlate it with public knowledge and infer cases. Treat the config blob the same way we treat any `restricted` evidence: the existence of the collector is `internal`, but its scope is `restricted`.
+
+#### 4.11.5 Lifecycle events — SystemLog, not a third table
+
+Every supervisor-driven transition emits one `SystemLog` row (MODELS.md §2.16) with a curated event name and one `eyenet.audit.collector.*` audit row (MODELS.md §2.14) when operator-initiated:
+
+| Event | SystemLog level | Audit? | Trigger |
+|---|---|---|---|
+| `collector.created` | `lifecycle` | yes | `POST /v1/collectors` |
+| `collector.config_changed` | `lifecycle` | yes | `PATCH /v1/collectors/{id}` (config delta) |
+| `collector.started` | `lifecycle` | yes (operator-initiated) / no (supervisor restart) | desired→running transition |
+| `collector.stopped` | `lifecycle` | yes (operator-initiated) | desired→stopped transition |
+| `collector.crashed` | `error` | no | task raised, supervisor caught |
+| `collector.cooling` | `notice` | no | crash → backoff enter |
+| `collector.cooling_overridden` | `lifecycle` | yes | `admin:collectors` force-start during cooling |
+| `collector.identity_lease_released` | `lifecycle` | yes (force) / no (normal stop) | lease release |
+| `collector.deleted` | `lifecycle` | yes | `DELETE /v1/collectors/{id}` |
+
+Operator-initiated audit rows reference the originating `SystemUser.id` and include the collector id in `subject_id` (with `subject_kind="collector"`). The audit chain (§5) makes the operator's intent recoverable; SystemLog makes the supervisor's reality queryable. They are not redundant.
+
+#### 4.11.6 SSE — `/v1/stream/collectors` and `/v1/stream/collectors/{id}`
+
+Bus subjects:
+- `eyenet.collector.lifecycle` — fleet-wide; one envelope per state transition.
+- `eyenet.collector.lifecycle.{collector_id}` — per-instance, suffix-matched for the scoped stream.
+- `eyenet.collector.heartbeat.{collector_id}` — periodic (default 30s); proves the task is alive between transitions.
+
+Envelope shape (bus-side):
+```json
+{
+  "event": "collector.crashed",
+  "collector_id": "01HZ...",
+  "kind": "telegram",
+  "from_state": "running",
+  "to_state": "crashed",
+  "error_type": "FloodWaitError",
+  "error_message": "A wait of 86400 seconds is required",
+  "occurred_at": "2026-05-25T14:00:00Z",
+  "trace_id": "...",
+  "span_id": "..."
+}
+```
+
+The SSE replay rules (§6.2) apply unchanged. Fleet dashboard subscribes to the wide stream and renders the table; the collector detail panel subscribes to the narrow stream and gets heartbeats too.
+
+#### 4.11.7 Why this is in §4 and not §3
+
+§3 is the surface map — the table of contents. §4 is the contract that makes the surface enforceable. Collectors get their own §4 subsection because:
+
+1. Identity leasing crosses two storage tables transactionally and has a force-release escape hatch with its own audit shape.
+2. Config sensitivity intersects §4.7 tiers (redaction depends on a grant-only scope).
+3. The supervisor process model is part of the API contract — `start`/`stop` are 202-not-200 because the supervisor is the actual actor, and the SSE stream is the only honest place to learn the outcome.
+
+None of that fits in a surface-map row.
+
+### 4.12 Candidates — the recursive discovery loop
+
+`GroupCandidate` (MODELS.md §2.20) and `GroupCandidateMention` (§2.21) are the substrate of the discovery loop: collectors observe cross-references to groups EYENET is not yet in, those references aggregate into candidates, and the operator triages — manually, or via per-Case auto-join policy. §4.12 is the contract that makes this loop **operator-supervised by default, OPSEC-aware in execution, and recoverable when it goes wrong**.
+
+#### 4.12.1 Posture — hybrid by default
+
+The system ships with `Case.auto_join_policy = disabled` for every new Case. Every candidate is operator-triaged in the UI. Auto-join is opt-in per Case, and the threshold is configured per Case — there is no system-wide default that auto-joins anything.
+
+Rationale: "we joined this group" is a court-defensible act under the §2.13 `EngagementAuthorization` framework. The audit row attributing the join to either a SystemUser (manual approve) or to the policy row in effect at that moment (auto approve) must be reconstructable. Defaulting to disabled means the operator has to consciously opt in to automation per investigation — there is no setting in `eyenet.toml` that quietly enables auto-expansion across the fleet.
+
+#### 4.12.2 Discovery → score → queue
+
+The `channel_reference_extraction` sensor primitive (sensor module, not modeled here) runs on every Message. For each detected reference to an unobserved group:
+
+1. **Resolve-or-create the candidate.** Storage: `INSERT INTO group_candidate (source_id, platform_groupid, ...) ON CONFLICT (source_id, platform_groupid) DO NOTHING`. Either way, retrieve the row.
+2. **Append the mention.** `INSERT INTO group_candidate_mention (...)` — never upserted; every observation is its own row. The mention carries `observed_by_collector_id`, `observed_in_group_id`, `seed_root_id`, `depth_from_root`, `mentioning_actor_id`, `mention_kind`.
+3. **Recompute the score.** Server-side function (`score_candidate(candidate_id)`); writes back to `GroupCandidate.score` + `score_breakdown`. Inputs: `distinct_mentioning_groups`, `distinct_mentioning_actors`, time-decayed recency, role-signal boost from `mentioning_actor_role_signal` snapshots.
+4. **Auto-queue threshold.** If `state = discovered` and the new score crosses the Case (or Source-default) `auto_join_score_threshold`, transition to `queued` and emit `candidate.queued`. The candidate now appears in the operator's triage view.
+5. **Auto-approve gate** (only when `auto_join_policy != disabled` for at least one Case containing a mention's `seed_root_id`): evaluate `auto_join_policy` AND eligibility (§4.12.3). If both pass, transition `queued → approved` and emit `candidate.auto_approved` with the originating policy row id frozen in the audit payload.
+
+The score function is **deterministic and frozen per release**. Changing it bumps a `score_function_version: int` column on `GroupCandidate` and is itself an audit event (`candidate.score_function_upgraded`). The operator must be able to reconstruct "why was X auto-approved on Tuesday" against the score function in effect on Tuesday, not today's.
+
+#### 4.12.3 Eligibility — per-collector, computed at decision time
+
+Before approving (manual or auto), the server computes per-collector eligibility against the candidate. The predicate combines provenance from MODELS.md §2.21 (`GroupCandidateMention.depth_from_root`) with active-membership state from MODELS.md §2.22 (`CollectorGroupMembership` — the dedup/dual-cover oracle). When two collectors end up in the same group despite the predicate, the per-message dual-sighting record is MODELS.md §2.23 (`MessageObservation.was_first_sighting`), which is what the candidate's `dual_cover_count` field is materialized from. Concrete form:
+
+```python
+# eyenet/services/discovery/eligibility.py — sketch
+async def eligibility(candidate: GroupCandidate, collector: Collector) -> EligibilityResult:
+    # 1. Dedup: is any active collector already in the target group?
+    if candidate.resulting_group_id is not None:
+        active = await storage.list_active_memberships(group_id=candidate.resulting_group_id)
+        if active:
+            case = await resolve_case_for_candidate(candidate)
+            if case.redundancy_policy == "prefer_single":
+                return EligibilityResult.SKIP_DUAL_COVER
+            if case.redundancy_policy == "prefer_dual" and len(active) >= 2:
+                return EligibilityResult.SKIP_DUAL_COVER
+
+    # 2. Depth: does any mention's seed_root reach this collector at acceptable depth?
+    reachable = await storage.reachable_roots_for_collector(collector.id)
+    min_depth = min(
+        (m.depth_from_root for m in candidate.mentions if m.seed_root_id in reachable),
+        default=None,
+    )
+    if min_depth is None:
+        return EligibilityResult.NO_REACHABLE_ROOT
+    if min_depth >= collector.config.max_auto_join_depth:
+        return EligibilityResult.OVER_DEPTH
+
+    # 3. Identity availability for scout-first policy.
+    if not await identity_pool.has_available_scout(source_id=candidate.source_id):
+        return EligibilityResult.NO_SCOUT_AVAILABLE
+
+    return EligibilityResult.OK
+```
+
+`GET /v1/candidates/{id}` precomputes eligibility against every collector the caller can see and returns it inline:
+
+```json
+{
+  "id": "01HZ...",
+  "source_id": "...",
+  "platform_groupid": "-1001234567890",
+  "state": "queued",
+  "score": 0.78,
+  "score_breakdown": { ... },
+  "eligibility_per_collector": [
+    {"collector_id": "01H...A", "result": "ok"},
+    {"collector_id": "01H...B", "result": "over_depth", "min_depth_via_roots": 3, "max_auto_join_depth": 2},
+    {"collector_id": "01H...C", "result": "skip_dual_cover"}
+  ],
+  "mentions": [ ... up to last 50 ... ],
+  "mentions_total": 142
+}
+```
+
+The UI's "Approve & assign to..." dropdown only enables `result: "ok"` collectors. `admin:candidates` can force-bypass `over_depth` and `skip_dual_cover` with explicit override audit events (`candidate.depth_override`, `candidate.dual_cover_override`).
+
+#### 4.12.4 Approval → supervisor command channel
+
+`POST /v1/candidates/{id}/approve` does NOT make the collector join. It transitions state, sets `assigned_collector_id`, and emits `candidate.approved` to the bus. The `CollectorSupervisor` (§4.11.1) subscribes to `eyenet.candidate.approved` and translates it into a typed command on the assigned collector's command channel:
+
+```python
+# eyenet/services/collector_supervisor.py — discovery extensions
+class JoinGroupCommand(BaseModel):
+    kind: Literal["join_group"]
+    candidate_id: UUID
+    platform_groupid: str
+    access_artifact_id: UUID           # the artifact the supervisor selected (MODELS.md §2.24)
+    use_scout_identity: bool = True    # supervisor leases a scout from the pool
+
+class LeaveGroupCommand(BaseModel):
+    kind: Literal["leave_group"]
+    group_id: UUID
+    reason: str
+```
+
+The supervisor selects `access_artifact_id` BEFORE dispatching the command (selection algorithm in MODELS.md §2.24). The backend receives both the candidate and the chosen artifact, and dispatches the platform API call that matches the artifact's `kind`:
+
+| Artifact kind | Telegram backend call | Matrix backend call |
+|---|---|---|
+| `public_identifier` | `JoinChannelRequest(InputChannel @ resolve(value))` | `room_join(alias=value, via=details.via_servers)` |
+| `invite_link` | `ImportChatInviteRequest(hash from value)` | `room_join(room_id from matrix.to, via=details.via_servers)` |
+| `qr_code` | resolve to embedded invite_link, then as above | same |
+| `direct_invite` | unsupported via auto — supervisor refuses; queues operator action | `room_join(room_id)` when an inviter member exists; else refuse |
+| `paid_subscription` | requires `admin:candidates` override; subscription gate is operator-only | n/a |
+| `access_blocked` | always refuse | always refuse |
+| `restricted_other` | requires `admin:candidates` override; operator decides | requires override |
+
+Each collector kind owns its own retry, backoff, and platform-error mapping. A Telegram `FloodWaitError` translates to `candidate.failed` with `last_error_type = "FloodWaitError"` and the wait duration in `last_error_message`; the candidate is parked, not retried. An `InviteHashExpiredError` writes the artifact's `validation_state = "expired"` and re-runs artifact selection — if another valid artifact exists for the same candidate, the supervisor tries again with that one in the same tick. **Re-validation is automatic; re-attempt is bounded** (one retry per artifact-selection cycle, never an infinite loop over a candidate's artifact set).
+
+State transitions written by the supervisor:
+- `approved → joining` — command dispatched
+- `joining → joined` — platform confirmed; supervisor creates the `Group` row with `discovered_via_candidate_id` populated, writes `CollectorGroupMembership(joined_via="candidate")`, sets `GroupCandidate.resulting_group_id`
+- `joining → failed` — platform refused or timeout; supervisor writes `last_error_*` fields on the candidate, NOT on the collector (the collector is healthy; only this one join failed)
+- `joined → parked` — operator-initiated leave or supervisor-detected ban (e.g. the collector starts seeing 403s on this group); supervisor closes the `CollectorGroupMembership` row (`left_at`, `left_reason`)
+
+#### 4.12.5 Scout identities — graduation flow
+
+When the supervisor picks an identity for a candidate join, it prefers `Identity.role = scout`. The scout joins, EYENET observes for `Source.scout_observation_window_days` (default 7). If during that window:
+
+- No bans, no anti-spam flags, no `FloodWait` storms, no platform-level account warnings → emit `identity.graduated`, set `Identity.role = monitor`, `Identity.graduated_at = now`. The collector continues using the same identity; it is now a monitor.
+- Any of the above → emit `identity.burned`, set `Identity.state = burned` and `Identity.role = quarantine`. The candidate goes to `parked`. The operator must triage manually.
+
+This isolates new joins behind disposable identities. A scout that gets burned costs the operator one credential; a monitor that gets burned costs the operator continuity on every group it was already in.
+
+#### 4.12.6 SSE events — `/v1/stream/candidates`
+
+Bus subjects:
+- `eyenet.candidate.lifecycle` — fleet-wide; one envelope per state transition.
+- `eyenet.candidate.lifecycle.{candidate_id}` — per-candidate.
+- `eyenet.candidate.queued` — fan-out to the operator triage UI when a new candidate is ready for review.
+
+Envelope shape:
+```json
+{
+  "event": "candidate.queued",
+  "candidate_id": "01HZ...",
+  "source_id": "...",
+  "platform_groupid": "-1001234567890",
+  "display_name_hint": "Rutify Premium",
+  "score": 0.78,
+  "score_delta_since_last": 0.21,
+  "from_state": "discovered",
+  "to_state": "queued",
+  "case_ids": ["01H...A", "01H...B"],
+  "occurred_at": "2026-05-25T14:00:00Z",
+  "trace_id": "...",
+  "span_id": "..."
+}
+```
+
+`case_ids` lists every Case whose seed-root subtree contributed a mention — the dashboard uses this to route the candidate notification to the right operator pane. SSE replay rules (§6.2) apply.
+
+#### 4.12.7 Auditing — what lands where
+
+Every transition writes BOTH a SystemLog row (queryable in the UI) AND an audit row (court-defensible chain), with the established split:
+
+| Event | SystemLog level | Audit | Notes |
+|---|---|---|---|
+| `candidate.discovered` | `notice` | no | first mention landed; high-volume, SystemLog only |
+| `candidate.queued` | `lifecycle` | no | score crossed threshold; operator-visible signal |
+| `candidate.approved` | `lifecycle` | yes | reason in payload: `manual:<system_user_id>` or `auto:<policy_id>` |
+| `candidate.rejected` | `lifecycle` | yes | reason text required |
+| `candidate.auto_approved` | `lifecycle` | yes | frozen snapshot of the policy row in effect |
+| `candidate.depth_override` | `lifecycle` | yes | `admin:candidates` forced join past depth limit |
+| `candidate.dual_cover_override` | `lifecycle` | yes | `admin:candidates` forced second collector into a group |
+| `candidate.joined` | `lifecycle` | yes | resulting `group_id` in payload |
+| `candidate.failed` | `error` | no | platform-side failure; not operator action |
+| `candidate.parked` | `lifecycle` | yes | operator-initiated leave or supervisor-detected ban; reason required |
+| `candidate.retry` | `lifecycle` | yes | `admin:candidates` retry on `failed` |
+| `candidate.score_function_upgraded` | `lifecycle` | yes | release event; once per deploy |
+| `case.seed_roots_changed` | `lifecycle` | yes | changes downstream candidate eligibility |
+| `case.root_promoted` | `lifecycle` | yes | interior group promoted; resets depth-from-root for descendants |
+| `identity.graduated` | `lifecycle` | yes | scout → monitor |
+| `identity.burned` | `error` | yes | scout or monitor went to quarantine |
+
+The `candidate.discovered` firehose stays out of the audit table on purpose — there is no operator action and no SystemUser to attribute. SystemLog filtering by `event = "candidate.discovered"` and date range is the operator's "show me the discovery surface" query.
+
+#### 4.12.8 What this does NOT model (yet)
+
+- **Cross-source bridging** — a Telegram channel that mentions a Matrix room. The Pydantic-discriminated `mention_kind` allows future `bridge_to_other_source` values; the per-collector eligibility predicate already filters on `candidate.source_id == collector.source_id`, so cross-source candidates are correctly inert until a future milestone adds an `IdentityBridge` resolver. Deferred.
+- **Public actor-bio scraping for invite links** — discovering a group via an actor's profile bio rather than a sent message. The current substrate is message-only. Adding it = new `mention_kind = "bio_link"` (already in the enum) + a new sensor primitive `actor_bio_reference_extraction`. Model is ready; implementation is deferred.
+- **Negative signals** — actors warning each other AWAY from a group ("don't join, it's a honeypot"). Future score function input. Model: an enum extension `mention_kind = "negative_reference"` and a sign-aware score function. Deferred.
+
+### 4.13 Sources & SourceDomains — the platform registry
+
+`Source` (MODELS.md §1.1) and `SourceDomain` (§2.26) are the operator-curated platform registry. Every Collector points at a Source; every cross-source URL artifact (§2.7) resolves against the SourceDomain index. Mutation here is **load-bearing for the discovery loop and the cross-source bridge** — getting it wrong silently breaks resolution for every artifact ingested afterward.
+
+#### 4.13.1 Posture
+
+- **Operator-only.** No system path creates Sources or SourceDomains automatically. The bridge resolver (§2.25) populates `InfrastructureArtifact.resolved_to_source_id` automatically once a matching Source exists, but the matching Source itself ALWAYS comes from operator intent — never from an inferred-domain promotion.
+- **Inline invariants, not async jobs.** The storage layer's writes for Source / SourceDomain trigger MODELS.md §2.25 resolution sweeps in-transaction. By the time the API returns 2xx, every affected `InfrastructureArtifact` row has been re-evaluated. The UI can refresh and show the new resolution counts immediately. No polling, no queue.
+- **`canonical_url` is a derived invariant, not an independent field.** PATCHing `canonical_url` requires it to match the current primary SourceDomain's `pattern` per MODELS.md §1.1. Swapping the primary via `PATCH /v1/sources/{id}/domains/{domain_id}` with `{is_primary: true}` triggers re-validation; the swap response includes a `canonical_url_status` field with values `ok`, `now_invalid` (server null-ed it), or `updated` (server rewrote it — only when the request included `?update-canonical-url=true`).
+
+#### 4.13.2 Overlap conflicts — 409 with structured payload
+
+`POST /v1/sources/{id}/domains` runs MODELS.md §2.26's `_scan_overlaps` BEFORE inserting. On conflict, response is HTTP 409 with problem+json:
+
+```json
+{
+  "type": "https://eyenet.local/errors/source-domain-overlap",
+  "title": "SourceDomain overlap",
+  "status": 409,
+  "detail": "Pattern 'forum.example.com' (exact) conflicts with existing patterns on other Sources",
+  "conflicts": [
+    {
+      "other_source_id": "01H...",
+      "other_source_display_name": "Example Network",
+      "other_pattern": "*.example.com",
+      "other_pattern_kind": "subdomain_wildcard",
+      "why_overlap": "new exact pattern falls under existing wildcard's subdomain space"
+    }
+  ],
+  "force_available": true,
+  "force_required_scope": "admin:sources"
+}
+```
+
+The UI presents the conflict to the operator with a clear "Force anyway (marks both ambiguous)" affordance that's disabled unless the caller has `admin:sources`. The force path retries with `?force=true` and writes the `source_domain.overlap_forced` audit row.
+
+#### 4.13.3 Bulk Source creation — atomic, per-Source
+
+`POST /v1/sources` with a `domains: [...]` array creates the Source AND every SourceDomain in one transaction. The validation is "as if added one-by-one": overlap detection runs against the existing DB state plus each prior row in the same payload. If ANY row would conflict, the whole transaction rolls back and the response is the standard 409 payload pointing at the FIRST conflict encountered. There is no "partial success" mode — either the entire Source materializes correctly, or nothing changes.
+
+Rationale: operator-facing bulk-add is an atomic intent ("set up the forum with these three mirror domains"). A half-created Source with two of three intended domains is operationally worse than no Source — the bridge resolver would resolve some artifacts against an incomplete pattern set and the operator would never know.
+
+#### 4.13.4 Deletion semantics — Source vs SourceDomain
+
+**SourceDomain deletion is soft-by-default.** `DELETE /v1/sources/{id}/domains/{domain_id}` writes `removed_at` and an audit event; the row is excluded from future matching but preserved for audit reconstruction. Historical `InfrastructureArtifact.resolved_to_source_id` rows that were set via this SourceDomain keep their FK intact — the FK references the Source, not the SourceDomain row. New artifacts mentioning the removed pattern go `unresolved` per §2.25, which is correct.
+
+`?hard=true` requires `admin:sources` and drops the row outright. Use case: typo correction immediately after add, before any artifacts resolved through it. Refuses with 409 if ANY `InfrastructureArtifact` exists whose `resolved_to_source_id` was set during this SourceDomain's active lifetime — the audit chain depends on the row's existence to reconstruct "why did this artifact resolve to this Source on date X." Hard-delete is for "this never should have been added," not for "this is no longer relevant."
+
+**Source deletion is refused while in use.** `DELETE /v1/sources/{id}` refuses (409) while:
+- any `Collector.source_id` references it (collectors must be reassigned or deleted first), OR
+- any `InfrastructureArtifact.resolved_to_source_id` references it (artifacts must be unresolved manually or via `?force=true`), OR
+- any `GroupCandidate.source_id` references it (candidates must be rejected or transitioned to a different Source first; the latter is rare and admin-only).
+
+`?force=true` requires `admin:sources` and:
+1. Reassigns every dependent Collector to a sentinel `parked` Source (creating it if missing).
+2. SET NULL on every dependent `InfrastructureArtifact.resolved_to_source_id`, writes `infrastructure.unresolved_post_source_delete` audit per row (bounded — for typical operators the set is small; for a Source with millions of resolved artifacts, the operation is rejected unless `?force=true&i-know-what-im-doing=true` per the explicit-consent convention).
+3. Soft-deletes every SourceDomain row.
+4. Marks the Source itself with `deleted_at` (extension to §1.1 — Source soft-delete; rows retained for audit) rather than a hard DELETE.
+
+Hard DELETE of a Source is NOT exposed via API. If the operator needs it (testing, mistaken creation immediately reversed), `eyenet source purge <id>` CLI is the path, and it refuses if ANY downstream row references the Source. Forensic-grade evidence systems do not let operators erase the configuration history through which evidence was collected.
+
+#### 4.13.5 SSE — no dedicated subject
+
+Source and SourceDomain mutations are infrequent (operator-pace, not collector-pace), so no dedicated SSE subject. Affected dashboards subscribe to `eyenet.audit.lifecycle` and filter on the relevant event names: `source.created`, `source.updated`, `source.deleted`, `source_domain.added`, `source_domain.removed`, `source_domain.primary_changed`, `source_domain.overlap_forced`, `infrastructure.resolved_on_ingest`, `infrastructure.bridge_resolved_existing_artifacts`, `infrastructure.ambiguous_on_ingest`, `infrastructure.resolution_revoked`, `infrastructure.resolved_post_source_change`, `infrastructure.unresolved_post_source_delete`.
+
+The audit-event stream is the right surface here because these are inherently low-volume, operator-correlated changes — adding an SSE subject just for Sources would burn complexity for no value.
+
+#### 4.13.6 Auditing — what lands where
+
+| Event | SystemLog level | Audit | Notes |
+|---|---|---|---|
+| `source.created` | `lifecycle` | yes | includes initial SourceDomain set if bulk |
+| `source.updated` | `lifecycle` | yes | `display_name` / `canonical_url` / `notes` deltas |
+| `source.deleted` | `lifecycle` | yes | soft-delete; `force` flag noted in payload |
+| `source_domain.added` | `lifecycle` | yes | |
+| `source_domain.overlap_forced` | `error` | yes | `admin:sources` overrode overlap; both sides ambiguous now |
+| `source_domain.removed` | `lifecycle` | yes | soft by default; `hard` flag in payload when used |
+| `source_domain.primary_changed` | `lifecycle` | yes | includes old + new primary, canonical_url disposition |
+| `infrastructure.*` events (§2.25) | various | yes | already covered in MODELS.md §2.25; emitted by storage-layer resolution sweeps triggered by these endpoints |
+
+The bridge-resolution audit events ride on the same chain as the source-mutation events that triggered them — a single audit walk recovers "operator added domain X at time T → 47 artifacts resolved → 3 became ambiguous" as a contiguous run with a shared `trace_id`.
+
+#### 4.13.7 What this does NOT model
+
+- **Programmatic SourceDomain discovery.** No endpoint accepts "we observed this domain a lot — auto-suggest it as a SourceDomain for an existing Source." The discovery-suggestion flow lives in the Infrastructure UI (`GET /v1/infrastructure?resolution_state=pending_source`) and the operator manually decides whether to add. Auto-suggestion would invert the operator-only posture.
+- **Source merging.** "I configured two Sources for the same forum by mistake, merge them." Future tooling, manual migration script. Not API-exposed yet — too easy to get wrong, too rare to design pre-emptively.
+- **Source-level rate limits / quotas.** A Source might have global rate limits across all Collectors observing it. Modeled at the Collector level today (per-collector `rate_limit_per_min`); a Source-level aggregate ceiling is a sensible future addition. Deferred.
 
 ---
 
@@ -2076,7 +2579,25 @@ Coverage gate: the current floor inherited from M8 is **0.845** (calibration-sui
 
 ## 16. Milestones
 
-Sized for one-commit-series each, matching the M5–M8 cadence.
+**Sizing rule.** Every remaining milestone is sized to land in a single worktree (`.claude/worktrees/<slug>`), one commit series, one `--no-ff` merge to main. Target: half-day to two-day execution window per slice. If a milestone needs more than two days, split it again.
+
+**Independence rule.** Milestones declare an explicit `Depends on:` line listing the *minimum* prior merges they need. Anything not listed is parallel-safe. Two milestones with disjoint `Files touched:` sets can be executed concurrently in two worktrees by two operators (or two Claude sessions) without merge pain — the pre-public posture (no Alembic, `rm data/*.db && eyenet init`) means even FK-sharing storage milestones don't serialize through migrations.
+
+**Group convention.** Letters are independence groups, not strict ordering:
+- **9.0 / 9.1a / 9.1a.5** — historical, shipped, foundation.
+- **A — Auth & tokens** (sequential within group, parallel to all other groups)
+- **B — File-access journal** (independent of A, C, D, E, F, G, H)
+- **C — Discovery storage** (independent of A, B, F, G, H)
+- **D — Discovery API surface** (depends on C; parallel to E)
+- **E — Discovery runtime** (depends on C; parallel to D)
+- **F — Read surface** (depends on 9.1a only; parallel to A, B, C, G, H)
+- **G — Write surface** (depends on 9.1a only; parallel to A, B, C, F, H)
+- **H — SSE streaming** (depends on G for event logs; parallel to F)
+- **I — Hardening** (final; depends on F + G + H)
+
+Each milestone block carries: scope (1–3 bullets), `Depends on:`, `Files touched:` (worktree-collision predictor), `DoD:` (verification gate).
+
+---
 
 ### M9.0 — Skeleton
 - `eyenet/api/` package + `create_app(...)` with lifespan.
@@ -2234,76 +2755,447 @@ Plus one repo helper: `recent_message_bodies_for_actor(actor_id, limit=N)` — t
 
 **Definition of done.** ruff format clean, ruff check clean, mypy `--strict` clean (275 source files, 0 errors), bandit 0 issues, deptry clean, detect-secrets clean, `pytest` 962/962 unit + 41/42 integration (1 throughput-bound flake under SQLite QueuePool pressure) + 5/5 e2e over real NATS, 18 commits squashed-or-merged as `5efbe50`.
 
-#### M9.1b — Auth-token storage + JWT
+---
 
-Unblocks `/v1/auth/login`, `/refresh`, `/logout`, `/me`, PAT mint/list/revoke, and the JWT denylist enforcement path.
+### Group A — Auth & tokens
 
-- **New tables in `messages.db`** (co-located with `system_user`):
-  - `system_user_credential` — authoritative `password_hash` + `mfa_secret_encrypted` + `password_updated_at`. STRIPS the inline columns from `SystemUserTable`.
-  - `refresh_token` — issued/expires/revoked/replaced_by; rotation chain.
-  - `personal_access_token` (§4.4 scope list applies) — name, hash, prefix, scopes, last_used_at, expires_at, revoked_at.
-  - `jwt_denylist` — `(jti, expires_at)`; rows purgeable after `expires_at`.
-  - `system_user_scope` — additive routine scopes; clearance grants stay in their own audit-DB table from 9.1a.
-- Storage typing pass: methods declare concrete return types; all `cast()` removed from current `query_api/routes.py` (prep for the surface rewrite).
+Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5), but the group as a whole is parallel-safe against B, C, D, E, F, G, H. The `messages.db` schema additions in A1 don't touch any table read by B/C/F.
+
+#### M9.A1 — Auth tables (no handlers)
+- New tables in `messages.db`: `system_user_credential`, `refresh_token`, `jwt_denylist`, `system_user_scope`. STRIPS inline `password_hash` / `mfa_secret_encrypted` from `SystemUserTable`.
+- Storage mixin: `eyenet/storage/sqlmodel_repo/auth.py` — `get_credential`, `set_credential`, `record_refresh_token`, `revoke_refresh_chain`, `denylist_jti`, `is_jti_denied`, `set_user_scopes`, `get_user_scopes`. ANSI SQL only; SQLite-specific UPSERT (if needed) goes on `SQLiteRepository` per CLAUDE.md §2.3 Rule 1.
+- Tests in `tests/unit/storage/test_auth_sqlmodel.py` against `get_repository(in_memory=True)`.
+- **Depends on:** M9.1a.5
+- **Files touched:** `eyenet/models/auth.py`, `eyenet/storage/sqlmodel_repo/{__init__.py,auth.py}`, `eyenet/storage/repository.py`, `tests/unit/storage/test_auth_sqlmodel.py`
+- **DoD:** new tests pass; `mypy --strict` clean; CHECK on `refresh_token.replaced_by` (replacement chain) enforced.
+
+#### M9.A2 — JWT + login/refresh/logout/me handlers
 - `eyenet/api/auth/jwt.py` — RS256 sign/verify, kid rotation hooks.
-- `/v1/auth/login`, `/refresh`, `/logout`, `/me` handlers; `eyenet/api/v1/schemas/auth.py` finalises `LoginRequest`, `TokenPair`, `AccessToken`, `UserMe` (each with §9.5 docstring → `MODELS.md` §2.17).
-- `RequireScope` dependency factory + `current_user` resolver wired to consult both `system_user_scope` and the active `system_user_clearance_grant` rows from 9.1a.
-- CLI: `eyenet user create`, `eyenet user reset-password`, `eyenet user scopes`.
-- `eyenet.audit.auth.{login.success,login.failure,refresh,logout,token.minted,token.revoked}` emission on every auth event.
-- **Definition of done:** PAT mint → use → revoke round-trip; refresh-token rotation chain test; jti denylist hit blocks reuse; Schemathesis coverage extends to the four auth endpoints.
+- Handlers: `/v1/auth/login`, `/refresh`, `/logout`, `/me`.
+- `eyenet/api/v1/schemas/auth.py` — `LoginRequest`, `TokenPair`, `AccessToken`, `UserMe` (each with `MODELS.md §2.17` docstring per §9.5).
+- `RequireScope` dependency factory + `current_user` resolver consulting `system_user_scope` AND active `system_user_clearance_grant` rows from M9.1a.
+- Audit subjects: `eyenet.audit.auth.{login.success,login.failure,refresh,logout}`.
+- **Depends on:** M9.A1
+- **Files touched:** `eyenet/api/auth/jwt.py`, `eyenet/api/v1/{auth.py,schemas/auth.py,__init__.py}`, `eyenet/api/deps.py`
+- **DoD:** login → refresh → logout round-trip; jti denylist hit on revoked token blocks reuse; Schemathesis stateful pass on the four endpoints; contract `expected_routes.json` updated.
 
-#### M9.1c — File-access journal
+#### M9.A3 — Personal Access Token surface
+- New table: `personal_access_token` in `messages.db` (already declared in §16/A1 scope-list — split as own milestone for surface isolation).
+- Handlers: `POST /v1/auth/tokens`, `GET /v1/auth/tokens`, `DELETE /v1/auth/tokens/{id}`.
+- PAT auth path joins the same middleware as JWT (same `current_user` contract).
+- `admin:tokens` scope wired.
+- Audit subjects: `eyenet.audit.auth.token.{minted,revoked}`.
+- M9.2-era PAT docs: copy-pasteable Prometheus least-privilege `read:metrics` scrape recipe in `development/PAT_RECIPES.md`.
+- **Depends on:** M9.A2
+- **Files touched:** `eyenet/models/auth.py` (PAT table), `eyenet/storage/sqlmodel_repo/auth.py` (PAT helpers), `eyenet/api/v1/auth_tokens.py`, `eyenet/api/v1/schemas/tokens.py`, `development/PAT_RECIPES.md`
+- **DoD:** PAT mint → use → revoke round-trip; PAT-scoped scrape against `/v1/metrics` works once M9.I3 lands (forward compat OK).
 
-Unblocks signed byte-serving for `restricted`/`classified` attachments (§5.6–5.9) and the exoneration query.
+#### M9.A4 — Stream-token + EventSource fallback
+- `/v1/auth/stream-token` mint (short-TTL, single-stream-bound JWT) for browser `EventSource` without `Authorization` header.
+- Polyfill primary path documented in §6.4.1.
+- **Depends on:** M9.A2
+- **Files touched:** `eyenet/api/v1/auth_stream.py`, `eyenet/api/auth/stream_token.py`
+- **DoD:** browser EventSource with stream-token can connect to `/v1/stream/audit`; token rejects on second connection (single-use binding).
 
-- **New tables in `audit.db`:**
-  - `system_user_signing_pubkey_history` — every historical Ed25519 pubkey; fingerprint = `sha256(verifying_key_DER)[:8]`.
-  - `file_access_acknowledgment` (§5.7) — operator's signed pre-read receipt; 60s nonce TTL, single-use; reason ≥16 chars.
-  - `file_access_journal` (§5.6) — every byte-served event; mandatory Ed25519 signature over canonical form; fingerprint reference for post-hoc verification. CHECK: tier `normal` may skip grant/acknowledgment fields; `restricted`/`classified` MUST populate both.
-- Helpers in `eyenet/storage/file_access.py`: `record_access`, `query_by_user`, `query_by_content_hash`, `verify_signature(row)`. Ed25519 via `cryptography`.
-- **Definition of done:** signed-access round-trip; exoneration query returns chronologically-ordered signed rows; tampering with `served_at` invalidates the signature; the §5.9 audit subjects are emitted on every byte-fetch path.
+#### M9.A5 — User-management CLI
+- `eyenet user create`, `eyenet user reset-password`, `eyenet user scopes`.
+- Same audit shape as M9.A2 handlers (no CLI/API divergence).
+- **Depends on:** M9.A1
+- **Files touched:** `eyenet/cli/user.py`
+- **DoD:** create → set scopes → reset password round-trip; emitted audit rows match the API path byte-for-byte.
 
-### M9.2 — PATs
-- `personal_access_token` table — already created in M9.1b. M9.2 is the handler layer on top.
-- `POST /v1/auth/tokens`, `GET /v1/auth/tokens`, `DELETE /v1/auth/tokens/{id}`.
-- PAT auth path in the same middleware as JWT (same `current_user` contract).
-- `admin:tokens` scope wired up.
+---
 
-### M9.3 — Read surface + audit middleware (parity + replacement)
-- All read endpoints under §3.2, §3.3 implemented.
-- All read-side schemas land in `eyenet/api/v1/schemas/` per the §9.6 matrix: `actors.py`, `personas.py`, `linkages.py` (summary + detail), `graph.py`, `audit.py`, `pagination.py`. Every schema with a `from_domain` translator and `MODELS.md` reference docstring (§9.5).
-- Cursor pagination (`CursorPage[T]`).
-- Enum-typed query params.
-- `evidence_access` audit middleware emits per-subject before response body is written. Failure → 503.
-- Schemathesis stateful mode enabled across the read surface; CI gate.
-- `eyenet/query_api/` deleted in the final commit of this series. All callers redirected to `/v1/`.
+### Group B — File-access journal
 
-### M9.4 — Write surface
-- All write endpoints under §3.4.
-- `eyenet/api/v1/schemas/writes.py` lands with the shared `WriteAccepted` response model and per-action request models (`LinkageDecisionRequest`, `IdentityActionRequest`). Every write endpoint declares `response_model=WriteAccepted` and `status_code=202`.
-- `Idempotency-Key` middleware + `idempotency_record` table.
-- `linkage_event_log` / `persona_event_log` / `identity_event_log` tables created (§11.5) — every state transition writes one row with `traceparent` for SSE replay.
-- Writes follow the §5.5 / §10.3 durability rule: durable audit append (gate) → durable event-log append → async bus publish for both audit and domain events.
-- Schemathesis stateful runs include the full write cycle and end every run with `GET /v1/audit/verify`; chain must verify clean as a CI gate.
-- CLI parity: `eyenet linkage confirm/reject` continues to work, uses the same audit append + event log path, and emits the same audit shape (no divergence between CLI and API audit format).
+Fully independent of A. Different tables (`audit.db`), different handler module, no shared schemas.
 
-### M9.5 — SSE streaming
+#### M9.B1 — Signing pubkey history + acknowledgments
+- Tables in `audit.db`: `system_user_signing_pubkey_history`, `file_access_acknowledgment` (§5.7) — 60s nonce TTL, single-use, reason ≥16 chars.
+- Storage mixin: `eyenet/storage/sqlmodel_repo/file_access.py` — `record_signing_key`, `lookup_key_by_fingerprint`, `record_acknowledgment`, `consume_acknowledgment`.
+- Ed25519 verification helpers (`cryptography` lib).
+- **Depends on:** M9.1a.5
+- **Files touched:** `eyenet/models/file_access.py`, `eyenet/storage/sqlmodel_repo/file_access.py`, `eyenet/storage/repository.py`, `tests/unit/storage/test_file_access_keys.py`
+- **DoD:** fingerprint reproduces `sha256(verifying_key_DER)[:8]`; expired nonce rejected; double-spend rejected.
+
+#### M9.B2 — file_access_journal table + signing
+- Table `file_access_journal` (§5.6) with the mandatory Ed25519 signature column, CHECK enforcing tier-conditional fields.
+- Helper `record_access(serving_user, content_hash, tier, request_ctx) -> JournalRow` that signs the canonical form and persists.
+- `verify_signature(row)` for post-hoc audit.
+- **Depends on:** M9.B1
+- **Files touched:** `eyenet/storage/sqlmodel_repo/file_access.py` (extend), `tests/unit/storage/test_file_access_journal.py`
+- **DoD:** tampering with `served_at` invalidates the signature; chronological exoneration query returns ordered signed rows.
+
+#### M9.B3 — Byte-serving handlers + exoneration query
+- Handlers: `GET /v1/attachments/{hash}` (tier-aware), `GET /v1/audit/file-access` (exoneration query).
+- §5.9 audit subjects emitted on every byte-fetch path.
+- **Depends on:** M9.B2, M9.A2 (needs `current_user`)
+- **Files touched:** `eyenet/api/v1/attachments.py`, `eyenet/api/v1/audit_file_access.py`
+- **DoD:** restricted/classified fetch requires acknowledgment + grant; signed row materialized before bytes flow; exoneration query for a given `user_id` returns chronologically-ordered signed rows.
+
+---
+
+### Group C — Discovery storage (multidomain Sources, collectors, candidates)
+
+Independent of A, B, F, G, H. Lands the schema half of every concept modelled this design pass (MODELS.md §2.19–§2.27). Group C is the dependency for D (API) and E (runtime), but C-internal milestones can be parallelized into 2–3 worktrees if two operators want to split the load.
+
+#### M9.C1 — SourceDomain table + normalize_host invariant ✅ SHIPPED (`d3735ac`)
+- New table: `SourceDomain` (MODELS.md §2.26) with `pattern_kind ∈ {exact, subdomain_wildcard, suffix_match}`, partial-unique `is_primary` per source, soft-delete `removed_at`.
+- Helper: `eyenet/util/domain.py` with `normalize_host(input: str) -> str` — IDN/punycode normalize, strip trailing dot, lowercase, reject empty/whitespace, reject `xn--` *AND* unicode (must be one canonical form).
+- Storage mixin: `eyenet/storage/sqlmodel_repo/sources.py` — `add_source_domain`, `remove_source_domain` (soft), `find_source_for_host`, `detect_overlap(pattern, pattern_kind)`.
+- Overlap detection runs **in-transaction**, before insert, against all non-removed rows — refuses ambiguous overlaps with a typed `SourceDomainOverlapError(conflicting_id, conflict_kind)`.
+- **Depends on:** M9.1a.5
+- **Files touched:** `eyenet/models/source_domain.py`, `eyenet/util/domain.py`, `eyenet/storage/sqlmodel_repo/sources.py`, `eyenet/storage/repository.py`, `tests/unit/storage/test_source_domains.py`, `tests/unit/util/test_normalize_host.py`
+- **DoD:** homograph test pairs collide on `normalize_host` (`раура.com` vs `paypa.com` — Cyrillic а vs Latin a); overlap conflict raises before INSERT; primary swap is atomic.
+
+#### M9.C2 — Source refactor (canonical_url → SourceDomain.is_primary) ✅ SHIPPED (`feeb22c`)
+- `Source.base_url` renamed to `canonical_url`, display-only, enforced by CHECK referencing the primary `SourceDomain` row (MODELS.md §1.1).
+- `eyenet init` seed updates Telegram/Matrix sources with the corresponding primary domains.
+- **Depends on:** M9.C1
+- **Files touched:** `eyenet/models/source.py`, `eyenet/cli/init.py`, `tests/unit/storage/test_source_canonical_url.py`
+- **DoD:** `rm data/*.db && eyenet init` produces a clean main.db with seeded sources + primary domains; canonical_url change without matching primary domain is rejected.
+
+#### M9.C3 — Collector table (storage only, no supervisor yet) ✅ SHIPPED (`d94445f`)
+- New table: `Collector` (MODELS.md §2.19) — `source_id`, `identity_id UNIQUE`, `kind`, `config JSON`, `desired_state`, `observed_state`, soft-delete.
+- Storage mixin: `eyenet/storage/sqlmodel_repo/collectors.py` — `create_collector`, `list_collectors`, `set_desired_state`, `record_observed_state`, `redact_config` (returns config with sensitivity-flagged keys masked).
+- `Identity.role ∈ {monitor, scout, quarantine}` enum extension.
+- **Depends on:** M9.1a.5
+- **Files touched:** `eyenet/models/collector.py`, `eyenet/models/identity.py` (role extension), `eyenet/storage/sqlmodel_repo/collectors.py`, `eyenet/storage/repository.py`, `tests/unit/storage/test_collectors.py`
+- **DoD:** `identity_id` uniqueness enforced (one identity = one collector); redacted config matches §4.11 sensitivity contract; desired/observed state transitions tested.
+
+#### M9.C4 — GroupCandidate + GroupCandidateMention storage
+- Tables: `GroupCandidate` (MODELS.md §2.20) — 8-state machine `discovered→queued→approved→joining→joined/rejected/failed/parked`. `GroupCandidateMention` (§2.21) with `seed_root_id`, `depth_from_root`.
+- Storage mixin: `eyenet/storage/sqlmodel_repo/candidates.py` — `record_candidate_mention` (upserts candidate, appends mention), `list_queued_candidates`, `transition_candidate` (state guard), `compute_eligibility_inputs` (returns reachable roots, active memberships, available scouts for a candidate).
+- State transitions audited.
+- **Depends on:** M9.C1 (`source_id` FK), M9.C3 (eligibility needs `Collector`)
+- **Files touched:** `eyenet/models/candidates.py`, `eyenet/storage/sqlmodel_repo/candidates.py`, `tests/unit/storage/test_candidates.py`
+- **DoD:** every illegal transition raises; mention upsert is idempotent on `(candidate_id, evidence_ref)`; `depth_from_root` materialized correctly across multi-hop chains.
+
+#### M9.C5 — CollectorGroupMembership + MessageObservation
+- Tables: `CollectorGroupMembership` (§2.22) — `joined_via` discriminator, `left_at`/`left_reason`. `MessageObservation` (§2.23) — `was_first_sighting` materialized per `(message_evidence_ref, collector_id)`.
+- Storage mixin: `eyenet/storage/sqlmodel_repo/memberships.py` — `open_membership`, `close_membership`, `list_active_memberships`, `record_observation` (atomically sets `was_first_sighting` based on existing rows for the same `evidence_ref`).
+- **Depends on:** M9.C3
+- **Files touched:** `eyenet/models/membership.py`, `eyenet/storage/sqlmodel_repo/memberships.py`, `tests/unit/storage/test_memberships.py`
+- **DoD:** two collectors recording the same `evidence_ref` → first gets `was_first_sighting=True`, second gets `False`; race tested via `asyncio.gather`.
+
+#### M9.C6 — GroupAccessArtifact + InfrastructureArtifact bridge
+- New table: `GroupAccessArtifact` (§2.24) — `kind ∈ {public_identifier, invite_link, qr_code, direct_invite, paid_subscription, access_blocked, restricted_other}`, `kind_preference` ordering.
+- Extension: `InfrastructureArtifact.resolved_to_source_id` + `.resolution_state` (§2.7 extension).
+- Bridge resolution invariant (§2.25) lives in `sqlmodel_repo/artifacts.py` — Path A (artifact-write side) and Path B (source-create side) both fire inside the same transaction that creates the artifact or source. No async job, no operator tool.
+- **Depends on:** M9.C1
+- **Files touched:** `eyenet/models/{access_artifact.py,infrastructure_artifact.py}`, `eyenet/storage/sqlmodel_repo/artifacts.py`, `tests/unit/storage/test_bridge_resolution.py`
+- **DoD:** creating an `InfrastructureArtifact` whose host matches an existing primary `SourceDomain` immediately populates `resolved_to_source_id` (Path A); creating a new `Source` retroactively resolves any prior unresolved artifacts whose hosts now match (Path B); both verified under `asyncio.gather` concurrency.
+
+---
+
+### Group D — Discovery API surface
+
+Depends on C (storage), parallel to E (runtime). Surface map §3.7–§3.9, contracts §4.11–§4.13.
+
+#### M9.D1 — Sources + SourceDomains handlers
+- Handlers under §4.13: `GET/POST/PATCH/DELETE /v1/sources`, `GET/POST/PATCH/DELETE /v1/sources/{id}/domains`. Atomic bulk-create for domains. 409 conflict shape for overlap.
+- Schemas in `eyenet/api/v1/schemas/sources.py` with `MODELS.md §1.1 / §2.26` docstrings.
+- Audit subjects: `eyenet.audit.source.{created,updated,deleted}`, `eyenet.audit.source_domain.{added,removed,primary_swapped}`.
+- **Depends on:** M9.C2, M9.A2
+- **Files touched:** `eyenet/api/v1/sources.py`, `eyenet/api/v1/schemas/sources.py`
+- **DoD:** overlap-conflict returns 409 with `conflicting_domain_id`; pattern + pattern_kind immutable post-create (remove + re-add path enforced); Schemathesis stateful pass.
+
+#### M9.D2 — Collectors handlers
+- Handlers under §4.11: `GET/POST/PATCH/DELETE /v1/collectors`, `POST /v1/collectors/{id}/start|stop|pause`.
+- Config redaction per §4.11 sensitivity contract.
+- SystemLog event taxonomy emitted on every supervisor-driven transition.
+- **Depends on:** M9.C3, M9.A2
+- **Files touched:** `eyenet/api/v1/collectors.py`, `eyenet/api/v1/schemas/collectors.py`
+- **DoD:** create → start → pause → stop → delete round-trip; redacted config never leaks `telegram_api_hash`; SystemLog rows materialized.
+
+#### M9.D3 — Candidates triage handlers
+- Handlers under §4.12: `GET /v1/candidates`, `GET /v1/candidates/{id}` (with per-collector eligibility precomputed), `POST /approve|reject|park|retry`.
+- Eligibility predicate from §4.12.3 lives in `eyenet/services/discovery/eligibility.py`.
+- **Depends on:** M9.C4, M9.C5, M9.D2
+- **Files touched:** `eyenet/api/v1/candidates.py`, `eyenet/api/v1/schemas/candidates.py`, `eyenet/services/discovery/eligibility.py`
+- **DoD:** approve with ineligible collector rejected with reason code; precomputed `eligibility_per_collector` matches the predicate run server-side; Schemathesis stateful pass.
+
+#### M9.D4 — Seed-roots + Case.auto_join_policy
+- Handlers: `GET/PUT /v1/cases/{id}/seed-roots`, `POST /v1/cases/{id}/seed-roots/{group_id}`.
+- `Case.auto_join_policy` + `Case.redundancy_policy` extension applied to existing `case_v2` table — *no Alembic, just schema change + `rm data/*.db && eyenet init`* per pre-public posture.
+- Emits `case.seed_roots_changed`; triggers candidate eligibility recompute (idempotent).
+- **Depends on:** M9.D3
+- **Files touched:** `eyenet/models/cases.py` (extension), `eyenet/api/v1/cases_discovery.py`
+- **DoD:** seed-root change → eligibility recompute reflected in next `GET /v1/candidates`; policy field round-trip persisted.
+
+---
+
+### Group E — Discovery runtime
+
+Depends on C (storage), parallel to D (API). Sensor primitives + supervisor + scout pipeline + Telegram-layer recursion.
+
+#### M9.E1 — `url_extraction` sensor primitive
+- New primitive at `eyenet/sensor/primitives/url_extraction.py` — extracts URLs from message text, normalizes via `normalize_host` from M9.C1, writes `InfrastructureArtifact` rows. Triggers Path A bridge resolution on insert.
+- **Depends on:** M9.C1, M9.C6
+- **Files touched:** `eyenet/sensor/primitives/url_extraction.py`, `tests/unit/sensor/test_url_extraction.py`
+- **DoD:** unicode/punycode duplicates collapse to one artifact; resolved/unresolved branches both tested.
+
+#### M9.E2 — `channel_reference_extraction` sensor primitive
+- New primitive — detects platform-native channel references (Telegram `@channel`, Matrix `#room:server`, etc.) and writes `GroupCandidateMention` rows.
+- **Depends on:** M9.C4
+- **Files touched:** `eyenet/sensor/primitives/channel_reference_extraction.py`, `tests/unit/sensor/test_channel_reference_extraction.py`
+- **DoD:** mention upsert idempotent; `depth_from_root` propagated from triggering Message's group lineage.
+
+#### M9.E3 — CollectorSupervisor service scaffold
+- New service `eyenet/services/collector_supervisor.py` inheriting `ServiceBase`. In-process async supervisor, NOT systemd flag-watcher (decision per session).
+- Reads `Collector.desired_state`, drives `observed_state`, leases identities atomically (single writer of `Identity.state=in_use`).
+- Emits `eyenet.audit.collector.*` on every operator-initiated transition.
+- **Depends on:** M9.C3
+- **Files touched:** `eyenet/services/collector_supervisor.py`, `tests/integration/services/test_supervisor.py`
+- **DoD:** desired=running + observed=stopped → supervisor transitions to running; crash recovery resumes from `observed_state`; identity-lease race tested.
+
+#### M9.E4 — Scout graduation pipeline
+- Scout identities observe a candidate group for 7 days before graduating to `role=monitor`. Lives in `eyenet/services/discovery/scout_graduation.py`.
+- Periodic tick (every hour) inspects active scout memberships, promotes eligible ones.
+- **Depends on:** M9.C5, M9.E3
+- **Files touched:** `eyenet/services/discovery/scout_graduation.py`
+- **DoD:** scout with 7d+ continuous membership graduates; graduation emits audit subject; failed scout (kicked, banned) is quarantined instead.
+
+#### M9.E5 — Telegram collector recursion
+- Telegram collector consumes approved `GroupCandidate` rows, joins via the access artifact's `kind_preference`-ordered method list, opens `CollectorGroupMembership`, transitions candidate to `joined`.
+- Cross-source candidates (`source_id != collector.source_id`) remain inert per §4.12.10 deferred-items note.
+- **Depends on:** M9.D3 (approval surface), M9.E2 (candidates being populated), M9.E3 (supervisor)
+- **Files touched:** `eyenet/collectors/telegram/real.py` (extend), `eyenet/collectors/telegram/discovery.py` (new)
+- **DoD:** approved candidate → joined Group with `discovered_via_candidate_id` populated; depth-from-root respected; access blocked → candidate transitions to `failed` with reason.
+
+---
+
+### Group F — Read surface
+
+Depends on M9.1a only. Fully parallel to A, B, C, D, E, G, H. Surface §3.2, §3.3.
+
+#### M9.F1 — Actors + Personas read endpoints
+- `GET /v1/actors`, `/v1/actors/{id}`, `/v1/personas`, `/v1/personas/{id}`.
+- Schemas in `eyenet/api/v1/schemas/{actors.py,personas.py}` with `from_domain` translator + `MODELS.md` docstring per §9.5.
+- **Depends on:** M9.1a.5, M9.A2
+- **Files touched:** `eyenet/api/v1/{actors.py,personas.py,schemas/actors.py,schemas/personas.py}`
+- **DoD:** Schemathesis pass; cursor pagination wired (depends on M9.F5 for shared `CursorPage`).
+
+#### M9.F2 — Linkages read endpoints
+- `GET /v1/linkages` (summary), `GET /v1/linkages/{id}` (detail).
+- **Depends on:** M9.1a.5, M9.A2
+- **Files touched:** `eyenet/api/v1/linkages_read.py`, `eyenet/api/v1/schemas/linkages.py`
+- **DoD:** Schemathesis pass.
+
+#### M9.F3 — Graph read endpoints
+- `GET /v1/graph/neighbors`, `GET /v1/graph/stats`.
+- **Depends on:** M9.1a.5, M9.A2
+- **Files touched:** `eyenet/api/v1/graph.py`, `eyenet/api/v1/schemas/graph.py`
+- **DoD:** Schemathesis pass.
+
+#### M9.F4 — Audit read endpoints + verify
+- `GET /v1/audit`, `GET /v1/audit/verify`. Chain verification reads the full audit table and recomputes `self_hash`.
+- **Depends on:** M9.1a.5, M9.A2
+- **Files touched:** `eyenet/api/v1/audit.py`, `eyenet/api/v1/schemas/audit.py`
+- **DoD:** verify returns OK on clean chain; tampering with one row's `self_hash` returns the offending row + index.
+
+#### M9.F5 — Pagination + enum query params
+- Shared `eyenet/api/v1/schemas/pagination.py` (`CursorPage[T]`, `OpaqueCursor`).
+- Enum-typed query param helpers used by F1–F4.
+- **Depends on:** M9.0
+- **Files touched:** `eyenet/api/v1/schemas/pagination.py`, `eyenet/api/deps_paging.py`
+- **DoD:** cursor round-trip stable across F1–F4 endpoints; opaque cursor opaque-but-stable.
+
+#### M9.F6 — evidence_access audit middleware
+- Middleware emits per-subject audit row BEFORE response body is written. Failure to write audit → 503 (gate, per §5.5).
+- **Depends on:** M9.F1, M9.F2, M9.F3, M9.F4 (covers every read path)
+- **Files touched:** `eyenet/api/middleware/evidence_access.py`
+- **DoD:** every read endpoint produces matching audit row; storage outage on append → 503 (no body served).
+
+#### M9.F7 — query_api deletion
+- `eyenet/query_api/` deleted in one commit. All callers redirected to `/v1/`.
+- **Depends on:** M9.F1, M9.F2, M9.F3, M9.F4
+- **Files touched:** `eyenet/query_api/` (delete), various caller sites
+- **DoD:** `grep -r 'from eyenet.query_api' eyenet/ tests/` empty; CI green.
+
+---
+
+### Group G — Write surface
+
+Depends on M9.1a only. Parallel to F. Surface §3.4.
+
+#### M9.G1 — Idempotency-Key middleware + idempotency_record table
+- New table `idempotency_record` (key, request_hash, response_hash, status, expires_at).
+- Middleware enforces 24h idempotency window. Mismatched request body → 409.
+- **Depends on:** M9.1a.5
+- **Files touched:** `eyenet/models/idempotency.py`, `eyenet/storage/sqlmodel_repo/idempotency.py`, `eyenet/api/middleware/idempotency.py`
+- **DoD:** duplicate POST returns first response; tampered POST returns 409.
+
+#### M9.G2 — Event log tables
+- New tables: `linkage_event_log`, `persona_event_log`, `identity_event_log` (§11.5). Every state transition writes one row with `traceparent`.
+- Storage helpers in `eyenet/storage/sqlmodel_repo/event_logs.py`.
+- **Depends on:** M9.1a.5
+- **Files touched:** `eyenet/models/event_logs.py`, `eyenet/storage/sqlmodel_repo/event_logs.py`
+- **DoD:** transition write atomic with state mutation; `traceparent` propagated through.
+
+#### M9.G3 — Linkage write handlers
+- `POST /v1/linkages/{id}/confirm|reject` with `LinkageDecisionRequest`.
+- Writes follow §5.5 / §10.3 durability rule: durable audit append → durable event-log append → async bus publish.
+- CLI parity with `eyenet linkage confirm/reject`.
+- **Depends on:** M9.G1, M9.G2, M9.A2
+- **Files touched:** `eyenet/api/v1/linkages_write.py`, `eyenet/api/v1/schemas/writes.py`
+- **DoD:** API and CLI emit byte-identical audit rows; bus publish failure does NOT roll back storage.
+
+#### M9.G4 — Persona write handlers
+- `POST /v1/personas/{id}/merge|split` per the §4 persona action model.
+- **Depends on:** M9.G1, M9.G2, M9.A2
+- **Files touched:** `eyenet/api/v1/personas_write.py`
+- **DoD:** merge/split round-trip; persona_event_log row materialized.
+
+#### M9.G5 — Identity write handlers
+- `POST /v1/identities/{id}/freeze|burn|release` per `IdentityActionRequest`.
+- **Depends on:** M9.G1, M9.G2, M9.A2
+- **Files touched:** `eyenet/api/v1/identities_write.py`
+- **DoD:** state transitions guarded; supervisor (M9.E3, when present) sees `desired_state` change via storage.
+
+#### M9.G6 — /v1/audit/verify as CI gate for write Schemathesis runs
+- Schemathesis stateful runs include the full write cycle and END every run with `GET /v1/audit/verify`. Chain must verify clean.
+- **Depends on:** M9.G3, M9.G4, M9.G5, M9.F4
+- **Files touched:** `tests/contract/api/test_write_chain_integrity.py`
+- **DoD:** CI fails if any write-cycle run leaves a forked or gapped chain.
+
+---
+
+### Group H — SSE streaming
+
+Depends on G (event logs). Parallel to F.
+
+#### M9.H1 — StreamReplaySource storage abstraction
+- `eyenet/api/streaming/replay.py` — `StreamReplaySource` reads from event-log tables (M9.G2), exposes `replay(after=event_id)`. Bus-agnostic.
+- **Depends on:** M9.G2
+- **Files touched:** `eyenet/api/streaming/replay.py`
+- **DoD:** replay against MemoryBus, NATS-core, JetStream all produce identical event sequences.
+
+#### M9.H2 — Last-Event-ID resume
+- SSE handlers consult `Last-Event-ID`, invoke `source.replay(after=...)` until drained, then switch to bus live-tail with overlap dedup by event id.
+- **Depends on:** M9.H1
+- **Files touched:** `eyenet/api/streaming/handler.py`
+- **DoD:** kill stream mid-tail, reconnect with Last-Event-ID, receive every missed event exactly once.
+
+#### M9.H3 — Heartbeats + backpressure
+- Heartbeat tick. `stream.gap` / `stream.backpressure` / `stream.expired` events.
+- Per-topic backpressure buffer with high-water mark.
+- **Depends on:** M9.H1
+- **Files touched:** `eyenet/api/streaming/heartbeat.py`, `eyenet/api/streaming/backpressure.py`
+- **DoD:** slow consumer triggers `stream.backpressure`; consumer disconnect → `stream.expired`; long idle → `stream.gap` sentinel events.
+
+#### M9.H4 — Custom SSE OTel middleware
+- Disable stock FastAPI OTel SSE instrumentation (per §11.4.1). Install connection-event-log + per-event-delivery-span model.
+- **Depends on:** M9.H2
+- **Files touched:** `eyenet/api/middleware/sse_otel.py`
+- **DoD:** Jaeger E2E shows connection span ⊇ per-event delivery spans; stock instrumentation absent from trace tree.
+
+#### M9.H5 — Per-topic stream handlers
 - `/v1/stream/linkages`, `/personas`, `/audit`, `/control`, `/all`.
-- `eyenet/api/v1/schemas/stream.py` lands with the per-event payload models referenced by the `x-eyenet-sse-events` OpenAPI extension (§9.7). TypeScript codegen now produces a typed discriminated-union event handler.
-- **Storage-backed replay via `StreamReplaySource`** (§6.2, §6.5). No durable bus consumers; the bus is used only for live tail via `BusClient.subscribe(subject)`. MemoryBus, NATS-core, and JetStream all work identically because durability lives in storage.
-- `Last-Event-ID` resume — handler invokes `source.replay(after=...)` until drained, then switches to bus live-tail with overlap dedup by event id.
-- Fallback `/v1/auth/stream-token` path for browser EventSource (the polyfill in §6.4.1 is the primary path).
-- Heartbeats + per-topic backpressure + `stream.gap` / `stream.backpressure` / `stream.expired` events.
-- Custom SSE middleware (§11.4.1) — disable stock FastAPI OTel SSE instrumentation; install the connection-event-log + per-event-delivery-span model.
+- `eyenet/api/v1/schemas/stream.py` with per-event payload models; OpenAPI `x-eyenet-sse-events` extension; TypeScript discriminated-union codegen.
+- **Depends on:** M9.H2, M9.H3, M9.H4
+- **Files touched:** `eyenet/api/v1/stream/*.py`, `eyenet/api/v1/schemas/stream.py`
+- **DoD:** TS codegen produces typed event handler; each stream subject Schemathesis-stateful tested.
 
-### M9.6 — Hardening
-- Per-token sliding-window rate limit.
+---
+
+### Group I — Hardening (final)
+
+Depends on F + G + H. Sequence within group is not strict — each milestone touches a different file family.
+
+#### M9.I1 — Sliding-window rate limit
+- Per-token sliding-window rate limit middleware. Configurable per-scope.
+- **Depends on:** M9.A2
+- **Files touched:** `eyenet/api/middleware/rate_limit.py`
+- **DoD:** quota exhaustion → 429; window slides correctly across clock skew.
+
+#### M9.I2 — CORS + X-Forwarded-For
 - CORS for configured operator-UI origins.
 - `X-Forwarded-For` middleware gated by `EYENET_API_TRUST_PROXY_HEADERS=1`.
-- TypeScript client codegen pipeline established (artifact only — UI lives elsewhere).
+- **Depends on:** M9.0
+- **Files touched:** `eyenet/api/middleware/{cors.py,xff.py}`
+- **DoD:** preflight passes for allowed origin; XFF parsed only when env flag set.
+
+#### M9.I3 — /v1/metrics Prometheus endpoint
+- `/v1/metrics` (§11.7), opt-in via `EYENET_API_METRICS_ENABLED=1`, scope-gated `read:metrics`.
+- View filters strip high-cardinality labels per §11.7.3.
+- Cardinality contract test in `tests/contract/api/`.
+- Example Grafana dashboard in `operations/dashboards/` (marketing-grade polish per session-saved feedback memory).
+- Prom alert rules in `operations/alerts/`.
+- **Depends on:** M9.A3 (PAT for scrape)
+- **Files touched:** `eyenet/api/v1/metrics.py`, `operations/dashboards/eyenet-overview.json`, `operations/alerts/eyenet.yml`
+- **DoD:** scrape via PAT works; cardinality contract test green; dashboard renders in Grafana without empty panels.
+
+#### M9.I4 — TypeScript client codegen + load test
+- TypeScript client codegen pipeline (artifact only — UI lives elsewhere).
 - Load test profile in `tests/load/api/`.
-- `/v1/metrics` Prometheus endpoint (§11.7), opt-in via `EYENET_API_METRICS_ENABLED=1`, scope-gated `read:metrics`, with view filters stripping high-cardinality labels for Prom exposition. Health gauges mirroring `/healthz` / `/readyz`. Cardinality contract test in `tests/contract/api/` (§14.4). Example Grafana dashboard checked into `operations/dashboards/` and Prometheus alert rules YAML into `operations/alerts/`.
+- **Depends on:** M9.F7, M9.G6, M9.H5
+- **Files touched:** `clients/typescript/`, `tests/load/api/`
+- **DoD:** TS client compiles against `/v1/openapi.json` without manual fixups; load test runs against a local instance.
+
+#### M9.I5 — Coverage gate raised
 - Coverage gate raised from 0.845 (M8 floor) to 0.89.
+- **Depends on:** M9.I4 (last code-adding milestone)
+- **Files touched:** `pyproject.toml`, `.githooks/lib/coverage.sh` (baseline)
+- **DoD:** `pytest --cov-fail-under=0.89` green.
+
+---
+
+### 16.1 Batching policy — group = worktree, slice = commit
+
+The 38 sized slices in Groups A–I are not 38 PRs. The default execution pattern is:
+
+> **One group = one worktree = one PR. Each slice inside the group is one commit in that PR's series.**
+
+Concretely:
+
+- Worktree name mirrors the group: `.claude/worktrees/groupA-auth-tokens`, `groupC-discovery-storage`, `groupF-read-surface`, etc.
+- Commits inside the worktree carry the slice id in the subject: `feat(api): M9.A2 — JWT + login/refresh/logout/me handlers`.
+- Each commit must independently satisfy its slice's `DoD:` before the next commit lands. Slice DoD becomes a commit-level gate, not a PR-level gate. This preserves bisectability — `git bisect` lands on the slice boundary that broke things.
+- The full pre-merge battery (ruff format + check, `mypy --strict`, bandit, detect-secrets, deptry, full pytest with `EYENET_E2E=1` if NATS is available) runs at the **last commit** of the series, before `ExitWorktree(action="keep")` and the `--no-ff` merge.
+- Merge message names the group: `Merge Group A: auth & tokens (M9.A1..M9.A5)`.
+
+**Why this beats both extremes:**
+
+| Alternative                       | What it costs                                                                 |
+|-----------------------------------|-------------------------------------------------------------------------------|
+| One worktree per slice (38 PRs)   | 38× the merge ceremony; same files touched in adjacent slices ping-pong between worktrees; reviewer fatigue. |
+| One worktree per Group A..I bag → squash-merged | Loses slice boundaries in history; `git bisect` can no longer pin regressions to a single slice; review reads as one giant diff. |
+| **Group = worktree, slice = commit (this policy)** | One PR per coherent feature; per-slice bisectability preserved; one merge collision on shared files like `expected_routes.json` per group, not per slice. |
+
+**Carve-outs — when to break the rule:**
+
+1. **Solo-operator parallelism.** When *you* are the only operator, batch by group (9 worktrees over the M9 chain, not 38). When two operators are working concurrently, slice-level worktrees on different groups are fine, and slice-level worktrees on the *same* group are fine if the `Files touched:` sets are disjoint (e.g. M9.E1 ‖ M9.E2 — the two sensor primitives touch zero common files).
+2. **Hot slices.** A security-grade fix to an already-merged slice (e.g. a CVE patch on M9.A3 after Group A merged) ships as its own worktree, one commit, on a branch named after the slice (`hotfix-M9.A3-pat-prefix-leak`). Don't reopen Group A's worktree.
+3. **Spec-only slices.** Slices that touch only `development/*.md` (rare; most spec lives in the same PR as code) can ship in a dedicated `docs-*` worktree to keep them off the code review's critical path.
+4. **Sequential dependency inside a group.** When slice N+1 *cannot start* until N has merged (rare; usually internal-group slices can chain on disk in one worktree), use two consecutive worktrees off the same branch. Document the chain in the second worktree's first commit message.
+
+**Anti-patterns explicitly forbidden:**
+
+- **Squash-merging a group.** The slice boundary is the whole point. Always `--no-ff`, never `--squash`.
+- **Mixing slices from two groups in one worktree.** Even if both touch the same file, the independence story collapses. If two groups genuinely need to land together, that's a sign the group boundary was drawn wrong — re-decompose first.
+- **Skipping the slice-level DoD between commits inside a group.** The temptation to "just keep going, I'll run tests at the end" defeats bisectability. If commit N is broken and commit N+1 is broken differently, the bisect bridge is gone.
+- **Long-running group worktrees.** If a group worktree is open more than ~3 days, the rebase debt with main starts to matter. Either ship what's there as a partial group (rename the merge message to reflect which slices landed) or pause and rebase before continuing.
+
+**Pre-public posture interaction.** Because there's no Alembic, schema-shape commits inside a group can freely add/drop columns across slices — the next `eyenet init` is the source of truth, not a migration chain. This is what makes M9.C1 → M9.C2 → M9.C3 work as three commits in one worktree without ceremony: each commit's `rm data/*.db && eyenet init` is valid.
+
+---
+
+### Worktree execution matrix
+
+For any operator picking up work, the safe parallelization is determined by `Files touched:` sets. Two milestones with disjoint sets can be executed in two worktrees concurrently. Concrete examples:
+
+| Worktree pair                | Reason it's safe                                                                 |
+|------------------------------|----------------------------------------------------------------------------------|
+| M9.A1 ‖ M9.B1                | `auth.db` table additions vs `audit.db` table additions — different files        |
+| M9.C1 ‖ M9.A2                | `source_domain.py` storage vs `api/v1/auth.py` — different layers                |
+| M9.C3 ‖ M9.F1                | `models/collector.py` vs `api/v1/actors.py` — fully disjoint                     |
+| M9.E1 ‖ M9.E2                | `sensor/primitives/url_extraction.py` vs `…/channel_reference_extraction.py`    |
+| M9.D1 ‖ M9.D2                | `api/v1/sources.py` vs `api/v1/collectors.py` — different router modules         |
+| M9.F2 ‖ M9.F3                | `api/v1/linkages_read.py` vs `api/v1/graph.py` — different router modules        |
+| M9.G3 ‖ M9.G4 ‖ M9.G5        | three write modules, three worktrees — only `schemas/writes.py` is shared (small merge)|
+
+The reverse pairings — milestones that *cannot* parallelize — are those sharing a `Files touched:` entry. `tests/contract/api/expected_routes.json` is the highest-collision file; any milestone that adds a route updates it, so two route-adding milestones serialize on that one file. Resolve with a small post-merge regeneration.
 
 ---
 

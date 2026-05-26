@@ -1,0 +1,299 @@
+<mxfile host="app.diagrams.net" version="24.0.0" agent="EYENET-spec-export" type="device">
+  <diagram id="eyenet-erd" name="EYENET ERD">
+    <mxGraphModel dx="2600" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="2400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="legend" value="&lt;b&gt;EYENET ERD&lt;/b&gt;&#10;&#10;&lt;b&gt;Legend (fill colors)&lt;/b&gt;&#10;&#10;&lt;font color=&quot;#1a5490&quot;&gt;■&lt;/font&gt; Platform registry &amp; identity&#10;&lt;font color=&quot;#3d7339&quot;&gt;■&lt;/font&gt; Observation surface&#10;&lt;font color=&quot;#b96c00&quot;&gt;■&lt;/font&gt; Collectors &amp; discovery loop&#10;&lt;font color=&quot;#9c8400&quot;&gt;■&lt;/font&gt; Analysis (observations, profiles, linkage, persona)&#10;&lt;font color=&quot;#6a3d99&quot;&gt;■&lt;/font&gt; Infrastructure artifacts (cross-source bridge)&#10;&lt;font color=&quot;#a32638&quot;&gt;■&lt;/font&gt; Cases, authorization &amp; audit&#10;&#10;&lt;b&gt;Edge legend&lt;/b&gt;&#10;solid arrow = FK (mandatory)&#10;dashed arrow = FK (nullable / discriminated)&#10;double-headed = self-reference&#10;&#10;Generated from MODELS.md §1.1–§2.27." style="text;html=1;strokeColor=#000000;fillColor=#ffffff;align=left;verticalAlign=top;whiteSpace=wrap;rounded=0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="500" height="280" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_source" value="&lt;b&gt;Source&lt;/b&gt; (§1.1)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;kind : SourceKind&lt;br/&gt;display_name : str&lt;br/&gt;canonical_url : str?&lt;br/&gt;default_redundancy_policy : enum&lt;br/&gt;default_auto_join_policy : enum&lt;br/&gt;created_at : datetime&lt;br/&gt;deleted_at : datetime?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1a5490;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="600" y="40" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_sourcedomain" value="&lt;b&gt;SourceDomain&lt;/b&gt; (§2.26)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;source_id → Source&lt;br/&gt;pattern : str&lt;br/&gt;pattern_kind : enum&lt;br/&gt;is_primary : bool&lt;br/&gt;is_onion : bool&lt;br/&gt;removed_at : datetime?&lt;br/&gt;added_by → SystemUser" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1a5490;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="40" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_identity" value="&lt;b&gt;Identity&lt;/b&gt; (§2.1)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;name : str unique&lt;br/&gt;source_id → Source&lt;br/&gt;session_path : str&lt;br/&gt;role : monitor|scout|quarantine&lt;br/&gt;state : enum&lt;br/&gt;cooldown_seconds : int&lt;br/&gt;graduated_at : datetime?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1a5490;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="40" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_systemuser" value="&lt;b&gt;SystemUser&lt;/b&gt; (§2.15)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;username : str unique&lt;br/&gt;display_name : str&lt;br/&gt;password_hash : str&lt;br/&gt;role : admin|analyst|viewer&lt;br/&gt;is_active : bool&lt;br/&gt;mfa_secret_encrypted : str?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1a5490;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1440" y="40" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_collector" value="&lt;b&gt;Collector&lt;/b&gt; (§2.19)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;source_id → Source&lt;br/&gt;identity_id → Identity (unique)&lt;br/&gt;kind : CollectorKind&lt;br/&gt;instance_name : str unique&lt;br/&gt;config : JSON (discriminated)&lt;br/&gt;desired_state : enum&lt;br/&gt;observed_state : enum&lt;br/&gt;last_heartbeat_at : datetime?&lt;br/&gt;created_by → SystemUser" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1720" y="40" width="260" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_actor" value="&lt;b&gt;Actor&lt;/b&gt; (§1.2)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_key : str unique&lt;br/&gt;source_id → Source&lt;br/&gt;platform_userid : str&lt;br/&gt;current_handle : str?&lt;br/&gt;first_seen_at_ingest : datetime&lt;br/&gt;last_seen_at_ingest : datetime&lt;br/&gt;is_bot_self_declared : bool" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="600" y="280" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_group" value="&lt;b&gt;Group&lt;/b&gt; (§1.3)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;source_id → Source&lt;br/&gt;platform_groupid : str&lt;br/&gt;kind : GroupKind&lt;br/&gt;current_title : str?&lt;br/&gt;is_public : bool?&lt;br/&gt;member_count : int?&lt;br/&gt;discovered_via_candidate_id → GroupCandidate?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="280" width="260" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_groupsnapshot" value="&lt;b&gt;GroupSnapshot&lt;/b&gt; (§2.11)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;group_id → Group&lt;br/&gt;title : str?&lt;br/&gt;description : str?&lt;br/&gt;member_count : int?&lt;br/&gt;is_public : bool?&lt;br/&gt;observed_at : datetime" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="280" width="240" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_membership" value="&lt;b&gt;Membership&lt;/b&gt; (§2.2)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_id → Actor&lt;br/&gt;group_id → Group&lt;br/&gt;role : enum&lt;br/&gt;joined_at_source : datetime?&lt;br/&gt;joined_at_ingest : datetime&lt;br/&gt;left_at_ingest : datetime?&lt;br/&gt;&lt;i&gt;(actor↔group: unique)&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="360" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_actoraliashistory" value="&lt;b&gt;ActorAliasHistory&lt;/b&gt; (§2.10)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_id → Actor&lt;br/&gt;kind : handle|display_name|username&lt;br/&gt;value : str&lt;br/&gt;observed_from : datetime&lt;br/&gt;observed_until : datetime?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="290" y="560" width="260" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_corpuscursor" value="&lt;b&gt;CorpusCursor&lt;/b&gt; (§2.18)&lt;hr size=&quot;1&quot;/&gt;actor_id → Actor (PK)&lt;br/&gt;primitive_name : str (PK)&lt;br/&gt;last_processed_msg_ts : datetime&lt;br/&gt;last_processed_msg_id : UUID" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="240" height="140" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_message" value="&lt;b&gt;Message&lt;/b&gt; (§1.4)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;source_id → Source&lt;br/&gt;group_id → Group&lt;br/&gt;actor_id → Actor&lt;br/&gt;platform_msgid : str&lt;br/&gt;evidence_ref : str unique&lt;br/&gt;body : str&lt;br/&gt;sent_at_source : datetime&lt;br/&gt;ingested_at : datetime&lt;br/&gt;reply_to_msg_id → Message?&lt;br/&gt;forward_of_msg_id → Message?&lt;br/&gt;forward_origin_actor_id → Actor?&lt;br/&gt;source_specific : JSON" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="540" width="260" height="280" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_messageobservation" value="&lt;b&gt;MessageObservation&lt;/b&gt; (§2.23)&lt;hr size=&quot;1&quot;/&gt;message_id → Message (PK)&lt;br/&gt;collector_id → Collector (PK)&lt;br/&gt;observed_at_ingest : datetime&lt;br/&gt;was_first_sighting : bool" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="560" width="260" height="140" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_attachment" value="&lt;b&gt;Attachment&lt;/b&gt; (§2.9)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;message_id → Message&lt;br/&gt;kind : enum&lt;br/&gt;mime : str&lt;br/&gt;size_bytes : int&lt;br/&gt;sha256 : str?&lt;br/&gt;storage_uri : str?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#3d7339;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="740" width="240" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_collectorgroupmembership" value="&lt;b&gt;CollectorGroupMembership&lt;/b&gt; (§2.22)&lt;hr size=&quot;1&quot;/&gt;collector_id → Collector (PK)&lt;br/&gt;group_id → Group (PK)&lt;br/&gt;joined_at : datetime&lt;br/&gt;joined_via : seed|candidate|manual|restored&lt;br/&gt;joined_via_candidate_id → GroupCandidate?&lt;br/&gt;left_at : datetime?&lt;br/&gt;left_reason : str?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1480" y="320" width="280" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_groupcandidate" value="&lt;b&gt;GroupCandidate&lt;/b&gt; (§2.20)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;source_id → Source&lt;br/&gt;platform_groupid : str&lt;br/&gt;kind_hint : GroupKind?&lt;br/&gt;display_name_hint : str?&lt;br/&gt;state : enum (8 values)&lt;br/&gt;score : float&lt;br/&gt;score_breakdown : JSON&lt;br/&gt;score_function_version : int&lt;br/&gt;reviewed_by : str?&lt;br/&gt;assigned_collector_id → Collector?&lt;br/&gt;resulting_group_id → Group?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1780" y="320" width="280" height="260" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_groupcandidatemention" value="&lt;b&gt;GroupCandidateMention&lt;/b&gt; (§2.21)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;candidate_id → GroupCandidate&lt;br/&gt;observed_by_collector_id → Collector&lt;br/&gt;observed_in_group_id → Group&lt;br/&gt;seed_root_id → Group?&lt;br/&gt;depth_from_root : int&lt;br/&gt;mention_evidence_ref : str&lt;br/&gt;mention_kind : enum&lt;br/&gt;mentioning_actor_id → Actor&lt;br/&gt;mentioning_actor_role_signal : str?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1780" y="620" width="300" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_groupaccessartifact" value="&lt;b&gt;GroupAccessArtifact&lt;/b&gt; (§2.24)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;subject_kind : group|candidate&lt;br/&gt;group_id → Group?&lt;br/&gt;candidate_id → GroupCandidate?&lt;br/&gt;kind : GroupAccessKind&lt;br/&gt;value : str?&lt;br/&gt;details : JSON&lt;br/&gt;discovered_via_mention_id → GroupCandidateMention?&lt;br/&gt;validation_state : enum&lt;br/&gt;requires_admin_approval : bool&lt;br/&gt;expires_at : datetime?&lt;br/&gt;&lt;i&gt;CHECK: group_id XOR candidate_id&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#b96c00;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2120" y="320" width="320" height="280" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_observation" value="&lt;b&gt;Observation&lt;/b&gt; (§2.3)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_id → Actor&lt;br/&gt;evidence_ref : str?&lt;br/&gt;primitive_namespace : str&lt;br/&gt;primitive_name : str&lt;br/&gt;primitive_version : str&lt;br/&gt;value_kind : enum&lt;br/&gt;value_hash : str?&lt;br/&gt;value_numeric : float?&lt;br/&gt;value_enum : str?&lt;br/&gt;value_array : JSON?&lt;br/&gt;observed_at : datetime&lt;br/&gt;sensor_instance : str" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#9c8400;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="600" y="900" width="260" height="280" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_profile" value="&lt;b&gt;Profile&lt;/b&gt; (§2.4)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_id → Actor&lt;br/&gt;version : int&lt;br/&gt;is_current : bool&lt;br/&gt;role_signal : enum?&lt;br/&gt;role_confidence : float&lt;br/&gt;stylometric_summary : JSON&lt;br/&gt;lexical_summary : JSON&lt;br/&gt;temporal_summary : JSON&lt;br/&gt;interaction_summary : JSON&lt;br/&gt;network_summary : JSON&lt;br/&gt;derived_at : datetime" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#9c8400;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="900" width="260" height="260" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_linkage" value="&lt;b&gt;Linkage&lt;/b&gt; (§2.5)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_a_id → Actor&lt;br/&gt;actor_b_id → Actor&lt;br/&gt;state : proposed|confirmed|rejected|superseded&lt;br/&gt;method : str&lt;br/&gt;score : float&lt;br/&gt;evidence : JSON&lt;br/&gt;proposed_at : datetime&lt;br/&gt;decided_at : datetime?&lt;br/&gt;decided_by : str?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#9c8400;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="940" width="280" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_persona" value="&lt;b&gt;Persona&lt;/b&gt; (§2.6)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;label : str?&lt;br/&gt;member_actor_ids : JSON list&lt;br/&gt;&lt;i&gt;(forward view; reverse via PersonaMembership)&lt;/i&gt;&lt;br/&gt;created_at : datetime&lt;br/&gt;updated_at : datetime" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#9c8400;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="960" width="280" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_personamembership" value="&lt;b&gt;PersonaMembership&lt;/b&gt; (§2.6a)&lt;hr size=&quot;1&quot;/&gt;persona_id → Persona (PK)&lt;br/&gt;actor_id → Actor (PK, unique)&lt;br/&gt;joined_at : datetime&lt;br/&gt;via_linkage_id → Linkage?&lt;br/&gt;&lt;i&gt;(reverse-indexable companion to §2.6)&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#9c8400;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1820" y="900" width="280" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_infraartifact" value="&lt;b&gt;InfrastructureArtifact&lt;/b&gt; (§2.7)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;kind : enum (10 values)&lt;br/&gt;value : str (normalized)&lt;br/&gt;value_hash : str (sha256)&lt;br/&gt;first_seen_at_ingest : datetime&lt;br/&gt;last_seen_at_ingest : datetime&lt;br/&gt;resolved_to_source_id → Source?&lt;br/&gt;resolution_state : enum (6 values)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#6a3d99;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2140" y="660" width="280" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_actorartifact" value="&lt;b&gt;ActorArtifact&lt;/b&gt; (§2.8)&lt;hr size=&quot;1&quot;/&gt;actor_id → Actor (PK)&lt;br/&gt;artifact_id → InfrastructureArtifact (PK)&lt;br/&gt;first_seen_evidence_ref : str&lt;br/&gt;confidence : float" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#6a3d99;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2140" y="900" width="300" height="140" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_case" value="&lt;b&gt;Case&lt;/b&gt; (§2.17)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;name : str&lt;br/&gt;state : open|closed|archived&lt;br/&gt;opened_at : datetime&lt;br/&gt;closed_at : datetime?&lt;br/&gt;actor_ids : JSON list&lt;br/&gt;group_ids : JSON list&lt;br/&gt;seed_root_group_ids : JSON list&lt;br/&gt;redundancy_policy : enum&lt;br/&gt;auto_join_policy : enum&lt;br/&gt;auto_join_score_threshold : float?" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#a32638;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="780" width="280" height="240" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_engagementauth" value="&lt;b&gt;EngagementAuthorization&lt;/b&gt; (§2.13)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;subject_kind : actor|group&lt;br/&gt;actor_id → Actor?&lt;br/&gt;group_id → Group?&lt;br/&gt;authorized_by : str&lt;br/&gt;authorized_at : datetime&lt;br/&gt;scope : enum&lt;br/&gt;expires_at : datetime?&lt;br/&gt;&lt;i&gt;CHECK: actor_id XOR group_id&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#a32638;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1060" width="280" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_identitylabel" value="&lt;b&gt;IdentityLabel&lt;/b&gt; (§2.12)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;actor_id → Actor&lt;br/&gt;label : str&lt;br/&gt;confidence : low|medium|high|certain&lt;br/&gt;applied_by : str&lt;br/&gt;applied_at : datetime&lt;br/&gt;rationale : str" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#a32638;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1080" width="260" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_auditlog" value="&lt;b&gt;AuditLog&lt;/b&gt; (§2.14)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;event : str&lt;br/&gt;service : str&lt;br/&gt;instance_id : str&lt;br/&gt;system_user_id → SystemUser?&lt;br/&gt;subject_kind : str&lt;br/&gt;subject_id : UUID?&lt;br/&gt;evidence_ref : str?&lt;br/&gt;trace_id : str?&lt;br/&gt;span_id : str?&lt;br/&gt;payload : JSON&lt;br/&gt;at : datetime&lt;br/&gt;prev_hash : str&lt;br/&gt;self_hash : str&lt;br/&gt;&lt;i&gt;(hash-chained)&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#a32638;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2120" y="40" width="260" height="320" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ent_systemlog" value="&lt;b&gt;SystemLog&lt;/b&gt; (§2.16)&lt;hr size=&quot;1&quot;/&gt;id : UUID PK&lt;br/&gt;level : warn|error|lifecycle|notice&lt;br/&gt;service : str&lt;br/&gt;instance_id : str&lt;br/&gt;event : str&lt;br/&gt;message : str&lt;br/&gt;trace_id : str?&lt;br/&gt;error_type : str?&lt;br/&gt;stack_hash : str?&lt;br/&gt;fields : JSON&lt;br/&gt;at : datetime" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#a32638;align=left;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="2440" y="40" width="280" height="260" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_sd_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_sourcedomain" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_sd_systemuser" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_sourcedomain" target="ent_systemuser">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_identity_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_identity" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_collector_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_collector" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_collector_identity" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_collector" target="ent_identity">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_collector_systemuser" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_collector" target="ent_systemuser">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_actor_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_actor" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_group_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_group" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_group_candidate_back" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_group" target="ent_groupcandidate">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_groupsnapshot_group" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_groupsnapshot" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_membership_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_membership" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_membership_group" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_membership" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_aliashistory_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_actoraliashistory" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_corpuscursor_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_corpuscursor" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_message_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_message" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_message_group" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_message" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_message_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_message" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_message_self_reply" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;exitX=0;exitY=0.5;entryX=0;entryY=1;curved=1;" edge="1" parent="1" source="ent_message" target="ent_message">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="840" y="780"/>
+              <mxPoint x="840" y="820"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge_message_forwardorigin_actor" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_message" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_messageobs_message" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_messageobservation" target="ent_message">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_messageobs_collector" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_messageobservation" target="ent_collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_attachment_message" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_attachment" target="ent_message">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_cgm_collector" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_collectorgroupmembership" target="ent_collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_cgm_group" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_collectorgroupmembership" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_cgm_candidate" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_collectorgroupmembership" target="ent_groupcandidate">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_candidate_source" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_groupcandidate" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_candidate_resulting_group" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_groupcandidate" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_candidate_assigned_collector" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_groupcandidate" target="ent_collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_mention_candidate" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_groupcandidatemention" target="ent_groupcandidate">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_mention_collector" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_groupcandidatemention" target="ent_collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_mention_group_observed" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_groupcandidatemention" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_mention_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_groupcandidatemention" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_accessartifact_group" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_groupaccessartifact" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_accessartifact_candidate" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_groupaccessartifact" target="ent_groupcandidate">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_accessartifact_mention" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_groupaccessartifact" target="ent_groupcandidatemention">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_observation_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_observation" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_profile_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_profile" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_linkage_actor_a" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_linkage" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_linkage_actor_b" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_linkage" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_personamembership_persona" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_personamembership" target="ent_persona">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_personamembership_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_personamembership" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_personamembership_linkage" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_personamembership" target="ent_linkage">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_infraartifact_source" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_infraartifact" target="ent_source">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_actorartifact_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_actorartifact" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_actorartifact_infraartifact" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_actorartifact" target="ent_infraartifact">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge_engagementauth_actor" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_engagementauth" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_engagementauth_group" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_engagementauth" target="ent_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_identitylabel_actor" style="endArrow=open;endFill=0;html=1;rounded=0;" edge="1" parent="1" source="ent_identitylabel" target="ent_actor">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge_auditlog_systemuser" style="endArrow=open;endFill=0;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="ent_auditlog" target="ent_systemuser">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
