@@ -12,6 +12,7 @@ from sqlmodel import SQLModel
 
 from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
+from .candidates import GroupCandidateMentionTable, GroupCandidateTable
 from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
 from .clearance import SystemUserClearanceGrantTable
 from .collector import CollectorTable
@@ -47,6 +48,8 @@ __all__ = [
     "CaseMemberTable",
     "CaseTable",
     "CollectorTable",
+    "GroupCandidateMentionTable",
+    "GroupCandidateTable",
     "CorpusCursorTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",

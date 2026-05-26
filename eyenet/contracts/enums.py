@@ -327,9 +327,49 @@ class IdentityRole(StrEnum):
     QUARANTINE = "quarantine"
 
 
+class CandidateState(StrEnum):
+    """GroupCandidate lifecycle (MODELS §2.20).
+
+    State machine (legal transitions in ``CandidatesMixin.transition_candidate``):
+
+    .. code-block::
+
+        discovered → queued → approved → joining → joined
+                      │           │          │
+                      ↓           ↓          ↓
+                   rejected    rejected   failed
+                      │                     │
+                      └──── parked ──────────┘
+                                │
+                                ↓ (re-entry, fresh operator decision)
+                             approved
+    """
+
+    DISCOVERED = "discovered"
+    QUEUED = "queued"
+    APPROVED = "approved"
+    JOINING = "joining"
+    JOINED = "joined"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    PARKED = "parked"
+
+
+class MentionKind(StrEnum):
+    """How a GroupCandidateMention was observed (MODELS §2.21)."""
+
+    INVITE_LINK = "invite_link"
+    USERNAME_MENTION = "username_mention"
+    FORWARD_ORIGIN = "forward_origin"
+    LINK_PREVIEW = "link_preview"
+    BIO_LINK = "bio_link"
+    OTHER = "other"
+
+
 __all__ = [
     "ActorAliasKind",
     "AttachmentKind",
+    "CandidateState",
     "CaseRoleOnCase",
     "CaseStatus",
     "CaseSubjectKind",
@@ -347,6 +387,7 @@ __all__ = [
     "InfrastructureKind",
     "LinkageState",
     "MembershipRole",
+    "MentionKind",
     "ReclassificationSubjectKind",
     "SensitivityTier",
     "SourceDomainPatternKind",

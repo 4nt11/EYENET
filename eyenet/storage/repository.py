@@ -25,14 +25,21 @@ if TYPE_CHECKING:
     from eyenet.contracts.audit import AuditLogRow
     from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
+    from eyenet.contracts.candidate import (
+        EligibilityInputs,
+        GroupCandidateMentionRow,
+        GroupCandidateRow,
+    )
     from eyenet.contracts.collector import CollectorRow
     from eyenet.contracts.enums import (
+        CandidateState,
         CaseRoleOnCase,
         CaseSubjectKind,
         ClearanceScope,
         CollectorDesiredState,
         CollectorObservedState,
         GroupKind,
+        MentionKind,
         SensitivityTier,
         SourceDomainPatternKind,
         SourceKind,
@@ -866,6 +873,80 @@ class BaseRepository(ABC):
         The API layer (M9.D2) gates this on
         ``observed_state == stopped``; the storage layer just executes.
         Raises :class:`ValueError` if the collector doesn't exist.
+        """
+
+    # =================================================================
+    # CANDIDATES (MODELS §2.20-2.21, API_PLAN §4.12, M9.C4)
+    # =================================================================
+
+    @abstractmethod
+    async def record_candidate_mention(
+        self,
+        *,
+        source_id: UUID,
+        platform_groupid: str,
+        observed_by_collector_id: UUID,
+        observed_in_group_id: UUID,
+        seed_root_id: UUID | None,
+        depth_from_root: int,
+        mention_evidence_ref: str,
+        mention_kind: MentionKind,
+        mentioned_at_source: datetime,
+        mentioned_at_ingest: datetime,
+        mentioning_actor_id: UUID,
+        mentioning_actor_role_signal: str | None = None,
+        kind_hint: GroupKind | None = None,
+        display_name_hint: str | None = None,
+    ) -> tuple[GroupCandidateRow, GroupCandidateMentionRow]:
+        """Upsert a GroupCandidate by ``(source_id, platform_groupid)`` and
+        append a mention provenance row.
+
+        The mention is idempotent: a second call with the same
+        ``(source_id + platform_groupid, mention_evidence_ref)`` returns the
+        existing rows without inserting a duplicate.
+        """
+
+    @abstractmethod
+    async def get_candidate(self, candidate_id: UUID) -> GroupCandidateRow | None:
+        """Return one GroupCandidateRow by id, or ``None``."""
+
+    @abstractmethod
+    async def list_queued_candidates(
+        self,
+        *,
+        source_id: UUID | None = None,
+    ) -> list[GroupCandidateRow]:
+        """Return QUEUED candidates ordered by score DESC.
+
+        Pass ``source_id`` to restrict to one Source; omit for all Sources.
+        """
+
+    @abstractmethod
+    async def transition_candidate(
+        self,
+        *,
+        candidate_id: UUID,
+        to_state: CandidateState,
+        reviewed_by: str | None = None,
+        reviewed_at: datetime | None = None,
+        rejection_reason: str | None = None,
+        assigned_collector_id: UUID | None = None,
+        resulting_group_id: UUID | None = None,
+    ) -> GroupCandidateRow:
+        """Apply a legal state transition to a GroupCandidate.
+
+        Raises :class:`ValueError` on an illegal transition or if the
+        candidate doesn't exist.
+        """
+
+    @abstractmethod
+    async def compute_eligibility_inputs(
+        self,
+        candidate_id: UUID,
+    ) -> EligibilityInputs:
+        """Return pre-computed eligibility inputs for ``candidate_id``.
+
+        Raises :class:`ValueError` if the candidate doesn't exist.
         """
 
     # =================================================================

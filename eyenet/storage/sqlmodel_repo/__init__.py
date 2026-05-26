@@ -18,6 +18,7 @@ from ._helpers import safe_session
 from .actors import ActorsMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
+from .candidates import CandidatesMixin
 from .cases import CasesMixin
 from .clearance import ClearanceMixin
 from .collectors import CollectorsMixin
@@ -44,6 +45,7 @@ class SQLModelRepository(
     ActorsMixin,
     AttachmentsMixin,
     AuditMixin,
+    CandidatesMixin,
     CasesMixin,
     ClearanceMixin,
     CollectorsMixin,
