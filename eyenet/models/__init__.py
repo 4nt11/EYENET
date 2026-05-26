@@ -13,6 +13,12 @@ from sqlmodel import SQLModel
 from .access_artifact import GroupAccessArtifactTable
 from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
+from .auth import (
+    JwtDenylistTable,
+    RefreshTokenTable,
+    SystemUserCredentialTable,
+    SystemUserScopeTable,
+)
 from .candidates import GroupCandidateMentionTable, GroupCandidateTable
 from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
@@ -68,6 +74,7 @@ __all__ = [
     "IdentityLabelTable",
     "IdentityTable",
     "InfrastructureArtifactTable",
+    "JwtDenylistTable",
     "LinkageTable",
     "MembershipTable",
     "MessageTable",
@@ -76,10 +83,13 @@ __all__ = [
     "PersonaTable",
     "ProfileTable",
     "ReactionTable",
+    "RefreshTokenTable",
     "SQLModel",
     "SourceDomainTable",
     "SourceTable",
     "SystemLogTable",
     "SystemUserClearanceGrantTable",
+    "SystemUserCredentialTable",
+    "SystemUserScopeTable",
     "SystemUserTable",
 ]

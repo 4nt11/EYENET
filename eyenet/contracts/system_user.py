@@ -15,24 +15,25 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import Field
-
 from ._base import DbRowBase
 from .enums import SystemUserRole
 
 
 class SystemUserRow(DbRowBase):
-    """Persisted operator account."""
+    """Persisted operator account.
+
+    Secret material (password_hash, MFA secret) lives in the separate
+    :class:`SystemUserCredentialRow` table per M9.A1 — profile and credentials
+    have different access patterns and audit scopes.
+    """
 
     username: str
     display_name: str
     email: str | None = None
-    password_hash: str = Field(description="argon2id; never plaintext")
     role: SystemUserRole = SystemUserRole.VIEWER
     is_active: bool = True
     last_login_at: datetime | None = None
     created_at: datetime
-    mfa_secret_encrypted: str | None = Field(default=None, description="age-encrypted TOTP")
     notes: str | None = None
 
 

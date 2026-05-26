@@ -19,6 +19,7 @@ from .actors import ActorsMixin
 from .artifacts import ArtifactsMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
+from .auth import AuthMixin
 from .candidates import CandidatesMixin
 from .cases import CasesMixin
 from .clearance import ClearanceMixin
@@ -48,6 +49,7 @@ class SQLModelRepository(
     ArtifactsMixin,
     AttachmentsMixin,
     AuditMixin,
+    AuthMixin,
     CandidatesMixin,
     CasesMixin,
     ClearanceMixin,

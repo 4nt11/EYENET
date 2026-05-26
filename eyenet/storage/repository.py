@@ -24,6 +24,12 @@ if TYPE_CHECKING:
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.attribution import LinkageRow
     from eyenet.contracts.audit import AuditLogRow
+    from eyenet.contracts.auth import (
+        JwtDenylistRow,
+        RefreshTokenRow,
+        SystemUserCredentialRow,
+        SystemUserScopeRow,
+    )
     from eyenet.contracts.candidate import (
         EligibilityInputs,
         GroupCandidateMentionRow,
@@ -1076,6 +1082,112 @@ class BaseRepository(ABC):
 
         ``validation_state`` defaults to ``UNVERIFIED`` when ``None``.
         """
+
+    # =================================================================
+    # AUTH (API_PLAN §4.1-§4.6, M9.A1)
+    # =================================================================
+
+    @abstractmethod
+    async def put_credential(
+        self,
+        *,
+        user_id: UUID,
+        password_hash: str,
+        password_updated_at: datetime,
+        mfa_secret_encrypted: str | None = None,
+    ) -> SystemUserCredentialRow:
+        """Upsert one credential row keyed by ``user_id`` (one-to-one with user).
+
+        A1 stores opaque hash strings; argon2id format enforcement happens
+        at the A2 service layer.
+        """
+
+    @abstractmethod
+    async def get_credential(self, user_id: UUID) -> SystemUserCredentialRow | None:
+        """Return one credential row by user_id, or ``None``."""
+
+    @abstractmethod
+    async def delete_credential(self, user_id: UUID) -> None:
+        """Delete a credential row. Raises :class:`ValueError` if not found."""
+
+    @abstractmethod
+    async def create_refresh_token(
+        self,
+        *,
+        user_id: UUID,
+        hash_value: str,
+        issued_at: datetime,
+        expires_at: datetime,
+    ) -> RefreshTokenRow:
+        """Mint a new refresh token. ``hash_value`` is sha256(opaque secret)."""
+
+    @abstractmethod
+    async def get_refresh_token(self, token_id: UUID) -> RefreshTokenRow | None:
+        """Return one refresh token by id, or ``None``."""
+
+    @abstractmethod
+    async def get_refresh_token_by_hash(
+        self,
+        hash_value: str,
+    ) -> RefreshTokenRow | None:
+        """Lookup a refresh token by its sha256 hash, or ``None``."""
+
+    @abstractmethod
+    async def revoke_refresh_token(
+        self,
+        *,
+        token_id: UUID,
+        revoked_at: datetime,
+        replaced_by: UUID | None = None,
+    ) -> RefreshTokenRow:
+        """Mark a refresh token revoked.
+
+        ``replaced_by`` is the next link in the rotation chain (set on
+        /refresh). Omit for logout-style revocation. The CHECK constraint
+        rejects ``replaced_by`` without a non-NULL ``revoked_at``.
+
+        Raises :class:`ValueError` if the token doesn't exist.
+        """
+
+    @abstractmethod
+    async def deny_jwt(
+        self,
+        *,
+        jti: UUID,
+        user_id: UUID,
+        denied_at: datetime,
+        expires_at: datetime,
+    ) -> JwtDenylistRow:
+        """Insert a JWT denylist entry. Idempotent on ``jti``."""
+
+    @abstractmethod
+    async def is_jwt_denylisted(self, jti: UUID) -> bool:
+        """Per-request denylist check. Hot path; indexed PK lookup."""
+
+    @abstractmethod
+    async def grant_scope(
+        self,
+        *,
+        user_id: UUID,
+        scope: str,
+        granted_at: datetime,
+        granted_by_user_id: UUID,
+    ) -> SystemUserScopeRow:
+        """Grant an explicit scope to a user (additive to ``ROLE_BASELINE``).
+
+        Idempotent on ``(user_id, scope)`` — re-grant returns the existing row.
+        """
+
+    @abstractmethod
+    async def revoke_scope(self, *, user_id: UUID, scope: str) -> None:
+        """Revoke an explicit scope grant. Raises :class:`ValueError` if no row."""
+
+    @abstractmethod
+    async def list_explicit_scopes(
+        self,
+        user_id: UUID,
+    ) -> list[SystemUserScopeRow]:
+        """Return all explicit scope grants for a user, ordered by ``granted_at``."""
 
     # =================================================================
     # ESCAPE HATCH (collector-side custom transactions)

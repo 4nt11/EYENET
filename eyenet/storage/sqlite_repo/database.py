@@ -83,6 +83,11 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "case_v2",
         "case_member",
         "case_collaborator",
+        # M9.A1 — auth tables
+        "system_user_credential",
+        "refresh_token",
+        "jwt_denylist",
+        "system_user_scope",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset({"audit_log"})
