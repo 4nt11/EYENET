@@ -241,8 +241,38 @@ class ActorAliasKind(StrEnum):
     USERNAME = "username"
 
 
+class SourceDomainPatternKind(StrEnum):
+    """How a ``SourceDomain.pattern`` is matched against a hostname (MODELS §2.26).
+
+    Specificity order for ``find_source_for_host``:
+    ``exact`` > ``subdomain_wildcard`` > ``suffix_match``.
+
+    Storage convention: ``pattern`` is stored post-normalize_host (lowercase
+    ASCII punycode, no trailing dot, no ``*`` literal). For
+    ``subdomain_wildcard``, the pattern holds **the parent only** — never the
+    ``*.`` prefix; a CHECK at the SQL layer rejects any ``*`` in the column.
+
+    Matching semantics:
+
+    - ``exact "foo.com"`` matches **exactly** ``foo.com``.
+    - ``subdomain_wildcard "foo.com"`` matches any strict subdomain
+      (``x.foo.com``, ``a.b.foo.com``) but **not** ``foo.com`` itself.
+    - ``suffix_match "foo.com"`` matches ``foo.com`` itself **and** any
+      subdomain (strictly stronger than ``subdomain_wildcard``).
+    """
+
+    EXACT = "exact"
+    SUBDOMAIN_WILDCARD = "subdomain_wildcard"
+    SUFFIX_MATCH = "suffix_match"
+
+
 class CollectorState(StrEnum):
-    """Collector health state (PLAN §2.1)."""
+    """In-process collector health state (PLAN §2.1).
+
+    Reported by :class:`CollectorBase.health` — NOT persisted. The
+    persisted lifecycle uses :class:`CollectorDesiredState` (operator
+    intent) and :class:`CollectorObservedState` (supervisor reconcile).
+    """
 
     STARTING = "starting"
     RUNNING = "running"
@@ -252,25 +282,190 @@ class CollectorState(StrEnum):
     STOPPED = "stopped"
 
 
+class CollectorDesiredState(StrEnum):
+    """Operator-expressed collector lifecycle intent (API_PLAN §4.11.2).
+
+    The API mutates ``desired_state``; the supervisor reconciles to
+    ``observed_state``. ``disabled`` is a hard stop the supervisor will
+    refuse to start until an explicit operator transition to ``stopped``.
+    """
+
+    RUNNING = "running"
+    STOPPED = "stopped"
+    DISABLED = "disabled"
+
+
+class CollectorObservedState(StrEnum):
+    """Supervisor-reported collector lifecycle state (API_PLAN §4.11.2).
+
+    Supervisor-written, server-readable, **never** accepted in API
+    request bodies. ``cooling`` is the post-crash backoff window;
+    duration is ``min(2^restart_count, 600)`` seconds.
+    """
+
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    COOLING = "cooling"
+    CRASHED = "crashed"
+
+
+class IdentityRole(StrEnum):
+    """Identity's operational role in the discovery loop (API_PLAN §4.12).
+
+    ``monitor`` is the long-running watcher (the default — every identity
+    that observes traffic in an established group). ``scout`` is a
+    short-lived probe that joins a freshly-approved
+    :class:`GroupCandidate` and observes for 7 days before graduating to
+    ``monitor`` (M9.E4). ``quarantine`` is a terminal role for identities
+    that were detected/banned/burned during scout duty — they never
+    re-enter rotation.
+    """
+
+    MONITOR = "monitor"
+    SCOUT = "scout"
+    QUARANTINE = "quarantine"
+
+
+class CandidateState(StrEnum):
+    """GroupCandidate lifecycle (MODELS §2.20).
+
+    State machine (legal transitions in ``CandidatesMixin.transition_candidate``):
+
+    .. code-block::
+
+        discovered → queued → approved → joining → joined
+                      │           │          │
+                      ↓           ↓          ↓
+                   rejected    rejected   failed
+                      │                     │
+                      └──── parked ──────────┘
+                                │
+                                ↓ (re-entry, fresh operator decision)
+                             approved
+    """
+
+    DISCOVERED = "discovered"
+    QUEUED = "queued"
+    APPROVED = "approved"
+    JOINING = "joining"
+    JOINED = "joined"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    PARKED = "parked"
+
+
+class MentionKind(StrEnum):
+    """How a GroupCandidateMention was observed (MODELS §2.21)."""
+
+    INVITE_LINK = "invite_link"
+    USERNAME_MENTION = "username_mention"
+    FORWARD_ORIGIN = "forward_origin"
+    LINK_PREVIEW = "link_preview"
+    BIO_LINK = "bio_link"
+    OTHER = "other"
+
+
+class ResolutionState(StrEnum):
+    """Bridge-resolution state for InfrastructureArtifact (MODELS §2.25).
+
+    ``unresolved`` — no Source's SourceDomain matches the artifact's host yet.
+    ``resolved`` — exactly one Source matches; ``resolved_to_source_id``
+    populated. ``ambiguous`` — multiple Sources match (operator mistake;
+    overlap detection in C1 should prevent this, but the state exists for
+    defensive completeness). ``not_applicable`` — artifact ``kind`` carries
+    no host (wallets, PGP keys, emails, phones, etc.).
+    """
+
+    UNRESOLVED = "unresolved"
+    RESOLVED = "resolved"
+    AMBIGUOUS = "ambiguous"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ArtifactSubjectKind(StrEnum):
+    """GroupAccessArtifact subject discriminator (MODELS §2.24)."""
+
+    GROUP = "group"
+    CANDIDATE = "candidate"
+
+
+class GroupAccessKind(StrEnum):
+    """Platform-neutral access-vector taxonomy (MODELS §2.24).
+
+    Preference ordering (lowest = cheapest / lowest OPSEC cost / most stable):
+    public_identifier < invite_link < qr_code < direct_invite <
+    paid_subscription < restricted_other. ``access_blocked`` is a known-bad
+    state — the artifact records that access is denied for this identity.
+    """
+
+    PUBLIC_IDENTIFIER = "public_identifier"
+    INVITE_LINK = "invite_link"
+    QR_CODE = "qr_code"
+    DIRECT_INVITE = "direct_invite"
+    PAID_SUBSCRIPTION = "paid_subscription"
+    ACCESS_BLOCKED = "access_blocked"
+    RESTRICTED_OTHER = "restricted_other"
+
+
+class ArtifactValidationState(StrEnum):
+    """GroupAccessArtifact validation lifecycle (MODELS §2.24)."""
+
+    UNVERIFIED = "unverified"
+    VALID = "valid"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+    USAGE_EXHAUSTED = "usage_exhausted"
+    BLOCKED_FOR_OUR_IDENTITY = "blocked_for_our_identity"
+    UNKNOWN_FAILURE = "unknown_failure"
+
+
+class JoinedVia(StrEnum):
+    """How a CollectorGroupMembership was established (MODELS §2.22).
+
+    ``seed`` — operator-configured initial scope at collector startup.
+    ``candidate`` — came through the §2.20-§2.21 discovery loop;
+    ``joined_via_candidate_id`` is populated. ``manual`` — operator added
+    mid-investigation via the UI. ``restored`` — collector was banned, a
+    replacement identity rejoined the same group.
+    """
+
+    SEED = "seed"
+    CANDIDATE = "candidate"
+    MANUAL = "manual"
+    RESTORED = "restored"
+
+
 __all__ = [
     "ActorAliasKind",
+    "ArtifactSubjectKind",
+    "ArtifactValidationState",
     "AttachmentKind",
+    "CandidateState",
+    "GroupAccessKind",
+    "JoinedVia",
+    "ResolutionState",
     "CaseRoleOnCase",
     "CaseStatus",
     "CaseSubjectKind",
     "ClearanceScope",
+    "CollectorDesiredState",
+    "CollectorObservedState",
     "CollectorState",
     "ConfidenceTier",
     "EngagementScope",
     "EngagementSubjectKind",
     "FileServedVia",
     "GroupKind",
+    "IdentityRole",
     "IdentityState",
     "InfrastructureKind",
     "LinkageState",
     "MembershipRole",
+    "MentionKind",
     "ReclassificationSubjectKind",
     "SensitivityTier",
+    "SourceDomainPatternKind",
     "SourceKind",
     "SystemLogLevel",
     "SystemUserRole",

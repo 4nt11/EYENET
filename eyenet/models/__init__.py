@@ -10,10 +10,14 @@ from __future__ import annotations
 
 from sqlmodel import SQLModel
 
+from .access_artifact import GroupAccessArtifactTable
 from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
+from .candidates import GroupCandidateMentionTable, GroupCandidateTable
 from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
+from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .clearance import SystemUserClearanceGrantTable
+from .collector import CollectorTable
 from .corpus import CorpusCursorTable
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
@@ -32,6 +36,7 @@ from .profile import ProfileTable
 from .reaction import ReactionTable
 from .social_graph import MembershipTable
 from .source import SourceTable
+from .source_domain import SourceDomainTable
 from .syslog import SystemLogTable
 from .system_user import SystemUserTable
 
@@ -44,6 +49,12 @@ __all__ = [
     "CaseCollaboratorTable",
     "CaseMemberTable",
     "CaseTable",
+    "CollectorGroupMembershipTable",
+    "CollectorTable",
+    "GroupAccessArtifactTable",
+    "GroupCandidateMentionTable",
+    "GroupCandidateTable",
+    "MessageObservationTable",
     "CorpusCursorTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",
@@ -66,6 +77,7 @@ __all__ = [
     "ProfileTable",
     "ReactionTable",
     "SQLModel",
+    "SourceDomainTable",
     "SourceTable",
     "SystemLogTable",
     "SystemUserClearanceGrantTable",

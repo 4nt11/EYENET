@@ -141,7 +141,6 @@ class TelegramCollector(CollectorSkeleton):
         self._source_uuid = await self._storage.upsert_source(
             kind=SourceKind.TELEGRAM,
             display_name=f"telegram:{entry.name}",
-            base_url="https://t.me",
             created_at=datetime.now(tz=UTC),
         )
 

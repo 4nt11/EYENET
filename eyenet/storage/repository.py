@@ -21,21 +21,42 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
+    from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.attribution import LinkageRow
     from eyenet.contracts.audit import AuditLogRow
+    from eyenet.contracts.candidate import (
+        EligibilityInputs,
+        GroupCandidateMentionRow,
+        GroupCandidateRow,
+    )
     from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
+    from eyenet.contracts.collector import CollectorRow
     from eyenet.contracts.enums import (
+        ArtifactSubjectKind,
+        ArtifactValidationState,
+        CandidateState,
         CaseRoleOnCase,
         CaseSubjectKind,
         ClearanceScope,
+        CollectorDesiredState,
+        CollectorObservedState,
+        GroupAccessKind,
         GroupKind,
+        InfrastructureKind,
+        JoinedVia,
+        MentionKind,
         SensitivityTier,
+        SourceDomainPatternKind,
         SourceKind,
         SystemLogLevel,
     )
     from eyenet.contracts.feedback import FeedbackPairRow
+    from eyenet.contracts.infrastructure import InfrastructureArtifactRow
+    from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
+    from eyenet.contracts.source import SourceRow
+    from eyenet.contracts.source_domain import SourceDomainRow
 
 
 class BaseRepository(ABC):
@@ -675,9 +696,16 @@ class BaseRepository(ABC):
         *,
         kind: SourceKind,
         display_name: str,
-        base_url: str | None = None,
         created_at: datetime,
-    ) -> UUID: ...
+    ) -> UUID:
+        """Upsert a :class:`SourceTable` row by ``(kind, display_name)``.
+
+        ``canonical_url`` is never set here — it's operator-bound via
+        :meth:`set_source_canonical_url` after a primary
+        :class:`SourceDomainTable` row exists. Collectors call this on
+        startup to ensure their Source exists; the operator wires the
+        display URL later.
+        """
 
     @abstractmethod
     async def upsert_group(
@@ -704,6 +732,350 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
+
+    # =================================================================
+    # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
+    # =================================================================
+
+    @abstractmethod
+    async def add_source_domain(
+        self,
+        *,
+        source_id: UUID,
+        pattern: str,
+        pattern_kind: SourceDomainPatternKind,
+        is_primary: bool,
+        created_at: datetime,
+        created_by_user_id: UUID | None = None,
+        notes: str | None = None,
+    ) -> SourceDomainRow:
+        """Normalize pattern, detect overlap in-transaction, insert.
+
+        Raises :exc:`eyenet.storage.errors.SourceDomainOverlapError` if the
+        candidate ``(pattern, pattern_kind)`` can match any hostname also
+        matched by an existing non-removed SourceDomain row (global across
+        all Sources — no ambiguous routing).
+
+        Raises :class:`ValueError` if ``pattern`` is not a valid hostname
+        (delegates to :func:`eyenet.util.domain.normalize_host`).
+        """
+
+    @abstractmethod
+    async def remove_source_domain(
+        self,
+        *,
+        domain_id: UUID,
+        removed_at: datetime,
+        removed_by_user_id: UUID,
+    ) -> SourceDomainRow:
+        """Soft-delete: set ``removed_at`` + ``removed_by_user_id``.
+
+        Row remains for audit. Re-adding the same pattern post-removal is
+        allowed (it's a new claim, fresh ``id``, fresh ``created_at``).
+        """
+
+    @abstractmethod
+    async def set_source_canonical_url(
+        self,
+        *,
+        source_id: UUID,
+        canonical_url: str | None,
+    ) -> SourceRow:
+        """Set or clear ``Source.canonical_url`` with primary-domain validation.
+
+        When ``canonical_url`` is not None, the URL's host (normalized via
+        :func:`eyenet.util.domain.normalize_host`) must fall under the
+        source's active primary :class:`SourceDomainRow`. Raises
+        :exc:`eyenet.storage.errors.SourceCanonicalUrlError` otherwise
+        with a stable ``reason`` tag (``invalid_url`` /
+        ``no_primary_domain`` / ``host_not_owned``).
+
+        Passing ``canonical_url=None`` always clears the field.
+        """
+
+    @abstractmethod
+    async def find_source_for_host(self, host: str) -> SourceDomainRow | None:
+        """Return the SourceDomain row owning ``host``, or ``None``.
+
+        ``host`` is normalized via :func:`eyenet.util.domain.normalize_host`
+        before lookup. Specificity order: ``exact`` > ``subdomain_wildcard``
+        > ``suffix_match``. Ties within a kind broken by ``created_at ASC``
+        (oldest claim wins).
+        """
+
+    # =================================================================
+    # COLLECTORS (MODELS §2.19, API_PLAN §4.11)
+    # =================================================================
+
+    @abstractmethod
+    async def create_collector(
+        self,
+        *,
+        instance_name: str,
+        kind: SourceKind,
+        source_id: UUID,
+        identity_id: UUID,
+        config: dict[str, Any],
+        created_at: datetime,
+        created_by_user_id: UUID,
+        notes: str | None = None,
+    ) -> CollectorRow:
+        """Insert a new :class:`CollectorRow`.
+
+        Fresh rows start with ``desired_state=STOPPED`` and
+        ``observed_state=STOPPED``. The operator transitions the
+        ``desired_state`` after creation (M9.D2's ``POST .../start``).
+
+        Raises :class:`IntegrityError` if ``identity_id`` is already
+        bound to another collector (one-to-one is enforced by the
+        column-level unique constraint per API_PLAN §4.11.3) or
+        ``instance_name`` collides.
+        """
+
+    @abstractmethod
+    async def get_collector(self, collector_id: UUID) -> CollectorRow | None:
+        """Return one collector row by id, or ``None``."""
+
+    @abstractmethod
+    async def list_collectors(self) -> list[CollectorRow]:
+        """Return every collector row. Order: ``created_at ASC``."""
+
+    @abstractmethod
+    async def set_collector_desired_state(
+        self,
+        *,
+        collector_id: UUID,
+        desired_state: CollectorDesiredState,
+    ) -> CollectorRow:
+        """Mutate ``desired_state`` (operator-initiated, API_PLAN §4.11.2).
+
+        ``observed_state`` is never written by this call — the supervisor
+        owns that column. Raises :class:`ValueError` if the collector
+        doesn't exist.
+        """
+
+    @abstractmethod
+    async def record_collector_observed_state(
+        self,
+        *,
+        collector_id: UUID,
+        observed_state: CollectorObservedState,
+        last_heartbeat_at: datetime | None = None,
+        last_error_type: str | None = None,
+        last_error_message: str | None = None,
+        restart_count: int | None = None,
+    ) -> CollectorRow:
+        """Supervisor-only write of ``observed_state`` and ancillary fields.
+
+        Fields left as ``None`` are NOT cleared — pass an explicit value
+        to overwrite. The exception is the ``last_error_*`` pair, which
+        is always written as a pair (both ``None`` clears, both set
+        records). Raises :class:`ValueError` if the collector doesn't
+        exist.
+        """
+
+    @abstractmethod
+    async def delete_collector(self, collector_id: UUID) -> None:
+        """Hard delete (API_PLAN §4.11 — ``DELETE`` row).
+
+        The API layer (M9.D2) gates this on
+        ``observed_state == stopped``; the storage layer just executes.
+        Raises :class:`ValueError` if the collector doesn't exist.
+        """
+
+    # =================================================================
+    # CANDIDATES (MODELS §2.20-2.21, API_PLAN §4.12, M9.C4)
+    # =================================================================
+
+    @abstractmethod
+    async def record_candidate_mention(
+        self,
+        *,
+        source_id: UUID,
+        platform_groupid: str,
+        observed_by_collector_id: UUID,
+        observed_in_group_id: UUID,
+        seed_root_id: UUID | None,
+        depth_from_root: int,
+        mention_evidence_ref: str,
+        mention_kind: MentionKind,
+        mentioned_at_source: datetime,
+        mentioned_at_ingest: datetime,
+        mentioning_actor_id: UUID,
+        mentioning_actor_role_signal: str | None = None,
+        kind_hint: GroupKind | None = None,
+        display_name_hint: str | None = None,
+    ) -> tuple[GroupCandidateRow, GroupCandidateMentionRow]:
+        """Upsert a GroupCandidate by ``(source_id, platform_groupid)`` and
+        append a mention provenance row.
+
+        The mention is idempotent: a second call with the same
+        ``(source_id + platform_groupid, mention_evidence_ref)`` returns the
+        existing rows without inserting a duplicate.
+        """
+
+    @abstractmethod
+    async def get_candidate(self, candidate_id: UUID) -> GroupCandidateRow | None:
+        """Return one GroupCandidateRow by id, or ``None``."""
+
+    @abstractmethod
+    async def list_queued_candidates(
+        self,
+        *,
+        source_id: UUID | None = None,
+    ) -> list[GroupCandidateRow]:
+        """Return QUEUED candidates ordered by score DESC.
+
+        Pass ``source_id`` to restrict to one Source; omit for all Sources.
+        """
+
+    @abstractmethod
+    async def transition_candidate(
+        self,
+        *,
+        candidate_id: UUID,
+        to_state: CandidateState,
+        reviewed_by: str | None = None,
+        reviewed_at: datetime | None = None,
+        rejection_reason: str | None = None,
+        assigned_collector_id: UUID | None = None,
+        resulting_group_id: UUID | None = None,
+    ) -> GroupCandidateRow:
+        """Apply a legal state transition to a GroupCandidate.
+
+        Raises :class:`ValueError` on an illegal transition or if the
+        candidate doesn't exist.
+        """
+
+    @abstractmethod
+    async def compute_eligibility_inputs(
+        self,
+        candidate_id: UUID,
+    ) -> EligibilityInputs:
+        """Return pre-computed eligibility inputs for ``candidate_id``.
+
+        Raises :class:`ValueError` if the candidate doesn't exist.
+        """
+
+    # =================================================================
+    # MEMBERSHIPS (MODELS §2.22-2.23, M9.C5)
+    # =================================================================
+
+    @abstractmethod
+    async def open_membership(
+        self,
+        *,
+        collector_id: UUID,
+        group_id: UUID,
+        joined_at: datetime,
+        joined_via: JoinedVia,
+        joined_via_candidate_id: UUID | None = None,
+    ) -> CollectorGroupMembershipRow:
+        """Record that a collector joined a group.
+
+        Raises :class:`ValueError` if the collector already has an active
+        (``left_at IS NULL``) membership for this group.
+        """
+
+    @abstractmethod
+    async def close_membership(
+        self,
+        *,
+        collector_id: UUID,
+        group_id: UUID,
+        left_at: datetime,
+        left_reason: str,
+    ) -> CollectorGroupMembershipRow:
+        """Mark a membership as departed (set ``left_at`` + ``left_reason``).
+
+        Raises :class:`ValueError` if no active membership exists.
+        """
+
+    @abstractmethod
+    async def list_active_memberships(
+        self,
+        *,
+        collector_id: UUID | None = None,
+        group_id: UUID | None = None,
+    ) -> list[CollectorGroupMembershipRow]:
+        """Return active memberships (``left_at IS NULL``).
+
+        Filter by ``collector_id`` to answer "what is this collector in?",
+        by ``group_id`` to answer "who is currently in this group?", or omit
+        both for all active memberships.
+        """
+
+    @abstractmethod
+    async def record_observation(
+        self,
+        *,
+        message_id: UUID,
+        collector_id: UUID,
+        observed_at_ingest: datetime,
+    ) -> MessageObservationRow:
+        """Record that a collector observed a message; set ``was_first_sighting``.
+
+        ``was_first_sighting`` is True iff this is the first call for this
+        ``message_id``. Idempotent on ``(message_id, collector_id)``.
+        """
+
+    # =================================================================
+    # ARTIFACTS (MODELS §2.7, §2.24, §2.25 bridge resolution, M9.C6)
+    # =================================================================
+
+    @abstractmethod
+    async def put_infrastructure_artifact(
+        self,
+        *,
+        kind: InfrastructureKind,
+        value: str,
+        first_seen_at_ingest: datetime,
+        last_seen_at_ingest: datetime,
+    ) -> InfrastructureArtifactRow:
+        """Upsert an InfrastructureArtifact and run §2.25 Path A inline.
+
+        Resolution against existing SourceDomain rows runs in the same
+        transaction; ``resolution_state`` + ``resolved_to_source_id`` are
+        set before COMMIT. Idempotent on ``value_hash``.
+        """
+
+    @abstractmethod
+    async def get_infrastructure_artifact(
+        self,
+        artifact_id: UUID,
+    ) -> InfrastructureArtifactRow | None:
+        """Return one InfrastructureArtifactRow by id, or ``None``."""
+
+    @abstractmethod
+    async def list_artifacts_for_source(
+        self,
+        source_id: UUID,
+    ) -> list[InfrastructureArtifactRow]:
+        """Return InfrastructureArtifacts resolved to ``source_id``."""
+
+    @abstractmethod
+    async def add_group_access_artifact(
+        self,
+        *,
+        subject_kind: ArtifactSubjectKind,
+        group_id: UUID | None,
+        candidate_id: UUID | None,
+        kind: GroupAccessKind,
+        value: str | None,
+        discovered_at_ingest: datetime,
+        details: dict[str, Any] | None = None,
+        discovered_via_mention_id: UUID | None = None,
+        validation_state: ArtifactValidationState | None = None,
+        requires_admin_approval: bool = False,
+        expires_at: datetime | None = None,
+    ) -> GroupAccessArtifactRow:
+        """Insert a GroupAccessArtifact (MODELS §2.24).
+
+        Exactly one of (group_id, candidate_id) must be populated; the CHECK
+        constraint at the SQL layer is the durable backstop.
+
+        ``validation_state`` defaults to ``UNVERIFIED`` when ``None``.
+        """
 
     # =================================================================
     # ESCAPE HATCH (collector-side custom transactions)

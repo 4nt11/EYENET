@@ -265,7 +265,6 @@ class MatrixCollector(CollectorSkeleton):
         self._source_uuid = await self._storage.upsert_source(
             kind=SourceKind.MATRIX,
             display_name=f"matrix:{entry.name}",
-            base_url=homeserver,
             created_at=datetime.now(tz=UTC),
         )
 

@@ -16,19 +16,24 @@ from eyenet.storage.repository import BaseRepository
 
 from ._helpers import safe_session
 from .actors import ActorsMixin
+from .artifacts import ArtifactsMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
+from .candidates import CandidatesMixin
 from .cases import CasesMixin
 from .clearance import ClearanceMixin
+from .collectors import CollectorsMixin
 from .corpus import CorpusMixin
 from .cursors import CursorsMixin
 from .feedback import FeedbackMixin
 from .graph import GraphMixin
 from .linkages import LinkagesMixin
+from .memberships import MembershipsMixin
 from .messages import MessagesMixin
 from .observations import ObservationsMixin
 from .personas import PersonasMixin
 from .profiles import ProfilesMixin
+from .sources import SourcesMixin
 from .syslog import SyslogMixin
 from .vectors import VectorsMixin
 
@@ -40,19 +45,24 @@ if TYPE_CHECKING:
 
 class SQLModelRepository(
     ActorsMixin,
+    ArtifactsMixin,
     AttachmentsMixin,
     AuditMixin,
+    CandidatesMixin,
     CasesMixin,
     ClearanceMixin,
+    CollectorsMixin,
     CorpusMixin,
     CursorsMixin,
     FeedbackMixin,
     GraphMixin,
     LinkagesMixin,
+    MembershipsMixin,
     MessagesMixin,
     ObservationsMixin,
     PersonasMixin,
     ProfilesMixin,
+    SourcesMixin,
     SyslogMixin,
     VectorsMixin,
     BaseRepository,

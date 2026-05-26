@@ -41,6 +41,11 @@ _MAIN_TABLES: frozenset[str] = frozenset(
     {
         # social / message graph
         "source",
+        "source_domain",
+        "group_candidate",
+        "group_candidate_mention",
+        "collector_group_membership",
+        "message_observation",
         "actor",
         "group_",
         "message",
@@ -52,8 +57,10 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "identity",
         "identity_label",
         "engagement_authorization",
+        "collector",
         "infrastructure_artifact",
         "actor_artifact",
+        "group_access_artifact",
         "system_user",
         # observations
         "observation",

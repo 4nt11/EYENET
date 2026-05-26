@@ -26,7 +26,6 @@ class ActorsMixin:
         *,
         kind: SourceKind,
         display_name: str,
-        base_url: str | None = None,
         created_at: datetime,
     ) -> UUID:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
@@ -41,7 +40,6 @@ class ActorsMixin:
                 row = SourceTable(
                     kind=kind,
                     display_name=display_name,
-                    base_url=base_url,
                     created_at=created_at,
                 )
                 session.add(row)
