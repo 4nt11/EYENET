@@ -22,9 +22,15 @@ recipe that the boot canary re-proves on every startup:
   NSS probes the absent nscd socket at startup); network *containment* is the
   empty net namespace's job, not seccomp's.
 
-The allowlist evolves per parser (a later slice straces pymupdf / Tesseract and
-extends it with thread-creating ``clone`` filtered to ``CLONE_THREAD``); any
-change is re-validated by the canary before normal mode is armed.
+One allowlist covers every parser. Empirically (strace under a real jail),
+pymupdf, python-docx, and Tesseract all run within this set **single-threaded** —
+their only would-be extra was thread creation, which on modern glibc routes
+through ``clone3``. ``clone3`` passes its flags behind a struct pointer, so
+seccomp cannot tell a thread (``CLONE_THREAD``) from a process spawn; allowing it
+would reopen process spawning. We therefore keep it KILLed and force parsers
+single-threaded via ``SINGLE_THREAD_ENV`` instead — preserving the no-spawn
+guarantee the canary proves. A parser that ignores the hint and tries ``clone3``
+fails *closed* (SIGSYS), never open.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 # uid/gid the jailed process is mapped to inside the user namespace. A high,
 # unallocated id that owns no files on any sane host (effectively "nobody").
@@ -43,8 +49,8 @@ SANDBOX_GID = 99999
 # The interpreter that runs extraction workers INSIDE the jail. It must live
 # under one of RUNTIME_BINDS. We use the system interpreter (not sys.executable,
 # which is usually a venv path outside /usr and therefore absent in the jail).
-# Stdlib-only workers run here; a later slice binds the venv site-packages for
-# parsers with C-extension dependencies.
+# Stdlib-only workers run here; the venv-backed workers add the venv
+# site-packages bind + PYTHONPATH (see _profiles), still on this interpreter.
 SANDBOX_INTERPRETER = "/usr/bin/python3"
 
 # Read-only runtime mounts: the interpreter, shared libraries, and the ELF
@@ -70,7 +76,7 @@ POLICY eyenet_extract {
     open, openat, prctl, pread64, prlimit64, read, readv, readlink,
     recvfrom, recvmsg, rseq, rt_sigaction, rt_sigprocmask, rt_sigreturn,
     sched_getaffinity, sched_yield, sendto, sendmsg, set_robust_list,
-    set_tid_address, socket, getsockname, getsockopt, setsockopt,
+    set_tid_address, socket, getsockname, getsockopt, setsockopt, shutdown,
     timerfd_create, timerfd_settime, write, writev, exit, exit_group,
     clock_gettime, clock_getres, clock_nanosleep, nanosleep, poll, ppoll,
     pselect6, pipe2, dup, dup2, dup3, newuname, sysinfo, sigaltstack,
@@ -79,6 +85,47 @@ POLICY eyenet_extract {
 }
 USE eyenet_extract DEFAULT KILL
 """
+
+# Environment that forces parser libraries to stay single-threaded. With these
+# set, pymupdf / Tesseract / numpy-BLAS never attempt clone3 thread creation, so
+# they run within the (process-spawn-free) base allowlist. A library that ignores
+# the hint and tries to spawn a thread anyway hits DEFAULT KILL → fail closed.
+SINGLE_THREAD_ENV: tuple[tuple[str, str], ...] = (
+    ("OMP_THREAD_LIMIT", "1"),
+    ("OMP_NUM_THREADS", "1"),
+    ("OPENBLAS_NUM_THREADS", "1"),
+    ("MKL_NUM_THREADS", "1"),
+)
+
+# The dedicated parser venv (built by setup; see README §"Document Classifier").
+# A box that never extracts may lack it — missing => the affected formats fail
+# closed at dispatch, not a global degrade. The env override lets an operator
+# relocate it; the in-jail mount points are fixed so workers reference one path.
+DEFAULT_EXTRACT_VENV = "/opt/eyenet/extract-venv"
+EXTRACT_VENV_ENV = "EYENET_EXTRACT_VENV"
+VENV_SITE_DEST = "/site"  # where the venv's site-packages is bound (RO) in-jail
+TESSDATA_DEST = "/tessdata"  # where Tesseract language data is bound (RO) in-jail
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxProfile:
+    """A least-privilege execution recipe for one class of extraction worker.
+
+    The default profile is the stdlib-only Python worker with no extra binds —
+    i.e. exactly the Slice-1 behaviour. Parser classes that need more (the venv on
+    ``PYTHONPATH``, Tesseract's own entrypoint, single-thread env) carry only the
+    additional binds/env they require. All profiles share the one base seccomp
+    allowlist — privilege is added through binds and env, never new syscalls.
+    """
+
+    name: str
+    extra_ro_binds: tuple[tuple[str, str], ...] = ()  # (host_src, jail_dest) pairs
+    env: tuple[tuple[str, str], ...] = ()  # (key, value) — rendered as --env K=V
+    entrypoint: tuple[str, ...] | None = None  # None => [interpreter, /worker.py, *args]
+
+
+# The Slice-1 default: stdlib Python worker, base allowlist, no extra binds.
+STDLIB_PROFILE = SandboxProfile(name="stdlib")
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,17 +162,28 @@ def render_nsjail_argv(
     *,
     nsjail_path: str,
     jail_root: str,
-    worker_path: str,
+    worker_path: str | None,
     input_path: str | None,
     limits: SandboxLimits,
     worker_args: Sequence[str] = (),
     interpreter: str = SANDBOX_INTERPRETER,
+    entrypoint: Sequence[str] | None = None,
+    extra_ro_binds: Sequence[tuple[str, str]] = (),
+    env: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Build the full, shell-free nsjail argv for one extraction run.
 
     Every element is controlled by EYENET — the untrusted bytes travel in the
     bind-mounted ``input_path`` file, never on the command line. ``jail_root``
     is a caller-owned empty directory used as the throwaway tmpfs root.
+
+    The defaults reproduce the Slice-1 recipe exactly (stdlib Python worker,
+    ``/usr`` + ``/lib64`` only). The optional knobs carry the per-parser privilege
+    a profile needs: ``extra_ro_binds`` for the venv site-packages or Tesseract
+    data, ``env`` for ``PYTHONPATH`` / ``TESSDATA_PREFIX`` / single-thread limits,
+    and ``entrypoint`` for a non-Python command (Tesseract runs as its own jail
+    entrypoint — we cannot shell out to it from Python because process spawning is
+    killed). All runs share the one base seccomp allowlist.
     """
     argv: list[str] = [
         nsjail_path,
@@ -150,10 +208,18 @@ def render_nsjail_argv(
         "--seccomp_string",
         SECCOMP_ALLOWLIST,
     ]
+    for key, value in (env or {}).items():
+        argv += ["--env", f"{key}={value}"]
     for src in RUNTIME_BINDS:
         argv += ["--bindmount_ro", src]
-    argv += ["--bindmount_ro", f"{worker_path}:{WORKER_DEST}"]
+    for src, dest in extra_ro_binds:
+        argv += ["--bindmount_ro", f"{src}:{dest}"]
+    if worker_path is not None:
+        argv += ["--bindmount_ro", f"{worker_path}:{WORKER_DEST}"]
     if input_path is not None:
         argv += ["--bindmount_ro", f"{input_path}:{INPUT_DEST}"]
-    argv += ["--", interpreter, WORKER_DEST, *worker_args]
+    if entrypoint is not None:
+        argv += ["--", *entrypoint]
+    else:
+        argv += ["--", interpreter, WORKER_DEST, *worker_args]
     return argv

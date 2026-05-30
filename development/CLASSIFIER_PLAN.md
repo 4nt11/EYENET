@@ -205,12 +205,24 @@ if tier < CLASSIFIED:
     network, so spaCy `es_core_news_sm` auto-fetch and Tesseract `tessdata`
     CANNOT download in-jail. Provision them in setup.
   - **Tesseract runs as its OWN jail entrypoint** (`nsjail -- tesseract …`), not
-    via an in-jail `exec` from python (we block `clone`). python-docx / pymupdf
-    are pure imports under the python worker.
-  - **Threaded libs** (spaCy/numpy/BLAS) need `clone` re-added to the allowlist
-    **arg-filtered to `CLONE_THREAD`** so thread creation passes but spawning a
-    process still SIGSYS-dies. Per parser: strace in-jail, extend allowlist,
-    re-run the canary before arming.
+    via an in-jail `exec` from python (we block process spawning). python-docx /
+    pymupdf are pure imports under the python worker; Tesseract's raw stdout is
+    read directly (`interpret="raw_text"`).
+  - **Single-thread, not threaded-allowlist (slice-2 empirical reversal).** The
+    plan was to re-add `clone` arg-filtered to `CLONE_THREAD`. Strace on glibc
+    2.40 (Fedora, py3.14) proved this impossible: `pthread_create` routes through
+    **`clone3`**, whose flags sit behind a struct pointer that seccomp cannot
+    dereference — so a thread (`CLONE_THREAD`) is indistinguishable from a process
+    spawn (`CLONE_VFORK`+`SIGCHLD`), and allowing `clone3` would reopen process
+    spawning. Resolution: keep `clone`/`clone3`/`fork`/`vfork` **all KILLed** and
+    force parsers single-threaded via env (`OMP_THREAD_LIMIT=1`,
+    `OMP/OPENBLAS/MKL_NUM_THREADS=1`). Verified end-to-end: pymupdf text, python-docx,
+    and Tesseract OCR all run within the **one base allowlist** single-threaded;
+    the Slice-1 no-spawn guarantee is fully preserved (canary unchanged). A parser
+    that ignores the hint and tries `clone3` fails *closed* (SIGSYS). Only added
+    syscall vs Slice 1: `shutdown` (benign socket teardown python-docx uses;
+    same safe class as the socket calls already allowed — netns is the network
+    containment, not seccomp).
 
 ---
 
@@ -230,8 +242,19 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    stdout (output-bomb guard) + abnormal-exit-fails-closed in the runner. 62 tests
    (pure-logic via fakes + real-nsjail integration proof).
 2. **Extraction adapters** (behind the chokepoint) — magic-byte type sniff;
-   Tesseract / pymupdf / python-docx / text-rtf-html; embedded-image OCR;
-   text-layer-vs-render mismatch flag; all → `ExtractResult | FAILED_CLOSED`.
+   Tesseract / pymupdf / python-docx / text-rtf-html; all → `ExtractResult |
+   FAILED_CLOSED`. **SHIPPED (single-pass)** as `eyenet/classifier/extract/`:
+   pure-Python magic-byte `sniff()` (content, never extension) → `DocKind`;
+   per-kind `SandboxProfile` (stdlib / venv-on-PYTHONPATH / Tesseract-entrypoint),
+   all single-threaded under the one base allowlist; shipped `_workers/*.py`
+   scripts (bind-mounted, never imported, excluded from lint/type/cov);
+   `extract_document()` normalizes `meta` (`doc_kind`/`method`/`ocr_applied`/
+   `empty`) and fails closed on unknown type / missing extractor / parser
+   crash-kill-timeout. **Embedded-image OCR + text-layer-vs-render mismatch
+   DEFERRED to slice 2b** (operator decision: both need a jail→host channel for
+   jail-*derived* images — an RW bind that widens the boundary — so they earn
+   their own commit). Unit (sniff/dispatch/profiles/chokepoint via fakes) +
+   real-nsjail integration (PDF/DOCX/OCR/encrypted-pdf/unknown).
 3. **Regex ruleset engine** — versioned data rules → tier floors; deterministic
    spine; per-match provenance.
 4. **Presidio wiring** — locale-aware via the existing spaCy dep; PII type+density

@@ -22,7 +22,14 @@ from ._chokepoint import (
     reset_sandbox,
     sandbox_state,
 )
-from ._policy import DEFAULT_LIMITS, SandboxLimits
+from ._policy import DEFAULT_LIMITS, SandboxLimits, SandboxProfile
+from ._profiles import (
+    discover_tesseract,
+    resolve_extract_venv,
+    stdlib_profile,
+    tesseract_profile,
+    venv_profile,
+)
 from ._types import (
     CanaryProbeResult,
     ExtractResult,
@@ -42,14 +49,20 @@ __all__ = [
     "FailedClosed",
     "SandboxLimits",
     "SandboxOutcome",
+    "SandboxProfile",
     "SandboxState",
     "SandboxStatus",
     "SandboxVerification",
     "arm_sandbox",
     "current_verification",
     "discover_nsjail",
+    "discover_tesseract",
     "extract_sandboxed",
     "reset_sandbox",
+    "resolve_extract_venv",
     "sandbox_state",
+    "stdlib_profile",
+    "tesseract_profile",
+    "venv_profile",
     "verify_sandbox",
 ]

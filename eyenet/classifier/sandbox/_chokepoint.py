@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from ._canary import verify_sandbox
-from ._policy import DEFAULT_LIMITS, SandboxLimits
+from ._policy import DEFAULT_LIMITS, STDLIB_PROFILE, SandboxLimits, SandboxProfile
 from ._runner import run_sandboxed
 from ._types import (
     ExtractResult,
@@ -37,6 +37,7 @@ from ._types import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Literal
 
 _log = structlog.get_logger()
 
@@ -144,9 +145,18 @@ def _parse_envelope(stdout: bytes) -> ExtractResult | None:
     return ExtractResult(text=text, meta=meta)
 
 
-def _interpret_extraction(outcome: SandboxOutcome) -> ExtractResult | FailedClosed:
-    """Turn a sandbox outcome into a trusted result or a reasoned fail-closed."""
+def _interpret_extraction(
+    outcome: SandboxOutcome, interpret: Literal["envelope", "raw_text"] = "envelope"
+) -> ExtractResult | FailedClosed:
+    """Turn a sandbox outcome into a trusted result or a reasoned fail-closed.
+
+    ``envelope`` decodes a Python worker's ``{"text","meta"}`` stdout. ``raw_text``
+    wraps the whole stdout as the extracted text — for a non-Python entrypoint
+    (Tesseract) whose stdout *is* the OCR result and cannot speak our envelope.
+    """
     if outcome.status is SandboxStatus.OK:
+        if interpret == "raw_text":
+            return ExtractResult(text=outcome.stdout.decode("utf-8", "replace"), meta={})
         result = _parse_envelope(outcome.stdout)
         if result is None:
             return FailedClosed(
@@ -167,17 +177,28 @@ def _interpret_extraction(outcome: SandboxOutcome) -> ExtractResult | FailedClos
 def extract_sandboxed(
     blob: bytes,
     *,
-    worker_path: str,
+    worker_path: str | None = None,
     worker_args: Sequence[str] = (),
     limits: SandboxLimits = DEFAULT_LIMITS,
+    profile: SandboxProfile = STDLIB_PROFILE,
+    interpret: Literal["envelope", "raw_text"] = "envelope",
 ) -> ExtractResult | FailedClosed:
     """Extract text from an untrusted blob via the jailed worker.
 
     Returns :class:`ExtractResult` only on a clean jail exit with a valid
-    envelope. Every other path — degraded gate, launch failure, crash, signal,
-    timeout, output bomb, garbage output — returns :class:`FailedClosed`, which
-    the classifier maps to the highest sensitivity tier plus an operator flag.
+    envelope (or raw stdout, for ``interpret="raw_text"``). Every other path —
+    degraded gate, launch failure, crash, signal, timeout, output bomb, garbage
+    output — returns :class:`FailedClosed`, which the classifier maps to the
+    highest sensitivity tier plus an operator flag.
+
+    ``profile`` selects the least-privilege recipe (allowlist, extra RO binds,
+    env, entrypoint). The default is the Slice-1 stdlib Python worker, which
+    requires ``worker_path``. A profile carrying its own ``entrypoint``
+    (Tesseract) runs without a Python worker.
     """
+    if profile.entrypoint is None and worker_path is None:
+        raise ValueError("extract_sandboxed needs a worker_path or a profile entrypoint")
+
     if _GATE.state is not SandboxState.HEALTHY or _GATE.nsjail_path is None:
         return FailedClosed(
             reason=FailReason.SANDBOX_DEGRADED,
@@ -197,5 +218,8 @@ def extract_sandboxed(
             input_path=str(input_path),
             limits=limits,
             worker_args=worker_args,
+            entrypoint=profile.entrypoint,
+            extra_ro_binds=profile.extra_ro_binds,
+            env=dict(profile.env),
         )
-    return _interpret_extraction(outcome)
+    return _interpret_extraction(outcome, interpret)

@@ -99,6 +99,8 @@ class FailReason(enum.Enum):
     TIMEOUT = "timeout"  # exceeded the time budget
     OUTPUT_OVERFLOW = "output_overflow"  # decompression / output bomb
     BAD_OUTPUT = "bad_output"  # exited 0 but emitted unparseable garbage
+    UNSUPPORTED_TYPE = "unsupported_type"  # magic-byte sniff could not route the blob
+    EXTRACTOR_UNAVAILABLE = "extractor_unavailable"  # required venv/binary missing on host
 
 
 @dataclass(frozen=True, slots=True)

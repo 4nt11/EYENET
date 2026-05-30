@@ -9,6 +9,7 @@ from eyenet.classifier.sandbox._policy import (
     RUNTIME_BINDS,
     SANDBOX_GID,
     SANDBOX_UID,
+    SECCOMP_ALLOWLIST,
     WORKER_DEST,
     SandboxLimits,
     render_nsjail_argv,
@@ -67,3 +68,43 @@ def test_limits_reject_parent_timeout_not_exceeding_jail_limit() -> None:
 def test_limits_reject_nonpositive() -> None:
     with pytest.raises(ValueError, match="positive"):
         SandboxLimits(rlimit_as_mb=0)
+
+
+def test_one_allowlist_never_permits_process_or_thread_creation() -> None:
+    # The single base allowlist must never permit spawning or thread creation —
+    # clone3 (modern thread/spawn) and the classic clone/fork/vfork all stay out,
+    # so parsers run single-threaded with no in-jail process spawn. This is the
+    # property the boot canary proves at runtime.
+    for banned in ("clone", "clone3", "fork", "vfork", "ptrace", "mount", "bpf"):
+        assert f" {banned}," not in SECCOMP_ALLOWLIST
+        assert f" {banned}\n" not in SECCOMP_ALLOWLIST
+
+
+def test_argv_entrypoint_overrides_python_worker() -> None:
+    argv = render_nsjail_argv(
+        nsjail_path="/n",
+        jail_root="/r",
+        worker_path=None,  # Tesseract has no Python worker
+        input_path="in.bin",
+        limits=SandboxLimits(),
+        entrypoint=("/usr/bin/tesseract", INPUT_DEST, "stdout", "-l", "eng"),
+    )
+    # The entrypoint is the tail; no Python worker is mounted.
+    tail = argv[argv.index("--") + 1 :]
+    assert tail == ["/usr/bin/tesseract", INPUT_DEST, "stdout", "-l", "eng"]
+    assert not any(WORKER_DEST in part for part in argv)
+    assert f"in.bin:{INPUT_DEST}" in argv
+
+
+def test_argv_renders_extra_binds_and_env() -> None:
+    argv = render_nsjail_argv(
+        nsjail_path="/n",
+        jail_root="/r",
+        worker_path="/w.py",
+        input_path=None,
+        limits=SandboxLimits(),
+        extra_ro_binds=(("/opt/venv/site", "/site"),),
+        env={"PYTHONPATH": "/site"},
+    )
+    assert "/opt/venv/site:/site" in argv
+    assert "--env" in argv and "PYTHONPATH=/site" in argv

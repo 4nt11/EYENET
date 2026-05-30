@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import pytest
 
 from eyenet.classifier.sandbox import _chokepoint as cp
+from eyenet.classifier.sandbox._policy import SandboxProfile
 from eyenet.classifier.sandbox._types import (
     ExtractResult,
     FailedClosed,
@@ -91,6 +92,12 @@ def test_interpret_ok_garbage_is_bad_output() -> None:
     assert isinstance(res, FailedClosed) and res.reason is FailReason.BAD_OUTPUT
 
 
+def test_interpret_raw_text_wraps_stdout() -> None:
+    # Tesseract's raw stdout IS the text — no envelope to parse.
+    res = cp._interpret_extraction(_outcome(SandboxStatus.OK, stdout=b"SECRET OCR"), "raw_text")
+    assert isinstance(res, ExtractResult) and res.text == "SECRET OCR" and res.meta == {}
+
+
 @pytest.mark.parametrize(
     ("status", "reason"),
     [
@@ -173,3 +180,34 @@ def test_extract_healthy_failedclosed_on_kill(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(cp, "run_sandboxed", lambda **_k: _outcome(SandboxStatus.KILLED_SIGNAL))
     res = cp.extract_sandboxed(b"x", worker_path="worker.py")
     assert isinstance(res, FailedClosed) and res.reason is FailReason.PARSER_KILLED
+
+
+def test_extract_rejects_missing_worker_and_entrypoint() -> None:
+    # The default stdlib profile has no entrypoint, so a worker_path is required.
+    with pytest.raises(ValueError, match="worker_path or a profile entrypoint"):
+        cp.extract_sandboxed(b"x")
+
+
+def test_extract_forwards_profile_and_raw_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cp, "verify_sandbox", lambda **_k: _verification(True))
+    cp.arm_sandbox()
+    seen: dict[str, object] = {}
+
+    def fake_run(**kw: object) -> SandboxOutcome:
+        seen.update(kw)
+        return _outcome(SandboxStatus.OK, stdout=b"SECRET OCR ALPHA")
+
+    monkeypatch.setattr(cp, "run_sandboxed", fake_run)
+    profile = SandboxProfile(
+        name="tesseract",
+        extra_ro_binds=(("/host/tessdata", "/tessdata"),),
+        env=(("TESSDATA_PREFIX", "/tessdata"),),
+        entrypoint=("/usr/bin/tesseract", "/input", "stdout", "-l", "eng"),
+    )
+    # No worker_path: the profile carries its own entrypoint.
+    res = cp.extract_sandboxed(b"img", profile=profile, interpret="raw_text")
+    assert isinstance(res, ExtractResult) and res.text == "SECRET OCR ALPHA"
+    assert seen["worker_path"] is None
+    assert seen["entrypoint"] == ("/usr/bin/tesseract", "/input", "stdout", "-l", "eng")
+    assert seen["extra_ro_binds"] == (("/host/tessdata", "/tessdata"),)
+    assert seen["env"] == {"TESSDATA_PREFIX": "/tessdata"}

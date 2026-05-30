@@ -33,7 +33,7 @@ from ._policy import SandboxLimits, render_nsjail_argv
 from ._types import SandboxOutcome, SandboxStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 _log = structlog.get_logger()
 
@@ -166,17 +166,21 @@ def run_sandboxed(
     *,
     nsjail_path: str,
     jail_root: str,
-    worker_path: str,
+    worker_path: str | None,
     input_path: str | None,
     limits: SandboxLimits,
     worker_args: Sequence[str] = (),
+    entrypoint: Sequence[str] | None = None,
+    extra_ro_binds: Sequence[tuple[str, str]] = (),
+    env: Mapping[str, str] | None = None,
 ) -> SandboxOutcome:
     """Run one extraction worker inside the jail and report how it terminated.
 
     Never raises on workload misbehaviour — a crash, signal, timeout, or output
     bomb is returned as a non-``OK`` :class:`SandboxOutcome`. Only genuinely
     unexpected parent-side errors (which the caller treats as fail-closed)
-    propagate.
+    propagate. The profile knobs (``entrypoint`` / ``extra_ro_binds`` / ``env``)
+    default to the Slice-1 stdlib recipe.
     """
     argv = render_nsjail_argv(
         nsjail_path=nsjail_path,
@@ -185,6 +189,9 @@ def run_sandboxed(
         input_path=input_path,
         limits=limits,
         worker_args=worker_args,
+        entrypoint=entrypoint,
+        extra_ro_binds=extra_ro_binds,
+        env=env,
     )
     started = time.monotonic()
     try:
