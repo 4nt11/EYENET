@@ -54,9 +54,6 @@ SYSLOG_ALLOWLIST: frozenset[str] = frozenset(
         # Persona aggregation
         "persona.merged",
         "persona.split",
-        # Query API lifecycle
-        "query_api.started",
-        "query_api.stopped",
     }
 )
 

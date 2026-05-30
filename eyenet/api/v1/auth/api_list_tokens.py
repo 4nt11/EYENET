@@ -3,44 +3,16 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.exceptions import RequestValidationError
 
 from eyenet.api.deps import CurrentUser, get_current_user, get_storage
+from eyenet.api.deps_paging import decode_cursor, encode_cursor
 from eyenet.api.v1.schemas.auth import CursorPagePATSummary, PATSummary
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["auth"])
-
-
-def _encode_cursor(offset: int) -> str:
-    """Opaque base64url cursor over an integer offset (newest-first page)."""
-    return base64.urlsafe_b64encode(str(offset).encode("ascii")).decode("ascii")
-
-
-def _decode_cursor(cursor: str | None) -> int:
-    """Decode the opaque cursor to a non-negative offset; 0 when absent.
-
-    A malformed cursor is a client error → 422 (reuses the app's
-    RequestValidationError → problem+json handler).
-    """
-    if cursor is None:
-        return 0
-    try:
-        offset = int(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("ascii"))
-    except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
-        raise RequestValidationError(
-            [{"loc": ("query", "cursor"), "msg": "malformed cursor", "type": "value_error"}],
-        ) from exc
-    if offset < 0:
-        raise RequestValidationError(
-            [{"loc": ("query", "cursor"), "msg": "malformed cursor", "type": "value_error"}],
-        )
-    return offset
 
 
 @router.get(
@@ -56,7 +28,7 @@ async def auth_list_tokens(
     limit: int = Query(default=50, ge=1, le=200),
     include_total: bool = Query(default=False),
 ) -> CursorPagePATSummary:
-    offset = _decode_cursor(cursor)
+    offset = decode_cursor(cursor)
     # Over-fetch by one to detect a further page without a second query.
     rows = await storage.list_personal_access_tokens(
         user_id=current_user.user_id,
@@ -83,6 +55,6 @@ async def auth_list_tokens(
             )
             for r in page
         ],
-        next_cursor=_encode_cursor(offset + limit) if has_more else None,
+        next_cursor=encode_cursor(offset + limit) if has_more else None,
         estimated_total=estimated_total,
     )

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from opentelemetry import trace
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlmodel import col, select
 
 from eyenet.models.graph import (
@@ -127,6 +127,42 @@ class GraphMixin:
             result = await session.exec(stmt)
             rows = list(result)
         return [(r.dst_id, r.edge_type.value, dict(r.attrs)) for r in rows]
+
+    async def graph_neighbor_edges(
+        self,
+        node_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Outbound edges from a node as ``GraphEdgeTable`` rows (M9.F1).
+
+        Unlike ``graph_neighbors`` (which flattens to tuples), this returns
+        the rows so the typed-edge API projector (``LinkedToEdge.from_domain``
+        / ``BelongsToPersonaEdge.from_domain``) can consume them. Ordered by
+        id (UUIDv7, creation order) for a stable cursor.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(GraphEdgeTable)
+                .where(col(GraphEdgeTable.src_id) == node_id)
+                .order_by(col(GraphEdgeTable.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def count_graph_neighbors(self, node_id: UUID) -> int:
+        """Count outbound edges from a node (M9.F1)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(func.count())
+                .select_from(GraphEdgeTable)
+                .where(col(GraphEdgeTable.src_id) == node_id)
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def graph_edges_by_type(
         self,

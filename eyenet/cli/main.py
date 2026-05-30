@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -445,38 +444,6 @@ def graph_run(  # pragma: no cover
 
     cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
     _run(lambda bus, storage: Graph(bus=bus, storage=storage), cfg)
-
-
-@app.command("graph-api")
-def graph_api_serve(  # pragma: no cover
-    host: str = typer.Option("127.0.0.1", "--host", help="bind address"),
-    port: int = typer.Option(8765, "--port"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
-) -> None:
-    """Serve the read-only graph query API (FastAPI + uvicorn)."""
-
-    import uvicorn  # noqa: PLC0415
-
-    allow_public = os.environ.get("EYENET_QUERY_API_ALLOW_PUBLIC", "0") == "1"
-    if host == "0.0.0.0" and not allow_public:  # noqa: S104  # nosec B104  # pragma: allowlist secret
-        typer.echo(
-            "WARNING: refusing public bind without EYENET_QUERY_API_ALLOW_PUBLIC=1", err=True
-        )
-        raise typer.Exit(code=1)
-    if host != "127.0.0.1":
-        typer.echo(
-            f"WARNING: binding query API to {host} — set only if operator-only network", err=True
-        )
-
-    cfg = RuntimeConfig.from_env(data_dir=data_dir)
-    storage = get_repository(data_dir=cfg.data_dir)
-
-    from eyenet.query_api.app import create_app  # noqa: PLC0415
-
-    api_app = create_app(storage)
-
-    typer.echo(f"EYENET query API listening on http://{host}:{port}")
-    uvicorn.run(api_app, host=host, port=port, log_level="info")
 
 
 @app.command("panic")

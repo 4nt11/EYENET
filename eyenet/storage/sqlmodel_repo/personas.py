@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -207,6 +208,46 @@ class PersonasMixin:
             )
             rows = list(result)
         return [r.actor_id for r in rows]
+
+    async def list_persona_memberships(
+        self,
+        persona_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Membership rows for a persona, oldest-join-first (M9.F1).
+
+        Returns ``PersonaMembershipTable`` rows (type-erased to ``object``) so
+        the members projector can surface ``joined_at`` and ``via_linkage_id``
+        — richer than ``persona_members`` which yields only actor ids.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(PersonaMembershipTable)
+                .where(col(PersonaMembershipTable.persona_id) == persona_id)
+                .order_by(col(PersonaMembershipTable.joined_at))
+                .order_by(col(PersonaMembershipTable.actor_id))
+                .limit(limit)
+                .offset(offset)
+            )
+            return list(result)
+
+    async def count_persona_memberships(self, persona_id: UUID) -> int:
+        """Count membership rows for a persona (M9.F1)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(func.count())
+                .select_from(PersonaMembershipTable)
+                .where(col(PersonaMembershipTable.persona_id) == persona_id)
+            )
+            return int(result.one())
+
+    async def count_personas(self) -> int:
+        """Total number of personas (M9.F3 graph stats)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(PersonaTable))
+            return int(result.one())
 
     async def all_personas(self) -> list[object]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]

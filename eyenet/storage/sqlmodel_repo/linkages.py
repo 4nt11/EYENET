@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from opentelemetry import trace
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from eyenet.contracts.attribution import LinkageRow
@@ -147,26 +148,78 @@ class LinkagesMixin:
             row = await session.get(LinkageTable, linkage_id)
             return _row_to_contract(row) if row is not None else None
 
+    def _linkage_filters(
+        self,
+        stmt: Any,
+        *,
+        actor_id: UUID | None,
+        state: object | None,
+        method: str | None,
+        since: datetime | None,
+        until: datetime | None,
+    ) -> Any:
+        """Apply the shared WHERE clauses for list/count (M9.F2)."""
+        if actor_id is not None:
+            stmt = stmt.where(
+                (col(LinkageTable.actor_a_id) == actor_id)
+                | (col(LinkageTable.actor_b_id) == actor_id)
+            )
+        if state is not None:
+            stmt = stmt.where(col(LinkageTable.state) == LinkageState(str(state)))
+        if method is not None:
+            stmt = stmt.where(col(LinkageTable.method) == method)
+        if since is not None:
+            stmt = stmt.where(col(LinkageTable.proposed_at) >= since)
+        if until is not None:
+            stmt = stmt.where(col(LinkageTable.proposed_at) < until)
+        return stmt
+
     async def list_linkages(
         self,
         actor_id: UUID | None = None,
         state: object | None = None,
         limit: int = 100,
         offset: int = 0,
+        *,
+        method: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
     ) -> list[object]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(LinkageTable)
-            if actor_id is not None:
-                stmt = stmt.where(
-                    (col(LinkageTable.actor_a_id) == actor_id)
-                    | (col(LinkageTable.actor_b_id) == actor_id)
-                )
-            if state is not None:
-                stmt = stmt.where(col(LinkageTable.state) == LinkageState(str(state)))
+            stmt = self._linkage_filters(
+                select(LinkageTable),
+                actor_id=actor_id,
+                state=state,
+                method=method,
+                since=since,
+                until=until,
+            )
             stmt = stmt.order_by(col(LinkageTable.proposed_at).desc()).offset(offset).limit(limit)
             result = await session.exec(stmt)
             rows = list(result)
         return [_row_to_contract(r) for r in rows]
+
+    async def count_linkages(
+        self,
+        actor_id: UUID | None = None,
+        state: object | None = None,
+        *,
+        method: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int:
+        """Count linkages matching the same filters as list_linkages (M9.F2)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._linkage_filters(
+                select(func.count()).select_from(LinkageTable),
+                actor_id=actor_id,
+                state=state,
+                method=method,
+                since=since,
+                until=until,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def confirmed_linkage_pairs(self) -> list[tuple[UUID, UUID]]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]

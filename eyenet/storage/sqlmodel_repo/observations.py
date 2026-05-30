@@ -8,6 +8,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from opentelemetry import trace
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from eyenet.contracts.audit_subjects import AuditSubject
@@ -58,6 +59,63 @@ class ObservationsMixin:
             )
             result = await session.exec(stmt)
             return list(result)
+
+    async def observations_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Observations attributable to an actor, newest-first (M9.F1).
+
+        Optional half-open time window on ``observed_at`` (``since <= ts``,
+        ``ts < until``). Returns ``ObservationTable`` rows for the API
+        projector; type-erased to ``object`` to keep ORM types off the ABC.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(ObservationTable).where(ObservationTable.actor_id == actor_id)
+            if since is not None:
+                stmt = stmt.where(col(ObservationTable.observed_at) >= since)
+            if until is not None:
+                stmt = stmt.where(col(ObservationTable.observed_at) < until)
+            stmt = (
+                stmt.order_by(col(ObservationTable.observed_at).desc())
+                .order_by(col(ObservationTable.id).desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def count_observations_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int:
+        """Count observations for an actor, with the same optional window (M9.F1)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(func.count())
+                .select_from(ObservationTable)
+                .where(ObservationTable.actor_id == actor_id)
+            )
+            if since is not None:
+                stmt = stmt.where(col(ObservationTable.observed_at) >= since)
+            if until is not None:
+                stmt = stmt.where(col(ObservationTable.observed_at) < until)
+            result = await session.exec(stmt)
+            return int(result.one())
+
+    async def count_observations(self) -> int:
+        """Total number of observations across all actors (M9.F3 graph stats)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(ObservationTable))
+            return int(result.one())
 
     async def observation_by_evidence_and_primitive(
         self,

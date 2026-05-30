@@ -87,6 +87,29 @@ class BaseRepository(ABC):
     async def all_audit(self) -> list[AuditLogRow]:
         """Return the full audit chain in rowid (= INSERT-commit) order."""
 
+    @abstractmethod
+    async def list_audit(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        user: UUID | None = None,
+        subject: str | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Filtered, paginated audit rows newest-first (AuditLogRow). (M9.F4)"""
+
+    @abstractmethod
+    async def count_audit(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        user: UUID | None = None,
+        subject: str | None = None,
+    ) -> int: ...
+
     # =================================================================
     # SYSLOG (PLAN §9.5)
     # =================================================================
@@ -358,6 +381,31 @@ class BaseRepository(ABC):
     ) -> object | None: ...
 
     @abstractmethod
+    async def observations_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Observations for an actor, newest-first, with optional time window.
+        Returns ObservationTable rows (type-erased). (M9.F1)"""
+
+    @abstractmethod
+    async def count_observations_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
+
+    @abstractmethod
+    async def count_observations(self) -> int: ...
+
+    @abstractmethod
     async def reclassify_observation(
         self,
         *,
@@ -431,6 +479,28 @@ class BaseRepository(ABC):
     ) -> list[str]:
         """Return up to ``limit`` recent non-empty bodies for an actor,
         oldest-first. Used by the Verifier window-corpus loader."""
+
+    @abstractmethod
+    async def messages_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Messages sent by an actor, newest-first, with optional time window.
+        Returns MessageTable rows (type-erased) for the timeline. (M9.F1)"""
+
+    @abstractmethod
+    async def count_messages_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
 
     @abstractmethod
     async def resolve_message_id(
@@ -590,6 +660,20 @@ class BaseRepository(ABC):
     ) -> list[tuple[UUID, str, dict[str, object]]]: ...
 
     @abstractmethod
+    async def graph_neighbor_edges(
+        self,
+        node_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Outbound edges from a node as GraphEdgeTable rows (type-erased),
+        for the typed-edge neighbor projector. (M9.F1)"""
+
+    @abstractmethod
+    async def count_graph_neighbors(self, node_id: UUID) -> int: ...
+
+    @abstractmethod
     async def graph_edges_by_type(
         self,
         edge_type: str,
@@ -635,7 +719,22 @@ class BaseRepository(ABC):
         state: object | None = None,
         limit: int = 100,
         offset: int = 0,
+        *,
+        method: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
     ) -> list[object]: ...
+
+    @abstractmethod
+    async def count_linkages(
+        self,
+        actor_id: UUID | None = None,
+        state: object | None = None,
+        *,
+        method: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
 
     @abstractmethod
     async def confirmed_linkage_pairs(self) -> list[tuple[UUID, UUID]]: ...
@@ -666,6 +765,23 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def persona_members(self, persona_id: UUID) -> list[UUID]: ...
+
+    @abstractmethod
+    async def list_persona_memberships(
+        self,
+        persona_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Membership rows for a persona, oldest-join-first (type-erased
+        PersonaMembershipTable rows) for the members projector. (M9.F1)"""
+
+    @abstractmethod
+    async def count_persona_memberships(self, persona_id: UUID) -> int: ...
+
+    @abstractmethod
+    async def count_personas(self) -> int: ...
 
     @abstractmethod
     async def all_personas(self) -> list[object]: ...
@@ -742,6 +858,25 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
+
+    @abstractmethod
+    async def get_actor(self, actor_id: UUID) -> object | None:
+        """Return the ActorRow for a primary-key id, or None (M9.F1)."""
+
+    @abstractmethod
+    async def get_source(self, source_id: UUID) -> object | None:
+        """Return the SourceRow for a primary-key id, or None (M9.F1)."""
+
+    @abstractmethod
+    async def count_actors(self) -> int: ...
+
+    @abstractmethod
+    async def search_actors(self, q: str, *, limit: int, offset: int = 0) -> list[object]:
+        """Actors whose handle/display name contain ``q`` (ANSI substring),
+        newest-activity first; ActorTable rows type-erased. (M9.F3)"""
+
+    @abstractmethod
+    async def count_search_actors(self, q: str) -> int: ...
 
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
