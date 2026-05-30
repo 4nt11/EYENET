@@ -106,9 +106,11 @@ inside the active 15-minute window and emits `mfa.unlocked` to the audit
 chain. It does NOT reset the enrolled TOTP secret — the user still
 authenticates with the same authenticator-app code.
 
-If the user has **lost their authenticator device**, use the A6 command
-`eyenet user reset-mfa <username>` (when A6 ships) — different semantics:
-that one wipes the encrypted secret entirely and forces re-enrollment.
+If the user has **lost their authenticator device**, use
+`eyenet user reset-mfa <username>` (shipped in A6) — different semantics:
+that one wipes the encrypted secret entirely and forces re-enrollment. Like
+every mutating `eyenet user` command it requires an authorizer
+(`--as <admin>` + password + TOTP step-up).
 
 ---
 
@@ -123,9 +125,9 @@ Recovery procedure:
 
 1. Restore `mfa_key` from the most recent good backup. Re-test the login
    flow with a known-enrolled test user.
-2. If no backup exists: every MFA-enrolled user must re-enroll. The A6
-   command `eyenet user reset-mfa --all` will be the bulk path; until A6
-   ships, the manual procedure is:
+2. If no backup exists: every MFA-enrolled user must re-enroll. A6 shipped
+   the per-user `eyenet user reset-mfa <username>`; a bulk `--all` variant
+   is not yet implemented, so the disaster-recovery procedure remains:
 
    ```sql
    UPDATE system_user_credential SET mfa_secret_encrypted = NULL;
