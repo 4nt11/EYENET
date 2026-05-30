@@ -693,7 +693,22 @@ class BaseRepository(ABC):
         state: object | None = None,
         limit: int = 100,
         offset: int = 0,
+        *,
+        method: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
     ) -> list[object]: ...
+
+    @abstractmethod
+    async def count_linkages(
+        self,
+        actor_id: UUID | None = None,
+        state: object | None = None,
+        *,
+        method: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
 
     @abstractmethod
     async def confirmed_linkage_pairs(self) -> list[tuple[UUID, UUID]]: ...
