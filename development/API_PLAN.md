@@ -2780,14 +2780,15 @@ Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5 → A6), b
 - **DoD:** login → refresh → logout round-trip; jti denylist hit on revoked token blocks reuse; Schemathesis stateful pass on the four endpoints; contract `expected_routes.json` updated.
 
 #### M9.A3 — MFA enrollment + login challenge ✅ SHIPPED (`e0f0599`, `5f7cabb`)
-- TOTP (RFC 6238): `POST /v1/auth/mfa/enroll` (provisioning URI + base32 secret), `/mfa/verify-enroll`, `/mfa/disable`. Secret Fernet-encrypted at rest under `<data_dir>/jwt/mfa_key`.
-- Login challenge: `/v1/auth/login` returns a discriminated `LoginResponse` (token pair OR `mfa_challenge_id`); `POST /v1/auth/login/verify` redeems the one-shot challenge. 5-fail / 15-min lockout.
+- TOTP (RFC 6238): `POST /v1/auth/mfa/enroll` (provisioning URI + base32 secret), `/mfa/verify-enroll`, `/mfa/disable`. Secret Fernet-encrypted at rest under `<data_dir>/jwt/mfa_key` (0600, generated on first boot alongside the JWT keypair; rotation is a manual operator procedure per `MFA_OPS.md`).
+- Login challenge: `/v1/auth/login` returns a discriminated `LoginResponse` (token pair OR `mfa_challenge_id`) — HTTP 200, not 401, because the password check itself succeeded; `POST /v1/auth/login/verify` redeems the one-shot challenge. 5-fail / 15-min lockout.
+- Storage: one-shot `mfa_challenge` table in `messages.db` (≤90s TTL, replay-detected on consume); dep `pyotp>=2.9` (`cryptography` already pinned for Fernet).
 - ASCII-only digit gate on the submitted code at every layer (rejects Unicode-digit lookalikes).
-- Operator recovery: `eyenet user unlock-mfa` clears a lockout without touching the secret (A6 adds `reset-mfa` to wipe it). See `development/MFA_OPS.md`.
+- Operator recovery: `eyenet user unlock-mfa` clears a lockout without touching the secret (A6 adds `reset-mfa` to wipe it). Recovery codes deferred. See `development/MFA_OPS.md`.
 - Audit subjects: `eyenet.audit.auth.mfa.{enrolled,enroll_failed,verified,verify_failed,disabled,disable_failed,challenge_issued,locked_out,replay_attempt,unlocked}`.
 - **Depends on:** M9.A2
-- **Files touched:** `eyenet/api/auth/{_mfa.py,_mfa_key.py}`, `eyenet/api/v1/auth/api_mfa_*.py`, `eyenet/api/v1/auth/api_login_verify.py`, `eyenet/cli/user.py`, `development/MFA_OPS.md`
-- **DoD:** enroll → verify-enroll → login-challenge → verify round-trip; lockout after 5 fails; `unlock-mfa` clears it.
+- **Files touched:** `eyenet/api/auth/{_mfa.py,_mfa_key.py}`, `eyenet/api/v1/auth/api_mfa_*.py`, `eyenet/api/v1/auth/api_login_verify.py`, `eyenet/models/mfa.py` (`mfa_challenge`), `eyenet/storage/{repository.py,sqlmodel_repo/auth.py}`, `eyenet/cli/user.py`, `development/MFA_OPS.md`
+- **DoD:** enroll → verify-enroll → login-challenge → verify round-trip; replay of a consumed challenge rejected; lockout after 5 fails; `unlock-mfa` clears it.
 
 #### M9.A4 — Personal Access Token surface ✅ SHIPPED (`4f03dec`)
 - New table: `personal_access_token` in `messages.db` (already declared in §16/A1 scope-list — split as own milestone for surface isolation).
@@ -2796,7 +2797,7 @@ Auth is sequential *within* the group (A1 → A2 → A3 → A4 → A5 → A6), b
 - `admin:tokens` scope wired.
 - Audit subjects: `eyenet.audit.auth.token.{minted,revoked}`.
 - M9.2-era PAT docs: copy-pasteable Prometheus least-privilege `read:metrics` scrape recipe in `development/PAT_RECIPES.md`.
-- **Depends on:** M9.A2
+- **Depends on:** M9.A2 (MFA enforcement on PAT mint is optional per-operator; gated on the calling user's MFA status, not on A3 shipping)
 - **Files touched:** `eyenet/models/auth.py` (PAT table), `eyenet/storage/sqlmodel_repo/auth.py` (PAT helpers), `eyenet/api/v1/auth_tokens.py`, `eyenet/api/v1/schemas/tokens.py`, `development/PAT_RECIPES.md`
 - **DoD:** PAT mint → use → revoke round-trip; PAT-scoped scrape against `/v1/metrics` works once M9.I3 lands (forward compat OK).
 
