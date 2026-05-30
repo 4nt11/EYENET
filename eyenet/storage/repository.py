@@ -87,6 +87,29 @@ class BaseRepository(ABC):
     async def all_audit(self) -> list[AuditLogRow]:
         """Return the full audit chain in rowid (= INSERT-commit) order."""
 
+    @abstractmethod
+    async def list_audit(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        user: UUID | None = None,
+        subject: str | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Filtered, paginated audit rows newest-first (AuditLogRow). (M9.F4)"""
+
+    @abstractmethod
+    async def count_audit(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        user: UUID | None = None,
+        subject: str | None = None,
+    ) -> int: ...
+
     # =================================================================
     # SYSLOG (PLAN §9.5)
     # =================================================================

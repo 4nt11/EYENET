@@ -10,16 +10,45 @@ override. Reading the chain (``all_audit``) is dialect-agnostic.
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import text
-from sqlmodel import select
+from sqlalchemy import String, cast, func, text
+from sqlmodel import col, select
 
 from eyenet.contracts.audit import AuditLogRow
 from eyenet.models import AuditLogTable
 
 from ._helpers import safe_session
+
+
+def _audit_filters(
+    stmt: Any,
+    *,
+    since: datetime | None,
+    until: datetime | None,
+    user: UUID | None,
+    subject: str | None,
+) -> Any:
+    """Shared WHERE clauses for the audit list/count (M9.F4).
+
+    ``subject`` filters the domain ``event`` column — the API renames
+    ``event`` -> ``subject`` (see AuditRow). ``user`` filters
+    ``system_user_id``; ``since``/``until`` bound ``at`` (half-open).
+    """
+    if since is not None:
+        stmt = stmt.where(col(AuditLogTable.at) >= since)
+    if until is not None:
+        stmt = stmt.where(col(AuditLogTable.at) < until)
+    if user is not None:
+        # Audit rows are raw-inserted with the dashed UUID string (the
+        # hash-chain write path bypasses the column's UUID type), so compare
+        # against the stored TEXT form rather than the ORM's binary encoding.
+        stmt = stmt.where(cast(col(AuditLogTable.system_user_id), String) == str(user))
+    if subject is not None:
+        stmt = stmt.where(col(AuditLogTable.event) == subject)
+    return stmt
 
 
 class AuditMixin:
@@ -41,6 +70,60 @@ class AuditMixin:
                     data["at"] = data["at"].replace(tzinfo=UTC)
                 rows.append(AuditLogRow.model_validate(data))
             return rows
+
+    async def list_audit(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        user: UUID | None = None,
+        subject: str | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Filtered, paginated audit rows, newest-first (M9.F4).
+
+        Returns AuditLogRow contracts (detached-safe). ``all_audit`` remains
+        the full-chain reader for verification; this is the browse surface.
+        """
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            stmt = _audit_filters(
+                select(AuditLogTable), since=since, until=until, user=user, subject=subject
+            )
+            stmt = (
+                stmt.order_by(col(AuditLogTable.at).desc())
+                .order_by(col(AuditLogTable.id).desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            rows: list[object] = []
+            for t in result.all():
+                data = t.model_dump()
+                if data["at"].tzinfo is None:
+                    data["at"] = data["at"].replace(tzinfo=UTC)
+                rows.append(AuditLogRow.model_validate(data))
+            return rows
+
+    async def count_audit(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        user: UUID | None = None,
+        subject: str | None = None,
+    ) -> int:
+        """Count audit rows matching the same filters as list_audit (M9.F4)."""
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            stmt = _audit_filters(
+                select(func.count()).select_from(AuditLogTable),
+                since=since,
+                until=until,
+                user=user,
+                subject=subject,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def _append_audit_locked(  # pragma: no cover — overridden
         self,
