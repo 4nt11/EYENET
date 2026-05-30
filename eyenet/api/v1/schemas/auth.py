@@ -5,15 +5,15 @@ The backing storage tables (`system_user_credential`, `refresh_token`,
 until then these schemas declare the wire shape only and `from_domain()`
 translators are documented TODOs.
 
-OpenAPI: `contracts/openapi/eyenet.v1.yaml` — Login*, Refresh*, TokenPair,
-AccessToken, UserMe, PAT*, StreamToken*.
+OpenAPI: `contracts/openapi/eyenet.v1.yaml` — Login*, Refresh*, Logout*,
+TokenPair, UserMe, PAT*, StreamToken*.
 API_PLAN §3.1, §4.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -36,9 +36,26 @@ class RefreshRequest(ApiSchema):
     refresh_token: str = Field(min_length=16, max_length=256)
 
 
-class TokenPair(ApiSchema):
-    """200 response from `/v1/auth/login`."""
+class LogoutRequest(ApiSchema):
+    """Body for `POST /v1/auth/logout` — refresh token is optional.
 
+    When present, the matching refresh row is revoked alongside the
+    access JWT denylist write. When omitted, only the access JWT is
+    denylisted (use this from a UI that has already discarded the
+    refresh secret).
+    """
+
+    refresh_token: str | None = Field(default=None, min_length=16, max_length=256)
+
+
+class TokenPair(ApiSchema):
+    """200 response from `/v1/auth/login` (no MFA) or `/v1/auth/login/verify`.
+
+    ``kind`` is the discriminator for :data:`LoginResponse` — additive to
+    spec §M9.A2, ignored by clients that don't read it.
+    """
+
+    kind: Literal["token_pair"] = "token_pair"
     access_token: str
     access_expires_at: datetime
     refresh_token: str
@@ -46,12 +63,20 @@ class TokenPair(ApiSchema):
     token_type: Literal["Bearer"] = "Bearer"
 
 
-class AccessToken(ApiSchema):
-    """200 response from `/v1/auth/refresh` — refresh rotates separately."""
+class MfaLoginChallenge(ApiSchema):
+    """200 response from `/v1/auth/login` when the user is MFA-enrolled.
 
-    access_token: str
-    access_expires_at: datetime
-    token_type: Literal["Bearer"] = "Bearer"
+    Client must follow up with `POST /v1/auth/login/verify` carrying the
+    ``mfa_challenge_id`` and the 6-digit TOTP code (API_PLAN §M9.A3).
+    """
+
+    kind: Literal["mfa_required"] = "mfa_required"
+    mfa_required: Literal[True] = True
+    mfa_challenge_id: UUID
+
+
+LoginResponse = Annotated[TokenPair | MfaLoginChallenge, Field(discriminator="kind")]
+"""Discriminated union surface of `POST /v1/auth/login`."""
 
 
 class UserMe(ApiSchema):
@@ -137,9 +162,11 @@ class CursorPagePATSummary(CursorPage[PATSummary]):
 
 
 __all__ = [
-    "AccessToken",
     "CursorPagePATSummary",
     "LoginRequest",
+    "LoginResponse",
+    "LogoutRequest",
+    "MfaLoginChallenge",
     "PATMintRequest",
     "PATMinted",
     "PATSummary",

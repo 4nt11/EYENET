@@ -54,6 +54,11 @@ YAML_ONLY_SCHEMAS = {
     "PersonaUpdatedEvent",
     "StreamGapEvent",
     "CursorPageBase",
+    # LoginResponse is the Pydantic Annotated[..., discriminator] union surface.
+    # FastAPI inlines this as oneOf at the operation level (no top-level $ref),
+    # so the YAML retains the named schema as documentation but the login
+    # operation references the inline oneOf to match the generated spec.
+    "LoginResponse",
     "NeighborEdge",
     "PersonaSummary",
     # RedactionMarker is the §4.7 polymorphic-content replacement shape.
@@ -74,8 +79,15 @@ def hand() -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def gen() -> dict[str, Any]:
-    client = TestClient(create_app())
-    resp = client.get("/v1/openapi.json")
+    import tempfile
+    from pathlib import Path
+
+    from eyenet.storage.factory import get_repository
+
+    storage = get_repository(in_memory=True)
+    with tempfile.TemporaryDirectory() as td:
+        client = TestClient(create_app(storage=storage, data_dir=Path(td)))
+        resp = client.get("/v1/openapi.json")
     assert resp.status_code == 200
     return cast("dict[str, Any]", resp.json())
 

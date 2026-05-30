@@ -19,6 +19,7 @@ from .actors import ActorsMixin
 from .artifacts import ArtifactsMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
+from .auth import AuthMixin
 from .candidates import CandidatesMixin
 from .cases import CasesMixin
 from .clearance import ClearanceMixin
@@ -35,6 +36,7 @@ from .personas import PersonasMixin
 from .profiles import ProfilesMixin
 from .sources import SourcesMixin
 from .syslog import SyslogMixin
+from .users import UsersMixin
 from .vectors import VectorsMixin
 
 if TYPE_CHECKING:
@@ -48,6 +50,7 @@ class SQLModelRepository(
     ArtifactsMixin,
     AttachmentsMixin,
     AuditMixin,
+    AuthMixin,
     CandidatesMixin,
     CasesMixin,
     ClearanceMixin,
@@ -64,6 +67,7 @@ class SQLModelRepository(
     ProfilesMixin,
     SourcesMixin,
     SyslogMixin,
+    UsersMixin,
     VectorsMixin,
     BaseRepository,
 ):

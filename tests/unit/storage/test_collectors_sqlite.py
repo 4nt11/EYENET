@@ -42,7 +42,6 @@ def _seed_source_identity_user(session: Session) -> tuple[UUID, UUID, UUID]:
         username="op",
         display_name="op",
         role=SystemUserRole.ADMIN,
-        password_hash="x",
         created_at=_NOW,
     )
     session.add(src)

@@ -19,13 +19,13 @@ class SystemUserTable(SQLModel, table=True):
     username: str = Field(unique=True, index=True)
     display_name: str
     email: str | None = Field(default=None, index=True)
-    password_hash: str
     role: SystemUserRole = Field(default=SystemUserRole.VIEWER, index=True)
     is_active: bool = True
     last_login_at: datetime | None = None
     created_at: datetime
-    mfa_secret_encrypted: str | None = None
     notes: str | None = None
+    # Secret material (password_hash, mfa_secret_encrypted) lives in
+    # `system_user_credential` (M9.A1). One-to-one with this row.
 
 
 __all__ = ["SystemUserTable"]

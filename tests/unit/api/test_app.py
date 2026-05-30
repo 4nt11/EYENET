@@ -11,6 +11,9 @@ Covers:
 
 from __future__ import annotations
 
+import tempfile
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -18,13 +21,16 @@ import yaml  # type: ignore[import-untyped]
 from fastapi.testclient import TestClient
 
 from eyenet.api.app import PROBLEM_JSON, create_app
+from eyenet.storage.factory import get_repository
 
 pytestmark = pytest.mark.contract
 
 
 @pytest.fixture(scope="module")
-def client() -> TestClient:
-    return TestClient(create_app())
+def client() -> Iterator[TestClient]:
+    storage = get_repository(in_memory=True)
+    with tempfile.TemporaryDirectory() as td:
+        yield TestClient(create_app(storage=storage, data_dir=Path(td)))
 
 
 @pytest.fixture(scope="module")

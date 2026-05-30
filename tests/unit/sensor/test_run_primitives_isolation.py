@@ -145,9 +145,7 @@ async def test_broken_primitive_does_not_suppress_sibling_observations(
         rows = list(result.all())
 
     primitive_names = {r.primitive_name for r in rows}
-    assert "mattr" not in primitive_names, (
-        "broken primitive should not have written an observation"
-    )
+    assert "mattr" not in primitive_names, "broken primitive should not have written an observation"
     assert len(primitive_names) >= 1, (
         "at least one sibling primitive must produce an observation despite "
         f"mattr raising — got: {primitive_names}"

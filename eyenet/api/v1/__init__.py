@@ -37,7 +37,11 @@ from eyenet.api.v1.audit.api_verify_audit import router as audit_verify_router
 from eyenet.api.v1.auth.api_get_me import router as auth_me_router
 from eyenet.api.v1.auth.api_list_tokens import router as auth_list_tokens_router
 from eyenet.api.v1.auth.api_login import router as auth_login_router
+from eyenet.api.v1.auth.api_login_verify import router as auth_login_verify_router
 from eyenet.api.v1.auth.api_logout import router as auth_logout_router
+from eyenet.api.v1.auth.api_mfa_disable import router as auth_mfa_disable_router
+from eyenet.api.v1.auth.api_mfa_enroll import router as auth_mfa_enroll_router
+from eyenet.api.v1.auth.api_mfa_verify_enroll import router as auth_mfa_verify_enroll_router
 from eyenet.api.v1.auth.api_mint_token import router as auth_mint_token_router
 from eyenet.api.v1.auth.api_refresh import router as auth_refresh_router
 from eyenet.api.v1.auth.api_revoke_token import router as auth_revoke_token_router
@@ -131,9 +135,13 @@ v1_router = APIRouter(prefix="/v1", responses=SHARED_RESPONSES)
 
 # auth
 v1_router.include_router(auth_login_router)
+v1_router.include_router(auth_login_verify_router)
 v1_router.include_router(auth_refresh_router)
 v1_router.include_router(auth_logout_router)
 v1_router.include_router(auth_me_router)
+v1_router.include_router(auth_mfa_enroll_router)
+v1_router.include_router(auth_mfa_verify_enroll_router)
+v1_router.include_router(auth_mfa_disable_router)
 v1_router.include_router(auth_list_tokens_router)
 v1_router.include_router(auth_mint_token_router)
 v1_router.include_router(auth_revoke_token_router)

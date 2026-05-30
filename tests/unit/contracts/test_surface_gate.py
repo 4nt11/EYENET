@@ -28,6 +28,7 @@ _BUS_MODULES: frozenset[str] = frozenset(
 _DB_ONLY_MODULES: frozenset[str] = frozenset(
     {
         "eyenet.contracts.access_artifact",
+        "eyenet.contracts.auth",
         "eyenet.contracts.candidate",
         "eyenet.contracts.membership",
         "eyenet.contracts.source",
@@ -35,6 +36,7 @@ _DB_ONLY_MODULES: frozenset[str] = frozenset(
         "eyenet.contracts.actor",
         "eyenet.contracts.group",
         "eyenet.contracts.message",
+        "eyenet.contracts.mfa",
         "eyenet.contracts.social_graph",
         "eyenet.contracts.infrastructure",
         "eyenet.contracts.case",

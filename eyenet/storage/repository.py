@@ -24,6 +24,13 @@ if TYPE_CHECKING:
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.attribution import LinkageRow
     from eyenet.contracts.audit import AuditLogRow
+    from eyenet.contracts.auth import (
+        JwtDenylistRow,
+        PersonalAccessTokenRow,
+        RefreshTokenRow,
+        SystemUserCredentialRow,
+        SystemUserScopeRow,
+    )
     from eyenet.contracts.candidate import (
         EligibilityInputs,
         GroupCandidateMentionRow,
@@ -50,13 +57,16 @@ if TYPE_CHECKING:
         SourceDomainPatternKind,
         SourceKind,
         SystemLogLevel,
+        SystemUserRole,
     )
     from eyenet.contracts.feedback import FeedbackPairRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
+    from eyenet.contracts.mfa import MfaChallengeRow
     from eyenet.contracts.source import SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
+    from eyenet.contracts.system_user import SystemUserRow
 
 
 class BaseRepository(ABC):
@@ -1076,6 +1086,290 @@ class BaseRepository(ABC):
 
         ``validation_state`` defaults to ``UNVERIFIED`` when ``None``.
         """
+
+    # =================================================================
+    # AUTH (API_PLAN §4.1-§4.6, M9.A1)
+    # =================================================================
+
+    @abstractmethod
+    async def put_credential(
+        self,
+        *,
+        user_id: UUID,
+        password_hash: str,
+        password_updated_at: datetime,
+        mfa_secret_encrypted: str | None = None,
+    ) -> SystemUserCredentialRow:
+        """Upsert one credential row keyed by ``user_id`` (one-to-one with user).
+
+        A1 stores opaque hash strings; argon2id format enforcement happens
+        at the A2 service layer.
+        """
+
+    @abstractmethod
+    async def get_credential(self, user_id: UUID) -> SystemUserCredentialRow | None:
+        """Return one credential row by user_id, or ``None``."""
+
+    @abstractmethod
+    async def delete_credential(self, user_id: UUID) -> None:
+        """Delete a credential row. Raises :class:`ValueError` if not found."""
+
+    @abstractmethod
+    async def create_refresh_token(
+        self,
+        *,
+        user_id: UUID,
+        hash_value: str,
+        issued_at: datetime,
+        expires_at: datetime,
+    ) -> RefreshTokenRow:
+        """Mint a new refresh token. ``hash_value`` is sha256(opaque secret)."""
+
+    @abstractmethod
+    async def get_refresh_token(self, token_id: UUID) -> RefreshTokenRow | None:
+        """Return one refresh token by id, or ``None``."""
+
+    @abstractmethod
+    async def get_refresh_token_by_hash(
+        self,
+        hash_value: str,
+    ) -> RefreshTokenRow | None:
+        """Lookup a refresh token by its sha256 hash, or ``None``."""
+
+    @abstractmethod
+    async def revoke_refresh_token(
+        self,
+        *,
+        token_id: UUID,
+        revoked_at: datetime,
+        replaced_by: UUID | None = None,
+    ) -> RefreshTokenRow:
+        """Mark a refresh token revoked.
+
+        ``replaced_by`` is the next link in the rotation chain (set on
+        /refresh). Omit for logout-style revocation. The CHECK constraint
+        rejects ``replaced_by`` without a non-NULL ``revoked_at``.
+
+        Raises :class:`ValueError` if the token doesn't exist.
+        """
+
+    @abstractmethod
+    async def deny_jwt(
+        self,
+        *,
+        jti: UUID,
+        user_id: UUID,
+        denied_at: datetime,
+        expires_at: datetime,
+    ) -> JwtDenylistRow:
+        """Insert a JWT denylist entry. Idempotent on ``jti``."""
+
+    @abstractmethod
+    async def is_jwt_denylisted(self, jti: UUID) -> bool:
+        """Per-request denylist check. Hot path; indexed PK lookup."""
+
+    @abstractmethod
+    async def grant_scope(
+        self,
+        *,
+        user_id: UUID,
+        scope: str,
+        granted_at: datetime,
+        granted_by_user_id: UUID,
+    ) -> SystemUserScopeRow:
+        """Grant an explicit scope to a user (additive to ``ROLE_BASELINE``).
+
+        Idempotent on ``(user_id, scope)`` — re-grant returns the existing row.
+        """
+
+    @abstractmethod
+    async def revoke_scope(self, *, user_id: UUID, scope: str) -> None:
+        """Revoke an explicit scope grant. Raises :class:`ValueError` if no row."""
+
+    @abstractmethod
+    async def list_explicit_scopes(
+        self,
+        user_id: UUID,
+    ) -> list[SystemUserScopeRow]:
+        """Return all explicit scope grants for a user, ordered by ``granted_at``."""
+
+    # =================================================================
+    # MFA (API_PLAN §M9.A3 — TOTP login challenge)
+    # =================================================================
+
+    @abstractmethod
+    async def create_mfa_challenge(
+        self,
+        *,
+        user_id: UUID,
+        issued_at: datetime,
+        expires_at: datetime,
+    ) -> MfaChallengeRow:
+        """Issue a fresh one-shot TOTP login challenge."""
+
+    @abstractmethod
+    async def get_mfa_challenge(self, challenge_id: UUID) -> MfaChallengeRow | None:
+        """Return one challenge row by id, or ``None``."""
+
+    @abstractmethod
+    async def consume_mfa_challenge(
+        self,
+        *,
+        challenge_id: UUID,
+        consumed_at: datetime,
+    ) -> MfaChallengeRow:
+        """Mark a challenge consumed (login/verify success).
+
+        Raises :class:`ValueError` if the challenge doesn't exist OR if it
+        has already been consumed (callers treat the second case as replay).
+        """
+
+    @abstractmethod
+    async def bump_mfa_challenge_failures(self, challenge_id: UUID) -> int:
+        """Atomically increment ``failed_attempts`` for a challenge. Returns
+        the new count. Raises :class:`ValueError` if the challenge is unknown."""
+
+    @abstractmethod
+    async def count_recent_mfa_failures(
+        self,
+        *,
+        user_id: UUID,
+        since: datetime,
+    ) -> int:
+        """Number of challenge rows for ``user_id`` with ``failed_attempts > 0``
+        AND ``issued_at >= since``. Drives the 5-fail / 15-min lockout window."""
+
+    @abstractmethod
+    async def clear_mfa_failures(
+        self,
+        *,
+        user_id: UUID,
+        since: datetime,
+    ) -> int:
+        """Zero ``failed_attempts`` on all of ``user_id``'s rows with
+        ``issued_at >= since``. Returns rows touched. Backs the operator
+        unlock path (``eyenet user unlock-mfa``)."""
+
+    # =================================================================
+    # Personal Access Tokens (API_PLAN §4.3 — M9.A4)
+    # =================================================================
+
+    @abstractmethod
+    async def create_personal_access_token(
+        self,
+        *,
+        user_id: UUID,
+        name: str,
+        prefix: str,
+        hash_value: str,
+        scopes: list[str],
+        created_at: datetime,
+        expires_at: datetime | None = None,
+    ) -> PersonalAccessTokenRow:
+        """Mint a PAT row. ``hash_value`` is HMAC-SHA256(pepper, secret) hex;
+        ``scopes`` are frozen at mint. The plaintext secret never reaches storage."""
+
+    @abstractmethod
+    async def get_personal_access_token(
+        self,
+        token_id: UUID,
+    ) -> PersonalAccessTokenRow | None:
+        """Return one PAT row by id, or ``None``."""
+
+    @abstractmethod
+    async def get_personal_access_token_by_hash(
+        self,
+        hash_value: str,
+    ) -> PersonalAccessTokenRow | None:
+        """Auth-time lookup by HMAC hex digest. Hot path; UNIQUE-indexed seek."""
+
+    @abstractmethod
+    async def list_personal_access_tokens(
+        self,
+        *,
+        user_id: UUID,
+        limit: int,
+        offset: int = 0,
+    ) -> list[PersonalAccessTokenRow]:
+        """Return a page of ``user_id``'s PATs, ordered ``created_at`` then
+        ``token_id`` descending (newest first). ``limit``/``offset`` drive the
+        opaque-cursor pagination at the handler layer."""
+
+    @abstractmethod
+    async def count_personal_access_tokens(self, *, user_id: UUID) -> int:
+        """Total PAT rows for ``user_id`` (drives ``?include_total``)."""
+
+    @abstractmethod
+    async def revoke_personal_access_token(
+        self,
+        *,
+        token_id: UUID,
+        revoked_at: datetime,
+    ) -> PersonalAccessTokenRow:
+        """Mark a PAT revoked. Idempotent — re-revoking keeps the first
+        ``revoked_at``. Raises :class:`ValueError` if the token doesn't exist."""
+
+    @abstractmethod
+    async def touch_pat_last_used(
+        self,
+        *,
+        token_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Best-effort ``last_used_at`` bump, coarsened to ~60s so a high-rate
+        scrape loop isn't a write per request. No-op when already fresh or when
+        the token has been revoked."""
+
+    # =================================================================
+    # SYSTEM USERS (MODELS §2.17 — operator accounts)
+    # =================================================================
+
+    @abstractmethod
+    async def put_system_user(
+        self,
+        *,
+        user_id: UUID,
+        username: str,
+        display_name: str,
+        role: SystemUserRole,
+        created_at: datetime,
+        email: str | None = None,
+        is_active: bool = True,
+        notes: str | None = None,
+    ) -> SystemUserRow:
+        """Upsert a system user row keyed by ``user_id``.
+
+        Profile-only — credentials live in :meth:`put_credential`. The
+        upsert preserves ``last_login_at`` on update (use
+        :meth:`record_system_user_login` to bump it explicitly).
+        """
+
+    @abstractmethod
+    async def get_system_user_by_id(self, user_id: UUID) -> SystemUserRow | None:
+        """Look up a system user by primary key."""
+
+    @abstractmethod
+    async def get_system_user_by_username(self, username: str) -> SystemUserRow | None:
+        """Look up a system user by the unique ``username`` index."""
+
+    @abstractmethod
+    async def count_system_users(self) -> int:
+        """Total number of ``system_user`` rows.
+
+        Backs the ``eyenet user create`` bootstrap path: a zero count means
+        there is no operator to authenticate against yet, so the first
+        ``create`` is allowed un-gated (and forced to ``role=admin``).
+        """
+
+    @abstractmethod
+    async def record_system_user_login(
+        self,
+        *,
+        user_id: UUID,
+        at: datetime,
+    ) -> SystemUserRow:
+        """Bump ``last_login_at`` on a successful authentication. Raises
+        :class:`ValueError` if the user doesn't exist."""
 
     # =================================================================
     # ESCAPE HATCH (collector-side custom transactions)

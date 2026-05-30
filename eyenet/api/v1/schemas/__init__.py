@@ -34,9 +34,11 @@ from .attachments import (
 )
 from .audit import AuditChainBreak, AuditRow, AuditVerifyResult, CursorPageAuditRow
 from .auth import (
-    AccessToken,
     CursorPagePATSummary,
     LoginRequest,
+    LoginResponse,
+    LogoutRequest,
+    MfaLoginChallenge,
     PATMinted,
     PATMintRequest,
     PATSummary,
@@ -98,6 +100,12 @@ from .linkages import (
     LinkageEvidence,
     LinkageSummary,
 )
+from .mfa import (
+    MfaDisableRequest,
+    MfaEnrollResponse,
+    MfaLoginVerifyRequest,
+    MfaVerifyEnrollRequest,
+)
 from .pagination import CursorPage
 from .personas import CursorPagePersonaMember, PersonaDetail, PersonaMember, PersonaSummary
 from .reclassify import ReclassificationRequest, ReclassificationResult
@@ -113,7 +121,6 @@ from .stream import (
 from .writes import WriteAccepted
 
 __all__ = [
-    "AccessToken",
     "ActorDetail",
     "ActorSummary",
     "Anchor",
@@ -181,6 +188,13 @@ __all__ = [
     "LinkedToAttrs",
     "LinkedToEdge",
     "LoginRequest",
+    "LoginResponse",
+    "LogoutRequest",
+    "MfaDisableRequest",
+    "MfaEnrollResponse",
+    "MfaLoginChallenge",
+    "MfaLoginVerifyRequest",
+    "MfaVerifyEnrollRequest",
     "NeighborEdge",
     "NeighborList",
     "ObservationSummary",
