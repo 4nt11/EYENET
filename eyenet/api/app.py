@@ -25,9 +25,11 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from eyenet.api.auth import AuthCache, load_mfa_key, load_pat_pepper, load_verifying_keys
 from eyenet.api.deps import AuthError, ResourceNotFound, ScopeForbidden
+from eyenet.api.middleware import evidence_access_dispatch
 from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
 from eyenet.bus.memory import MemoryBus
@@ -39,6 +41,11 @@ PROBLEM_JSON = "application/problem+json"
 
 
 def _request_id(request: Request) -> str:
+    # The evidence-access middleware (M9.F6) stashes one request id up front;
+    # prefer it so error bodies and the audit row agree.
+    stashed = getattr(request.state, "request_id", None)
+    if isinstance(stashed, str):
+        return stashed
     return request.headers.get("x-request-id") or uuid4().hex
 
 
@@ -147,6 +154,10 @@ def create_app(
             request_id=_request_id(request),
         )
         return _problem_response(problem, 403)
+
+    # Evidence-access audit (§5.5): every successful read emits a durable
+    # audit row before its body is served; audit-append failure → 503.
+    app.add_middleware(BaseHTTPMiddleware, dispatch=evidence_access_dispatch)
 
     app.include_router(v1_router)
     return app

@@ -285,14 +285,18 @@ async def get_stream_principal(
 
 def RequireScope(  # noqa: N802 — FastAPI dependency factory convention
     scope: str,
-) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
+) -> Callable[..., Awaitable[CurrentUser]]:
     """Dependency factory: 403 if the caller's effective scopes lack ``scope``."""
 
     async def _dep(
+        request: Request,
         current_user: Annotated[CurrentUser, Depends(get_current_user)],
     ) -> CurrentUser:
         if scope not in current_user.effective_scopes:
             raise ScopeForbidden(scope)
+        # Stash for the evidence-access middleware (M9.F6) to attribute its
+        # audit row to the calling operator.
+        request.state.current_user = current_user
         return current_user
 
     _dep.__name__ = f"require_scope_{scope.replace(':', '_')}"
