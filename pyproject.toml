@@ -112,6 +112,25 @@ deferred = [
   "mutmut>=2.5",
 ]
 
+# M10 Document Classifier — extraction parser libraries. DELIBERATELY NOT in the
+# main `dependencies`: these parse hostile, attacker-controlled documents and run
+# ONLY inside the nsjail sandbox (eyenet/classifier/sandbox/). They install into a
+# dedicated, minimal `eyenet-extract` venv that is bound READ-ONLY into the jail —
+# least functionality on the hostile-parse boundary, so a parser exploit never
+# reaches the main app's deps. Build the jail venv with:
+#   python -m venv /opt/eyenet/extract-venv
+#   /opt/eyenet/extract-venv/bin/pip install 'eyenet[extract]'
+# System binaries (nsjail, tesseract-ocr) and the spaCy model are provisioned
+# separately — see the install docs. spaCy itself is already a core dep above.
+# Versions are forward-declared for slice 2; pins get locked when the adapters
+# are wired and straced against the seccomp allowlist.
+extract = [
+  "pymupdf>=1.24,<2.0",           # PDF text + embedded-image extraction (AGPL — OK)
+  "python-docx>=1.1,<2.0",        # DOCX text extraction
+  "pytesseract>=0.3.10,<0.4",     # OCR (wraps the system `tesseract` binary)
+  "presidio-analyzer>=2.2,<3.0",  # PII detection (locale-aware via spaCy)
+]
+
 [project.scripts]
 eyenet = "eyenet.cli.main:app"
 

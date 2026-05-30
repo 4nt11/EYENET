@@ -183,11 +183,34 @@ if tier < CLASSIFIED:
 - ✅ **Async worker** + provisional-CLASSIFIED-until-settled (§5).
 
 - ✅ **Sandbox engine = nsjail** (Linux-only; purpose-built for untrusted code).
-  We ship + version-pin a `eyenet-extract` nsjail policy (userns→nobody, no
-  network iface, `RLIMIT_AS`/`RLIMIT_CPU`/`RLIMIT_FSIZE`, cgroup mem cap,
-  `time_limit`, seccomp allowlist, read-only input bind, no `/proc` write). The
-  policy is an artifact under version control; the boot canary (§0.x.1) verifies
-  it actually contains. nsjail is boot-probed; absent/old → degraded fail-closed.
+  We ship + version-pin a `eyenet-extract` nsjail policy (userns→99999, no
+  network iface, `RLIMIT_AS`/`RLIMIT_CPU`/`RLIMIT_FSIZE`, `time_limit`, seccomp
+  allowlist, read-only input bind). The policy is an artifact under version
+  control (`_policy.py`); the boot canary (§0.x.1) verifies it actually
+  contains. nsjail is boot-probed; absent/old → degraded fail-closed.
+  **SHIPPED slice 1.** Empirical addenda: unprivileged userns refuses the RO
+  pivot-root remount on this kernel → root is an ephemeral RW tmpfs (empty,
+  discarded), real content RO-bound; network containment is the netns (socket
+  syscalls are allowed for glibc NSS, but there is no route); allowlist is
+  strace-derived, default-KILL, with `clone`/`fork`/`vfork`/`ptrace` absent.
+
+- ✅ **Parser libraries = a dedicated minimal `eyenet-extract` venv** (NOT the
+  main app venv), bound **read-only** into the jail; `site-packages` on
+  `PYTHONPATH`, interpreter stays `/usr/bin/python3`. Least functionality on the
+  hostile-parse boundary: smallest library + syscall surface, tractable
+  allowlist, no app deps (fastapi/sqlmodel/nats) reachable from a parser
+  exploit. Built once by setup; verified intact at boot (missing/broken →
+  degraded fail-closed, like absent nsjail).
+  - **Models/data are PRE-FETCHED on the host** and bound RO — the jail has no
+    network, so spaCy `es_core_news_sm` auto-fetch and Tesseract `tessdata`
+    CANNOT download in-jail. Provision them in setup.
+  - **Tesseract runs as its OWN jail entrypoint** (`nsjail -- tesseract …`), not
+    via an in-jail `exec` from python (we block `clone`). python-docx / pymupdf
+    are pure imports under the python worker.
+  - **Threaded libs** (spaCy/numpy/BLAS) need `clone` re-added to the allowlist
+    **arg-filtered to `CLONE_THREAD`** so thread creation passes but spawning a
+    process still SIGSYS-dies. Per parser: strace in-jail, extend allowlist,
+    re-run the canary before arming.
 
 ---
 
