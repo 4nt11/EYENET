@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import select
 
 from eyenet.contracts.enums import SystemUserRole
@@ -88,6 +89,11 @@ class UsersMixin:
             )
             row = result.one_or_none()
             return _user_row(row) if row is not None else None
+
+    async def count_system_users(self) -> int:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(SystemUserTable))
+            return int(result.one())
 
     async def record_system_user_login(
         self,

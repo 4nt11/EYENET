@@ -1353,6 +1353,15 @@ class BaseRepository(ABC):
         """Look up a system user by the unique ``username`` index."""
 
     @abstractmethod
+    async def count_system_users(self) -> int:
+        """Total number of ``system_user`` rows.
+
+        Backs the ``eyenet user create`` bootstrap path: a zero count means
+        there is no operator to authenticate against yet, so the first
+        ``create`` is allowed un-gated (and forced to ``role=admin``).
+        """
+
+    @abstractmethod
     async def record_system_user_login(
         self,
         *,
