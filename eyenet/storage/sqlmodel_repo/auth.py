@@ -12,14 +12,15 @@ is the established repo convention (see :class:`ClearanceMixin`).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy.sql import func, update
+from sqlalchemy.sql import func, or_, update
 from sqlmodel import col, select
 
 from eyenet.contracts.auth import (
     JwtDenylistRow,
+    PersonalAccessTokenRow,
     RefreshTokenRow,
     SystemUserCredentialRow,
     SystemUserScopeRow,
@@ -27,6 +28,7 @@ from eyenet.contracts.auth import (
 from eyenet.contracts.mfa import MfaChallengeRow
 from eyenet.models.auth import (
     JwtDenylistTable,
+    PersonalAccessTokenTable,
     RefreshTokenTable,
     SystemUserCredentialTable,
     SystemUserScopeTable,
@@ -73,6 +75,13 @@ def _mfa_row(table: MfaChallengeTable) -> MfaChallengeRow:
     for k in ("issued_at", "expires_at", "consumed_at"):
         data[k] = _coerce_utc(data.get(k))
     return MfaChallengeRow.model_validate(data)
+
+
+def _pat_row(table: PersonalAccessTokenTable) -> PersonalAccessTokenRow:
+    data = table.model_dump()
+    for k in ("created_at", "last_used_at", "expires_at", "revoked_at"):
+        data[k] = _coerce_utc(data.get(k))
+    return PersonalAccessTokenRow.model_validate(data)
 
 
 class AuthMixin:
@@ -366,6 +375,130 @@ class AuthMixin:
             result = await session.exec(stmt)
             await session.commit()
             return int(result.rowcount or 0)
+
+    # =================================================================
+    # Personal Access Tokens (API_PLAN §4.3 — M9.A4)
+    # =================================================================
+
+    async def create_personal_access_token(
+        self,
+        *,
+        user_id: UUID,
+        name: str,
+        prefix: str,
+        hash_value: str,
+        scopes: list[str],
+        created_at: datetime,
+        expires_at: datetime | None = None,
+    ) -> PersonalAccessTokenRow:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = PersonalAccessTokenTable(
+                user_id=user_id,
+                name=name,
+                prefix=prefix,
+                hash=hash_value,
+                scopes=list(scopes),
+                created_at=created_at,
+                expires_at=expires_at,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _pat_row(row)
+
+    async def get_personal_access_token(
+        self,
+        token_id: UUID,
+    ) -> PersonalAccessTokenRow | None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(PersonalAccessTokenTable, token_id)
+            return _pat_row(row) if row is not None else None
+
+    async def get_personal_access_token_by_hash(
+        self,
+        hash_value: str,
+    ) -> PersonalAccessTokenRow | None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(PersonalAccessTokenTable).where(
+                    PersonalAccessTokenTable.hash == hash_value,
+                ),
+            )
+            row = result.one_or_none()
+            return _pat_row(row) if row is not None else None
+
+    async def list_personal_access_tokens(
+        self,
+        *,
+        user_id: UUID,
+        limit: int,
+        offset: int = 0,
+    ) -> list[PersonalAccessTokenRow]:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(PersonalAccessTokenTable)
+                .where(PersonalAccessTokenTable.user_id == user_id)
+                .order_by(
+                    col(PersonalAccessTokenTable.created_at).desc(),
+                    col(PersonalAccessTokenTable.token_id).desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [_pat_row(r) for r in list(result)]
+
+    async def count_personal_access_tokens(self, *, user_id: UUID) -> int:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(func.count()).where(
+                PersonalAccessTokenTable.user_id == user_id,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
+
+    async def revoke_personal_access_token(
+        self,
+        *,
+        token_id: UUID,
+        revoked_at: datetime,
+    ) -> PersonalAccessTokenRow:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(PersonalAccessTokenTable, token_id)
+            if row is None:
+                raise ValueError(f"personal_access_token {token_id} not found")
+            # Idempotent: keep the first revocation timestamp.
+            if row.revoked_at is None:
+                row.revoked_at = revoked_at
+                session.add(row)
+                await session.commit()
+                await session.refresh(row)
+            return _pat_row(row)
+
+    async def touch_pat_last_used(
+        self,
+        *,
+        token_id: UUID,
+        now: datetime,
+    ) -> None:
+        # Coarsened to ~60s: skip the write unless last_used_at is unset or
+        # older than the threshold. One race-safe conditional UPDATE; no
+        # SELECT-then-write round-trip. Revoked tokens are never touched.
+        threshold = now - timedelta(seconds=60)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                update(PersonalAccessTokenTable)
+                .where(
+                    col(PersonalAccessTokenTable.token_id) == token_id,
+                    col(PersonalAccessTokenTable.revoked_at).is_(None),
+                    or_(
+                        col(PersonalAccessTokenTable.last_used_at).is_(None),
+                        col(PersonalAccessTokenTable.last_used_at) < threshold,
+                    ),
+                )
+                .values(last_used_at=now)
+            )
+            await session.exec(stmt)
+            await session.commit()
 
 
 __all__ = ["AuthMixin"]

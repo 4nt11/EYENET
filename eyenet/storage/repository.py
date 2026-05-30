@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.audit import AuditLogRow
     from eyenet.contracts.auth import (
         JwtDenylistRow,
+        PersonalAccessTokenRow,
         RefreshTokenRow,
         SystemUserCredentialRow,
         SystemUserScopeRow,
@@ -1248,6 +1249,76 @@ class BaseRepository(ABC):
         """Zero ``failed_attempts`` on all of ``user_id``'s rows with
         ``issued_at >= since``. Returns rows touched. Backs the operator
         unlock path (``eyenet user unlock-mfa``)."""
+
+    # =================================================================
+    # Personal Access Tokens (API_PLAN §4.3 — M9.A4)
+    # =================================================================
+
+    @abstractmethod
+    async def create_personal_access_token(
+        self,
+        *,
+        user_id: UUID,
+        name: str,
+        prefix: str,
+        hash_value: str,
+        scopes: list[str],
+        created_at: datetime,
+        expires_at: datetime | None = None,
+    ) -> PersonalAccessTokenRow:
+        """Mint a PAT row. ``hash_value`` is HMAC-SHA256(pepper, secret) hex;
+        ``scopes`` are frozen at mint. The plaintext secret never reaches storage."""
+
+    @abstractmethod
+    async def get_personal_access_token(
+        self,
+        token_id: UUID,
+    ) -> PersonalAccessTokenRow | None:
+        """Return one PAT row by id, or ``None``."""
+
+    @abstractmethod
+    async def get_personal_access_token_by_hash(
+        self,
+        hash_value: str,
+    ) -> PersonalAccessTokenRow | None:
+        """Auth-time lookup by HMAC hex digest. Hot path; UNIQUE-indexed seek."""
+
+    @abstractmethod
+    async def list_personal_access_tokens(
+        self,
+        *,
+        user_id: UUID,
+        limit: int,
+        offset: int = 0,
+    ) -> list[PersonalAccessTokenRow]:
+        """Return a page of ``user_id``'s PATs, ordered ``created_at`` then
+        ``token_id`` descending (newest first). ``limit``/``offset`` drive the
+        opaque-cursor pagination at the handler layer."""
+
+    @abstractmethod
+    async def count_personal_access_tokens(self, *, user_id: UUID) -> int:
+        """Total PAT rows for ``user_id`` (drives ``?include_total``)."""
+
+    @abstractmethod
+    async def revoke_personal_access_token(
+        self,
+        *,
+        token_id: UUID,
+        revoked_at: datetime,
+    ) -> PersonalAccessTokenRow:
+        """Mark a PAT revoked. Idempotent — re-revoking keeps the first
+        ``revoked_at``. Raises :class:`ValueError` if the token doesn't exist."""
+
+    @abstractmethod
+    async def touch_pat_last_used(
+        self,
+        *,
+        token_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Best-effort ``last_used_at`` bump, coarsened to ~60s so a high-rate
+        scrape loop isn't a write per request. No-op when already fresh or when
+        the token has been revoked."""
 
     # =================================================================
     # SYSTEM USERS (MODELS §2.17 — operator accounts)

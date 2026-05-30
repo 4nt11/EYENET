@@ -90,6 +90,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "system_user_scope",
         # M9.A3 — MFA TOTP login challenge
         "mfa_challenge",
+        # M9.A4 — personal access tokens
+        "personal_access_token",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset({"audit_log"})

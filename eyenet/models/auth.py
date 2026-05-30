@@ -27,7 +27,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Index
+from sqlalchemy import JSON, CheckConstraint, Column, Index
 from sqlmodel import Field, SQLModel
 
 from ._base import new_uuid7
@@ -97,8 +97,44 @@ class SystemUserScopeTable(SQLModel, table=True):
     granted_by_user_id: UUID = Field(foreign_key="system_user.id")
 
 
+class PersonalAccessTokenTable(SQLModel, table=True):
+    """`personal_access_token` — non-interactive bearer credential (API_PLAN §4.3, M9.A4).
+
+    A PAT authenticates automation (Prometheus scraping, read-only feeds)
+    without a human JWT session. ``hash`` is HMAC-SHA256(pepper, secret) —
+    UNIQUE so the per-request auth lookup is an index seek. ``prefix`` is the
+    plaintext 22-char display segment, also UNIQUE for a defense-in-depth
+    match at verify time. ``scopes`` are frozen at mint (M9.A4 decision):
+    the row carries exactly the scopes captured then, until ``revoked_at``.
+    """
+
+    __tablename__ = "personal_access_token"
+    __table_args__ = (
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="ck_personal_access_token_revoked_after_created",
+        ),
+        Index("ix_personal_access_token_user_created", "user_id", "created_at"),
+    )
+
+    token_id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    user_id: UUID = Field(foreign_key="system_user.id", index=True)
+    name: str = Field(max_length=128)
+    prefix: str = Field(unique=True, index=True, min_length=1, max_length=32)
+    # HMAC-SHA256(pepper, secret) hex digest. UNIQUE → indexed equality
+    # lookup on the per-request auth hot path. The pepper lives off-database
+    # (<data_dir>/jwt/pat_pepper) so DB exfiltration alone yields nothing.
+    hash: str = Field(unique=True, index=True, min_length=64, max_length=64)
+    scopes: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
 __all__ = [
     "JwtDenylistTable",
+    "PersonalAccessTokenTable",
     "RefreshTokenTable",
     "SystemUserCredentialTable",
     "SystemUserScopeTable",

@@ -89,8 +89,39 @@ class SystemUserScopeRow(BaseModel):
     granted_by_user_id: UUID
 
 
+class PersonalAccessTokenRow(BaseModel):
+    """Non-interactive bearer credential (API_PLAN §4.3, M9.A4).
+
+    ``hash`` is HMAC-SHA256(pepper, secret); the plaintext secret never
+    reaches storage. ``scopes`` are frozen at mint. Revocation = setting
+    ``revoked_at`` (the row is retained for the audit trail).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token_id: UUID
+    user_id: UUID
+    name: str = Field(min_length=1, max_length=128)
+    prefix: str = Field(
+        min_length=1,
+        max_length=32,
+        description="Plaintext 22-char display prefix; the secret is never stored.",
+    )
+    hash: str = Field(
+        min_length=64,
+        max_length=64,
+        description="HMAC-SHA256(pepper, secret) hex digest — the only secret-derived value stored",
+    )
+    scopes: list[str] = Field(default_factory=list)
+    created_at: datetime
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
 __all__ = [
     "JwtDenylistRow",
+    "PersonalAccessTokenRow",
     "RefreshTokenRow",
     "SystemUserCredentialRow",
     "SystemUserScopeRow",

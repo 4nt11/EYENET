@@ -26,8 +26,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from eyenet.api.auth import AuthCache, load_mfa_key, load_verifying_keys
-from eyenet.api.deps import AuthError, ScopeForbidden
+from eyenet.api.auth import AuthCache, load_mfa_key, load_pat_pepper, load_verifying_keys
+from eyenet.api.deps import AuthError, ResourceNotFound, ScopeForbidden
 from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
 from eyenet.bus.memory import MemoryBus
@@ -75,6 +75,7 @@ def create_app(
     )
     app.state.verifying_keys = load_verifying_keys(data_dir)
     app.state.mfa_key = load_mfa_key(data_dir)
+    app.state.pat_pepper = load_pat_pepper(data_dir)
     app.state.data_dir = data_dir
     app.state.auth_cache = AuthCache.from_env()
 
@@ -122,6 +123,18 @@ def create_app(
             request_id=_request_id(request),
         )
         return _problem_response(problem, 401)
+
+    @app.exception_handler(ResourceNotFound)
+    async def _resource_not_found(request: Request, exc: ResourceNotFound) -> JSONResponse:  # noqa: ARG001 — FastAPI handler signature; detail kept generic (no enumeration oracle)
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Not Found",
+            status=404,
+            detail="resource not found",
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 404)
 
     @app.exception_handler(ScopeForbidden)
     async def _scope_forbidden(request: Request, exc: ScopeForbidden) -> JSONResponse:

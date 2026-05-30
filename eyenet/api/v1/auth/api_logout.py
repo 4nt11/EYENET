@@ -9,7 +9,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response
 
 from eyenet.api.auth import AuthCache, hash_refresh_secret
-from eyenet.api.deps import CurrentUser, get_audit, get_auth_cache, get_current_user, get_storage
+from eyenet.api.deps import (
+    AuthError,
+    CurrentUser,
+    get_audit,
+    get_auth_cache,
+    get_current_user,
+    get_storage,
+)
 from eyenet.api.v1.schemas.auth import LogoutRequest
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -30,6 +37,12 @@ async def auth_logout(
     audit: Annotated[AuditEmitter, Depends(get_audit)],
     cache: Annotated[AuthCache, Depends(get_auth_cache)],
 ) -> Response:
+    # Logout denylists an interactive access JWT. A PAT principal carries no
+    # jti (and no JWT expiry) — it cannot denylist a session; revoke it via
+    # DELETE /v1/auth/tokens/{token_id} instead.
+    if current_user.jti is None or current_user.token_expires_at is None:
+        raise AuthError("pat_cannot_logout")
+
     now = datetime.now(tz=UTC)
     await storage.deny_jwt(
         jti=current_user.jti,

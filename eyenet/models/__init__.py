@@ -15,6 +15,7 @@ from .actor import ActorAliasHistoryTable, ActorTable
 from .audit import AuditLogTable
 from .auth import (
     JwtDenylistTable,
+    PersonalAccessTokenTable,
     RefreshTokenTable,
     SystemUserCredentialTable,
     SystemUserScopeTable,
@@ -83,6 +84,7 @@ __all__ = [
     "ObservationTable",
     "PersonaMembershipTable",
     "PersonaTable",
+    "PersonalAccessTokenTable",
     "ProfileTable",
     "ReactionTable",
     "RefreshTokenTable",

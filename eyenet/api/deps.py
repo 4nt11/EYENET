@@ -13,6 +13,7 @@ and re-raises as those.
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,6 +27,9 @@ from eyenet.api.auth import (
     JwtError,
     VerifyingKey,
     decode_access_token,
+    hash_pat,
+    is_pat,
+    parse_pat,
 )
 
 if TYPE_CHECKING:
@@ -54,16 +58,40 @@ class ScopeForbidden(Exception):  # noqa: N818 — domain term, not the generic 
         self.scope = scope
 
 
+class ResourceNotFound(Exception):  # noqa: N818 — domain term, not the generic ``*Error`` suffix
+    """404-class failure: the addressed resource is absent OR the caller may
+    not see it. The public ``detail`` is generic so a non-owner can't use the
+    status code to enumerate other operators' resources. ``resource`` is for
+    audit/logging only."""
+
+    def __init__(self, resource: str) -> None:
+        super().__init__(resource)
+        self.resource = resource
+
+
 @dataclass(frozen=True)
 class CurrentUser:
-    """Per-request identity + freshly-resolved authority."""
+    """Per-request identity + resolved authority.
+
+    Two principal kinds resolve into this one shape:
+
+    * **JWT** — ``jti`` set, ``pat_id`` None, ``effective_scopes`` resolved
+      live from storage per request (identity-in-JWT / authority-in-storage).
+    * **PAT** — ``pat_id`` set, ``jti`` None, ``effective_scopes`` frozen to
+      the scopes captured at mint (M9.A4 decision); ``token_expires_at`` is
+      the PAT's optional expiry (None = non-expiring).
+
+    Handlers needing the interactive-session ``jti`` (logout) must guard on
+    ``jti is None`` and reject PAT principals.
+    """
 
     user_id: UUID
     username: str
     role: SystemUserRole
     effective_scopes: frozenset[str]
-    jti: UUID
-    token_expires_at: datetime
+    token_expires_at: datetime | None
+    jti: UUID | None = None
+    pat_id: UUID | None = None
 
 
 def get_storage(request: Request) -> BaseRepository:
@@ -103,6 +131,13 @@ def get_verifying_keys(request: Request) -> dict[str, VerifyingKey]:
     return cast("dict[str, VerifyingKey]", keys)
 
 
+def get_pat_pepper(request: Request) -> bytes:
+    pepper = getattr(request.app.state, "pat_pepper", None)
+    if pepper is None:
+        raise RuntimeError("app.state.pat_pepper is not configured")
+    return cast("bytes", pepper)
+
+
 def bearer_token(
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ) -> str:
@@ -114,12 +149,63 @@ def bearer_token(
     return token
 
 
+async def _resolve_pat(
+    token: str,
+    storage: BaseRepository,
+    cache: AuthCache,
+    pepper: bytes,
+) -> CurrentUser:
+    """Resolve a PAT bearer into the shared :class:`CurrentUser` principal.
+
+    Every failure mode raises the flat ``AuthError`` (401, no oracle); the
+    reason is recorded for audit only. Scopes are FROZEN to the values
+    captured at mint (M9.A4 decision) — revocation, not live re-resolution,
+    is the guard.
+    """
+    parsed = parse_pat(token)
+    if parsed is None:
+        raise AuthError("malformed_pat")
+    prefix, secret = parsed
+    row = await storage.get_personal_access_token_by_hash(hash_pat(pepper, secret))
+    if row is None:
+        raise AuthError("invalid_pat")
+    # Defense-in-depth: the hash already uniquely identifies the row, but a
+    # constant-time prefix compare rejects any logic error pairing a matching
+    # digest with a mismatched display prefix.
+    if not hmac.compare_digest(row.prefix, prefix):
+        raise AuthError("pat_prefix_mismatch")
+    now = datetime.now(tz=UTC)
+    if row.revoked_at is not None:
+        raise AuthError("pat_revoked")
+    if row.expires_at is not None and row.expires_at <= now:
+        raise AuthError("pat_expired")
+    ctx = await cache.get_or_load(row.user_id, storage, now=now)
+    if ctx is None:
+        raise AuthError("user_not_found_or_inactive")
+    await storage.touch_pat_last_used(token_id=row.token_id, now=now)
+    return CurrentUser(
+        user_id=ctx.user.id,
+        username=ctx.user.username,
+        role=ctx.user.role,
+        effective_scopes=frozenset(row.scopes),
+        token_expires_at=row.expires_at,
+        jti=None,
+        pat_id=row.token_id,
+    )
+
+
 async def get_current_user(
     token: Annotated[str, Depends(bearer_token)],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     cache: Annotated[AuthCache, Depends(get_auth_cache)],
     verifying_keys: Annotated[dict[str, VerifyingKey], Depends(get_verifying_keys)],
+    pepper: Annotated[bytes, Depends(get_pat_pepper)],
 ) -> CurrentUser:
+    # PAT bearers carry a fixed literal prefix — triage cheaply before the
+    # JWT decode path. Both kinds resolve to the same CurrentUser shape.
+    if is_pat(token):
+        return await _resolve_pat(token, storage, cache, pepper)
+
     try:
         claims = decode_access_token(token, verifying_keys=verifying_keys)
     except JwtError as exc:
@@ -138,8 +224,9 @@ async def get_current_user(
         username=ctx.user.username,
         role=ctx.user.role,
         effective_scopes=ctx.effective_scopes,
-        jti=claims.jti,
         token_expires_at=claims.expires_at,
+        jti=claims.jti,
+        pat_id=None,
     )
 
 
@@ -163,12 +250,14 @@ __all__ = [
     "AuthError",
     "CurrentUser",
     "RequireScope",
+    "ResourceNotFound",
     "ScopeForbidden",
     "bearer_token",
     "get_audit",
     "get_auth_cache",
     "get_current_user",
     "get_mfa_key",
+    "get_pat_pepper",
     "get_storage",
     "get_verifying_keys",
 ]

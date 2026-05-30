@@ -11,16 +11,25 @@ recovery) or §5 (Lost mfa_key — disaster recovery).
 
 ## 1. Key material on disk
 
-EYENET stores ONE Fernet key for TOTP-secret encryption at rest:
+EYENET stores two auth secrets under `<data_dir>/jwt/`, both auto-generated
+at startup, both mode 0600, owner = service account:
 
 ```
-<data_dir>/jwt/mfa_key   mode 0600, owner = service account
+<data_dir>/jwt/mfa_key      Fernet key — TOTP-secret encryption at rest (M9.A3)
+<data_dir>/jwt/pat_pepper   32-byte HMAC pepper — Personal Access Tokens (M9.A4)
 ```
 
-This file is auto-generated on first call to `eyenet.api.auth.load_mfa_key`
-(which the app factory triggers at startup). The file lives in the same
-directory as the JWT signing keypair (`signing_key.pem`,
-`verifying_key.pem`), so backing up `<data_dir>/jwt/` covers both.
+`mfa_key` is auto-generated on first call to `eyenet.api.auth.load_mfa_key`;
+`pat_pepper` on first call to `eyenet.api.auth.load_pat_pepper` — both
+triggered by the app factory at startup. They live alongside the JWT signing
+keypair (`signing_key.pem`, `verifying_key.pem`), so backing up
+`<data_dir>/jwt/` covers everything.
+
+The **`pat_pepper`** keys the HMAC-SHA256 digest stored in
+`personal_access_token.hash`. PATs are high-entropy random secrets, so the
+pepper — not a slow hash — is the at-rest defense: an attacker holding
+`main.db` but not `pat_pepper` cannot verify or forge any token. Losing it
+invalidates every PAT (operators re-mint — see `development/PAT_RECIPES.md`).
 
 The key is **symmetric** (AES-128-CBC + HMAC-SHA256 in the Fernet
 construction). It encrypts the per-user TOTP secret stored in
