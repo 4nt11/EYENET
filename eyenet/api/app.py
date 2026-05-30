@@ -25,7 +25,6 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from eyenet.api.auth import AuthCache, load_mfa_key, load_pat_pepper, load_verifying_keys
 from eyenet.api.deps import AuthError, ResourceNotFound, ScopeForbidden
@@ -157,7 +156,9 @@ def create_app(
 
     # Evidence-access audit (§5.5): every successful read emits a durable
     # audit row before its body is served; audit-append failure → 503.
-    app.add_middleware(BaseHTTPMiddleware, dispatch=evidence_access_dispatch)
+    # `app.middleware("http")` wraps it as a BaseHTTPMiddleware internally —
+    # no direct starlette import needed.
+    app.middleware("http")(evidence_access_dispatch)
 
     app.include_router(v1_router)
     return app

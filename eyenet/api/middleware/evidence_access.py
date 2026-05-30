@@ -23,10 +23,9 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID, uuid4
 
 import structlog
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
-from starlette.requests import Request
-from starlette.responses import Response
 
 from eyenet.api.deps import CurrentUser
 from eyenet.api.v1.schemas.errors import ProblemDetail
