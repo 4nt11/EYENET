@@ -35,7 +35,16 @@ ALGORITHM: Final[str] = "RS256"
 ISSUER: Final[str] = "eyenet"
 ACCESS_TTL: Final[timedelta] = timedelta(minutes=15)
 REFRESH_TTL: Final[timedelta] = timedelta(days=30)
+STREAM_TTL: Final[timedelta] = timedelta(minutes=15)
 _RSA_KEY_BITS: Final[int] = 4096
+
+# `typ` claim discriminator (M9.A5). Every minted JWT carries exactly one of
+# these. The decode path enforces the expected value, so an access token can
+# never authenticate an SSE stream and a stream token can never authenticate a
+# normal API request — the two surfaces are cryptographically isolated even
+# though they share the signing key.
+_TYP_ACCESS: Final[str] = "access"
+_TYP_STREAM: Final[str] = "stream"
 
 _SIGNING_KEY_NAME = "signing_key.pem"
 _VERIFYING_KEY_NAME = "verifying_key.pem"
@@ -59,6 +68,23 @@ class AccessClaims:
     """Decoded JWT body — identity only, never authority."""
 
     user_id: UUID
+    jti: UUID
+    issued_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class StreamClaims:
+    """Decoded stream-token body (M9.A5).
+
+    Like :class:`AccessClaims` it is identity-only for *authority* purposes —
+    the stream endpoint re-resolves the caller's live ``stream:*`` scopes from
+    storage. ``topics`` is the capability set the token was minted for; it
+    *narrows* what the connection may subscribe to, it does not grant it.
+    """
+
+    user_id: UUID
+    topics: tuple[str, ...]
     jti: UUID
     issued_at: datetime
     expires_at: datetime
@@ -145,6 +171,7 @@ def mint_access_token(
         "iss": ISSUER,
         "sub": str(user_id),
         "jti": str(jti),
+        "typ": _TYP_ACCESS,
         "iat": int(moment.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
@@ -193,6 +220,11 @@ def decode_access_token(
         raise JwtError("expired_token") from exc
     except jwt.InvalidTokenError as exc:
         raise JwtError("invalid_token") from exc
+    # Token-type isolation (M9.A5): reject a stream token presented on the
+    # normal Authorization-header path. A token minted before `typ` existed
+    # also fails here — acceptable pre-public (15-min TTL, nothing persists).
+    if payload.get("typ") != _TYP_ACCESS:
+        raise JwtError("wrong_token_type")
     try:
         user_id = UUID(payload["sub"])
         jti = UUID(payload["jti"])
@@ -200,6 +232,99 @@ def decode_access_token(
         raise JwtError("invalid_token") from exc
     return AccessClaims(
         user_id=user_id,
+        jti=jti,
+        issued_at=datetime.fromtimestamp(int(payload["iat"]), tz=UTC),
+        expires_at=datetime.fromtimestamp(int(payload["exp"]), tz=UTC),
+    )
+
+
+def mint_stream_token(
+    *,
+    user_id: UUID,
+    topics: list[str],
+    ttl: timedelta,
+    signing_key: SigningKey,
+    now: datetime | None = None,
+) -> tuple[str, StreamClaims]:
+    """Sign one short-lived stream token (M9.A5).
+
+    The browser SSE client (``EventSource``) cannot set an ``Authorization``
+    header, so this token is handed to it as a ``?token=`` query param. It
+    carries ``typ:"stream"`` (so it can't be used as an access token) and the
+    ``topics`` it was minted for. ``ttl`` is clamped by the caller to
+    :data:`STREAM_TTL`.
+    """
+    moment = now or datetime.now(tz=UTC)
+    jti = UUID(str(new_uuid7()))
+    expires_at = moment + ttl
+    payload = {
+        "iss": ISSUER,
+        "sub": str(user_id),
+        "jti": str(jti),
+        "typ": _TYP_STREAM,
+        "topics": list(topics),
+        "iat": int(moment.timestamp()),
+        "exp": int(expires_at.timestamp()),
+    }
+    token = jwt.encode(
+        payload,
+        signing_key.private_pem,
+        algorithm=ALGORITHM,
+        headers={"kid": signing_key.kid},
+    )
+    claims = StreamClaims(
+        user_id=user_id,
+        topics=tuple(topics),
+        jti=jti,
+        issued_at=moment,
+        expires_at=expires_at,
+    )
+    return token, claims
+
+
+def decode_stream_token(
+    token: str,
+    *,
+    verifying_keys: dict[str, VerifyingKey],
+) -> StreamClaims:
+    """Verify signature + claims of a stream token; return parsed identity.
+
+    Enforces ``typ:"stream"`` (rejecting an access token presented on the SSE
+    query-param path). Raises :class:`JwtError` for every failure mode.
+    """
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.exceptions.PyJWTError as exc:
+        raise JwtError("malformed_token") from exc
+    kid = header.get("kid")
+    if not isinstance(kid, str) or kid not in verifying_keys:
+        raise JwtError("unknown_kid")
+    vkey = verifying_keys[kid]
+    try:
+        payload = jwt.decode(
+            token,
+            vkey.public_pem,
+            algorithms=[ALGORITHM],
+            issuer=ISSUER,
+            options={"require": ["exp", "iat", "sub", "jti", "iss"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise JwtError("expired_token") from exc
+    except jwt.InvalidTokenError as exc:
+        raise JwtError("invalid_token") from exc
+    if payload.get("typ") != _TYP_STREAM:
+        raise JwtError("wrong_token_type")
+    raw_topics = payload.get("topics")
+    if not isinstance(raw_topics, list) or not all(isinstance(t, str) for t in raw_topics):
+        raise JwtError("invalid_token")
+    try:
+        user_id = UUID(payload["sub"])
+        jti = UUID(payload["jti"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise JwtError("invalid_token") from exc
+    return StreamClaims(
+        user_id=user_id,
+        topics=tuple(raw_topics),
         jti=jti,
         issued_at=datetime.fromtimestamp(int(payload["iat"]), tz=UTC),
         expires_at=datetime.fromtimestamp(int(payload["exp"]), tz=UTC),
@@ -223,14 +348,18 @@ __all__ = [
     "ALGORITHM",
     "ISSUER",
     "REFRESH_TTL",
+    "STREAM_TTL",
     "AccessClaims",
     "JwtError",
     "SigningKey",
+    "StreamClaims",
     "VerifyingKey",
     "decode_access_token",
+    "decode_stream_token",
     "hash_refresh_secret",
     "load_signing_keypair",
     "load_verifying_keys",
     "mint_access_token",
     "mint_refresh_secret",
+    "mint_stream_token",
 ]

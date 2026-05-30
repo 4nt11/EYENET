@@ -27,6 +27,7 @@ from eyenet.api.auth import (
     JwtError,
     VerifyingKey,
     decode_access_token,
+    decode_stream_token,
     hash_pat,
     is_pat,
     parse_pat,
@@ -92,6 +93,23 @@ class CurrentUser:
     token_expires_at: datetime | None
     jti: UUID | None = None
     pat_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class StreamPrincipal:
+    """Authenticated SSE connection (M9.A5).
+
+    Distinct from :class:`CurrentUser`: a stream connection is not a full API
+    principal. It carries the ``topics`` the stream token was minted for (the
+    capability set), not effective scopes — the SSE delivery path re-resolves
+    live ``stream:*`` authority and intersects it with these topics.
+    """
+
+    user_id: UUID
+    username: str
+    role: SystemUserRole
+    topics: frozenset[str]
+    expires_at: datetime
 
 
 def get_storage(request: Request) -> BaseRepository:
@@ -230,6 +248,41 @@ async def get_current_user(
     )
 
 
+async def get_stream_principal(
+    request: Request,
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+    cache: Annotated[AuthCache, Depends(get_auth_cache)],
+    verifying_keys: Annotated[dict[str, VerifyingKey], Depends(get_verifying_keys)],
+) -> StreamPrincipal:
+    """Resolve the ``?token=`` query-param stream token into a principal.
+
+    EventSource cannot set an ``Authorization`` header, so the SSE endpoints
+    authenticate off the query string. Reading the token from ``request``
+    (rather than a declared ``Query`` param) keeps this dependency from adding
+    a duplicate parameter to the endpoints' OpenAPI surface — they already
+    declare their own ``token`` param. Every failure raises the flat
+    ``AuthError`` (401, no oracle); the reason is for audit only.
+    """
+    token = request.query_params.get("token")
+    if not token:
+        raise AuthError("missing_stream_token")
+    try:
+        claims = decode_stream_token(token, verifying_keys=verifying_keys)
+    except JwtError as exc:
+        raise AuthError(exc.args[0] if exc.args else "invalid_stream_token") from exc
+    now = datetime.now(tz=UTC)
+    ctx = await cache.get_or_load(claims.user_id, storage, now=now)
+    if ctx is None:
+        raise AuthError("user_not_found_or_inactive")
+    return StreamPrincipal(
+        user_id=ctx.user.id,
+        username=ctx.user.username,
+        role=ctx.user.role,
+        topics=frozenset(claims.topics),
+        expires_at=claims.expires_at,
+    )
+
+
 def RequireScope(  # noqa: N802 — FastAPI dependency factory convention
     scope: str,
 ) -> Callable[[CurrentUser], Awaitable[CurrentUser]]:
@@ -252,6 +305,7 @@ __all__ = [
     "RequireScope",
     "ResourceNotFound",
     "ScopeForbidden",
+    "StreamPrincipal",
     "bearer_token",
     "get_audit",
     "get_auth_cache",
@@ -259,5 +313,6 @@ __all__ = [
     "get_mfa_key",
     "get_pat_pepper",
     "get_storage",
+    "get_stream_principal",
     "get_verifying_keys",
 ]
