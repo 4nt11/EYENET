@@ -243,6 +243,12 @@ class PersonasMixin:
             )
             return int(result.one())
 
+    async def count_personas(self) -> int:
+        """Total number of personas (M9.F3 graph stats)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(PersonaTable))
+            return int(result.one())
+
     async def all_personas(self) -> list[object]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(select(PersonaTable))

@@ -6,7 +6,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlmodel import select
+from sqlalchemy import ColumnElement, func, or_
+from sqlmodel import col, select
 
 from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.enums import GroupKind, SourceKind
@@ -74,6 +75,55 @@ class ActorsMixin:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             row = await session.get(SourceTable, source_id)
             return _row_to_source(row) if row is not None else None
+
+    async def count_actors(self) -> int:
+        """Total number of actors (M9.F3 graph stats)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(ActorTable))
+            return int(result.one())
+
+    def _actor_search_clause(self, q: str) -> ColumnElement[bool]:
+        """Case-insensitive substring match on handle / display name (M9.F3).
+
+        ANSI ``LOWER(col) LIKE '%q%'`` — portable across backends, no FTS5
+        dependency. Per CLAUDE.md §2.3 Rule 1 this stays dialect-free; a
+        future SQLite FTS5 override can supersede it if ranking is needed.
+        """
+        pattern = f"%{q.lower()}%"
+        return or_(
+            func.lower(col(ActorTable.current_handle)).like(pattern),
+            func.lower(col(ActorTable.current_display_name)).like(pattern),
+        )
+
+    async def search_actors(
+        self,
+        q: str,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Actors whose handle/display name contain ``q`` (M9.F3).
+
+        Returns ``ActorTable`` rows (type-erased), newest-activity first.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(ActorTable)
+                .where(self._actor_search_clause(q))
+                .order_by(col(ActorTable.last_seen_at_ingest).desc())
+                .order_by(col(ActorTable.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def count_search_actors(self, q: str) -> int:
+        """Count actors matching the same substring search (M9.F3)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(func.count()).select_from(ActorTable).where(self._actor_search_clause(q))
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def upsert_source(
         self,

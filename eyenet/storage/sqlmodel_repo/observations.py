@@ -111,6 +111,12 @@ class ObservationsMixin:
             result = await session.exec(stmt)
             return int(result.one())
 
+    async def count_observations(self) -> int:
+        """Total number of observations across all actors (M9.F3 graph stats)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(ObservationTable))
+            return int(result.one())
+
     async def observation_by_evidence_and_primitive(
         self,
         evidence_ref: str,

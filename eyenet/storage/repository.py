@@ -380,6 +380,9 @@ class BaseRepository(ABC):
     ) -> int: ...
 
     @abstractmethod
+    async def count_observations(self) -> int: ...
+
+    @abstractmethod
     async def reclassify_observation(
         self,
         *,
@@ -755,6 +758,9 @@ class BaseRepository(ABC):
     async def count_persona_memberships(self, persona_id: UUID) -> int: ...
 
     @abstractmethod
+    async def count_personas(self) -> int: ...
+
+    @abstractmethod
     async def all_personas(self) -> list[object]: ...
 
     # =================================================================
@@ -837,6 +843,17 @@ class BaseRepository(ABC):
     @abstractmethod
     async def get_source(self, source_id: UUID) -> object | None:
         """Return the SourceRow for a primary-key id, or None (M9.F1)."""
+
+    @abstractmethod
+    async def count_actors(self) -> int: ...
+
+    @abstractmethod
+    async def search_actors(self, q: str, *, limit: int, offset: int = 0) -> list[object]:
+        """Actors whose handle/display name contain ``q`` (ANSI substring),
+        newest-activity first; ActorTable rows type-erased. (M9.F3)"""
+
+    @abstractmethod
+    async def count_search_actors(self, q: str) -> int: ...
 
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
