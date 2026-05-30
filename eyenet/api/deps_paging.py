@@ -22,7 +22,7 @@ from __future__ import annotations
 import base64
 import binascii
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import Query
 from fastapi.exceptions import RequestValidationError
@@ -85,12 +85,14 @@ class CursorParams:
 def cursor_params(
     cursor: Annotated[str | None, Query(max_length=4096)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
-    include_total: Annotated[Literal[0, 1], Query()] = 0,
+    include_total: Annotated[int, Query(ge=0, le=1)] = 0,
 ) -> CursorParams:
     """FastAPI dependency bundling the three shared pagination query params.
 
     Mirrors the `Cursor` / `Limit` / `IncludeTotal` OpenAPI parameter
-    components verbatim so the generated spec matches the hand-drafted YAML.
+    components: cursor (maxLength 4096), limit (1..500, default 50),
+    include_total (0/1 integer flag — modeled as a ranged int rather than a
+    `Literal` so query-string values coerce cleanly).
     """
     return CursorParams(
         offset=decode_cursor(cursor),

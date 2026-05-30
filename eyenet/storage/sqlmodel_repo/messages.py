@@ -8,10 +8,12 @@ event in the calling service.
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 import structlog
 from opentelemetry import trace
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
@@ -98,6 +100,58 @@ class MessagesMixin:
             rows = list(result.all())
         rows.reverse()
         return [str(b) for b in rows if b]
+
+    async def messages_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Messages sent by an actor, newest-first (M9.F1 timeline).
+
+        Optional half-open time window on ``sent_at_source``. Returns
+        ``MessageTable`` rows (type-erased to ``object``) for the timeline
+        projector — unlike ``recent_message_bodies_for_actor`` which yields
+        only bodies, the timeline needs the row's id and timestamp.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(MessageTable).where(MessageTable.actor_id == actor_id)
+            if since is not None:
+                stmt = stmt.where(col(MessageTable.sent_at_source) >= since)
+            if until is not None:
+                stmt = stmt.where(col(MessageTable.sent_at_source) < until)
+            stmt = (
+                stmt.order_by(col(MessageTable.sent_at_source).desc())
+                .order_by(col(MessageTable.id).desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def count_messages_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int:
+        """Count messages for an actor, with the same optional window (M9.F1)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(func.count())
+                .select_from(MessageTable)
+                .where(MessageTable.actor_id == actor_id)
+            )
+            if since is not None:
+                stmt = stmt.where(col(MessageTable.sent_at_source) >= since)
+            if until is not None:
+                stmt = stmt.where(col(MessageTable.sent_at_source) < until)
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def resolve_message_id(
         self,

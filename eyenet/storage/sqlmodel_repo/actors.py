@@ -8,10 +8,49 @@ from uuid import UUID
 
 from sqlmodel import select
 
+from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.enums import GroupKind, SourceKind
+from eyenet.contracts.source import SourceRow
 from eyenet.models import ActorTable, GroupTable, SourceTable
 
 from ._helpers import safe_session
+
+
+def _aware(dt: datetime) -> datetime:
+    """Normalize a naive (SQLite-returned) datetime to UTC-aware."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def _aware_opt(dt: datetime | None) -> datetime | None:
+    return None if dt is None else _aware(dt)
+
+
+def _row_to_actor(row: ActorTable) -> ActorRow:
+    return ActorRow(
+        id=row.id,
+        actor_key=row.actor_key,
+        source_id=row.source_id,
+        platform_userid=row.platform_userid,
+        current_handle=row.current_handle,
+        current_display_name=row.current_display_name,
+        first_seen_at_source=_aware_opt(row.first_seen_at_source),
+        first_seen_at_ingest=_aware(row.first_seen_at_ingest),
+        last_seen_at_source=_aware_opt(row.last_seen_at_source),
+        last_seen_at_ingest=_aware(row.last_seen_at_ingest),
+        is_bot_self_declared=row.is_bot_self_declared,
+        notes=row.notes,
+    )
+
+
+def _row_to_source(row: SourceTable) -> SourceRow:
+    return SourceRow(
+        id=row.id,
+        kind=row.kind,
+        display_name=row.display_name,
+        canonical_url=row.canonical_url,
+        created_at=_aware(row.created_at),
+        notes=row.notes,
+    )
 
 
 class ActorsMixin:
@@ -20,6 +59,21 @@ class ActorsMixin:
             result = await session.exec(select(ActorTable).where(ActorTable.actor_key == actor_key))
             row = result.first()
             return row.id if row else None
+
+    async def get_actor(self, actor_id: UUID) -> object | None:
+        """Return the :class:`ActorRow` for a primary-key id, or None (M9.F1)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(ActorTable, actor_id)
+            return _row_to_actor(row) if row is not None else None
+
+    async def get_source(self, source_id: UUID) -> object | None:
+        """Return the :class:`SourceRow` for a primary-key id, or None (M9.F1).
+
+        Used by the actor-detail handler to project an actor's single platform.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(SourceTable, source_id)
+            return _row_to_source(row) if row is not None else None
 
     async def upsert_source(
         self,

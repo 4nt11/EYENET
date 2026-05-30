@@ -358,6 +358,28 @@ class BaseRepository(ABC):
     ) -> object | None: ...
 
     @abstractmethod
+    async def observations_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Observations for an actor, newest-first, with optional time window.
+        Returns ObservationTable rows (type-erased). (M9.F1)"""
+
+    @abstractmethod
+    async def count_observations_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
+
+    @abstractmethod
     async def reclassify_observation(
         self,
         *,
@@ -431,6 +453,28 @@ class BaseRepository(ABC):
     ) -> list[str]:
         """Return up to ``limit`` recent non-empty bodies for an actor,
         oldest-first. Used by the Verifier window-corpus loader."""
+
+    @abstractmethod
+    async def messages_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Messages sent by an actor, newest-first, with optional time window.
+        Returns MessageTable rows (type-erased) for the timeline. (M9.F1)"""
+
+    @abstractmethod
+    async def count_messages_for_actor(
+        self,
+        actor_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
 
     @abstractmethod
     async def resolve_message_id(
@@ -590,6 +634,20 @@ class BaseRepository(ABC):
     ) -> list[tuple[UUID, str, dict[str, object]]]: ...
 
     @abstractmethod
+    async def graph_neighbor_edges(
+        self,
+        node_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Outbound edges from a node as GraphEdgeTable rows (type-erased),
+        for the typed-edge neighbor projector. (M9.F1)"""
+
+    @abstractmethod
+    async def count_graph_neighbors(self, node_id: UUID) -> int: ...
+
+    @abstractmethod
     async def graph_edges_by_type(
         self,
         edge_type: str,
@@ -668,6 +726,20 @@ class BaseRepository(ABC):
     async def persona_members(self, persona_id: UUID) -> list[UUID]: ...
 
     @abstractmethod
+    async def list_persona_memberships(
+        self,
+        persona_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Membership rows for a persona, oldest-join-first (type-erased
+        PersonaMembershipTable rows) for the members projector. (M9.F1)"""
+
+    @abstractmethod
+    async def count_persona_memberships(self, persona_id: UUID) -> int: ...
+
+    @abstractmethod
     async def all_personas(self) -> list[object]: ...
 
     # =================================================================
@@ -742,6 +814,14 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
+
+    @abstractmethod
+    async def get_actor(self, actor_id: UUID) -> object | None:
+        """Return the ActorRow for a primary-key id, or None (M9.F1)."""
+
+    @abstractmethod
+    async def get_source(self, source_id: UUID) -> object | None:
+        """Return the SourceRow for a primary-key id, or None (M9.F1)."""
 
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)

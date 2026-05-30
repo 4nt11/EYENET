@@ -1,12 +1,19 @@
-"""GET /v1/actors/{actor_id}/observations — paginated observations."""
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""GET /v1/actors/{actor_id}/observations — paginated observations (M9.F1)."""
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from eyenet.api.v1.schemas.actors import CursorPageObservationSummary
+from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
+from eyenet.api.deps_paging import CursorParams, cursor_params
+from eyenet.api.v1.schemas.actors import CursorPageObservationSummary, ObservationSummary
+from eyenet.models.observation import ObservationTable
+from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["actors"])
 
@@ -19,8 +26,27 @@ router = APIRouter(tags=["actors"])
 )
 async def actors_observations(
     actor_id: UUID,
-    cursor: str | None = Query(default=None, max_length=512),
-    limit: int = Query(default=50, ge=1, le=200),
-    include_total: bool = Query(default=False),
+    _: Annotated[CurrentUser, Depends(RequireScope("read:observations"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+    page: Annotated[CursorParams, Depends(cursor_params)],
+    since: Annotated[datetime | None, Query()] = None,
+    until: Annotated[datetime | None, Query()] = None,
 ) -> CursorPageObservationSummary:
-    raise NotImplementedError("actors_observations (M9.0 skeleton)")
+    if await storage.get_actor(actor_id) is None:
+        raise ResourceNotFound("actor")
+    rows = cast(
+        "list[ObservationTable]",
+        await storage.observations_for_actor(
+            actor_id, since=since, until=until, limit=page.fetch_limit, offset=page.offset
+        ),
+    )
+    estimated_total = (
+        await storage.count_observations_for_actor(actor_id, since=since, until=until)
+        if page.include_total
+        else None
+    )
+    return CursorPageObservationSummary(
+        items=[ObservationSummary.from_domain(r) for r in rows[: page.limit]],
+        next_cursor=page.next_cursor(fetched=len(rows)),
+        estimated_total=estimated_total,
+    )
