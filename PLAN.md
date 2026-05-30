@@ -794,6 +794,81 @@ already accept this — no contract changes.
 
 ---
 
+### Milestone 10 — Document Classifier — 📐 PLANNED (sketch: `development/CLASSIFIER_PLAN.md`)
+
+The clearance/file-access stack (M9 Groups A–F) gates access by
+`SensitivityTier`, but nothing **assigns** that tier. M10 closes the loop:
+every byte of evidence that lands — message attachments and standalone
+operator uploads — gets a tier **automatically at reception**, deterministically
+and defensibly. This is the milestone that makes clearance levels *mean*
+something. Full design in `development/CLASSIFIER_PLAN.md`.
+
+**Load-bearing principle — fail-closed.** Anything we cannot read, cannot parse,
+or cannot reason about confidently becomes `CLASSIFIED` + an operator-review
+flag. Under-classification is the only unacceptable error; over-classification
+is merely annoying and operator-correctable (monotone-up promote, never demote).
+
+**Tier decision is 100% deterministic and reproducible.**
+`tier = MAX(regex_floor, presidio_floor, extraction_failure_floor)`. The LLM
+**never** mutates the tier — it only ever raises a hand (operator-review flag).
+A tier is therefore court-defensible: re-runnable to the same answer, no model
+weights in the decision path. This is the classifier-authoritative,
+operator-promote-only reclassification model (API_PLAN §4.9) applied at intake.
+
+**Extraction is the security boundary.** Parsing hostile documents (Tesseract
+OCR, python-docx, pymupdf) is the highest-RCE-risk surface in the system, so
+**all** extraction runs behind ONE chokepoint — `extract_sandboxed(blob)
+-> ExtractResult | FAILED_CLOSED` — over **nsjail** (userns→`nobody`, no network
+interface, `RLIMIT_AS/CPU/FSIZE`, cgroup mem cap, `time_limit`, seccomp
+allowlist, read-only input bind). Contract: a malicious **boot canary**
+self-test proves the sandbox actually contains a hostile payload on **every
+startup** (we re-prove isolation, we don't trust a config file); a throwaway,
+networkless, unprivileged identity per parse; a parent-owned kill switch with
+bounded output; abnormal exit ⇒ fail-closed. nsjail absent/old/unable-to-contain
+⇒ **degraded fail-closed mode** (everything → `CLASSIFIED`). Linux-only by
+design — the deployment target for sensitive evidence.
+
+**Pipeline (in order; deterministic stages are binding, LLM is advisory):**
+1. **Extraction adapters** — Tesseract (OCR), python-docx (DOCX), pymupdf (PDF),
+   each behind `extract_sandboxed`. Extraction failure ⇒ `CLASSIFIED` floor.
+2. **Regex ruleset engine** — versioned data rules → tier floors. The strongest,
+   most predictable signal; the spine of the decision.
+3. **Microsoft Presidio** — PII detection, locale-aware via the existing spaCy
+   models (reuses the M6.5 locale path). Maps recognizer hits → tier floors.
+4. **Aggregator** — `MAX(...)` of the deterministic floors + provenance +
+   audit row; short-circuits (skips downstream) once a stage hits `CLASSIFIED`.
+5. **LLM tripwire** — local model, **flag-only / non-binding**,
+   prompt-injection-hardened, skipped entirely when the tier is already
+   `CLASSIFIED`. Raises `operator_review` on anything the deterministic stages
+   might have under-read; cannot move the tier.
+
+**Surface + execution.** New `Document` table + an upload surface for standalone
+operator uploads (attachments already exist). `ClassifierService(ServiceBase)`,
+async, processes at reception; rows are **provisional-`CLASSIFIED` until
+settled** (fail-closed during the in-flight window). Calibration grid with the
+**false-negative rate as the headline metric** (an under-classified secret is
+the failure that matters).
+
+**Build plan — 9 slices, worktree, slice-per-commit, `--no-ff` merge** (sandbox
+first; nothing parses until isolation is proven):
+1. Sandbox chokepoint + boot canary (degraded fail-closed) — *the load-bearing
+   slice; prove isolation BEFORE wiring any parser.*
+2. Extraction adapters (Tesseract / python-docx / pymupdf).
+3. Regex ruleset engine (versioned rules → floors).
+4. Presidio wiring (locale-aware via spaCy).
+5. Aggregator + provenance + audit.
+6. LLM tripwire (flag-only).
+7. `Document` table + upload surface.
+8. `ClassifierService`.
+9. Calibration grid (false-negative headline).
+
+**New runtime deps (Linux-only):** `nsjail` (pinned policy, shipped),
+`tesseract-ocr`, `python-docx`, `pymupdf`, `presidio-analyzer`. The LLM runtime
+reuses the operator's local model story (decision deferred to slice 6, mirrors
+the M8 embedding-model bundle-vs-BYO question).
+
+---
+
 ## 11. Open Questions
 
 1. ~~**Graph backend final choice:**~~ **Resolved (M4, 2026-05-22).** SQLite-with-edges shipped via `eyenet/storage/graph.py` + `eyenet/models/graph.py` — `GraphStore` exposes `upsert_node`, `upsert_edge`, `neighbors`, `edges_by_type`, `stats`. Typed `GraphNodeType` (`Actor`, `Persona`) and `GraphEdgeType` (`LinkedTo`, `BelongsToPersona`) drive the relation set. Zero-ops, embedded, no external server. Revisit only if scale forces a move to Neo4j or ArangoDB — the `GraphStore` interface is the swap point.
