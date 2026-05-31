@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
     from eyenet.contracts.collector import CollectorRow
+    from eyenet.contracts.document import DocumentRow
     from eyenet.contracts.enums import (
         ArtifactSubjectKind,
         ArtifactValidationState,
@@ -447,6 +448,16 @@ class BaseRepository(ABC):
         trace_id: str | None = None,
         span_id: str | None = None,
     ) -> object: ...
+
+    # =================================================================
+    # DOCUMENTS (MODELS §2.10, M10 classifier)
+    # =================================================================
+
+    @abstractmethod
+    async def put_document(self, document_row: object) -> UUID: ...
+
+    @abstractmethod
+    async def get_document(self, document_id: UUID) -> DocumentRow | None: ...
 
     # =================================================================
     # MESSAGES (PLAN §4.3, MODELS §1.4)

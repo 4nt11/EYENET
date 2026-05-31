@@ -26,6 +26,7 @@ from .clearance import ClearanceMixin
 from .collectors import CollectorsMixin
 from .corpus import CorpusMixin
 from .cursors import CursorsMixin
+from .documents import DocumentsMixin
 from .feedback import FeedbackMixin
 from .graph import GraphMixin
 from .linkages import LinkagesMixin
@@ -57,6 +58,7 @@ class SQLModelRepository(
     CollectorsMixin,
     CorpusMixin,
     CursorsMixin,
+    DocumentsMixin,
     FeedbackMixin,
     GraphMixin,
     LinkagesMixin,
