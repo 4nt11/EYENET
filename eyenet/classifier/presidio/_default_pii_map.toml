@@ -14,10 +14,13 @@
 # calibration but never loaded) — used for the noisiest NER types that fire on
 # near-every document and would collapse the density signal into noise.
 #
-# CALIBRATION WARNING: every threshold below is an UNCALIBRATED conservative
-# guess. The slice-9 grid re-tunes min_score and the density cut-offs against a
-# labelled corpus, with the false-negative (under-classification) rate as the
-# headline metric. Do not treat these numbers as validated.
+# CALIBRATION (slice 9, SHIPPED): the document grid (`eyenet calibrate classify`)
+# scores these thresholds against a labelled corpus with the under-classification
+# (false-negative) rate as the headline metric. On the committed seed corpus they
+# produce ZERO under-classification. They remain conservative OPERATOR-TUNABLE
+# defaults — re-tune against a LARGER corpus with the grid — NOT hard-validated
+# numbers: a 9-doc synthetic seed cannot justify tightening a security boundary
+# (that is the overfitting direction §0 warns against).
 
 map_version = "v1"
 
@@ -135,10 +138,12 @@ tier_floor = "normal"
 min_score = 0.5
 description = "Organization name (NER)"
 
-# --- Parked: too noisy for a hard floor; revisit in slice-9 calibration -------
+# --- Parked: too noisy for a hard floor ---------------------------------------
 # DATE_TIME and URL fire on a huge fraction of ordinary documents. Counting them
 # toward density would push benign documents over the threshold and collapse the
-# tier into noise. Kept here, disabled, so the calibration grid can study them.
+# tier into noise. The slice-9 seed corpus did not exercise them, so there is no
+# evidence to un-park; kept disabled until a REAL corpus shows density scoring
+# contains them (un-parking is a grid-evidenced decision, never a guess).
 
 [[entities]]
 name = "DATE_TIME"

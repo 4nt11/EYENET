@@ -39,7 +39,12 @@ _COUNTER_SIGNAL_RULES = frozenset({"fp_template_placeholder", "fp_creative_works
 
 # Markings the ruleset descriptions flag as FP-prone calibration targets — a tier
 # these (and ONLY these) drove is a demotion CANDIDATE when a counter-signal
-# co-occurs. UNCALIBRATED starting set; slice 9 tunes it against the corpus.
+# co-occurs. Slice 9 (the document grid) CONFIRMED `corp_confidential_en` is
+# FP-prone — on the seed corpus it fired on both a routine NORMAL footer and a
+# genuinely-elevated internal memo (the rule-firing table is the evidence). The
+# remaining members are validated-not-contradicted; this set is tuned (members
+# added/removed) only with grid evidence from a larger corpus via
+# `eyenet calibrate classify`, never hand-edited on a guess.
 _FP_PRONE_RULES = frozenset(
     {
         "banner_en",  # CONFIDENTIAL bleeds into email footers
