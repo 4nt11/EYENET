@@ -122,13 +122,25 @@ def aggregate(
     extraction: ExtractResult | FailedClosed,
     regex: RegexVerdict,
     presidio: PresidioVerdict,
+    *,
+    meta_regex: RegexVerdict | None = None,
 ) -> ClassificationVerdict:
-    """Bind the three deterministic floors into one tier + provenance (§4).
+    """Bind the deterministic floors into one tier + provenance (§4).
 
-    ``tier = MAX(extraction_floor, regex_floor, presidio_floor)`` — monotone and
-    never lowered. A failed-closed extraction or Presidio pass forces CLASSIFIED.
-    Counter-signal co-occurrence raises a review flag but leaves the tier intact.
-    Deterministic: the same three inputs yield an identical verdict.
+    ``tier = MAX(extraction_floor, regex_floor, presidio_floor[, metadata_floor])``
+    — monotone and never lowered. A failed-closed extraction or Presidio pass
+    forces CLASSIFIED. Counter-signal co-occurrence raises a review flag but
+    leaves the tier intact. Deterministic: the same inputs yield an identical
+    verdict.
+
+    ``meta_regex`` (slice 9) is the ruleset run over the document's sanitized
+    embedded metadata as a *second text source*: a classification banner hidden
+    in XMP keywords / DOCX core-props escalates the tier even when the body text
+    is empty (closing the §0 under-classify gap). It is ESCALATE-ONLY — folded
+    into the ``MAX`` like any other floor, so it can only raise the tier, never
+    lower it. Metadata is attacker-controlled, so a metadata-driven tier is NOT a
+    counter-signal demotion candidate (the counter-signal logic inspects the body
+    ``regex.matches`` only).
     """
     extraction_prov = _extraction_provenance(extraction)
     regex_prov = StageProvenance(
@@ -142,8 +154,19 @@ def aggregate(
         version=presidio.map_version,
         fail_closed=presidio.fail_closed,
     )
+    provenance = [extraction_prov, regex_prov, presidio_prov]
+    floors = [extraction_prov.tier_floor, regex.tier_floor, presidio.tier_floor]
+    if meta_regex is not None:
+        metadata_prov = StageProvenance(
+            stage="metadata",
+            tier_floor=meta_regex.tier_floor,
+            version=meta_regex.ruleset_version,
+            detail="escalate-only: embedded metadata as a regex text source (slice 9)",
+        )
+        provenance.append(metadata_prov)
+        floors.append(meta_regex.tier_floor)
 
-    tier = max_tier((extraction_prov.tier_floor, regex.tier_floor, presidio.tier_floor))
+    tier = max_tier(floors)
     fail_closed = extraction_prov.fail_closed or presidio.fail_closed
 
     review_flags = _counter_signal_flags(
@@ -159,6 +182,7 @@ def aggregate(
         extraction_floor=extraction_prov.tier_floor.value,
         regex_floor=regex.tier_floor.value,
         presidio_floor=presidio.tier_floor.value,
+        metadata_floor=meta_regex.tier_floor.value if meta_regex is not None else None,
         fail_closed=fail_closed,
         consult_llm=consult_llm,
         n_flags=len(review_flags),
@@ -166,7 +190,7 @@ def aggregate(
     )
     return ClassificationVerdict(
         tier=tier,
-        provenance=(extraction_prov, regex_prov, presidio_prov),
+        provenance=tuple(provenance),
         regex=regex,
         presidio=presidio,
         review_flags=review_flags,

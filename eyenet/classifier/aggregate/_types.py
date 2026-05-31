@@ -42,6 +42,7 @@ class ReviewFlag:
     kind: ReviewKind
     detail: str  # human-readable, redaction-safe — carries no raw spans
     suggested_tier: SensitivityTier | None = None  # what review MIGHT change it to
+    corroborated: bool = False  # a later signal (the LLM) independently agreed (slice 9)
 
 
 @dataclass(frozen=True, slots=True)

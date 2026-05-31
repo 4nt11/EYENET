@@ -78,6 +78,36 @@ async def test_classify_blob_returns_settled_verdict(monkeypatch: pytest.MonkeyP
     assert out.doc_kind == "text"
 
 
+async def test_classify_blob_metadata_banner_escalates_empty_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The §0 under-classify gap (slice 9): an empty body, but the embedded XMP
+    # keywords carry a real classification banner → the metadata-regex floor
+    # escalates the tier through the live pipeline. Real ruleset + RE2 run
+    # in-process; only extraction/presidio are faked.
+    meta = {"doc_kind": "pdf", "empty": True, "xmp_keywords": "TOP SECRET//NOFORN"}
+    _install(monkeypatch, extraction=ExtractResult(text="", meta=meta))
+
+    async def _boom(text: str) -> LlmAdvisory:  # already CLASSIFIED → short-circuit
+        raise AssertionError("LLM must not run when metadata drove CLASSIFIED")
+
+    out = await classify_blob(b"raw", advise_fn=_boom)
+    assert out.verdict.tier is C
+    assert out.text == ""
+    assert any(p.stage == "metadata" and p.tier_floor is C for p in out.verdict.provenance)
+
+
+async def test_classify_blob_benign_metadata_does_not_escalate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    meta = {"doc_kind": "pdf", "empty": False, "author": "Jane from Accounting"}
+    _install(monkeypatch, extraction=ExtractResult(text=_BENIGN, meta=meta))
+    out = await classify_blob(b"raw", advise_fn=_advise_normal)
+    assert out.verdict.tier is N
+    # the metadata stage still ran (provenance present) but floored NORMAL
+    assert any(p.stage == "metadata" and p.tier_floor is N for p in out.verdict.provenance)
+
+
 async def test_classify_blob_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     _install(monkeypatch, extraction=FailedClosed(reason=FailReason.PARSER_KILLED, detail="x"))
 

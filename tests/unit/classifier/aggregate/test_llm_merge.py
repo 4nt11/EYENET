@@ -144,3 +144,55 @@ def test_payload_is_json_serializable() -> None:
     base = _verdict(N, N)
     out = apply_llm_advisory(base, _adv(R))
     json.dumps(classification_audit_payload(out))  # must not raise
+
+
+# ── LLM x over-classification flag coupling (slice 9) ────────────────────────-
+
+
+def _over_class_verdict():
+    """A verdict carrying a POSSIBLE_OVER_CLASSIFICATION flag (FP-prone + counter)."""
+    regex = _regex(
+        R,
+        [
+            RuleMatch(
+                rule_name="corp_confidential_en",
+                tier_floor=R,
+                start=0,
+                end=17,
+                matched_text="INTERNAL USE ONLY",
+            ),
+            RuleMatch(
+                rule_name="fp_template_placeholder",
+                tier_floor=N,
+                start=40,
+                end=51,
+                matched_text="lorem ipsum",
+            ),
+        ],
+    )
+    return aggregate(_extract(), regex, _presidio(N))
+
+
+def test_llm_normal_corroborates_over_classification_flag() -> None:
+    base = _over_class_verdict()
+    assert any(f.kind is ReviewKind.POSSIBLE_OVER_CLASSIFICATION for f in base.review_flags)
+    out = apply_llm_advisory(base, _adv(N))  # LLM agrees: not sensitive
+    assert out.tier is R  # tier NEVER moves (§0)
+    flag = next(f for f in out.review_flags if f.kind is ReviewKind.POSSIBLE_OVER_CLASSIFICATION)
+    assert flag.corroborated is True
+
+
+def test_llm_sensitive_suppresses_over_classification_flag() -> None:
+    base = _over_class_verdict()
+    out = apply_llm_advisory(base, _adv(C))  # LLM disagrees: it IS sensitive
+    assert out.tier is R  # tier NEVER moves
+    assert all(f.kind is not ReviewKind.POSSIBLE_OVER_CLASSIFICATION for f in out.review_flags)
+    # the LLM's own higher-tier tripwire still fires (suggested C > tier R)
+    assert any(f.kind is ReviewKind.LLM_HIGHER_TIER for f in out.review_flags)
+
+
+def test_llm_unavailable_leaves_over_classification_flag_independent() -> None:
+    base = _over_class_verdict()
+    out = apply_llm_advisory(base, LlmUnavailable(reason="timeout", detail="", attempts=1))
+    flag = next(f for f in out.review_flags if f.kind is ReviewKind.POSSIBLE_OVER_CLASSIFICATION)
+    assert flag.corroborated is False  # no LLM opinion → untouched

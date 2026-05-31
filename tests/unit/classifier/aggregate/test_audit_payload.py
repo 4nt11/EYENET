@@ -107,6 +107,7 @@ def test_review_flags_serialized() -> None:
     assert len(flags) == 1  # type: ignore[arg-type]
     assert flags[0]["kind"] == "possible_over_classification"  # type: ignore[index]
     assert flags[0]["suggested_tier"] == "normal"  # type: ignore[index]
+    assert flags[0]["corroborated"] is False  # type: ignore[index]  # no LLM ran here
 
 
 def test_fail_closed_payload_shape() -> None:

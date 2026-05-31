@@ -127,6 +127,31 @@ def _sanitize_meta(meta: dict[str, object]) -> dict[str, object]:
     return {_sani_key(key): _sani_value(value) for key, value in meta.items()}
 
 
+def _meta_text(meta: dict[str, object]) -> str:
+    """Flatten sanitized embedded metadata into one newline-joined string.
+
+    Slice 9: the ruleset runs over this as a second text source so a
+    classification banner hidden in XMP keywords / DOCX core-props escalates the
+    tier (escalate-only, §0). Walks keys + string leaves of the (already
+    sanitized) meta dict; numbers/bools/None carry no markings and are skipped.
+    """
+    parts: list[str] = []
+
+    def _walk(value: object) -> None:
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                parts.append(str(key))
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(meta)
+    return "\n".join(parts)
+
+
 async def classify_blob(blob: bytes, *, advise_fn: AdviseFn | None = None) -> ClassifiedDoc:
     """Run the full deterministic pipeline over raw bytes; no I/O side effects.
 
@@ -136,10 +161,16 @@ async def classify_blob(blob: bytes, *, advise_fn: AdviseFn | None = None) -> Cl
     extraction = await asyncio.to_thread(extract_document, blob)
     raw_meta = extraction.meta if isinstance(extraction, ExtractResult) else {}
     text = extraction.text if isinstance(extraction, ExtractResult) else ""
+    sanitized_meta = _sanitize_meta(raw_meta)
 
-    regex = classify(text, load_ruleset())
+    ruleset = load_ruleset()
+    regex = classify(text, ruleset)
+    # Escalate-only metadata floor (slice 9): the SAME ruleset over the sanitized
+    # embedded metadata catches a banner hidden in XMP/core-props on an
+    # empty-body doc. Runs even when `text` is empty (the gap we are closing).
+    meta_regex = classify(_meta_text(sanitized_meta), ruleset)
     presidio = await asyncio.to_thread(detect, text)
-    verdict = aggregate(extraction, regex, presidio)
+    verdict = aggregate(extraction, regex, presidio, meta_regex=meta_regex)
     if verdict.consult_llm:
         # Resolved at call time (not a bound default) so a test/operator can
         # swap the provider via the module global without a network round-trip.
@@ -150,7 +181,7 @@ async def classify_blob(blob: bytes, *, advise_fn: AdviseFn | None = None) -> Cl
     return ClassifiedDoc(
         verdict=verdict,
         text=text,
-        embedded_meta=_sanitize_meta(raw_meta),
+        embedded_meta=sanitized_meta,
         doc_kind=str(doc_kind) if doc_kind is not None else None,
     )
 

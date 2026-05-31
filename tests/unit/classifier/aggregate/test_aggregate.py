@@ -245,6 +245,56 @@ def test_flag_and_short_circuit_coexist_at_classified() -> None:
     assert len(v.review_flags) == 1
 
 
+# ── metadata floor — escalate-only (slice 9) ────────────────────────────────-
+
+
+def test_metadata_floor_escalates_on_empty_body() -> None:
+    # The §0 gap we are closing: a banner hidden in XMP keywords on a doc whose
+    # body extracted NORMAL must still escalate the tier.
+    v = aggregate(_extract(text=""), _regex(N), _presidio(N), meta_regex=_regex(C))
+    assert v.tier is C
+    stages = [p.stage for p in v.provenance]
+    assert stages == ["extraction", "regex", "presidio", "metadata"]
+    meta_prov = next(p for p in v.provenance if p.stage == "metadata")
+    assert meta_prov.tier_floor is C
+    assert meta_prov.version == "v3"
+
+
+def test_metadata_floor_never_lowers_tier() -> None:
+    # Metadata enters only via MAX — a benign metadata floor cannot pull a
+    # CLASSIFIED body back down.
+    v = aggregate(_extract(), _regex(C), _presidio(N), meta_regex=_regex(N))
+    assert v.tier is C
+
+
+def test_metadata_floor_takes_max_with_body() -> None:
+    v = aggregate(_extract(), _regex(R), _presidio(N), meta_regex=_regex(R))
+    assert v.tier is R
+    v2 = aggregate(_extract(), _regex(R), _presidio(N), meta_regex=_regex(C))
+    assert v2.tier is C
+
+
+def test_metadata_driven_tier_is_not_a_counter_signal_candidate() -> None:
+    # A counter-signal + FP-prone marking in the BODY does not make a
+    # metadata-driven tier a demotion candidate: the tier-driving floor came from
+    # metadata, so no body rule sits at the tier and no flag is raised.
+    regex = _regex(
+        R,
+        [
+            _rule("corp_confidential_en", R, start=0, text="INTERNAL USE ONLY"),
+            _rule("fp_template_placeholder", N, start=40, text="lorem ipsum"),
+        ],
+    )
+    v = aggregate(_extract(), regex, _presidio(N), meta_regex=_regex(C))
+    assert v.tier is C
+    assert v.review_flags == ()
+
+
+def test_metadata_none_keeps_three_stage_provenance() -> None:
+    v = aggregate(_extract(), _regex(R), _presidio(N))
+    assert [p.stage for p in v.provenance] == ["extraction", "regex", "presidio"]
+
+
 # ── provenance + determinism ────────────────────────────────────────────────-
 
 

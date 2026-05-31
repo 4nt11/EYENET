@@ -40,6 +40,33 @@ def _exceeds(suggested: SensitivityTier, tier: SensitivityTier) -> bool:
     return suggested != tier and max_tier((suggested, tier)) == suggested
 
 
+def _couple_over_classification(
+    flags: list[ReviewFlag], suggested: SensitivityTier
+) -> list[ReviewFlag]:
+    """Let the LLM corroborate or suppress a possible-over-classification flag (slice 9).
+
+    The deterministic counter-signal stage may flag a tier as a demotion CANDIDATE
+    (an FP-prone marking co-occurring with a counter-signal). The advisory LLM has
+    now also read the document, so it gets a vote on whether that demotion looks
+    right — but ONLY over whether the human-facing *suggestion* surfaces; the tier
+    is never moved (§0):
+
+    - LLM judges NORMAL  → it agrees the marking is a false positive → mark the
+      flag ``corroborated`` (a stronger demotion signal for the operator).
+    - LLM judges > NORMAL → it disagrees → DROP the over-classification flag; the
+      tier stays where the deterministic floors put it (the safe direction).
+    """
+    out: list[ReviewFlag] = []
+    for flag in flags:
+        if flag.kind is not ReviewKind.POSSIBLE_OVER_CLASSIFICATION:
+            out.append(flag)
+            continue
+        if suggested is SensitivityTier.NORMAL:
+            out.append(replace(flag, corroborated=True))
+        # else: LLM judged it sensitive — suppress the demotion suggestion (drop).
+    return out
+
+
 def apply_llm_advisory(
     verdict: ClassificationVerdict,
     outcome: LlmAdvisory | LlmUnavailable,
@@ -50,9 +77,13 @@ def apply_llm_advisory(
             kind=ReviewKind.LLM_UNAVAILABLE,
             detail=f"semantic LLM tripwire did not deploy ({outcome.reason})",
         )
+        # The LLM did not deploy → no opinion on the over-classification flag; it
+        # is left independent (untouched).
         return replace(verdict, review_flags=(*verdict.review_flags, flag))
 
-    flags = list(verdict.review_flags)
+    # The LLM ran and produced a tier opinion → corroborate/suppress any pending
+    # over-classification flag before adding the tripwire flag (slice 9).
+    flags = _couple_over_classification(list(verdict.review_flags), outcome.suggested_tier)
     if verdict.tier is not SensitivityTier.CLASSIFIED and _exceeds(
         outcome.suggested_tier, verdict.tier
     ):

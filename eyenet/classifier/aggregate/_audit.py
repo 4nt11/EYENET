@@ -67,6 +67,7 @@ def classification_audit_payload(verdict: ClassificationVerdict) -> dict[str, ob
                 "suggested_tier": (
                     f.suggested_tier.value if f.suggested_tier is not None else None
                 ),
+                "corroborated": f.corroborated,
             }
             for f in verdict.review_flags
         ],
