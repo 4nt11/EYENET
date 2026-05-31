@@ -71,11 +71,11 @@ from sqlmodel import select
 from eyenet.collectors.base.skeleton import CollectorSkeleton
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.bus import Bus
-from eyenet.contracts.collector import CollectorHealth
 from eyenet.contracts.classify_events import (
     SUBJECT_ATTACHMENT_STORED,
     AttachmentStoredEnvelope,
 )
+from eyenet.contracts.collector import CollectorHealth
 from eyenet.contracts.enums import (
     AttachmentKind,
     CollectorState,

@@ -280,7 +280,7 @@ async def settle_document(
     if row.storage_uri is None:
         raise RuntimeError(f"document {document_id} has no storage_uri to read bytes from")
 
-    blob = Path(row.storage_uri).read_bytes()
+    blob = await asyncio.to_thread(Path(row.storage_uri).read_bytes)
     classified = await classify_blob(blob, advise_fn=advise_fn)
     verdict = classified.verdict
 
@@ -332,7 +332,7 @@ async def classify_attachment(
     if row.storage_uri is None:
         raise RuntimeError(f"attachment {attachment_id} has no storage_uri to read bytes from")
 
-    blob = Path(row.storage_uri).read_bytes()
+    blob = await asyncio.to_thread(Path(row.storage_uri).read_bytes)
     classified = await classify_blob(blob, advise_fn=advise_fn)
     verdict = classified.verdict
 
