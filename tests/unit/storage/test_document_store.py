@@ -80,3 +80,69 @@ async def test_every_tier_round_trips(storage: BaseRepository, tier: Sensitivity
     fetched = await storage.get_document(doc_id)
     assert fetched is not None
     assert fetched.classifier_tier is tier
+
+
+_LATER = datetime(2026, 5, 31, 12, 5, tzinfo=UTC)
+
+
+async def test_settle_overwrites_provisional_classified(storage: BaseRepository) -> None:
+    # Stage a provisional CLASSIFIED row (what stage_document persists), then
+    # settle it down to the computed tier once the async pipeline finishes.
+    provisional = _row(
+        classifier_tier=SensitivityTier.CLASSIFIED,
+        extracted_text=None,
+        embedded_meta={},
+        classification={},
+        review_required=False,
+    )
+    doc_id = await storage.put_document(provisional)
+
+    await storage.settle_document_classification(
+        doc_id,
+        tier=SensitivityTier.NORMAL,
+        extracted_text="lunch plans",
+        embedded_meta={"author": "bob"},
+        classification={"tier": "normal", "ruleset_version": "v3"},
+        review_required=False,
+        ingested_at=_LATER,
+    )
+
+    settled = await storage.get_document(doc_id)
+    assert settled is not None
+    assert settled.classifier_tier is SensitivityTier.NORMAL  # provisional → lowered
+    assert settled.extracted_text == "lunch plans"
+    assert settled.embedded_meta == {"author": "bob"}
+    assert settled.classification == {"tier": "normal", "ruleset_version": "v3"}
+    # SQLite stores datetimes naive (tzinfo stripped on round-trip, treated UTC).
+    assert settled.ingested_at.replace(tzinfo=None) == _LATER.replace(tzinfo=None)
+
+
+async def test_settle_is_idempotent_on_replay(storage: BaseRepository) -> None:
+    doc_id = await storage.put_document(_row(classifier_tier=SensitivityTier.CLASSIFIED))
+    kwargs = {
+        "tier": SensitivityTier.RESTRICTED,
+        "extracted_text": "x",
+        "embedded_meta": {},
+        "classification": {"tier": "restricted"},
+        "review_required": True,
+        "ingested_at": _LATER,
+    }
+    await storage.settle_document_classification(doc_id, **kwargs)  # type: ignore[arg-type]
+    await storage.settle_document_classification(doc_id, **kwargs)  # type: ignore[arg-type]
+    settled = await storage.get_document(doc_id)
+    assert settled is not None
+    assert settled.classifier_tier is SensitivityTier.RESTRICTED
+    assert settled.review_required is True
+
+
+async def test_settle_missing_document_raises(storage: BaseRepository) -> None:
+    with pytest.raises(ValueError, match="not found"):
+        await storage.settle_document_classification(
+            uuid4(),
+            tier=SensitivityTier.NORMAL,
+            extracted_text=None,
+            embedded_meta={},
+            classification={},
+            review_required=False,
+            ingested_at=_LATER,
+        )

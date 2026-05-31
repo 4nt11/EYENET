@@ -14,7 +14,7 @@ from uuid import UUID
 from pydantic import Field
 
 from ._base import DbRowBase
-from .enums import AttachmentKind
+from .enums import AttachmentKind, SensitivityTier
 
 
 class MessageRow(DbRowBase):
@@ -51,6 +51,11 @@ class AttachmentRow(DbRowBase):
     sha256: str
     filename: str | None = None
     storage_uri: str | None = None
+    # Field-parity with AttachmentTable (M10): the classifier-authoritative tier
+    # + the operator promote-only override. Collectors insert provisional
+    # CLASSIFIED; the ClassifierService settles it (fail-closed, §0).
+    classifier_tier: SensitivityTier = SensitivityTier.NORMAL
+    operator_tier_override: SensitivityTier | None = None
 
 
 __all__ = ["AttachmentRow", "MessageRow"]
