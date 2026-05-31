@@ -570,6 +570,41 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
   `classify.attachment.stored` subject the Matrix collector publishes (Telegram
   is metadata-only → no bytes → no trigger). Fail-closed is preserved by
   construction (provisional CLASSIFIED in the arrival→settle window).
+
+- ✅ **Embedded metadata FEEDS the tier — ESCALATE-ONLY via regex** (AskUserQuestion
+  2026-05-31, slice 9; resolves the §5/slice-7 deferral). `aggregate()` gained an
+  optional `meta_regex` floor; `classify_blob` runs the SAME ruleset over the
+  sanitized embedded-metadata string as a second text source and folds its floor
+  into the monotone `MAX`. A classification banner hidden in XMP keywords / DOCX
+  core-props now escalates the tier even on an empty extracted body (closing a real
+  §0 under-classify gap). It can ONLY raise the tier, never lower it; a
+  metadata-driven tier is not a counter-signal demotion candidate (counter-signals
+  inspect the body `regex.matches` only). Alternatives (flag-only, evidence-only)
+  rejected: escalate-only is the safe (over-classify) direction and directly closes
+  the gap.
+
+- ✅ **LLM ↔ over-classification flag coupling = CORROBORATE / SUPPRESS**
+  (AskUserQuestion 2026-05-31, slice 9; build-item 9's open question). When the LLM
+  ran (tier < CLASSIFIED) and a `POSSIBLE_OVER_CLASSIFICATION` flag is present:
+  LLM judges NORMAL → flag `corroborated=True` (stronger demotion signal for the
+  human); LLM judges sensitive → DROP the flag (the LLM disagrees with the demotion
+  candidate). **Tier still NEVER moves (§0)** — this governs only whether the
+  human-facing demotion *suggestion* surfaces, and suppression errs toward keeping
+  the tier high. Lives in `apply_llm_advisory`; `ReviewFlag` gained `corroborated`.
+
+- ✅ **Calibration scope = HARNESS + SEED CORPUS + BASELINE; flip only unambiguous
+  wins** (AskUserQuestion 2026-05-31, slice 9). No large labeled document corpus
+  exists yet, so slice 9 ships the grid/corpus/artifact/CLI/regression-suite + a
+  synthetic seed corpus + a hash-pinned baseline, and makes ZERO functional retuning
+  (a 9-doc synthetic seed cannot justify tightening a security boundary — that is
+  the overfitting/under-classify direction). The headline metric is the
+  under-classification (false-negative) rate; the operating-point strategy is the
+  §0-correct INVERSE of M5/M8's precision-floor. Regex runs in-process, Presidio
+  findings replay from a pre-captured sidecar, so the grid + regression suite are
+  fully offline/CI-runnable; only `eyenet calibrate classify capture` needs the jail.
+  `corp_confidential_en` is corpus-CONFIRMED FP-prone; everything else stays an
+  operator-tunable default. The artifact is SEPARATE from the Rutify/verifier
+  artifact (its own `corpus_sha256` pin).
 8. ✅ **`ClassifierService(ServiceBase)`** — async worker, plural-from-day-one.
    **SHIPPED** as `eyenet/classifier/service.py`. **DECISION (AskUserQuestion
    2026-05-31): classification is ASYNC — this REVERTS slice-7's
@@ -607,9 +642,36 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
      moved to the service/end-to-end layer — an async httpx test runs a real
      ClassifierService on the same bus and asserts a benign doc settles NORMAL
      through the LIVE endpoint. Service driven via MemoryBus (publish→sleep→assert).
-9. **Calibration grid** — labeled corpus; **false-negative (under-classification)
+9. ✅ **Calibration grid** — labeled corpus; **false-negative (under-classification)
    rate as the headline metric**; per-tier thresholds; calibration-suite-only.
-   Carries the accumulated UNCALIBRATED debt from the deterministic slices:
+   **SHIPPED** as `eyenet/calibration/document_{corpus,grid}.py` +
+   `classifier_artifact.py` + `eyenet calibrate classify {capture,run}`, mirroring
+   the M5/M8 grid culture. Pure + CI-runnable: regex runs in-process, Presidio
+   findings replay from a pre-captured sidecar (capture is the only jail-gated
+   step). The grid replays the deterministic path (regex over text + **escalate-
+   only regex over sanitized embedded metadata** — the slice-7 metadata-feeds-tier
+   decision, resolved ESCALATE-ONLY: a banner in XMP keywords lifts the tier even
+   on an empty body, never lowers it) + `map_findings` → `MAX` tier per sample,
+   scored vs labels. Headline = under-classification rate (the §0 catastrophic
+   direction); operating-point recommendation is the §0-correct INVERSE of M5/M8's
+   precision-floor (minimize under-class, then over-class). Sweeps the Presidio
+   density cut-offs; reports per-rule firing + per-PII-type hit diagnostics. A
+   committed synthetic seed corpus (9 docs, fictional → committable) + hash-pinned
+   baseline artifact + two test layers (a `@pytest.mark.calibration` regression
+   over the committed numbers AND an always-on unit guard that re-runs the live
+   grid and fails CI if a seed doc starts under-classifying). The LLM↔flag coupling
+   (build-item 9 open question) resolved CORROBORATE/SUPPRESS: a `POSSIBLE_OVER_
+   CLASSIFICATION` flag is corroborated when the LLM agrees NORMAL, dropped when it
+   judges sensitive — tier still never moves (§0). **Outcome (locked scope: flip
+   only unambiguous wins):** zero functional retuning — a 9-doc synthetic seed
+   cannot justify tightening a security boundary (overfitting = the under-classify
+   direction). `corp_confidential_en` is corpus-CONFIRMED FP-prone; the rest of
+   `_FP_PRONE_RULES`, the parked rules/types, and all min_score/density numbers
+   stay as validated-not-contradicted OPERATOR-TUNABLE defaults — the grid is the
+   tool, operators grow the corpus. On the seed corpus: UNDER-classification = 0.000.
+   Carries (now ADDRESSED — re-pointed from "slice 9 tunes" to "grid shipped;
+   operator-tunable via the grid") the accumulated UNCALIBRATED debt from the
+   deterministic slices:
    - regex `enabled=false` parked shape rules (bare-number cédula/AR-DNI, raw
      hash, email, phone) — decide their density-scored home (slice 3);
    - Presidio `min_score`s + density cut-offs (`restricted_at`/`classified_at`)
