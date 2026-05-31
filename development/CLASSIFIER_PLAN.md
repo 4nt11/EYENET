@@ -351,6 +351,18 @@ if tier < CLASSIFIED:
   Egress guard: `allow_remote=false` refuses sending text to a non-loopback
   endpoint (the gate a future cloud provider must clear).
 
+- ✅ **Forensic metadata folded into slice 7** (decided 2026-05-31). Audit found
+  we capture NO content hash and NO embedded document metadata — `ExtractResult.meta`
+  is only `method`/`doc_kind`/`ocr_applied`/`empty`/`pages`. Slice 7 adds:
+  `Document.sha256` of the raw bytes (host-side at ingest, mirrors
+  `AttachmentTable.sha256`; never hash jail output or extracted text), and a
+  jailed-worker extension emitting embedded metadata (PDF Info/XMP, DOCX core
+  props, EXIF, creation/modification timestamps, author, producer). Embedded
+  metadata is attacker-controlled → captured verbatim as evidence but UNTRUSTED:
+  runs through the slice-6 `_sanitize` boundary, must not be skipped on empty
+  text, and may feed the classifier as a signal only as a slice-9 scope/calibration
+  decision. See build-plan item 7.
+
 ---
 
 ## Build plan — milestone "Document Classifier" (worktree, slice-per-commit)
@@ -490,6 +502,25 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    against a fake provider; live `impl/ollama.py` transport coverage-omitted.
 7. **`Document` table + upload surface** — new entity mirroring Attachment
    sensitivity columns; upload endpoint + CLI; provisional-CLASSIFIED.
+   **FORENSIC METADATA (folded in — DECIDED 2026-05-31):**
+   - **Content hash:** `sha256` of the RAW uploaded bytes, computed **host-side
+     at ingest** (NOT in the jail — never trust jail output for custody; NOT over
+     extracted text — text varies by extractor version). Indexed, mirrors
+     `AttachmentTable.sha256`. MD5 optional, only if NSRL/legacy hash-set interop
+     is wanted — SHA256 is the house convention.
+   - **Embedded document metadata:** extend the jailed slice-2 workers to emit
+     into `meta` — PDF Info/XMP (Author, Producer, CreationDate, ModDate), DOCX
+     `core.xml` core properties (creator, lastModifiedBy, created, modified,
+     revision/edit-time), image EXIF. These are often the MOST probative
+     attribution fields and we currently discard them. Constraints: (a) it is
+     **attacker-controlled** → captured VERBATIM as evidence (what the doc claims
+     about itself) but treated as **untrusted** — runs through the slice-6
+     `_sanitize` boundary before any log/UI (stored-XSS vector); (b) the metadata
+     pass must run **even when the text body is empty** (don't let `empty=True`
+     skip it); (c) it MAY feed the classifier as a signal later (a classification
+     marking in XMP keywords is real) but is never ground truth — scope/calibration
+     call deferred to slice 9. Persist on the `Document` row; surface in the
+     classification record + provenance.
 8. **`ClassifierService(ServiceBase)`** — async worker, plural-from-day-one;
    subscribes to attachment-received + document-uploaded; provisional → settled.
 9. **Calibration grid** — labeled corpus; **false-negative (under-classification)
