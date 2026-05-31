@@ -1,0 +1,170 @@
+# EYENET classifier — default PII-type → sensitivity-tier map (Presidio stage).
+#
+# Operator-editable DATA, not code. This maps Microsoft Presidio entity labels to
+# a tier FLOOR and a per-type confidence gate, plus the density thresholds that
+# escalate a CLUSTER of PII. The aggregator (slice 5) takes the MAX of this floor
+# against the regex and extraction-failure floors — so this only ever RAISES a
+# tier, never lowers one.
+#
+# Tiers (monotone): normal < restricted < classified.
+#
+# `min_score` is the confidence gate: a finding of that type below the score is
+# dropped as noise (Presidio emits a 0..1 confidence — we feed it in, we do not
+# binarize it). `enabled = false` parks a type entirely (kept here for
+# calibration but never loaded) — used for the noisiest NER types that fire on
+# near-every document and would collapse the density signal into noise.
+#
+# CALIBRATION (slice 9, v1->v2 RECALIBRATED against a 50-doc multilingual corpus):
+# the document grid (`eyenet calibrate classify`) proved the v1 map over-classified
+# ~59% of REAL documents at ZERO under-classification. Root cause: raw NER density
+# (PERSON/ORG/LOCATION) and contact-info per-type floors (EMAIL/PHONE/LOCATION/IP)
+# are NON-discriminative — benign news/blogs are the MOST entity-dense documents
+# (normal: up to 55 PII spans; classified: as few as 0, banner-driven). v2 fix:
+# only STRONG single identifiers (gov/financial IDs, crypto, medical license)
+# escalate; names + contact info sit at NORMAL; density counts STRONG identifiers
+# ONLY (a breach-dump cluster), never names. Verified UNDER stays 0.000 on the
+# corpus. Still OPERATOR-TUNABLE — re-run the grid against a larger corpus.
+
+map_version = "v2"
+
+# Density now counts ONLY findings whose mapped floor is RESTRICTED+ (strong
+# identifiers — see _mapping.py). A cluster of strong IDs (many cards / SSNs /
+# IBANs — a breach dump) escalates; a page full of names/emails does NOT. Names
+# and contact info are NORMAL-floor and never reach this count.
+[density]
+restricted_at = 4
+classified_at = 8
+
+# --- Strong identifiers: a single high-confidence hit raises the floor ---------
+# Government / financial identifiers that, on their own, mark a document as
+# sensitive evidence. Several overlap the regex ruleset — that is fine, MAX is
+# idempotent and Presidio adds context-aware recall the regex shapes miss.
+
+[[entities]]
+name = "CRYPTO"
+tier_floor = "classified"
+min_score = 0.5
+description = "Crypto wallet address (BTC/etc.)"
+
+[[entities]]
+name = "US_SSN"
+tier_floor = "classified"
+min_score = 0.4
+description = "US Social Security Number"
+
+[[entities]]
+name = "US_PASSPORT"
+tier_floor = "classified"
+min_score = 0.4
+description = "US passport number"
+
+[[entities]]
+name = "US_ITIN"
+tier_floor = "classified"
+min_score = 0.4
+description = "US Individual Taxpayer Identification Number"
+
+[[entities]]
+name = "IBAN_CODE"
+tier_floor = "classified"
+min_score = 0.5
+description = "International Bank Account Number"
+
+[[entities]]
+name = "MEDICAL_LICENSE"
+tier_floor = "classified"
+min_score = 0.5
+description = "Medical license number"
+
+# --- Restricted-on-single-hit: financial account identifiers ------------------
+# Account numbers that mark a document as sensitive on a single hit, and that
+# also drive the strong-identifier density count when clustered.
+
+[[entities]]
+name = "CREDIT_CARD"
+tier_floor = "restricted"
+min_score = 0.4
+description = "Payment card number (Luhn-validated by Presidio)"
+
+[[entities]]
+name = "US_BANK_NUMBER"
+tier_floor = "restricted"
+min_score = 0.4
+description = "US bank account number"
+
+[[entities]]
+name = "US_DRIVER_LICENSE"
+tier_floor = "restricted"
+min_score = 0.4
+description = "US driver license number"
+
+# --- NORMAL floor: names + contact info (v2 recalibration) --------------------
+# Slice-9 grid finding: a lone name, email, phone, location, IP, or org does NOT
+# mark a document sensitive — benign news/blogs/business mail are saturated with
+# them, and escalating on their presence over-classified ~59% of real documents.
+# Kept as PROVENANCE (matched + redacted) but NORMAL floor, and they do NOT count
+# toward the strong-identifier density signal. Sensitivity comes from markers
+# (regex banners/caveats/secrets) and strong IDs, not contact-info volume.
+
+[[entities]]
+name = "PERSON"
+tier_floor = "normal"
+min_score = 0.5
+description = "Person name (NER) — NORMAL: presence alone is not sensitive"
+
+[[entities]]
+name = "NRP"
+tier_floor = "normal"
+min_score = 0.5
+description = "Nationality / religious / political group (NER)"
+
+[[entities]]
+name = "ORGANIZATION"
+tier_floor = "normal"
+min_score = 0.5
+description = "Organization name (NER)"
+
+[[entities]]
+name = "EMAIL_ADDRESS"
+tier_floor = "normal"
+min_score = 0.4
+description = "Email address — NORMAL (v2): ubiquitous in benign mail/business docs"
+
+[[entities]]
+name = "PHONE_NUMBER"
+tier_floor = "normal"
+min_score = 0.4
+description = "Telephone number — NORMAL (v2): ubiquitous contact info"
+
+[[entities]]
+name = "IP_ADDRESS"
+tier_floor = "normal"
+min_score = 0.5
+description = "IPv4/IPv6 address — NORMAL (v2): ubiquitous in logs/technical docs"
+
+[[entities]]
+name = "LOCATION"
+tier_floor = "normal"
+min_score = 0.6
+description = "Geographic location — NORMAL (v2): news/travel/business docs are location-dense"
+
+# --- Parked: too noisy for a hard floor ---------------------------------------
+# DATE_TIME and URL fire on a huge fraction of ordinary documents. Counting them
+# toward density would push benign documents over the threshold and collapse the
+# tier into noise. The slice-9 seed corpus did not exercise them, so there is no
+# evidence to un-park; kept disabled until a REAL corpus shows density scoring
+# contains them (un-parking is a grid-evidenced decision, never a guess).
+
+[[entities]]
+name = "DATE_TIME"
+tier_floor = "normal"
+min_score = 0.5
+enabled = false
+description = "PARKED — fires on near-every document; would inflate density"
+
+[[entities]]
+name = "URL"
+tier_floor = "normal"
+min_score = 0.5
+enabled = false
+description = "PARKED — fires on near-every document; would inflate density"

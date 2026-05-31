@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
     from eyenet.contracts.collector import CollectorRow
+    from eyenet.contracts.document import DocumentRow
     from eyenet.contracts.enums import (
         ArtifactSubjectKind,
         ArtifactValidationState,
@@ -434,6 +435,18 @@ class BaseRepository(ABC):
     async def get_attachment(self, attachment_id: UUID) -> AttachmentRow | None: ...
 
     @abstractmethod
+    async def set_attachment_classification(
+        self,
+        attachment_id: UUID,
+        tier: SensitivityTier,
+    ) -> None:
+        """Stamp the classifier-AUTHORITATIVE ``classifier_tier`` (M10 slice 8).
+
+        Distinct from :meth:`reclassify_attachment` (the operator-promote path,
+        which writes ``operator_tier_override`` monotone-up). This is the
+        classifier setting its own verdict and is idempotent on replay."""
+
+    @abstractmethod
     async def reclassify_attachment(
         self,
         *,
@@ -447,6 +460,34 @@ class BaseRepository(ABC):
         trace_id: str | None = None,
         span_id: str | None = None,
     ) -> object: ...
+
+    # =================================================================
+    # DOCUMENTS (MODELS §2.10, M10 classifier)
+    # =================================================================
+
+    @abstractmethod
+    async def put_document(self, document_row: object) -> UUID: ...
+
+    @abstractmethod
+    async def get_document(self, document_id: UUID) -> DocumentRow | None: ...
+
+    @abstractmethod
+    async def settle_document_classification(
+        self,
+        document_id: UUID,
+        *,
+        tier: SensitivityTier,
+        doc_kind: str | None,
+        extracted_text: str | None,
+        embedded_meta: dict[str, Any],
+        classification: dict[str, Any],
+        review_required: bool,
+        ingested_at: datetime,
+    ) -> None:
+        """Settle a provisional CLASSIFIED upload to its computed tier (slice 8).
+
+        Overwrites the staged row's classification fields once the async
+        pipeline finishes. Idempotent on replay (deterministic verdict)."""
 
     # =================================================================
     # MESSAGES (PLAN §4.3, MODELS §1.4)

@@ -64,6 +64,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "system_user",
         # observations
         "observation",
+        # M10 — uploaded documents (classifier)
+        "document",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

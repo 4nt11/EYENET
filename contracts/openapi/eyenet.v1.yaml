@@ -1588,6 +1588,34 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  # ── Documents (M10 classifier) ────────────────────────────────────────────
+  /v1/documents:
+    post:
+      tags: [documents]
+      operationId: documents_upload
+      summary: |
+        Upload one document for ASYNC classification. Body is the RAW file bytes
+        (not multipart); `Content-Type` and the optional `X-Filename` header are
+        recorded as evidence. Stores the bytes + a PROVISIONAL CLASSIFIED row and
+        publishes a classifier trigger; the ClassifierService settles the real
+        tier off the request path. The 202 body carries the provisional tier
+        (`classified`). Requires `write:documents`.
+      parameters:
+        - name: x-filename
+          in: header
+          required: false
+          schema: { type: string, nullable: true }
+      responses:
+        "202":
+          description: Document accepted; provisional CLASSIFIED, settling async.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentUploadResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
 # ──────────────────────────────────────────────────────────────────────────
 # Components
 # ──────────────────────────────────────────────────────────────────────────
@@ -2400,6 +2428,20 @@ components:
         Promotable but never demotable (API_PLAN §4.7).
       type: string
       enum: [normal, restricted, classified]
+    DocumentUploadResult:
+      description: |
+        Result of `POST /v1/documents` — the settled classification for one
+        uploaded document (M10). `tier` is the BINDING classifier tier (the
+        deterministic MAX; never lowered by the advisory LLM). `review_required`
+        is true when the verdict carried any operator-review flag.
+      type: object
+      additionalProperties: false
+      required: [document_id, tier, sha256, review_required]
+      properties:
+        document_id:     { type: string, format: uuid }
+        tier:            { $ref: '#/components/schemas/SensitivityTier' }
+        sha256:          { type: string, pattern: '^[0-9a-f]{64}$' }
+        review_required: { type: boolean }
     RedactionMarker:
       description: |
         Replaces a content-bearing field when the caller lacks the clearance scope

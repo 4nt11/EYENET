@@ -1,0 +1,38 @@
+# EYENET classifier — LLM advisory config (operator-editable).
+#
+# The LLM is a FLAG-ONLY tripwire + analyst (CLASSIFIER_PLAN §3/§4): it never
+# changes the binding tier, only raises an operator_review flag and attaches a
+# short analysis. The PROVIDER is selected by the EYENET_LLM_PROVIDER env var
+# (default "ollama"), exactly like EYENET_STORAGE_TYPE for storage; this file
+# configures the connection to whichever provider was chosen.
+#
+# Override path with EYENET_LLM_CONFIG. All values UNCALIBRATED (slice 9).
+
+config_version = "v1"
+
+# The local model to run. The operator must `ollama pull <model>` first; a
+# missing model fails closed to an LLM_UNAVAILABLE review flag (tier unchanged).
+model = "llama3.1"
+
+# Local Ollama daemon. A non-loopback endpoint requires allow_remote = true
+# (it would send document text off-host — see the egress guard in _advise).
+endpoint = "http://127.0.0.1:11434"
+
+connect_timeout_s = 5.0
+request_timeout_s = 60.0
+
+# Repair/retry budget for dumb-model JSON breakage. 1 initial + (max_attempts-1)
+# corrective re-prompts before giving up to an LLM_UNAVAILABLE flag.
+max_attempts = 3
+
+# Input bound: extracted text is clipped to this many characters before sending
+# (cost + context-window guard). Clipping is recorded on the advisory.
+max_text_chars = 12000
+
+# Output bounds: each free-text field is sanitized AND truncated to this length,
+# and at most this many indicators are kept.
+max_summary_chars = 2000
+max_indicators = 20
+
+# Default-deny network egress to non-local providers.
+allow_remote = false

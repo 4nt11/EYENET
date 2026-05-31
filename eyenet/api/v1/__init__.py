@@ -72,6 +72,9 @@ from eyenet.api.v1.clearance.api_grant_clearance import router as clearance_gran
 from eyenet.api.v1.clearance.api_list_grants import router as clearance_list_grants_router
 from eyenet.api.v1.clearance.api_revoke_grant import router as clearance_revoke_grant_router
 
+# === documents (M10 classifier) ===
+from eyenet.api.v1.documents.api_upload_document import router as documents_upload_router
+
 # === graph ===
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
@@ -163,6 +166,9 @@ v1_router.include_router(linkages_get_router)
 v1_router.include_router(linkages_confirm_router)
 v1_router.include_router(linkages_reject_router)
 v1_router.include_router(linkages_suspect_router)
+
+# documents (M10 classifier)
+v1_router.include_router(documents_upload_router)
 
 # graph
 v1_router.include_router(graph_stats_router)

@@ -35,6 +35,19 @@ class AttachmentsMixin:
                 return None
             return AttachmentRow.model_validate(table.model_dump())
 
+    async def set_attachment_classification(
+        self,
+        attachment_id: UUID,
+        tier: SensitivityTier,
+    ) -> None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(AttachmentTable, attachment_id)
+            if row is None:
+                raise ValueError(f"attachment {attachment_id} not found")
+            row.classifier_tier = tier
+            session.add(row)
+            await session.commit()
+
     async def reclassify_attachment(
         self,
         *,

@@ -43,5 +43,12 @@ class AuditSubject(StrEnum):
     CASE_TIER_CHANGED = "eyenet.audit.case.tier_changed"
     CASE_ACCESS_DENIED = "eyenet.audit.case.access_denied"
 
+    # --- §M10 document classification --------------------------------------
+    # Emitted by the ClassifierService (a later slice); the aggregator builds
+    # the payload now (eyenet/classifier/aggregate/_audit.py) so callers and the
+    # service reference these canonical subjects, never free strings.
+    CLASSIFY_AGGREGATED = "eyenet.audit.classify.aggregated"  # a document settled to a tier
+    CLASSIFY_REVIEW_FLAGGED = "eyenet.audit.classify.review_flagged"  # operator_review raised
+
 
 __all__ = ["AuditSubject"]

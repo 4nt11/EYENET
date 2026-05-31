@@ -68,6 +68,13 @@ dependencies = [
   # The es_core_news_sm model (~13MB) is auto-fetched on first run by
   # eyenet/sensor/primitives/_locale_morph_kernel.py.
   "spacy>=3.7,<4.0",
+
+  # classifier — regex ruleset spine (M10 slice 3). RE2 is a linear-time,
+  # ReDoS-immune engine: the classifier matches operator-editable rules over
+  # threat-actor-authored text, where a backtracking engine is a DoS vector.
+  # Runs in the main app (consumes already-extracted text), so it is a core dep,
+  # not a jail-only extract dep. Imports as `re2`.
+  "google-re2>=1.1",
 ]
 
 [tool.uv.sources]
@@ -110,6 +117,26 @@ deferred = [
   "schemathesis>=3.34",
   # earned when primitive suite is stable
   "mutmut>=2.5",
+]
+
+# M10 Document Classifier — extraction parser libraries. DELIBERATELY NOT in the
+# main `dependencies`: these parse hostile, attacker-controlled documents and run
+# ONLY inside the nsjail sandbox (eyenet/classifier/sandbox/). They install into a
+# dedicated, minimal `eyenet-extract` venv that is bound READ-ONLY into the jail —
+# least functionality on the hostile-parse boundary, so a parser exploit never
+# reaches the main app's deps. Build the jail venv with:
+#   python -m venv /opt/eyenet/extract-venv
+#   /opt/eyenet/extract-venv/bin/pip install 'eyenet[extract]'
+# System binaries (nsjail, tesseract-ocr) and the spaCy model are provisioned
+# separately — see the install docs. spaCy itself is already a core dep above.
+# Versions are forward-declared for slice 2; pins get locked when the adapters
+# are wired and straced against the seccomp allowlist.
+extract = [
+  "pymupdf>=1.24,<2.0",           # PDF text + embedded-image extraction (AGPL — OK)
+  "python-docx>=1.1,<2.0",        # DOCX text extraction
+  "pytesseract>=0.3.10,<0.4",     # OCR (wraps the system `tesseract` binary)
+  "presidio-analyzer>=2.2,<3.0",  # PII detection (locale-aware via spaCy)
+  "Pillow>=10.0,<12.0",           # M10 slice 7 — image EXIF (local header parse only)
 ]
 
 [project.scripts]
@@ -174,6 +201,15 @@ omit = [
   "eyenet/collectors/telegram/real.py",
   "eyenet/collectors/telegram/auth.py",
   "eyenet/collectors/matrix/real.py",
+  # In-jail workers (extraction + Presidio NER): executed only inside nsjail by
+  # the venv python, so coverage.py cannot trace them. Proven by real-nsjail
+  # integration tests.
+  "eyenet/classifier/extract/_workers/*",
+  "eyenet/classifier/presidio/_workers/*",
+  # Live LLM transport: needs a running Ollama daemon, so coverage.py cannot
+  # trace it. The provider-agnostic advise() logic is fully unit-tested against a
+  # fake BaseProvider; this thin httpx shell is proven by test_llm_real.py.
+  "eyenet/classifier/llm/impl/ollama.py",
 ]
 
 [tool.coverage.report]
@@ -194,7 +230,15 @@ fail_under = 84  # TODO(EYENET v0.2): raise back to 89+ after calibration backfi
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["tests/fixtures/snapshots"]
+# The in-jail extraction workers are standalone scripts run by a DIFFERENT
+# interpreter (the eyenet-extract venv's python, inside nsjail). They import
+# libraries absent from the dev/app environment and follow script idioms — they
+# are not part of the checkable application surface.
+extend-exclude = [
+  "tests/fixtures/snapshots",
+  "eyenet/classifier/extract/_workers",
+  "eyenet/classifier/presidio/_workers",
+]
 
 [tool.ruff.lint]
 select = [
@@ -238,6 +282,9 @@ ignore = [
   "PTH123",       # open() in tests is fine (no Path-aware logic needed)
   "TC001", "TC002", "TC003",  # tests construct values, not just annotate
 ]
+# Multilingual classifier tests deliberately embed Cyrillic / CJK / Arabic
+# banner strings — the "ambiguous unicode" lints are the whole point of the test.
+"tests/unit/classifier/ruleset/test_engine.py" = ["RUF001", "RUF002", "RUF003"]
 # Pydantic / SQLModel evaluate annotations at runtime, so TC0xx (move to
 # TYPE_CHECKING) is wrong for these layers — the imports ARE runtime imports.
 "eyenet/contracts/**/*.py" = ["TC001", "TC002", "TC003"]
@@ -273,12 +320,23 @@ ignore = [
 known-first-party = ["eyenet"]
 combine-as-imports = true
 
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime (model build), so a type used
+# only in a BaseModel annotation must stay a runtime import — never moved into a
+# TYPE_CHECKING block. Without this, TC001/TC003 would push enum imports out of
+# scope and silently break validation.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 # -----------------------------------------------------------------------------
 # MyPy (strict)
 # -----------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# The in-jail workers import libraries (fitz, docx, presidio_analyzer) that live
+# only in the eyenet-extract venv, never in the type-check environment. They are
+# never imported by the app (only bind-mounted and run as scripts in nsjail).
+exclude = ['eyenet/classifier/(extract|presidio)/_workers/']
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_return_any = true
@@ -306,6 +364,7 @@ module = [
   "spacy.*",
   "thinc.*",
   "nio.*",
+  "re2.*",
 ]
 ignore_missing_imports = true
 
@@ -326,10 +385,18 @@ skips = ["B101"]  # assert is fine; we use it in tests + Pydantic invariants
 # -----------------------------------------------------------------------------
 [tool.deptry]
 known_first_party = ["eyenet"]
-extend_exclude = ["tests", "scripts"]
+# The in-jail workers import the extract-venv libs (fitz/docx/presidio); they run
+# in a separate environment, so deptry must not read them as app-level dependencies.
+extend_exclude = [
+  "tests",
+  "scripts",
+  "eyenet/classifier/extract/_workers",
+  "eyenet/classifier/presidio/_workers",
+]
 # DEP002 is suppressed globally: EYENET declares its full runtime dep set
 # upfront (all milestone deps in one place). Deptry can't distinguish
 # "not used yet" from "genuinely unnecessary." Audit manually at each release.
 ignore = ["DEP002"]
 [tool.deptry.package_module_name_map]
 PySocks = "socks"
+google-re2 = "re2"

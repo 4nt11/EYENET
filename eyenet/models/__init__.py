@@ -25,6 +25,7 @@ from .case import CaseCollaboratorTable, CaseMemberTable, CaseTable
 from .clearance import SystemUserClearanceGrantTable
 from .collector import CollectorTable
 from .corpus import CorpusCursorTable
+from .document import DocumentTable
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from .group import GroupSnapshotTable, GroupTable
@@ -60,6 +61,7 @@ __all__ = [
     "CollectorGroupMembershipTable",
     "CollectorTable",
     "CorpusCursorTable",
+    "DocumentTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",
     "FeedbackPairTable",

@@ -71,12 +71,17 @@ from sqlmodel import select
 from eyenet.collectors.base.skeleton import CollectorSkeleton
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.bus import Bus
+from eyenet.contracts.classify_events import (
+    SUBJECT_ATTACHMENT_STORED,
+    AttachmentStoredEnvelope,
+)
 from eyenet.contracts.collector import CollectorHealth
 from eyenet.contracts.enums import (
     AttachmentKind,
     CollectorState,
     GroupKind,
     IdentityState,
+    SensitivityTier,
     SourceKind,
 )
 from eyenet.contracts.identity_pool import IdentityPool
@@ -1000,6 +1005,12 @@ class MatrixCollector(CollectorSkeleton):
         size = descriptor.get("size") or (len(payload) if payload else 0)
         filename = descriptor.get("filename")
 
+        # Born provisional CLASSIFIED when we have bytes on disk — the
+        # ClassifierService settles the real tier off-path (§0 fail-closed).
+        # No bytes (integrity-failed / undownloaded) → nothing to classify.
+        provisional_tier = (
+            SensitivityTier.CLASSIFIED if storage_uri is not None else SensitivityTier.NORMAL
+        )
         attachment_row = AttachmentTable(
             id=new_uuid7(),
             message_id=msg_row.id,
@@ -1009,6 +1020,7 @@ class MatrixCollector(CollectorSkeleton):
             sha256=sha256 or ("0" * 64),
             filename=filename if isinstance(filename, str) else None,
             storage_uri=storage_uri,
+            classifier_tier=provisional_tier,
         )
 
         written = await self._storage.put_message(msg_row, [attachment_row])
@@ -1045,6 +1057,19 @@ class MatrixCollector(CollectorSkeleton):
                 size=attachment_row.size_bytes,
                 sha256=attachment_row.sha256[:16],
             )
+            # Trigger async classification only when bytes are on disk to read.
+            if storage_uri is not None and sha256 is not None:
+                await self.publisher.publish(
+                    SUBJECT_ATTACHMENT_STORED,
+                    AttachmentStoredEnvelope(
+                        attachment_id=attachment_row.id,
+                        message_id=msg_row.id,
+                        storage_uri=storage_uri,
+                        sha256=sha256,
+                        mime=str(mime),
+                        trace_context=TraceContext(traceparent=traceparent),
+                    ),
+                )
 
     # ---- reactions --------------------------------------------------------
 

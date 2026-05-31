@@ -15,6 +15,7 @@ from sqlmodel import col, select
 from eyenet import __version__
 from eyenet.bus import MemoryBus, NATSBus
 from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.classifier.service import ClassifierService
 from eyenet.cli.config import LinkerConfig, RuntimeConfig, VerifierConfig
 from eyenet.collectors.matrix.real import MatrixCollector
 from eyenet.collectors.matrix.stub import MatrixCollectorStub
@@ -60,6 +61,10 @@ app.add_typer(linkage_app, name="linkage")
 from eyenet.cli.user import user_app  # noqa: E402
 
 app.add_typer(user_app, name="user")
+
+from eyenet.cli.document import document_app  # noqa: E402
+
+app.add_typer(document_app, name="document")
 
 
 @app.callback()
@@ -430,6 +435,23 @@ def verifier_run(  # pragma: no cover
             config=verifier_cfg,
             impostor_pool_path=pool_path,
         )
+
+    _run(_factory, cfg)
+
+
+@app.command("classifier")
+def classifier_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    instance_id: str = typer.Option("classifier_1", "--instance-id"),
+) -> None:
+    """Run the M10 Document Classifier — async worker on classify.* triggers."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+
+    def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
+        return ClassifierService(bus=bus, storage=storage, instance_id=instance_id)
 
     _run(_factory, cfg)
 
