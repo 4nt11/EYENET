@@ -48,6 +48,10 @@ _log = structlog.get_logger()
 
 _WORKER_DIR = Path(__file__).parent / "_workers"
 
+# The second IMAGE pass — Pillow EXIF, run as a venv Python worker alongside the
+# Tesseract OCR entrypoint (the two can't share a process: the jail KILLs fork).
+_IMAGE_META_WORKER = "image_meta_worker.py"
+
 
 @dataclass(frozen=True, slots=True)
 class _Route:
@@ -94,11 +98,66 @@ def _normalize(result: ExtractResult, kind: DocKind) -> ExtractResult:
     return ExtractResult(text=result.text, meta=meta)
 
 
+def _extract_image_exif(blob: bytes, limits: SandboxLimits) -> dict[str, object]:
+    """Best-effort EXIF pass for an image (second jailed run, Pillow worker).
+
+    Returns the EXIF dict, or ``{}`` if the venv is absent or the pass fails.
+    EXIF is supplementary evidence: its absence must NOT fail-close a document
+    whose OCR text we read successfully (§0 is about unreadable CONTENT, not
+    missing metadata).
+    """
+    profile = venv_profile()
+    if profile is None:
+        _log.warning("extract.image_meta_unavailable", reason="venv_missing")
+        return {}
+    result = extract_sandboxed(
+        blob,
+        worker_path=str(_WORKER_DIR / _IMAGE_META_WORKER),
+        limits=limits,
+        profile=profile,
+        interpret="envelope",
+    )
+    if isinstance(result, FailedClosed):
+        _log.warning(
+            "extract.image_meta_failed", reason=result.reason.value, detail=result.detail[:200]
+        )
+        return {}
+    exif = result.meta.get("exif", {})
+    return exif if isinstance(exif, dict) else {}
+
+
+def _extract_image(blob: bytes, limits: SandboxLimits) -> ExtractResult | FailedClosed:
+    """IMAGE two-pass: Tesseract OCR (text) + Pillow EXIF (metadata), merged.
+
+    The OCR pass is authoritative for §0 — if we can't OCR the image we can't
+    read its content, so a failed OCR pass fails the document closed. The EXIF
+    pass is best-effort and runs regardless of whether OCR produced any text.
+    """
+    profile = _build_profile(DocKind.IMAGE)
+    if profile is None:
+        _log.error("extract.extractor_unavailable", kind=DocKind.IMAGE.value)
+        return FailedClosed(
+            reason=FailReason.EXTRACTOR_UNAVAILABLE,
+            detail="tesseract is not installed on this host",
+        )
+    ocr = extract_sandboxed(
+        blob, worker_path=None, limits=limits, profile=profile, interpret="raw_text"
+    )
+    if isinstance(ocr, FailedClosed):
+        return ocr
+    meta = dict(ocr.meta)
+    meta["exif"] = _extract_image_exif(blob, limits)
+    return _normalize(ExtractResult(text=ocr.text, meta=meta), DocKind.IMAGE)
+
+
 def extract_document(
     blob: bytes, *, limits: SandboxLimits = DEFAULT_LIMITS
 ) -> ExtractResult | FailedClosed:
     """Sniff, route, and extract one untrusted document through the sandbox."""
     kind = sniff(blob)
+    if kind is DocKind.IMAGE:  # two-pass (OCR + EXIF) — see _extract_image
+        return _extract_image(blob, limits)
+
     route = _ROUTES.get(kind)
     if route is None:  # DocKind.UNKNOWN — nothing claimed it
         _log.info("extract.unsupported_type", kind=kind.value)

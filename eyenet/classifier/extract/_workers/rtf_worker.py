@@ -4,6 +4,11 @@ A minimal RTF-to-text stripper: it drops control words and ignorable
 destinations (font tables, stylesheets, embedded objects), decodes \\'hh hex and
 \\uN unicode escapes, and keeps the visible text. Not a full RTF reader — enough
 to surface text for classification. No third-party imports.
+
+M10 slice 7: also surfaces the ``{\\info}`` group's text fields (title/author/
+operator/company/…) under ``meta.embedded``. ATTACKER-CONTROLLED — captured
+verbatim, sanitized HOST-SIDE. A focused regex pulls the single-level info
+subgroups; nested date control words (\\creatim) are out of scope for this pass.
 """
 
 import json
@@ -30,6 +35,24 @@ _SPECIAL = {
     "rquote": "’", "ldblquote": "“", "rdblquote": "”",
     "bullet": "•", "nbsp": " ",
 }
+
+
+# Single-level {\info} text fields, incl. the {\*\company …} custom-destination
+# form. Values are plain text (no nested groups), so [^{}]* is sufficient.
+_INFO_RE = re.compile(
+    r"\{(?:\\\*)?\\(title|author|subject|operator|company|manager|keywords|comment|doccomm)"
+    r"\s+([^{}]*)\}"
+)
+
+
+def extract_info(rtf: str) -> dict[str, str]:
+    """Pull the {\\info} group's text fields. Best-effort, never raises."""
+    out: dict[str, str] = {}
+    for match in _INFO_RE.finditer(rtf):
+        field, value = match.group(1), match.group(2).strip()
+        if value:
+            out[field] = value
+    return out
 
 
 def rtf_to_text(rtf: str) -> str:
@@ -83,8 +106,10 @@ def rtf_to_text(rtf: str) -> str:
 def main() -> int:
     with open("/input", "rb") as handle:
         data = handle.read()
-    text = rtf_to_text(data.decode("latin-1"))
-    sys.stdout.write(json.dumps({"text": text, "meta": {"method": "rtf"}}))
+    rtf = data.decode("latin-1")
+    text = rtf_to_text(rtf)
+    meta = {"method": "rtf", "embedded": extract_info(rtf)}
+    sys.stdout.write(json.dumps({"text": text, "meta": meta}))
     return 0
 
 

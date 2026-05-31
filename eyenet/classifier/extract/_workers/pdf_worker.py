@@ -8,6 +8,11 @@ A malformed PDF raises out of fitz.open → non-zero exit → fail closed.
 
 This slice extracts the TEXT LAYER only; embedded-image OCR + text-vs-render
 mismatch are Slice 2b.
+
+M10 slice 7: also surfaces the document's Info dict + XMP under ``meta.embedded``
+(Author/Producer/CreationDate/ModDate/…). These are ATTACKER-CONTROLLED — they
+are captured verbatim as evidence and sanitized HOST-SIDE before any log/store.
+Info values are strings (JSON-safe); the XMP packet is a string.
 """
 
 import json
@@ -25,7 +30,18 @@ def main() -> int:
         return 2
     parts = [page.get_text() for page in doc]
     text = "\n".join(parts)
-    meta = {"method": "pymupdf", "pages": doc.page_count}
+
+    # Embedded metadata — Info dict (strings or None) + XMP packet (string).
+    # ``hasattr`` guards the XMP accessor across PyMuPDF versions so a missing
+    # method can never fail-close an otherwise-readable PDF.
+    info = doc.metadata or {}
+    embedded = {key: value for key, value in info.items() if value}
+    if hasattr(doc, "get_xml_metadata"):
+        xmp = doc.get_xml_metadata()
+        if xmp:
+            embedded["xmp"] = xmp
+
+    meta = {"method": "pymupdf", "pages": doc.page_count, "embedded": embedded}
     sys.stdout.write(json.dumps({"text": text, "meta": meta}))
     return 0
 

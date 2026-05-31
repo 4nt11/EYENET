@@ -43,6 +43,21 @@ _HAVE_TESS = shutil.which("tesseract") is not None
 _needs_venv = pytest.mark.skipif(not _HAVE_VENV, reason="eyenet-extract venv not built")
 _needs_tess = pytest.mark.skipif(not _HAVE_TESS, reason="tesseract not installed")
 
+
+def _venv_has(module: str) -> bool:
+    """True if the extract venv can import `module` (e.g. Pillow for EXIF)."""
+    if _VENV is None:
+        return False
+    py = str(_VENV / "bin" / "python")
+    probe = subprocess.run(  # noqa: S603
+        [py, "-c", f"import {module}"], capture_output=True, check=False
+    )
+    return probe.returncode == 0
+
+
+_HAVE_PIL = _HAVE_VENV and _venv_has("PIL")
+_needs_pil = pytest.mark.skipif(not _HAVE_PIL, reason="Pillow not in eyenet-extract venv")
+
 # PDF render / OCR need more than the snappy 2s used for pure-Python probes.
 _LIMITS = SandboxLimits(time_limit_s=10, parent_timeout_s=15)
 
@@ -162,3 +177,84 @@ def test_real_image_ocr(tmp_path: Path) -> None:
     assert "SECRET" in result.text.upper()
     assert result.meta["ocr_applied"] is True
     assert result.meta["doc_kind"] == "image"
+
+
+# ---- embedded forensic metadata (M10 slice 7) -----------------------------
+
+
+@_needs_venv
+def test_real_pdf_embedded_metadata(tmp_path: Path) -> None:
+    blob = _gen(
+        tmp_path / "meta.pdf",
+        "import sys, fitz; d=fitz.open(); d.new_page();"
+        " d.set_metadata({'author':'Agent Smith','producer':'EYENET-test'});"
+        " d.save(sys.argv[1])",
+    )
+    result = extract_document(blob, limits=_LIMITS)
+    assert isinstance(result, ExtractResult), result
+    embedded = result.meta["embedded"]
+    assert isinstance(embedded, dict)
+    assert embedded["author"] == "Agent Smith"
+    assert embedded["producer"] == "EYENET-test"
+
+
+@_needs_venv
+def test_real_docx_embedded_core_properties(tmp_path: Path) -> None:
+    blob = _gen(
+        tmp_path / "meta.docx",
+        "import sys, docx; d=docx.Document();"
+        " d.add_paragraph('body');"
+        " d.core_properties.author='Agent Bravo';"
+        " d.core_properties.last_modified_by='Agent Charlie'; d.save(sys.argv[1])",
+    )
+    result = extract_document(blob, limits=_LIMITS)
+    assert isinstance(result, ExtractResult), result
+    embedded = result.meta["embedded"]
+    assert isinstance(embedded, dict)
+    assert embedded["author"] == "Agent Bravo"
+    assert embedded["last_modified_by"] == "Agent Charlie"
+
+
+def test_real_html_embedded_metadata() -> None:
+    blob = (
+        b"<html><head><title>Quarterly Brief</title>"
+        b'<meta name="author" content="J. Smith"></head>'
+        b"<body>visible text</body></html>"
+    )
+    result = extract_document(blob)
+    assert isinstance(result, ExtractResult)
+    embedded = result.meta["embedded"]
+    assert isinstance(embedded, dict)
+    assert embedded["title"] == "Quarterly Brief"
+    assert embedded["meta_tags"] == {"author": "J. Smith"}
+
+
+def test_real_rtf_embedded_info() -> None:
+    blob = rb"{\rtf1\ansi{\info{\title Op Nightfall}{\author Jane Doe}}\f0 body text}"
+    result = extract_document(blob)
+    assert isinstance(result, ExtractResult)
+    embedded = result.meta["embedded"]
+    assert isinstance(embedded, dict)
+    assert embedded["title"] == "Op Nightfall"
+    assert embedded["author"] == "Jane Doe"
+
+
+@_needs_venv
+@_needs_tess
+@_needs_pil
+def test_real_image_exif_captured_even_when_blank(tmp_path: Path) -> None:
+    # A blank white JPEG carries EXIF but no OCR text — proves the metadata pass
+    # runs even when the text body is empty (slice-7 constraint).
+    blob = _gen(
+        tmp_path / "exif.jpg",
+        "import sys; from PIL import Image; img=Image.new('RGB',(64,64),'white');"
+        " ex=img.getexif(); ex[271]='TestMake'; ex[305]='EYENET-cam';"
+        " img.save(sys.argv[1], exif=ex)",
+    )
+    result = extract_document(blob, limits=_LIMITS)
+    assert isinstance(result, ExtractResult), result
+    assert result.meta["doc_kind"] == "image"
+    exif = result.meta["exif"]
+    assert isinstance(exif, dict)
+    assert exif.get("Make") == "TestMake"
+    assert exif.get("Software") == "EYENET-cam"
