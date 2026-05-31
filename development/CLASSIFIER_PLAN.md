@@ -224,6 +224,31 @@ if tier < CLASSIFIED:
     same safe class as the socket calls already allowed — netns is the network
     containment, not seccomp).
 
+- ✅ **Regex engine = google-re2** (slice 3), a core app dep. The classifier
+  matches operator-editable rules over THREAT-ACTOR-authored text, so a
+  backtracking engine (stdlib `re`, `regex`) is a ReDoS/DoS vector even on
+  already-extracted text (the extraction cap bounds length, not backtracking).
+  RE2 is a linear-time FSM → catastrophic backtracking is *structurally
+  impossible*, not merely timed-out — strictly stronger and more reproducible
+  than a wall-clock timeout (which is host-load-dependent → non-deterministic →
+  undefensible). RE2 drops lookaround + backreferences; harmless-to-beneficial
+  here — every marker is literal/char-class, and lookaround would only suppress
+  over-classification, the *recoverable* error direction per §0. A
+  lookaround/backref pattern simply won't compile → caught at load (a feature).
+
+- ✅ **Rules = operator-editable TOML, eager fail-closed compile** (slice 3).
+  "Versioned DATA, not code" (§1) → a TOML ruleset (`ruleset_version` field,
+  bundled default + `EYENET_CLASSIFIER_RULESET` override), mirroring
+  `identity_pool/loader.py` (pydantic `extra="forbid"`). Every pattern compiles
+  at LOAD; any failure refuses the WHOLE ruleset (never half-load — a
+  partly-applied ruleset could silently drop the rule that catches a classified
+  marker → under-classify). Patterns MUST be TOML *literal strings* (`'\d…'`) so
+  backslashes survive; flags are inline (`(?i)/(?m)/(?s)`), not a side-channel,
+  so the same `ruleset_version` always means the same matches. Provenance stores
+  the RAW matched span + offsets (operator-grade evidence; offsets alone aren't
+  court-verifiable) with a `redact()` helper for logs — structured logs are not
+  clearance-gated and NEVER carry the raw span.
+
 ---
 
 ## Build plan — milestone "Document Classifier" (worktree, slice-per-commit)
@@ -256,7 +281,22 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    their own commit). Unit (sniff/dispatch/profiles/chokepoint via fakes) +
    real-nsjail integration (PDF/DOCX/OCR/encrypted-pdf/unknown).
 3. **Regex ruleset engine** — versioned data rules → tier floors; deterministic
-   spine; per-match provenance.
+   spine; per-match provenance. **SHIPPED** as `eyenet/classifier/ruleset/`:
+   pure I/O-free `classify(text, ruleset) -> RegexVerdict` over an
+   operator-editable TOML ruleset (`_default_rules.toml`, `ruleset_version="v1"`;
+   bundled default + `EYENET_CLASSIFIER_RULESET` override; pydantic
+   `extra="forbid"` + eager fail-closed compile — a bad/lookaround/backref
+   pattern is refused at LOAD, never silently dropped). `RegexVerdict` =
+   `MAX(tier_floor)` over matched rules (monotone, NORMAL when none) + a tuple of
+   `RuleMatch` (rule_name / tier_floor / start / end / raw matched_text / lang)
+   for court-quotable provenance ("offset N"); `.redacted()` masks spans for
+   logs. Engine = **google-re2** (linear-time, ReDoS-immune by construction —
+   the input text is threat-actor-authored; a backtracking engine is a DoS
+   vector). Default ruleset: structural locale-agnostic rules (crypto private
+   key / API secret → CLASSIFIED; PGP / onion / BTC-XMR-ETH wallets / IBAN / SSN
+   / passport MRZ / case-ref → RESTRICTED) + EN/ES classification banners
+   (`lang`-tagged, inert metadata in v1). Stage returns a FLOOR only — the
+   aggregator (slice 5) binds it. Pure unit tests, no nsjail/DB.
 4. **Presidio wiring** — locale-aware via the existing spaCy dep; PII type+density
    → tier floor.
 5. **Aggregator + provenance + audit** — monotone MAX of deterministic floors;

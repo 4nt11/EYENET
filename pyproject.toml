@@ -68,6 +68,13 @@ dependencies = [
   # The es_core_news_sm model (~13MB) is auto-fetched on first run by
   # eyenet/sensor/primitives/_locale_morph_kernel.py.
   "spacy>=3.7,<4.0",
+
+  # classifier — regex ruleset spine (M10 slice 3). RE2 is a linear-time,
+  # ReDoS-immune engine: the classifier matches operator-editable rules over
+  # threat-actor-authored text, where a backtracking engine is a DoS vector.
+  # Runs in the main app (consumes already-extracted text), so it is a core dep,
+  # not a jail-only extract dep. Imports as `re2`.
+  "google-re2>=1.1",
 ]
 
 [tool.uv.sources]
@@ -299,6 +306,13 @@ ignore = [
 known-first-party = ["eyenet"]
 combine-as-imports = true
 
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime (model build), so a type used
+# only in a BaseModel annotation must stay a runtime import — never moved into a
+# TYPE_CHECKING block. Without this, TC001/TC003 would push enum imports out of
+# scope and silently break validation.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 # -----------------------------------------------------------------------------
 # MyPy (strict)
 # -----------------------------------------------------------------------------
@@ -336,6 +350,7 @@ module = [
   "spacy.*",
   "thinc.*",
   "nio.*",
+  "re2.*",
 ]
 ignore_missing_imports = true
 
@@ -365,3 +380,4 @@ extend_exclude = ["tests", "scripts", "eyenet/classifier/extract/_workers"]
 ignore = ["DEP002"]
 [tool.deptry.package_module_name_map]
 PySocks = "socks"
+google-re2 = "re2"

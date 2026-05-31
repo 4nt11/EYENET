@@ -1,0 +1,112 @@
+# EYENET document-classifier — default regex ruleset (Slice 3, M10).
+#
+# This is operator-editable DATA, not code. Each rule maps a regex PATTERN to a
+# sensitivity-tier FLOOR; the engine assigns MAX(floor) over every rule that
+# fires. Floors only ever RAISE the tier — under MAX there is no way to lower it.
+#
+# ── HARD RULES for editing ───────────────────────────────────────────────────
+#  1. ALWAYS write `pattern` as a TOML *literal string* (single quotes): '...'.
+#     A basic double-quoted string mangles backslashes — "\d" is an invalid
+#     escape and "\b" is a backspace byte. Literal strings pass the regex through
+#     verbatim, so '\b\d{3}-\d{2}-\d{4}\b' is exactly those characters.
+#  2. The engine is google-re2 (linear-time, ReDoS-immune by construction). RE2
+#     has NO lookaround and NO backreferences. A pattern using (?=...), (?<=...),
+#     or \1 will FAIL TO COMPILE — the whole ruleset is then refused at load
+#     (fail-closed), never half-applied. This is intentional.
+#  3. Flags are baked into the pattern with inline syntax at the front:
+#     (?i) case-insensitive, (?m) multiline ^/$, (?s) dot-matches-newline.
+#     There is no separate flags field — the pattern string fully determines
+#     behavior, so the same `ruleset_version` always means the same matches.
+#  4. `tier_floor` is one of: "normal", "restricted", "classified".
+#  5. `lang` is OPTIONAL BCP-47 provenance metadata (e.g. "en", "es"). In v1 it
+#     is recorded but does NOT gate matching — banners run regardless of locale.
+#
+# Over-classification (a benign doc → CLASSIFIED) is the RECOVERABLE error per
+# CLASSIFIER_PLAN §0; under-classification is catastrophic. When in doubt, a
+# noisier rule is the safe direction.
+
+ruleset_version = "v1"
+
+# ── Structural identifiers — locale-agnostic ─────────────────────────────────
+
+[[rules]]
+name = "crypto_private_key"
+pattern = '-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----'
+tier_floor = "classified"
+description = "Armored private key header (RSA/OpenSSH/EC/DSA/PGP). A leaked private key is maximally sensitive."
+
+[[rules]]
+name = "api_secret"
+pattern = '\b(?:AKIA[0-9A-Z]{16}|ghp_[0-9A-Za-z]{36}|xox[baprs]-[0-9A-Za-z-]{10,}|sk-[0-9A-Za-z]{20,})\b'
+tier_floor = "classified"
+description = "Provider-prefixed API/cloud secrets: AWS access key, GitHub PAT, Slack token, OpenAI-style key."
+
+[[rules]]
+name = "pgp_block"
+pattern = '-----BEGIN PGP (?:MESSAGE|PUBLIC KEY BLOCK|SIGNATURE|SIGNED MESSAGE)-----'
+tier_floor = "restricted"
+description = "Armored PGP block (not a private key). Indicates encrypted/signed material worth review."
+
+[[rules]]
+name = "onion_address"
+pattern = '\b[a-z2-7]{16}(?:[a-z2-7]{40})?\.onion\b'
+tier_floor = "restricted"
+description = "Tor v2 (16-char) or v3 (56-char) onion service address. Aligns with InfrastructureKind.ONION."
+
+[[rules]]
+name = "crypto_wallet_btc"
+pattern = '\b(?:bc1[ac-hj-np-z02-9]{11,71}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b'
+tier_floor = "restricted"
+description = "Bitcoin address (bech32 or base58 P2PKH/P2SH). Aligns with InfrastructureKind.WALLET_BTC."
+
+[[rules]]
+name = "crypto_wallet_eth"
+pattern = '\b0x[a-fA-F0-9]{40}\b'
+tier_floor = "restricted"
+description = "Ethereum-style 20-byte hex address. Aligns with InfrastructureKind.WALLET_ETH."
+
+[[rules]]
+name = "crypto_wallet_xmr"
+pattern = '\b4[0-9AB][0-9A-Za-z]{93}\b'
+tier_floor = "restricted"
+description = "Monero standard address (95 chars, leading 4). Aligns with InfrastructureKind.WALLET_XMR."
+
+[[rules]]
+name = "iban"
+pattern = '\b[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}\b'
+tier_floor = "restricted"
+description = "IBAN shape only (mod-97 checksum validation belongs to a downstream confirmer, not the regex spine)."
+
+[[rules]]
+name = "ssn_us"
+pattern = '\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b'
+tier_floor = "restricted"
+description = "US Social Security Number (dashed). Shape match; not Luhn/area-validated here."
+
+[[rules]]
+name = "passport_mrz"
+pattern = '(?m)^P[<A-Z][A-Z]{3}[A-Z0-9<]{31,39}$'
+tier_floor = "restricted"
+description = "Machine-readable passport MRZ line 1 (TD3, 'P<' + 3-letter country + name field)."
+
+[[rules]]
+name = "case_ref"
+pattern = '\bCASE-[0-9]{4}-[0-9]{3,6}\b'
+tier_floor = "restricted"
+description = "PLACEHOLDER operator case-reference shape (CASE-YYYY-NNN). Edit to match your case-numbering scheme."
+
+# ── Classification banners — language-specific (lang is provenance only in v1) ─
+
+[[rules]]
+name = "banner_en"
+pattern = '(?i)\b(?:TOP[ -]SECRET|SECRET//[A-Z/ ]+|\bNOFORN\b|CONFIDENTIAL|CLASSIFIED|FOR OFFICIAL USE ONLY|FOUO)\b'
+tier_floor = "classified"
+lang = "en"
+description = "English classification banners and handling caveats. CONFIDENTIAL is FP-prone (email footers); the top calibration target — do not try to suppress it here."
+
+[[rules]]
+name = "banner_es"
+pattern = '(?i)(?:ALTO SECRETO|SECRETO|CONFIDENCIAL|RESERVADO|DIFUSIÓN LIMITADA|USO OFICIAL)'
+tier_floor = "classified"
+lang = "es"
+description = "Spanish classification banners (Spanish-first calibration parity with banner_en). Accents intact; \\b omitted around accented terms because RE2 \\b is byte-oriented."
