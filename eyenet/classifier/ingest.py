@@ -114,7 +114,7 @@ async def ingest_document(
     filename: str | None = None,
     mime: str | None = None,
     now: datetime | None = None,
-    advise_fn: AdviseFn = advise,
+    advise_fn: AdviseFn | None = None,
 ) -> IngestResult:
     """Classify + persist one uploaded document, returning the settled verdict.
 
@@ -134,7 +134,10 @@ async def ingest_document(
     presidio = await anyio.to_thread.run_sync(detect, text)
     verdict = aggregate(extraction, regex, presidio)
     if verdict.consult_llm:
-        verdict = apply_llm_advisory(verdict, await advise_fn(text))
+        # Resolved at call time (not a bound default) so a test/operator can
+        # swap the provider via the module global without a network round-trip.
+        resolved_advise = advise_fn or advise
+        verdict = apply_llm_advisory(verdict, await resolved_advise(text))
 
     doc_kind = raw_meta.get("doc_kind")
     row = DocumentRow(

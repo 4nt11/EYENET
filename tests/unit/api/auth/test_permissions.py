@@ -63,6 +63,13 @@ def test_role_baseline_viewer_is_strict_subset_of_analyst() -> None:
     assert ROLE_BASELINE[SystemUserRole.VIEWER] < ROLE_BASELINE[SystemUserRole.ANALYST]
 
 
+@pytest.mark.unit
+def test_write_documents_in_admin_and_analyst_not_viewer() -> None:
+    assert "write:documents" in ROLE_BASELINE[SystemUserRole.ADMIN]
+    assert "write:documents" in ROLE_BASELINE[SystemUserRole.ANALYST]
+    assert "write:documents" not in ROLE_BASELINE[SystemUserRole.VIEWER]
+
+
 @pytest.mark.parametrize(
     "scope",
     ["read:restricted", "read:classified", "admin:reclassify", "admin:case", "admin:clearance"],

@@ -34,6 +34,8 @@ from eyenet.api.auth import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from cryptography.fernet import Fernet
 from eyenet.contracts.enums import SystemUserRole
 from eyenet.storage.repository import BaseRepository
@@ -124,6 +126,13 @@ def get_audit(request: Request) -> AuditEmitter:
     if audit is None:
         raise RuntimeError("app.state.audit is not configured")
     return cast("AuditEmitter", audit)
+
+
+def get_data_dir(request: Request) -> Path:
+    data_dir = getattr(request.app.state, "data_dir", None)
+    if data_dir is None:
+        raise RuntimeError("app.state.data_dir is not configured")
+    return cast("Path", data_dir)
 
 
 def get_auth_cache(request: Request) -> AuthCache:
@@ -314,6 +323,7 @@ __all__ = [
     "get_audit",
     "get_auth_cache",
     "get_current_user",
+    "get_data_dir",
     "get_mfa_key",
     "get_pat_pepper",
     "get_storage",

@@ -61,6 +61,10 @@ from eyenet.cli.user import user_app  # noqa: E402
 
 app.add_typer(user_app, name="user")
 
+from eyenet.cli.document import document_app  # noqa: E402
+
+app.add_typer(document_app, name="document")
+
 
 @app.callback()
 def _root() -> None:
