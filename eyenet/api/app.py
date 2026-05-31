@@ -73,6 +73,7 @@ def create_app(
 
     bus_publisher = publisher or BusEnvelopePublisher(MemoryBus())
     app.state.storage = storage
+    app.state.publisher = bus_publisher
     app.state.audit = AuditEmitter(
         bus_publisher,
         storage,

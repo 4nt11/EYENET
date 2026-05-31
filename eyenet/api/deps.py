@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cryptography.fernet import Fernet
+
+    from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import SystemUserRole
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -133,6 +135,13 @@ def get_data_dir(request: Request) -> Path:
     if data_dir is None:
         raise RuntimeError("app.state.data_dir is not configured")
     return cast("Path", data_dir)
+
+
+def get_publisher(request: Request) -> BusEnvelopePublisher:
+    publisher = getattr(request.app.state, "publisher", None)
+    if publisher is None:
+        raise RuntimeError("app.state.publisher is not configured")
+    return cast("BusEnvelopePublisher", publisher)
 
 
 def get_auth_cache(request: Request) -> AuthCache:
@@ -326,6 +335,7 @@ __all__ = [
     "get_data_dir",
     "get_mfa_key",
     "get_pat_pepper",
+    "get_publisher",
     "get_storage",
     "get_stream_principal",
     "get_verifying_keys",

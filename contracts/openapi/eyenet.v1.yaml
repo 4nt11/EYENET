@@ -1594,18 +1594,20 @@ paths:
       tags: [documents]
       operationId: documents_upload
       summary: |
-        Upload + classify one document. Body is the RAW file bytes (not
-        multipart); `Content-Type` and the optional `X-Filename` header are
-        recorded as evidence. Runs the full classifier pipeline synchronously
-        and persists the settled tier. Requires `write:documents`.
+        Upload one document for ASYNC classification. Body is the RAW file bytes
+        (not multipart); `Content-Type` and the optional `X-Filename` header are
+        recorded as evidence. Stores the bytes + a PROVISIONAL CLASSIFIED row and
+        publishes a classifier trigger; the ClassifierService settles the real
+        tier off the request path. The 202 body carries the provisional tier
+        (`classified`). Requires `write:documents`.
       parameters:
         - name: x-filename
           in: header
           required: false
           schema: { type: string, nullable: true }
       responses:
-        "201":
-          description: Document ingested + classified.
+        "202":
+          description: Document accepted; provisional CLASSIFIED, settling async.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DocumentUploadResult' }
