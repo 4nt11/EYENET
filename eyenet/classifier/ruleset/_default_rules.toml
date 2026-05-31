@@ -25,7 +25,7 @@
 # CLASSIFIER_PLAN §0; under-classification is catastrophic. When in doubt, a
 # noisier rule is the safe direction.
 
-ruleset_version = "v1"
+ruleset_version = "v2"
 
 # ── Structural identifiers — locale-agnostic ─────────────────────────────────
 
@@ -99,14 +99,28 @@ description = "PLACEHOLDER operator case-reference shape (CASE-YYYY-NNN). Edit t
 
 [[rules]]
 name = "banner_en"
-pattern = '(?i)\b(?:TOP[ -]SECRET|SECRET//[A-Z/ ]+|\bNOFORN\b|CONFIDENTIAL|CLASSIFIED|FOR OFFICIAL USE ONLY|FOUO)\b'
+pattern = '(?i)\b(?:TOP[ -]SECRET|SECRET//[A-Z/ ]+|\bNOFORN\b|\bORCON\b|EYES ONLY|ORIGINATOR.CONTROLLED|WARNING NOTICE|\bCUI\b|\bSBU\b|CONFIDENTIAL|CLASSIFIED|FOR OFFICIAL USE ONLY|FOUO)\b'
 tier_floor = "classified"
 lang = "en"
-description = "English classification banners and handling caveats. CONFIDENTIAL is FP-prone (email footers); the top calibration target — do not try to suppress it here."
+description = "English classification banners + dissemination caveats (ORCON / EYES ONLY / NOFORN / CUI). CONFIDENTIAL is FP-prone (email footers); the top calibration target — do not try to suppress it here."
 
 [[rules]]
 name = "banner_es"
 pattern = '(?i)(?:ALTO SECRETO|SECRETO|CONFIDENCIAL|RESERVADO|DIFUSIÓN LIMITADA|USO OFICIAL)'
 tier_floor = "classified"
 lang = "es"
-description = "Spanish classification banners (Spanish-first calibration parity with banner_en). Accents intact; \\b omitted around accented terms because RE2 \\b is byte-oriented."
+description = "Spanish classification banners (Spanish-first calibration parity with banner_en). Accents intact; \\b omitted around accented terms because RE2's \\b/\\w are ASCII-only and never fire at accented (non-ASCII) word edges."
+
+# ── Portion markings — the most reliable structured classification signal ─────
+# A leaked page or pasted excerpt often carries (TS//NH//NF), (S), (U) markings
+# WITHOUT a full banner line. Without this rule such a fragment classifies NORMAL
+# — the catastrophic under-classification direction (§0). (C) collides with the
+# copyright symbol (over-classify = recoverable); a calibration target, not
+# suppressed here.
+
+[[rules]]
+name = "portion_marking"
+pattern = '\((?:TS|S|C|U)(?://[A-Z0-9/]+)?\)'
+tier_floor = "classified"
+lang = "en"
+description = "US-style portion markings: (U) (C) (S) (TS), optionally with //COMPARTMENT//DISSEM caveats, e.g. (TS//NH//NF)."

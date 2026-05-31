@@ -294,9 +294,14 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    the input text is threat-actor-authored; a backtracking engine is a DoS
    vector). Default ruleset: structural locale-agnostic rules (crypto private
    key / API secret → CLASSIFIED; PGP / onion / BTC-XMR-ETH wallets / IBAN / SSN
-   / passport MRZ / case-ref → RESTRICTED) + EN/ES classification banners
-   (`lang`-tagged, inert metadata in v1). Stage returns a FLOOR only — the
-   aggregator (slice 5) binds it. Pure unit tests, no nsjail/DB.
+   / passport MRZ / case-ref → RESTRICTED) + EN/ES classification banners + a
+   **portion_marking** rule (`(TS//…)`/`(S)`/`(U)` → CLASSIFIED;
+   `ruleset_version="v2"`). `lang`-tagged but inert in v2 (per-locale gating is
+   slice 9). The portion-marking rule closed a catastrophic under-classification
+   gap a fictional intel-memo fixture exposed (portion-marked body fragment with
+   no plaintext banner → was NORMAL); fixture adopted as a real-jail
+   extract→classify smoke test. Stage returns a FLOOR only — the aggregator
+   (slice 5) binds it. Pure unit tests + one integration smoke, no DB.
 4. **Presidio wiring** — locale-aware via the existing spaCy dep; PII type+density
    → tier floor.
 5. **Aggregator + provenance + audit** — monotone MAX of deterministic floors;

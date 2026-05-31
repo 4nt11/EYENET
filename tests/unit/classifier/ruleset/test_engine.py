@@ -30,7 +30,7 @@ def test_no_match_is_normal_floor(default_ruleset: object) -> None:
     assert verdict.tier_floor is SensitivityTier.NORMAL
     assert verdict.matches == ()
     assert verdict.engine == "re2"
-    assert verdict.ruleset_version == "v1"
+    assert verdict.ruleset_version == "v2"
 
 
 def test_ssn_match_offsets_are_exact(default_ruleset: object) -> None:
@@ -64,6 +64,24 @@ def test_matches_sorted_by_offset(default_ruleset: object) -> None:
     verdict = _classify(text, default_ruleset)
     starts = [m.start for m in verdict.matches]
     assert starts == sorted(starts)
+
+
+def test_portion_markings_catch_banner_less_fragment(default_ruleset: object) -> None:
+    # A leaked body excerpt with portion markings but NO plaintext banner line
+    # MUST NOT classify NORMAL — that is the catastrophic under-classification
+    # direction (§0). This is the gap the DSR fixture exposed.
+    frag = "(TS//NH//NF) Subsequent exploitation provided continuing access. (S//NF) Coverage held."
+    verdict = _classify(frag, default_ruleset)
+    fired = {m.rule_name for m in verdict.matches}
+    assert "portion_marking" in fired
+    assert "banner_en" not in fired  # proves it was the portion marking, not a banner
+    assert verdict.tier_floor is SensitivityTier.CLASSIFIED
+
+
+def test_orcon_caveat_is_a_banner(default_ruleset: object) -> None:
+    verdict = _classify("Dissemination is ORCON-controlled", default_ruleset)
+    assert any(m.rule_name == "banner_en" for m in verdict.matches)
+    assert verdict.tier_floor is SensitivityTier.CLASSIFIED
 
 
 def test_banner_lang_recorded(default_ruleset: object) -> None:

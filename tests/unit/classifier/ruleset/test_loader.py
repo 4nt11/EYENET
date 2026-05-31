@@ -25,10 +25,17 @@ def _write(tmp_path: Path, body: str) -> Path:
 def test_bundled_default_loads_and_compiles() -> None:
     rs = load_ruleset()
     assert isinstance(rs, CompiledRuleset)
-    assert rs.version == "v1"
+    assert rs.version == "v2"
     names = {r.name for r in rs.rules}
     # spine categories must all be present
-    assert {"crypto_private_key", "ssn_us", "onion_address", "banner_en", "banner_es"} <= names
+    assert {
+        "crypto_private_key",
+        "ssn_us",
+        "onion_address",
+        "banner_en",
+        "banner_es",
+        "portion_marking",
+    } <= names
     # every bundled rule carries a real tier and a compiled pattern
     for rule in rs.rules:
         assert isinstance(rule.tier_floor, SensitivityTier)
