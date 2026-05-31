@@ -43,6 +43,7 @@ class DocumentsMixin:
         document_id: UUID,
         *,
         tier: SensitivityTier,
+        doc_kind: str | None,
         extracted_text: str | None,
         embedded_meta: dict[str, Any],
         classification: dict[str, Any],
@@ -54,6 +55,7 @@ class DocumentsMixin:
             if row is None:
                 raise ValueError(f"document {document_id} not found")
             row.classifier_tier = tier
+            row.doc_kind = doc_kind
             row.extracted_text = extracted_text
             row.embedded_meta = embedded_meta
             row.classification = classification

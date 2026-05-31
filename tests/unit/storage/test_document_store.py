@@ -100,6 +100,7 @@ async def test_settle_overwrites_provisional_classified(storage: BaseRepository)
     await storage.settle_document_classification(
         doc_id,
         tier=SensitivityTier.NORMAL,
+        doc_kind="text",
         extracted_text="lunch plans",
         embedded_meta={"author": "bob"},
         classification={"tier": "normal", "ruleset_version": "v3"},
@@ -121,6 +122,7 @@ async def test_settle_is_idempotent_on_replay(storage: BaseRepository) -> None:
     doc_id = await storage.put_document(_row(classifier_tier=SensitivityTier.CLASSIFIED))
     kwargs = {
         "tier": SensitivityTier.RESTRICTED,
+        "doc_kind": "pdf",
         "extracted_text": "x",
         "embedded_meta": {},
         "classification": {"tier": "restricted"},
@@ -140,6 +142,7 @@ async def test_settle_missing_document_raises(storage: BaseRepository) -> None:
         await storage.settle_document_classification(
             uuid4(),
             tier=SensitivityTier.NORMAL,
+            doc_kind=None,
             extracted_text=None,
             embedded_meta={},
             classification={},

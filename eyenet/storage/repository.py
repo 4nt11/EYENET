@@ -477,6 +477,7 @@ class BaseRepository(ABC):
         document_id: UUID,
         *,
         tier: SensitivityTier,
+        doc_kind: str | None,
         extracted_text: str | None,
         embedded_meta: dict[str, Any],
         classification: dict[str, Any],
