@@ -21,7 +21,7 @@ __all__ = ["classification_audit_payload"]
 def classification_audit_payload(verdict: ClassificationVerdict) -> dict[str, object]:
     """Serialize a verdict into the redacted, JSON-safe audit payload."""
     redacted = verdict.redacted()
-    return {
+    payload: dict[str, object] = {
         "tier": verdict.tier.value,
         "fail_closed": verdict.fail_closed,
         "consult_llm": verdict.consult_llm,
@@ -71,3 +71,15 @@ def classification_audit_payload(verdict: ClassificationVerdict) -> dict[str, ob
             for f in verdict.review_flags
         ],
     }
+    if verdict.llm is not None:
+        # Safe metadata ONLY — the LLM's summary/indicators paraphrase document
+        # content and may quote sensitive spans, so they NEVER reach the
+        # (non-clearance-gated) audit log.
+        payload["llm"] = {
+            "suggested_tier": verdict.llm.suggested_tier.value,
+            "confidence": verdict.llm.confidence,
+            "model": verdict.llm.model,
+            "attempts": verdict.llm.attempts,
+            "truncated_input": verdict.llm.truncated_input,
+        }
+    return payload

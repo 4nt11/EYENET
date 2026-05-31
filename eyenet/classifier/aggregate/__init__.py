@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from ._aggregate import aggregate
 from ._audit import classification_audit_payload
+from ._llm_merge import apply_llm_advisory
 from ._types import ClassificationVerdict, ReviewFlag, ReviewKind, StageProvenance
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "ReviewKind",
     "StageProvenance",
     "aggregate",
+    "apply_llm_advisory",
     "classification_audit_payload",
 ]

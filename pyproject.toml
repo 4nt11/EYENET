@@ -205,6 +205,10 @@ omit = [
   # integration tests.
   "eyenet/classifier/extract/_workers/*",
   "eyenet/classifier/presidio/_workers/*",
+  # Live LLM transport: needs a running Ollama daemon, so coverage.py cannot
+  # trace it. The provider-agnostic advise() logic is fully unit-tested against a
+  # fake BaseProvider; this thin httpx shell is proven by test_llm_real.py.
+  "eyenet/classifier/llm/impl/ollama.py",
 ]
 
 [tool.coverage.report]
