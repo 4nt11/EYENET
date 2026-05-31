@@ -76,4 +76,4 @@ def test_classified_memo_extracts_and_classifies() -> None:
     fired = {m.rule_name for m in verdict.matches}
     # both the plaintext banners AND the structured portion markings must fire
     assert "banner_en" in fired
-    assert "portion_marking" in fired
+    assert "struct_portion_marking" in fired

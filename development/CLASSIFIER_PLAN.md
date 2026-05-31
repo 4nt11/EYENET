@@ -294,14 +294,24 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    the input text is threat-actor-authored; a backtracking engine is a DoS
    vector). Default ruleset: structural locale-agnostic rules (crypto private
    key / API secret → CLASSIFIED; PGP / onion / BTC-XMR-ETH wallets / IBAN / SSN
-   / passport MRZ / case-ref → RESTRICTED) + EN/ES classification banners + a
-   **portion_marking** rule (`(TS//…)`/`(S)`/`(U)` → CLASSIFIED;
-   `ruleset_version="v2"`). `lang`-tagged but inert in v2 (per-locale gating is
-   slice 9). The portion-marking rule closed a catastrophic under-classification
-   gap a fictional intel-memo fixture exposed (portion-marked body fragment with
-   no plaintext banner → was NORMAL); fixture adopted as a real-jail
-   extract→classify smoke test. Stage returns a FLOOR only — the aggregator
-   (slice 5) binds it. Pure unit tests + one integration smoke, no DB.
+   / passport MRZ / case-ref → RESTRICTED). Expanded to **`ruleset_version="v3"`**
+   (67 enabled rules): classification banners across **16 languages** (EN/ES/PT/
+   FR/DE/IT/NL/PL/RU/UK/ZH/JA/KO/AR/HE/TR) + NATO/EU/UN systems + US/UK/AU-CA
+   handling caveats + SCI compartments + structural CAB / handling-block /
+   portion-marking / declass-date + export-control + CBRN (AEA) + corporate
+   confidentiality + regulated-data (HIPAA/MNPI/GDPR/FERPA) + LEO/investigative
+   (incl. TLP) + structured PII (SSN/RUT/CPF/DNI-NIE/CURP-RFC/payment-card/IBAN)
+   + prefixed secrets/keys/JWT + defanged-IOC/YARA/CVE. A new **`enabled` schema
+   flag** parks 5 FP-catastrophic shape rules (bare-number cédula/AR-DNI, raw
+   hash, email, phone) off-by-default — a hard floor there collapses NORMAL;
+   their real home is density scoring (slice 4/5). `lang` tagged but inert
+   (per-locale gating is slice 9); RE2-incompatible lookaround rules rewritten as
+   loose shapes (validation downstream). `portion_marking` (`struct_portion_marking`)
+   closed a catastrophic under-classification gap a fictional intel-memo fixture
+   exposed; fixture adopted as a real-jail extract→classify smoke test. Stage
+   returns a FLOOR only — the aggregator (slice 5) binds it; the two `normal`-floor
+   counter-signal rules need the slice-5 demotion path. Pure unit tests + one
+   integration smoke, no DB.
 4. **Presidio wiring** — locale-aware via the existing spaCy dep; PII type+density
    → tier floor.
 5. **Aggregator + provenance + audit** — monotone MAX of deterministic floors;

@@ -54,6 +54,13 @@ class RuleSpec(BaseModel):
     tier_floor: SensitivityTier
     lang: str | None = None
     description: str = ""
+    # A disabled rule is parked: kept in the file for provenance/calibration but
+    # NOT compiled or matched. Used for shape rules that fire on near-every
+    # document (bare-number / hash / email shapes) — a hard tier floor there
+    # collapses NORMAL into noise; their real home is density-aware scoring
+    # (Presidio / aggregator). Disabling skips compilation, so a parked rule with
+    # a not-yet-valid pattern never refuses the whole ruleset.
+    enabled: bool = True
 
 
 class RulesetFile(BaseModel):
@@ -104,16 +111,21 @@ def load_ruleset(path: Path | None = None) -> CompiledRuleset:
 
     compiled: list[CompiledRule] = []
     seen: set[str] = set()
+    disabled = 0
     for spec in parsed.rules:
         if spec.name in seen:
             raise ValueError(f"duplicate rule name: {spec.name!r}")
         seen.add(spec.name)
+        if not spec.enabled:
+            disabled += 1
+            continue
         compiled.append(_compile(spec))
 
     _log.info(
         "classify.ruleset_loaded",
         ruleset_version=parsed.ruleset_version,
         n_rules=len(compiled),
+        n_disabled=disabled,
         source=str(resolved),
     )
     return CompiledRuleset(version=parsed.ruleset_version, rules=tuple(compiled))

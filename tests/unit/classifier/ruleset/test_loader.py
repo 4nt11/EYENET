@@ -25,16 +25,17 @@ def _write(tmp_path: Path, body: str) -> Path:
 def test_bundled_default_loads_and_compiles() -> None:
     rs = load_ruleset()
     assert isinstance(rs, CompiledRuleset)
-    assert rs.version == "v2"
+    assert rs.version == "v3"
     names = {r.name for r in rs.rules}
     # spine categories must all be present
     assert {
-        "crypto_private_key",
-        "ssn_us",
+        "secret_private_key_pem",
+        "pii_us_ssn",
         "onion_address",
         "banner_en",
         "banner_es",
-        "portion_marking",
+        "banner_zh",
+        "struct_portion_marking",
     } <= names
     # every bundled rule carries a real tier and a compiled pattern
     for rule in rs.rules:
@@ -47,7 +48,7 @@ def test_bundled_banners_carry_lang() -> None:
     by_name = {r.name: r for r in rs.rules}
     assert by_name["banner_en"].lang == "en"
     assert by_name["banner_es"].lang == "es"
-    assert by_name["ssn_us"].lang is None  # structural rules are locale-agnostic
+    assert by_name["pii_us_ssn"].lang == "en"
 
 
 # ---- path / env resolution -------------------------------------------------
@@ -155,3 +156,36 @@ def test_literal_string_backslash_survives(tmp_path: Path) -> None:
     )
     rs = load_ruleset(path)
     assert list(rs.rules[0].pattern.finditer("year 2026")), "literal \\d must match digits"
+
+
+# ---- enabled flag (parked rules) -------------------------------------------
+
+
+def test_disabled_rule_excluded_from_compiled(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "ruleset_version='v'\n"
+        "[[rules]]\nname='on'\npattern='foo'\ntier_floor='restricted'\n"
+        "[[rules]]\nname='off'\npattern='bar'\ntier_floor='restricted'\nenabled=false\n",
+    )
+    rs = load_ruleset(path)
+    assert [r.name for r in rs.rules] == ["on"]  # parked rule not compiled in
+
+
+def test_disabled_rule_with_bad_pattern_does_not_fail_load(tmp_path: Path) -> None:
+    # A parked rule is never compiled, so an as-yet-invalid pattern must NOT
+    # refuse the whole ruleset — that is the point of parking.
+    path = _write(
+        tmp_path,
+        "ruleset_version='v'\n"
+        "[[rules]]\nname='ok'\npattern='foo'\ntier_floor='restricted'\n"
+        "[[rules]]\nname='parked'\npattern='(?<=x)y'\ntier_floor='restricted'\nenabled=false\n",
+    )
+    rs = load_ruleset(path)  # must not raise despite the lookaround in 'parked'
+    assert [r.name for r in rs.rules] == ["ok"]
+
+
+def test_bundled_default_parks_fp_catastrophic_rules() -> None:
+    names = {r.name for r in load_ruleset().rules}
+    # bare-number / email / phone shapes collapse NORMAL — must ship parked
+    assert {"pii_co_cedula", "pii_email", "pii_phone_intl", "pii_ar_dni_cuit"}.isdisjoint(names)
