@@ -362,6 +362,14 @@ if tier < CLASSIFIED:
   runs through the slice-6 `_sanitize` boundary, must not be skipped on empty
   text, and may feed the classifier as a signal only as a slice-9 scope/calibration
   decision. See build-plan item 7.
+- ✅ **Slice 7 shape decided** (AskUserQuestion 2026-05-31): (1) **Full pipeline
+  at upload** — ingest classifies synchronously + persists the *settled* tier;
+  slice 8 is reduced to the bus harness around `ingest_document`. (2) **EXIF
+  included now** via a two-pass image extraction (Tesseract OCR + Pillow EXIF
+  worker — separate processes because the jail KILLs `fork`); Pillow joins the
+  `[extract]` venv. (3) **Endpoint + CLI** both ship; the endpoint takes the RAW
+  request body (not multipart — avoids a form-encoding dep + keeps exact bytes
+  for the custody hash) behind a new `write:documents` baseline scope.
 
 ---
 
@@ -500,9 +508,26 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    `LLM_UNAVAILABLE` when the tripwire couldn't deploy — **tier never moves**.
    Egress guard (`allow_remote=false`) blocks off-host text. Pure logic 100% cov
    against a fake provider; live `impl/ollama.py` transport coverage-omitted.
-7. **`Document` table + upload surface** — new entity mirroring Attachment
-   sensitivity columns; upload endpoint + CLI; provisional-CLASSIFIED.
-   **FORENSIC METADATA (folded in — DECIDED 2026-05-31):**
+7. ✅ **`Document` table + upload surface** — new entity mirroring Attachment
+   sensitivity columns; upload endpoint + CLI. **SHIPPED** as `DocumentTable`
+   (+ `DocumentRow` contract + flat `put_document`/`get_document` + generic
+   `DocumentsMixin`, no dialect leak) with the forensic-metadata columns
+   (host-side `sha256`, sanitized `embedded_meta`, redacted `classification`
+   record, `extracted_text`), an un-sharded on-disk byte store
+   (`storage/documents.py:store_document`, the custody-hash sibling of
+   `store_attachment`), and the reusable orchestration core
+   `classifier/ingest.py:ingest_document`. **DECISION (AskUserQuestion
+   2026-05-31): FULL pipeline at upload** — ingest runs
+   extract→regex→presidio→aggregate→advise synchronously and persists the
+   *settled* tier; the §0 fail-closed floors bind (unreadable → CLASSIFIED) and
+   the LLM stays flag-only. This reframes slice 8: `ClassifierService` becomes
+   **only the bus harness** around `ingest_document` (which already persists +
+   audits via an injectable emitter). The sync jailed stages run via
+   `anyio.to_thread`; `advise` is async + fail-soft. Surfaces: `POST
+   /v1/documents` (RAW body, not multipart — keeps exact bytes for the custody
+   hash + avoids a form-encoding dep; `Content-Type`/`X-Filename` are recorded
+   evidence) behind a new `write:documents` baseline scope (admin+analyst), and
+   `eyenet document ingest <path>`. **FORENSIC METADATA (folded in — DECIDED 2026-05-31):**
    - **Content hash:** `sha256` of the RAW uploaded bytes, computed **host-side
      at ingest** (NOT in the jail — never trust jail output for custody; NOT over
      extracted text — text varies by extractor version). Indexed, mirrors
@@ -521,8 +546,23 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
      marking in XMP keywords is real) but is never ground truth — scope/calibration
      call deferred to slice 9. Persist on the `Document` row; surface in the
      classification record + provenance.
+   **SHIPPED:** the slice-2 workers now emit `meta.embedded` (PDF Info/XMP, DOCX
+   `core.xml` props with datetimes ISO-rendered so `json.dumps` can't fail-close
+   a readable doc, HTML `<title>`/`<meta>`, RTF `{\info}`); **images are a
+   two-pass extraction** — the Tesseract OCR entrypoint (text, §0-authoritative)
+   plus a new Pillow `image_meta_worker.py` (EXIF), because the jail KILLs `fork`
+   so OCR and EXIF can't share a process. The EXIF pass is best-effort (a failed
+   or venv-absent EXIF pass never fail-closes a readable image) and runs even on
+   empty OCR text. Host-side, `ingest_document` runs the whole `meta` dict
+   through the slice-6 `sanitize_model_text` before persisting. Pillow added to
+   the `[extract]` venv (rebuild ABI-matched with the jail interpreter). Whether
+   metadata FEEDS the tier stays a slice-9 call.
 8. **`ClassifierService(ServiceBase)`** — async worker, plural-from-day-one;
-   subscribes to attachment-received + document-uploaded; provisional → settled.
+   subscribes to attachment-received + document-uploaded. **NOW ONLY THE BUS
+   HARNESS** around slice-7's `ingest_document` (which already runs the full
+   pipeline, persists the settled tier, and emits the classify audit via an
+   injectable emitter) — the service injects its own `ServiceBase.audit`,
+   owns subject/evidence_ref/publisher, and wires the subscriptions.
 9. **Calibration grid** — labeled corpus; **false-negative (under-classification)
    rate as the headline metric**; per-tier thresholds; calibration-suite-only.
    Carries the accumulated UNCALIBRATED debt from the deterministic slices:
