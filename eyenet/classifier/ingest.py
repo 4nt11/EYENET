@@ -22,11 +22,11 @@ fails the request / exits non-zero rather than persist a half-classified row.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-import anyio
 import structlog
 
 from eyenet.classifier.aggregate import (
@@ -126,12 +126,12 @@ async def ingest_document(
     at = now or datetime.now(tz=UTC)
     sha256, storage_uri = store_document(data_dir, blob)
 
-    extraction = await anyio.to_thread.run_sync(extract_document, blob)
+    extraction = await asyncio.to_thread(extract_document, blob)
     raw_meta = extraction.meta if isinstance(extraction, ExtractResult) else {}
     text = extraction.text if isinstance(extraction, ExtractResult) else ""
 
     regex = classify(text, load_ruleset())
-    presidio = await anyio.to_thread.run_sync(detect, text)
+    presidio = await asyncio.to_thread(detect, text)
     verdict = aggregate(extraction, regex, presidio)
     if verdict.consult_llm:
         # Resolved at call time (not a bound default) so a test/operator can
