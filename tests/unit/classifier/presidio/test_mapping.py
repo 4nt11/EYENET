@@ -1,0 +1,147 @@
+"""map_findings(): deterministic MAX-floor verdict over type + density + confidence."""
+
+from __future__ import annotations
+
+import pytest
+
+from eyenet.classifier.presidio import (
+    EntityRule,
+    PiiFinding,
+    PiiMap,
+    map_findings,
+)
+from eyenet.contracts.enums import SensitivityTier
+
+pytestmark = pytest.mark.unit
+
+
+def _map() -> PiiMap:
+    """Small test map: low density cut-offs so clustering is easy to exercise."""
+    return PiiMap(
+        map_version="test",
+        entities={
+            "US_SSN": EntityRule(tier_floor=SensitivityTier.CLASSIFIED, min_score=0.4),
+            "EMAIL_ADDRESS": EntityRule(tier_floor=SensitivityTier.RESTRICTED, min_score=0.4),
+            "PERSON": EntityRule(tier_floor=SensitivityTier.NORMAL, min_score=0.5),
+        },
+        restricted_at=3,
+        classified_at=5,
+    )
+
+
+def _person(start: int, *, score: float = 0.9, language: str = "es") -> PiiFinding:
+    return PiiFinding(
+        entity_type="PERSON",
+        start=start,
+        end=start + 4,
+        score=score,
+        language=language,
+        text="Juan",
+    )
+
+
+# ---- core behavior ---------------------------------------------------------
+
+
+def test_no_findings_is_normal() -> None:
+    verdict = map_findings([], _map())
+    assert verdict.tier_floor is SensitivityTier.NORMAL
+    assert verdict.matches == ()
+    assert verdict.engine == "presidio"
+    assert verdict.map_version == "test"
+    assert verdict.fail_closed is False
+
+
+def test_single_strong_type_classifies() -> None:
+    ssn = PiiFinding("US_SSN", 5, 16, 0.95, "en", "123-45-6789")
+    verdict = map_findings([ssn], _map())
+    assert verdict.tier_floor is SensitivityTier.CLASSIFIED
+    assert [m.entity_type for m in verdict.matches] == ["US_SSN"]
+    assert verdict.matches[0].matched_text == "123-45-6789"
+
+
+def test_subthreshold_known_finding_dropped() -> None:
+    # US_SSN below its 0.4 gate is noise — dropped entirely, floor stays NORMAL.
+    weak = PiiFinding("US_SSN", 0, 11, 0.2, "en", "123-45-6789")
+    verdict = map_findings([weak], _map())
+    assert verdict.tier_floor is SensitivityTier.NORMAL
+    assert verdict.matches == ()
+
+
+def test_lone_person_stays_normal() -> None:
+    # One NER name is low-signal: NORMAL floor, below the density cut-off.
+    verdict = map_findings([_person(0)], _map())
+    assert verdict.tier_floor is SensitivityTier.NORMAL
+    assert len(verdict.matches) == 1
+
+
+def test_person_cluster_escalates_by_density() -> None:
+    # restricted_at = 3 distinct PII spans -> RESTRICTED, even though each PERSON
+    # is a NORMAL-floor type. The cluster is the signal (CLASSIFIER_PLAN §2).
+    verdict = map_findings([_person(0), _person(10), _person(20)], _map())
+    assert verdict.tier_floor is SensitivityTier.RESTRICTED
+
+
+def test_density_classified_threshold() -> None:
+    findings = [_person(i * 10) for i in range(5)]  # classified_at = 5
+    assert map_findings(findings, _map()).tier_floor is SensitivityTier.CLASSIFIED
+
+
+def test_max_over_mixed_types() -> None:
+    # PERSON (normal) + EMAIL (restricted), below density -> RESTRICTED via type.
+    findings = [_person(0), PiiFinding("EMAIL_ADDRESS", 10, 25, 0.9, "en", "a@example.net")]
+    assert map_findings(findings, _map()).tier_floor is SensitivityTier.RESTRICTED
+
+
+def test_unknown_entity_kept_as_provenance_at_normal() -> None:
+    # An entity not in the map is never silently dropped (over-keep is §0-safe):
+    # kept as a match at a NORMAL floor, and it counts toward density.
+    unknown = PiiFinding("FOO_TOKEN", 0, 5, 0.99, "en", "XY-99")
+    verdict = map_findings([unknown], _map())
+    assert verdict.tier_floor is SensitivityTier.NORMAL
+    assert [m.entity_type for m in verdict.matches] == ["FOO_TOKEN"]
+    assert verdict.matches[0].tier_floor is SensitivityTier.NORMAL
+
+
+def test_es_en_overlap_is_deduped_for_density() -> None:
+    # Both engines report the SAME three names at the SAME spans (6 findings).
+    # Dedup by (start,end,type) -> 3 distinct -> RESTRICTED, NOT 6 -> CLASSIFIED.
+    findings = [_person(s, language=lang) for s in (0, 10, 20) for lang in ("es", "en")]
+    verdict = map_findings(findings, _map())
+    assert verdict.tier_floor is SensitivityTier.RESTRICTED
+    assert len(verdict.matches) == 3
+
+
+def test_dedup_keeps_higher_confidence() -> None:
+    low = _person(0, score=0.6, language="en")
+    high = _person(0, score=0.95, language="es")
+    verdict = map_findings([low, high], _map())
+    assert len(verdict.matches) == 1
+    assert verdict.matches[0].score == pytest.approx(0.95)
+    assert verdict.matches[0].language == "es"
+
+
+def test_dedup_is_order_independent() -> None:
+    # Higher-confidence finding FIRST: the later lower one must not displace it.
+    low = _person(0, score=0.6, language="en")
+    high = _person(0, score=0.95, language="es")
+    verdict = map_findings([high, low], _map())
+    assert len(verdict.matches) == 1
+    assert verdict.matches[0].score == pytest.approx(0.95)
+
+
+def test_matches_sorted_by_offset_then_type() -> None:
+    findings = [
+        PiiFinding("EMAIL_ADDRESS", 30, 45, 0.9, "en", "a@example.net"),
+        _person(0),
+        _person(10),
+    ]
+    verdict = map_findings(findings, _map())
+    assert [m.start for m in verdict.matches] == sorted(m.start for m in verdict.matches)
+
+
+def test_determinism_same_findings_same_verdict() -> None:
+    findings = [_person(0), PiiFinding("US_SSN", 10, 21, 0.9, "en", "123-45-6789")]
+    first = map_findings(findings, _map())
+    second = map_findings(list(findings), _map())
+    assert first == second  # frozen dataclasses compare structurally

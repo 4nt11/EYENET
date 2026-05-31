@@ -1,0 +1,155 @@
+# EYENET classifier — default PII-type → sensitivity-tier map (Presidio stage).
+#
+# Operator-editable DATA, not code. This maps Microsoft Presidio entity labels to
+# a tier FLOOR and a per-type confidence gate, plus the density thresholds that
+# escalate a CLUSTER of PII. The aggregator (slice 5) takes the MAX of this floor
+# against the regex and extraction-failure floors — so this only ever RAISES a
+# tier, never lowers one.
+#
+# Tiers (monotone): normal < restricted < classified.
+#
+# `min_score` is the confidence gate: a finding of that type below the score is
+# dropped as noise (Presidio emits a 0..1 confidence — we feed it in, we do not
+# binarize it). `enabled = false` parks a type entirely (kept here for
+# calibration but never loaded) — used for the noisiest NER types that fire on
+# near-every document and would collapse the density signal into noise.
+#
+# CALIBRATION WARNING: every threshold below is an UNCALIBRATED conservative
+# guess. The slice-9 grid re-tunes min_score and the density cut-offs against a
+# labelled corpus, with the false-negative (under-classification) rate as the
+# headline metric. Do not treat these numbers as validated.
+
+map_version = "v1"
+
+# Distinct PII spans (after the confidence gate + es/en dedup) at or above each
+# count escalate the floor by clustering. A handful of names + an org in one doc
+# is more sensitive than any one of them alone.
+[density]
+restricted_at = 6
+classified_at = 25
+
+# --- Strong identifiers: a single high-confidence hit raises the floor ---------
+# Government / financial identifiers that, on their own, mark a document as
+# sensitive evidence. Several overlap the regex ruleset — that is fine, MAX is
+# idempotent and Presidio adds context-aware recall the regex shapes miss.
+
+[[entities]]
+name = "CRYPTO"
+tier_floor = "classified"
+min_score = 0.5
+description = "Crypto wallet address (BTC/etc.)"
+
+[[entities]]
+name = "US_SSN"
+tier_floor = "classified"
+min_score = 0.4
+description = "US Social Security Number"
+
+[[entities]]
+name = "US_PASSPORT"
+tier_floor = "classified"
+min_score = 0.4
+description = "US passport number"
+
+[[entities]]
+name = "US_ITIN"
+tier_floor = "classified"
+min_score = 0.4
+description = "US Individual Taxpayer Identification Number"
+
+[[entities]]
+name = "IBAN_CODE"
+tier_floor = "classified"
+min_score = 0.5
+description = "International Bank Account Number"
+
+[[entities]]
+name = "MEDICAL_LICENSE"
+tier_floor = "classified"
+min_score = 0.5
+description = "Medical license number"
+
+# --- Restricted-on-single-hit -------------------------------------------------
+
+[[entities]]
+name = "CREDIT_CARD"
+tier_floor = "restricted"
+min_score = 0.4
+description = "Payment card number (Luhn-validated by Presidio)"
+
+[[entities]]
+name = "US_BANK_NUMBER"
+tier_floor = "restricted"
+min_score = 0.4
+description = "US bank account number"
+
+[[entities]]
+name = "US_DRIVER_LICENSE"
+tier_floor = "restricted"
+min_score = 0.4
+description = "US driver license number"
+
+[[entities]]
+name = "EMAIL_ADDRESS"
+tier_floor = "restricted"
+min_score = 0.4
+description = "Email address"
+
+[[entities]]
+name = "PHONE_NUMBER"
+tier_floor = "restricted"
+min_score = 0.4
+description = "Telephone number"
+
+[[entities]]
+name = "IP_ADDRESS"
+tier_floor = "restricted"
+min_score = 0.5
+description = "IPv4/IPv6 address"
+
+[[entities]]
+name = "LOCATION"
+tier_floor = "restricted"
+min_score = 0.6
+description = "Geographic location — a precise address/place is sensitive in evidence"
+
+# --- NER entities: NORMAL base, escalate by DENSITY only ----------------------
+# A lone name or org is low-signal; a cluster of them is not. These contribute to
+# the density count but never raise the floor by themselves.
+
+[[entities]]
+name = "PERSON"
+tier_floor = "normal"
+min_score = 0.5
+description = "Person name (NER)"
+
+[[entities]]
+name = "NRP"
+tier_floor = "normal"
+min_score = 0.5
+description = "Nationality / religious / political group (NER)"
+
+[[entities]]
+name = "ORGANIZATION"
+tier_floor = "normal"
+min_score = 0.5
+description = "Organization name (NER)"
+
+# --- Parked: too noisy for a hard floor; revisit in slice-9 calibration -------
+# DATE_TIME and URL fire on a huge fraction of ordinary documents. Counting them
+# toward density would push benign documents over the threshold and collapse the
+# tier into noise. Kept here, disabled, so the calibration grid can study them.
+
+[[entities]]
+name = "DATE_TIME"
+tier_floor = "normal"
+min_score = 0.5
+enabled = false
+description = "PARKED — fires on near-every document; would inflate density"
+
+[[entities]]
+name = "URL"
+tier_floor = "normal"
+min_score = 0.5
+enabled = false
+description = "PARKED — fires on near-every document; would inflate density"

@@ -249,6 +249,51 @@ if tier < CLASSIFIED:
   court-verifiable) with a `redact()` helper for logs — structured logs are not
   clearance-gated and NEVER carry the raw span.
 
+- ✅ **Presidio runs JAILED, not in-process** (slice 4). The pyproject already
+  drew the line: `google-re2` is a CORE dep ("runs in the main app on
+  already-extracted text"); `presidio-analyzer` is `[extract]`-only ("run ONLY
+  inside the nsjail sandbox, bound read-only into the jail"). The main app
+  cannot import presidio. `detect(text)` feeds the extracted text back through
+  the Slice-1 chokepoint to a worker in the eyenet-extract venv. Beyond honoring
+  the dependency boundary, this gives the heavy spaCy/thinc NER pass the same
+  `RLIMIT_AS`/`time_limit` containment extraction has — a pass that OOMs or hangs
+  on a 200-page or adversarial document fails *closed* to CLASSIFIED (§0), never
+  silently NORMAL. The decision logic (`map_findings`) is split out as a pure,
+  I/O-free function so it is 100% unit-testable without nsjail.
+
+- ✅ **Locale = es + en, MAX both** (slice 4). Presidio's `analyze()` takes an
+  explicit `language=` (no auto-detect; locale detection is slice 9). Running
+  only the es engine would under-detect names in an English document →
+  under-classification, the one catastrophic error (§0). The worker registers
+  `es_core_news_sm` (Spanish-first, EYENET's calibrated model) AND
+  `en_core_web_sm`, runs both passes, and unions the findings; the mapper dedups
+  overlapping spans so density is not double-counted. Both models are PRE-FETCHED
+  on the host and bound RO (the jail has no network) — provision alongside the
+  Tesseract/es-morph data in setup. **The extract venv MUST be built with the
+  jail interpreter (`/usr/bin/python3`), not the app's venv** — the jail binds
+  its `site-packages` and runs them under the system interpreter, so a Python
+  version mismatch breaks every C extension (ABI).
+
+- ✅ **Seccomp allowlist extended for presidio + open thread limitation**
+  (slice 4, strace-validated). Real-jail runs needed 7 more syscalls, all in
+  classes the existing confinement already contains: `mbind` (numpy/blis NUMA at
+  import), `mkdir`/`rename`/`unlink`/`flock` (thinc cache on the ephemeral RW
+  tmpfs), `bind`/`getpeername` (sockets, netns-contained). With these, es+en NER
+  runs end-to-end in-jail. A `clone3 CLONE_THREAD` SIGSYS on the email path was
+  root-caused and FIXED: presidio's `EmailRecognizer` validates an email's TLD via
+  the **module-global** `tldextract.extract`, whose default refreshes the
+  public-suffix list over HTTP; in the jail (RO cache, no route, no `/etc`) the
+  `getaddrinfo` made glibc spawn a resolver thread → killed by the no-spawn policy.
+  The worker now forces tldextract offline before importing presidio
+  (`tldextract.extract = TLDExtract(suffix_list_urls=(), cache_dir=None)`) — empty
+  fetch URLs + bundled snapshot → email still detected, zero network, zero threads.
+  `OMP_THREAD_LIMIT=1` does NOT cover this (not an OpenMP thread); a `unshare`
+  netns can't reproduce it (the trigger is the `/etc`-less chroot's glibc path).
+  **GENERAL RULE — any jailed library that fetches/DNS-resolves on startup is a
+  `clone3` SIGSYS landmine; force it OFFLINE in the worker and pre-fetch on the
+  host. Watch for module-global singletons created at import. This directly
+  governs the slice-6 jailed LLM (disable model auto-download / HF Hub / DNS).**
+
 ---
 
 ## Build plan — milestone "Document Classifier" (worktree, slice-per-commit)
@@ -313,7 +358,41 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    counter-signal rules need the slice-5 demotion path. Pure unit tests + one
    integration smoke, no DB.
 4. **Presidio wiring** — locale-aware via the existing spaCy dep; PII type+density
-   → tier floor.
+   → tier floor. **SHIPPED** as `eyenet/classifier/presidio/`. Mirrors the slice-3
+   surface: a `PresidioVerdict` (tier floor + per-match provenance + `.redacted()`)
+   over an operator-editable TOML map (`_default_pii_map.toml`, `map_version="v1"`;
+   bundled default + `EYENET_CLASSIFIER_PII_MAP` override; pydantic `extra="forbid"`
+   + eager fail-closed validation). **Runs JAILED, not in-process** — presidio is a
+   jail-only `[extract]` dep (never importable by the main app, unlike core RE2);
+   the public `detect(text)` feeds the already-extracted text back through the
+   Slice-1 chokepoint to `_workers/presidio_worker.py` in the eyenet-extract venv,
+   which runs presidio + spaCy in **both es and en** and returns a bounded
+   findings envelope. The pure, I/O-free `map_findings(findings, pii_map)` turns
+   those into a verdict: a strong identifier (SSN/IBAN/crypto/passport) raises the
+   floor on a single high-confidence hit; NER types (PERSON/ORG/LOCATION) sit at
+   NORMAL and escalate only by **density** (a cluster of distinct PII spans — the
+   §2 rule, "a lone name is low, a cluster is not"); Presidio's confidence is a
+   per-type `min_score` gate (fed in, not binarized). es+en findings are deduped by
+   span (the engines overlap) so the MAX is fail-closed-correct for multilingual
+   evidence without double-counting density. Any jail failure (missing venv,
+   degraded sandbox, OOM/timeout/seccomp-kill, bad output) → a `fail_closed`
+   verdict pinned to CLASSIFIED (§0) — a heavy NER pass that blows the
+   presidio-tuned `RLIMIT_AS`/`time_limit` is *contained*, never silently
+   under-classified. Noisy NER types (DATE_TIME/URL) ship parked (`enabled=false`,
+   the slice-3 discipline) — they'd inflate density into noise; their real home is
+   slice-9 calibration. `min_score`s + density cut-offs are UNCALIBRATED defaults
+   (slice 9 re-tunes). Pure unit tests (mapper/loader/types/§0-seam, 100% pkg cov,
+   no nsjail) + an nsjail+venv+es/en-model-gated real-jail smoke. **Real-jail
+   validated:** extended the seccomp allowlist by 7 strace-derived syscalls
+   (`mbind`/`mkdir`/`rename`/`unlink`/`flock`/`bind`/`getpeername`, all in
+   already-contained classes); es+en NER now runs end-to-end in-jail and the
+   memory-starved pass fails closed. A `clone3` SIGSYS on the email path was
+   root-caused (presidio `EmailRecognizer` → module-global `tldextract.extract` →
+   public-suffix HTTP refresh → `getaddrinfo` → glibc resolver thread in the
+   `/etc`-less chroot) and **fixed** by forcing tldextract offline in the worker
+   (`tldextract.extract = TLDExtract(suffix_list_urls=(), cache_dir=None)`); email
+   now detects → RESTRICTED with zero network/threads. Real-jail smoke = 4 passed
+   against an ABI-matched (jail-interpreter) extract venv.
 5. **Aggregator + provenance + audit** — monotone MAX of deterministic floors;
    LLM short-circuit gate; classification record (rules/PII/versions) persisted as
    evidence; `eyenet.audit.classify.*`.

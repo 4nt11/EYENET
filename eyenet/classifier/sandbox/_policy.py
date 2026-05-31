@@ -65,6 +65,18 @@ INPUT_DEST = "/input"
 # The kafel seccomp-bpf policy. DEFAULT KILL: any syscall not listed terminates
 # the process with SIGSYS. SYSCALL[5] is fstat (x86_64), which this kafel build
 # lacks by name. clone/fork/vfork/ptrace/mount/bpf are intentionally omitted.
+#
+# Slice-4 additions (strace-derived from presidio-analyzer + spaCy es/en NER,
+# single-threaded under SINGLE_THREAD_ENV). Each is in a class the existing
+# confinement already contains — none reopens process spawning, host-FS tamper,
+# or the network route:
+#   mbind            NUMA memory policy (numpy/blis at import) — self-memory only
+#   mkdir/rename/    cache file management (thinc/tldextract) — confined to the
+#     unlink/flock     ephemeral RW tmpfs root (RO binds stay immutable,
+#                      RLIMIT_FSIZE bounds writes, all discarded per run)
+#   bind/getpeername socket calls — contained by the empty net namespace (no
+#                      route), exactly as the already-allowed socket/connect/sendto
+# clone3 stays KILLed: a thread that escapes SINGLE_THREAD_ENV still fails closed.
 SECCOMP_ALLOWLIST = """\
 POLICY eyenet_extract {
   ALLOW {
@@ -80,7 +92,8 @@ POLICY eyenet_extract {
     timerfd_create, timerfd_settime, write, writev, exit, exit_group,
     clock_gettime, clock_getres, clock_nanosleep, nanosleep, poll, ppoll,
     pselect6, pipe2, dup, dup2, dup3, newuname, sysinfo, sigaltstack,
-    madvise, eventfd2, fstatfs, statfs, membarrier, restart_syscall
+    madvise, eventfd2, fstatfs, statfs, membarrier, restart_syscall,
+    mbind, flock, mkdir, rename, unlink, bind, getpeername
   }
 }
 USE eyenet_extract DEFAULT KILL

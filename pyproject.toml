@@ -200,9 +200,11 @@ omit = [
   "eyenet/collectors/telegram/real.py",
   "eyenet/collectors/telegram/auth.py",
   "eyenet/collectors/matrix/real.py",
-  # In-jail extraction workers: executed only inside nsjail by the venv python,
-  # so coverage.py cannot trace them. Proven by real-nsjail integration tests.
+  # In-jail workers (extraction + Presidio NER): executed only inside nsjail by
+  # the venv python, so coverage.py cannot trace them. Proven by real-nsjail
+  # integration tests.
   "eyenet/classifier/extract/_workers/*",
+  "eyenet/classifier/presidio/_workers/*",
 ]
 
 [tool.coverage.report]
@@ -227,7 +229,11 @@ target-version = "py312"
 # interpreter (the eyenet-extract venv's python, inside nsjail). They import
 # libraries absent from the dev/app environment and follow script idioms — they
 # are not part of the checkable application surface.
-extend-exclude = ["tests/fixtures/snapshots", "eyenet/classifier/extract/_workers"]
+extend-exclude = [
+  "tests/fixtures/snapshots",
+  "eyenet/classifier/extract/_workers",
+  "eyenet/classifier/presidio/_workers",
+]
 
 [tool.ruff.lint]
 select = [
@@ -322,10 +328,10 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# The in-jail extraction workers import parser libraries (fitz, docx) that live
+# The in-jail workers import libraries (fitz, docx, presidio_analyzer) that live
 # only in the eyenet-extract venv, never in the type-check environment. They are
 # never imported by the app (only bind-mounted and run as scripts in nsjail).
-exclude = ['eyenet/classifier/extract/_workers/']
+exclude = ['eyenet/classifier/(extract|presidio)/_workers/']
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_return_any = true
@@ -374,9 +380,14 @@ skips = ["B101"]  # assert is fine; we use it in tests + Pydantic invariants
 # -----------------------------------------------------------------------------
 [tool.deptry]
 known_first_party = ["eyenet"]
-# The in-jail workers import the extract-venv parser libs (fitz/docx); they run in
-# a separate environment, so deptry must not read them as app-level dependencies.
-extend_exclude = ["tests", "scripts", "eyenet/classifier/extract/_workers"]
+# The in-jail workers import the extract-venv libs (fitz/docx/presidio); they run
+# in a separate environment, so deptry must not read them as app-level dependencies.
+extend_exclude = [
+  "tests",
+  "scripts",
+  "eyenet/classifier/extract/_workers",
+  "eyenet/classifier/presidio/_workers",
+]
 # DEP002 is suppressed globally: EYENET declares its full runtime dep set
 # upfront (all milestone deps in one place). Deptry can't distinguish
 # "not used yet" from "genuinely unnecessary." Audit manually at each release.
