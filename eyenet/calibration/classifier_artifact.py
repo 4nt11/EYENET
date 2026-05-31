@@ -12,9 +12,9 @@ spans, the grid result is built from :class:`SampleOutcome`s that never carry
 text). A ``self_hash`` over the canonical JSON makes any edit detectable: the
 regression suite recomputes it and refuses a mismatch.
 
-It is committed to ``tests/fixtures/calibration/`` and is safe to commit because
-the seed corpus is synthetic/fictional and the artifact carries only tiers,
-counts, rates, rule names, and entity-type labels.
+It is committed to ``tests/fixtures/calibration/`` and is safe to commit: the
+corpus is fictional test data, and the artifact itself carries only tiers,
+counts, rates, rule names, entity-type labels, and doc_ids — never raw spans.
 """
 
 from __future__ import annotations
@@ -71,6 +71,12 @@ class ClassifierCalibrationArtifact:
     exact_match_rate: float
     recommended_restricted_at: int
     recommended_classified_at: int
+    # The doc_ids the DETERMINISTIC pipeline under-classifies (predicted < label).
+    # These are documented known gaps — adversarial / semantic cases (OCR-mangled
+    # banners, informal leaked chat) that CLASSIFIER_PLAN §3 assigns to the LLM
+    # tripwire + provisional-CLASSIFIED + operator review, not to fragile regex.
+    # The regression gate asserts NO NEW doc_id joins this set (no regression).
+    under_classified_doc_ids: tuple[str, ...]
     grid: DocumentGridResult  # full confusion/sweep/diagnostics (asdict-serialized)
     notes: tuple[str, ...] = field(default_factory=tuple)
 
@@ -119,6 +125,7 @@ def build(
         exact_match_rate=grid.exact_match_rate,
         recommended_restricted_at=grid.recommended_restricted_at,
         recommended_classified_at=grid.recommended_classified_at,
+        under_classified_doc_ids=tuple(o.doc_id for o in grid.outcomes if o.under_classified),
         grid=grid,
         notes=notes,
     )

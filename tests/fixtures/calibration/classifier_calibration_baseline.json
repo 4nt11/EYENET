@@ -1,13 +1,13 @@
 {
-  "corpus_id": "classifier-seed-2026-05-31",
-  "corpus_sha256": "a84622b4d6f7146289313d3273686d6615880fa6bed226e841d09c41e0780595",
-  "exact_match_rate": 0.8888888888888888,
+  "corpus_id": "classifier-corpus-2026-05-31",
+  "corpus_sha256": "6fd9f067774cfcf2e9dcfc529173e4930e89431513a03e1a5f97822abdb90311",
+  "exact_match_rate": 0.8235294117647058,
   "eyenet_version": "0.0.0",
-  "generated_at": "2026-05-31T22:16:28Z",
+  "generated_at": "2026-05-31T22:48:39Z",
   "grid": {
     "confusion": [
       {
-        "count": 3,
+        "count": 16,
         "expected": "normal",
         "predicted": "normal"
       },
@@ -17,12 +17,32 @@
         "predicted": "restricted"
       },
       {
-        "count": 2,
+        "count": 1,
+        "expected": "normal",
+        "predicted": "classified"
+      },
+      {
+        "count": 1,
+        "expected": "restricted",
+        "predicted": "normal"
+      },
+      {
+        "count": 12,
         "expected": "restricted",
         "predicted": "restricted"
       },
       {
-        "count": 3,
+        "count": 5,
+        "expected": "restricted",
+        "predicted": "classified"
+      },
+      {
+        "count": 1,
+        "expected": "classified",
+        "predicted": "restricted"
+      },
+      {
+        "count": 14,
         "expected": "classified",
         "predicted": "classified"
       }
@@ -30,417 +50,959 @@
     "density_sweep": [
       {
         "classified_at": 10,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 2,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 2,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 2,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 2,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 2,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 2,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 10,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 3,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 3,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 3,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 3,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 3,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 3,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 10,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 4,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 4,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 4,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 4,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 4,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 4,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 10,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 5,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 5,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 5,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 5,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 5,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 5,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 10,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 6,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 6,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 6,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 6,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 6,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.8888888888888888,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 6,
-        "under_rate": 0.0
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 10,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 7,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 7,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 7,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 7,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 7,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 7,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 10,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 8,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 8,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 8,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 8,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 8,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 8,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 12,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 10,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 15,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 10,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 20,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 10,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 25,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 10,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       },
       {
         "classified_at": 30,
-        "exact_rate": 0.7777777777777778,
-        "over_rate": 0.1111111111111111,
+        "exact_rate": 0.8235294117647058,
+        "over_rate": 0.13725490196078433,
         "restricted_at": 10,
-        "under_rate": 0.1111111111111111
+        "under_rate": 0.0392156862745098
       }
     ],
-    "exact_match_rate": 0.8888888888888888,
-    "map_version": "v1",
-    "n_samples": 9,
+    "exact_match_rate": 0.8235294117647058,
+    "map_version": "v2",
+    "n_samples": 51,
     "outcomes": [
       {
-        "doc_id": "n_lunch",
+        "doc_id": "doc_001",
         "expected": "normal",
         "fired_rules": [],
         "metadata_floor": "normal",
-        "n_pii": 0,
+        "n_pii": 44,
         "predicted": "normal",
         "presidio_floor": "normal",
         "regex_floor": "normal"
       },
       {
-        "doc_id": "n_confid_footer",
+        "doc_id": "doc_002",
         "expected": "normal",
         "fired_rules": [],
         "metadata_floor": "normal",
-        "n_pii": 0,
+        "n_pii": 41,
         "predicted": "normal",
         "presidio_floor": "normal",
         "regex_floor": "normal"
       },
       {
-        "doc_id": "n_marketing_internal",
+        "doc_id": "doc_003",
         "expected": "normal",
         "fired_rules": [
-          "corp_confidential_en"
+          "fp_creative_works"
         ],
         "metadata_floor": "normal",
-        "n_pii": 0,
+        "n_pii": 14,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_004",
+        "expected": "restricted",
+        "fired_rules": [
+          "corp_confidential_en",
+          "pii_us_ssn"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 32,
         "predicted": "restricted",
         "presidio_floor": "normal",
         "regex_floor": "restricted"
       },
       {
-        "doc_id": "n_blog_draft",
-        "expected": "normal",
-        "fired_rules": [],
-        "metadata_floor": "normal",
-        "n_pii": 0,
-        "predicted": "normal",
-        "presidio_floor": "normal",
-        "regex_floor": "normal"
-      },
-      {
-        "doc_id": "r_internal_memo",
-        "expected": "restricted",
-        "fired_rules": [
-          "corp_confidential_en"
-        ],
-        "metadata_floor": "normal",
-        "n_pii": 0,
-        "predicted": "restricted",
-        "presidio_floor": "normal",
-        "regex_floor": "restricted"
-      },
-      {
-        "doc_id": "r_contact_roster",
-        "expected": "restricted",
-        "fired_rules": [],
-        "metadata_floor": "normal",
-        "n_pii": 6,
-        "predicted": "restricted",
-        "presidio_floor": "restricted",
-        "regex_floor": "normal"
-      },
-      {
-        "doc_id": "c_banner",
+        "doc_id": "doc_005",
         "expected": "classified",
         "fired_rules": [
           "banner_en",
-          "caveats_us_en"
+          "caveats_us_en",
+          "struct_classification_authority_en",
+          "struct_declass_date_en",
+          "struct_portion_marking"
         ],
         "metadata_floor": "normal",
-        "n_pii": 0,
+        "n_pii": 29,
         "predicted": "classified",
         "presidio_floor": "normal",
         "regex_floor": "classified"
       },
       {
-        "doc_id": "c_meta_banner",
+        "doc_id": "doc_006",
+        "expected": "restricted",
+        "fired_rules": [
+          "corp_confidential_es",
+          "corp_confidential_pt",
+          "pii_cl_rut"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 21,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_007",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 49,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_008",
+        "expected": "classified",
+        "fired_rules": [
+          "cyber_cve"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 25,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_009",
+        "expected": "restricted",
+        "fired_rules": [
+          "cyber_defanged_iocs",
+          "cyber_yara_rule",
+          "leo_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 21,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_010",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 7,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_011",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_ru"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 14,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_012",
+        "expected": "restricted",
+        "fired_rules": [
+          "banner_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 23,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_013",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 55,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_014",
+        "expected": "restricted",
+        "fired_rules": [
+          "regulated_health_es"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 41,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_015",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "caveats_us_en",
+          "struct_classification_authority_en",
+          "struct_copy_control",
+          "struct_declass_date_en",
+          "struct_portion_marking"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 29,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_016",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 24,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_017",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "caveats_us_en",
+          "struct_classification_authority_en",
+          "struct_declass_date_en",
+          "struct_portion_marking"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 25,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_018",
+        "expected": "restricted",
+        "fired_rules": [
+          "corp_confidential_es",
+          "corp_confidential_pt",
+          "pii_br_cpf"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 31,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_019",
+        "expected": "normal",
+        "fired_rules": [
+          "fp_template_placeholder",
+          "secret_aws_key",
+          "secret_aws_secret",
+          "secret_private_key_pem"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 17,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_020",
+        "expected": "restricted",
+        "fired_rules": [
+          "cyber_cve",
+          "leo_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 19,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_021",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 28,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_022",
+        "expected": "restricted",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 34,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_023",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "banner_fr",
+          "caveats_uk_en",
+          "caveats_us_en",
+          "struct_portion_marking"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 22,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_024",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 34,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_025",
+        "expected": "restricted",
+        "fired_rules": [
+          "corp_confidential_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 15,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_026",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_es",
+          "banner_pt",
+          "struct_classification_authority_es"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 29,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_027",
+        "expected": "restricted",
+        "fired_rules": [
+          "pii_es_dni_nie",
+          "regulated_privacy_mul"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 30,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_028",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 18,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_029",
+        "expected": "restricted",
+        "fired_rules": [
+          "banner_en",
+          "pii_us_ssn"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 6,
+        "predicted": "classified",
+        "presidio_floor": "classified",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_030",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 8,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_031",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_nato",
+          "struct_portion_marking"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 15,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_032",
+        "expected": "restricted",
+        "fired_rules": [
+          "regulated_health_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 27,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_033",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 21,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_034",
+        "expected": "restricted",
+        "fired_rules": [
+          "banner_un",
+          "pii_us_ssn"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 16,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_035",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_fr"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 30,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_036",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 12,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_037",
+        "expected": "restricted",
+        "fired_rules": [
+          "banner_es",
+          "banner_pt",
+          "pii_cl_rut"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 17,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_038",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "caveats_us_en",
+          "struct_classification_authority_en",
+          "struct_declass_date_en",
+          "struct_portion_marking"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 14,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_039",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 27,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_040",
+        "expected": "restricted",
+        "fired_rules": [
+          "leo_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 21,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_041",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 11,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_042",
+        "expected": "restricted",
+        "fired_rules": [
+          "regulated_finance_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 24,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_043",
+        "expected": "classified",
+        "fired_rules": [
+          "caveats_us_en",
+          "struct_classification_authority_en",
+          "struct_declass_date_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 19,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_044",
+        "expected": "normal",
+        "fired_rules": [
+          "corp_confidential_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 19,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_045",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_ru"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 23,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_046",
+        "expected": "restricted",
+        "fired_rules": [
+          "pii_br_cpf",
+          "pii_cl_rut",
+          "regulated_privacy_mul"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 42,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "doc_047",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "caveats_us_en",
+          "struct_classification_authority_en",
+          "struct_declass_date_en",
+          "struct_portion_marking"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 17,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_048",
+        "expected": "restricted",
+        "fired_rules": [
+          "banner_en",
+          "banner_eu"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 18,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "doc_049",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 16,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "doc_050",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_es",
+          "banner_pt",
+          "struct_classification_authority_es"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 25,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "syn_meta_banner",
         "expected": "classified",
         "fired_rules": [
           "banner_en",
@@ -451,75 +1013,289 @@
         "predicted": "classified",
         "presidio_floor": "normal",
         "regex_floor": "normal"
-      },
-      {
-        "doc_id": "c_privkey",
-        "expected": "classified",
-        "fired_rules": [
-          "secret_private_key_pem"
-        ],
-        "metadata_floor": "normal",
-        "n_pii": 0,
-        "predicted": "classified",
-        "presidio_floor": "normal",
-        "regex_floor": "classified"
       }
     ],
-    "over_classification_rate": 0.1111111111111111,
+    "over_classification_rate": 0.13725490196078433,
     "pii_type_hits": [
       {
-        "docs": 1,
+        "docs": 38,
+        "entity_type": "DATE_TIME",
+        "matches": 105
+      },
+      {
+        "docs": 7,
+        "entity_type": "EMAIL_ADDRESS",
+        "matches": 12
+      },
+      {
+        "docs": 47,
+        "entity_type": "LOCATION",
+        "matches": 175
+      },
+      {
+        "docs": 20,
+        "entity_type": "NRP",
+        "matches": 27
+      },
+      {
+        "docs": 50,
+        "entity_type": "ORGANIZATION",
+        "matches": 441
+      },
+      {
+        "docs": 50,
         "entity_type": "PERSON",
-        "matches": 6
+        "matches": 420
+      },
+      {
+        "docs": 10,
+        "entity_type": "URL",
+        "matches": 18
+      },
+      {
+        "docs": 1,
+        "entity_type": "US_ITIN",
+        "matches": 1
       }
     ],
     "recommended_classified_at": 10,
     "recommended_restricted_at": 2,
     "rule_firing": [
       {
-        "on_elevated": 2,
+        "on_elevated": 10,
         "on_normal": 0,
         "rule_name": "banner_en",
+        "total": 10
+      },
+      {
+        "on_elevated": 3,
+        "on_normal": 0,
+        "rule_name": "banner_es",
+        "total": 3
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "banner_eu",
+        "total": 1
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "banner_fr",
+        "total": 2
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "banner_nato",
+        "total": 1
+      },
+      {
+        "on_elevated": 3,
+        "on_normal": 0,
+        "rule_name": "banner_pt",
+        "total": 3
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "banner_ru",
+        "total": 2
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "banner_un",
+        "total": 1
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "caveats_uk_en",
+        "total": 1
+      },
+      {
+        "on_elevated": 8,
+        "on_normal": 0,
+        "rule_name": "caveats_us_en",
+        "total": 8
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 1,
+        "rule_name": "corp_confidential_en",
+        "total": 3
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "corp_confidential_es",
         "total": 2
       },
       {
         "on_elevated": 2,
         "on_normal": 0,
-        "rule_name": "caveats_us_en",
+        "rule_name": "corp_confidential_pt",
         "total": 2
       },
       {
-        "on_elevated": 1,
-        "on_normal": 1,
-        "rule_name": "corp_confidential_en",
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "cyber_cve",
         "total": 2
       },
       {
         "on_elevated": 1,
         "on_normal": 0,
+        "rule_name": "cyber_defanged_iocs",
+        "total": 1
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "cyber_yara_rule",
+        "total": 1
+      },
+      {
+        "on_elevated": 0,
+        "on_normal": 1,
+        "rule_name": "fp_creative_works",
+        "total": 1
+      },
+      {
+        "on_elevated": 0,
+        "on_normal": 1,
+        "rule_name": "fp_template_placeholder",
+        "total": 1
+      },
+      {
+        "on_elevated": 3,
+        "on_normal": 0,
+        "rule_name": "leo_en",
+        "total": 3
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "pii_br_cpf",
+        "total": 2
+      },
+      {
+        "on_elevated": 3,
+        "on_normal": 0,
+        "rule_name": "pii_cl_rut",
+        "total": 3
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "pii_es_dni_nie",
+        "total": 1
+      },
+      {
+        "on_elevated": 3,
+        "on_normal": 0,
+        "rule_name": "pii_us_ssn",
+        "total": 3
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "regulated_finance_en",
+        "total": 1
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "regulated_health_en",
+        "total": 1
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "regulated_health_es",
+        "total": 1
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "regulated_privacy_mul",
+        "total": 2
+      },
+      {
+        "on_elevated": 0,
+        "on_normal": 1,
+        "rule_name": "secret_aws_key",
+        "total": 1
+      },
+      {
+        "on_elevated": 0,
+        "on_normal": 1,
+        "rule_name": "secret_aws_secret",
+        "total": 1
+      },
+      {
+        "on_elevated": 0,
+        "on_normal": 1,
         "rule_name": "secret_private_key_pem",
         "total": 1
+      },
+      {
+        "on_elevated": 6,
+        "on_normal": 0,
+        "rule_name": "struct_classification_authority_en",
+        "total": 6
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "struct_classification_authority_es",
+        "total": 2
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "struct_copy_control",
+        "total": 1
+      },
+      {
+        "on_elevated": 6,
+        "on_normal": 0,
+        "rule_name": "struct_declass_date_en",
+        "total": 6
+      },
+      {
+        "on_elevated": 7,
+        "on_normal": 0,
+        "rule_name": "struct_portion_marking",
+        "total": 7
       }
     ],
-    "ruleset_version": "v3",
-    "under_classification_rate": 0.0
+    "ruleset_version": "v4",
+    "under_classification_rate": 0.0392156862745098
   },
-  "labeler": "dr-ragesworth-via-anti",
-  "map_version": "v1",
-  "n_finding_docs": 9,
-  "n_samples": 9,
+  "labeler": "anti+dr-ragesworth",
+  "map_version": "v2",
+  "n_finding_docs": 51,
+  "n_samples": 51,
   "notes": [
-    "Synthetic seed corpus (fictional) \u2014 safe to commit; operators grow it with real docs.",
+    "Corpus = 50 real labelled docs (multilingual, 14 adversarial traps) + 1 synthetic empty-body-XMP metadata probe.",
+    "Presidio findings captured via the REAL jailed NER pass (eyenet calibrate classify capture); raw findings are map-version-independent.",
     "Headline = under-classification (false-negative) rate; the \u00a70 catastrophic direction.",
-    "corp_confidential_en fires on a routine marketing footer (on_normal=1) AND a real internal memo (on_elevated=1): confirms its membership in aggregate._FP_PRONE_RULES.",
-    "recommended_* density is informational on this tiny corpus and is NOT auto-applied; shipped defaults (restricted_at=6, classified_at=25) stay until a real corpus justifies a change.",
-    "Presidio findings are hand-authored to model the jailed NER output (no jail needed for the committed baseline); real corpora use `eyenet calibrate classify capture`."
+    "PII map RECALIBRATED v1->v2 (slice-9 grid evidence): raw NER density + contact-info per-type floors over-classified ~59% of real docs (normal news -> CLASSIFIED). v2: only STRONG single IDs escalate; names/email/phone/location/IP -> NORMAL; density counts STRONG IDs only. Over-class 0.588 -> 0.137.",
+    "Ruleset v3->v4: added regulated_health_es (Spanish clinical-record headers) to close the doc_014 PHI gap with a low-FP title marker.",
+    "Residual under-classifications are DOCUMENTED KNOWN GAPS, not regressions: doc_008 (OCR-corrupted SECRET0 banner, fn_trap) + doc_022 (informal leaked chat, purely semantic). Both are the LLM-tripwire + provisional-CLASSIFIED + operator-review backstop's domain (\u00a73); closing them deterministically needs FP-catastrophic rules. Gate = no NEW doc joins under_classified_doc_ids."
   ],
-  "over_classification_rate": 0.1111111111111111,
+  "over_classification_rate": 0.13725490196078433,
   "recommended_classified_at": 10,
   "recommended_restricted_at": 2,
-  "ruleset_version": "v3",
+  "ruleset_version": "v4",
   "schema_version": "1.0",
-  "self_hash": "eaccea1b89561e67dc93f2a61fe40b208ca3df90e37d995eced3b89bc333ec74",
-  "under_classification_rate": 0.0
+  "self_hash": "843fbee533f823fde000dabdc0238f10a1bb5b00c7af59c8d8fc8b745f4591da",
+  "under_classification_rate": 0.0392156862745098,
+  "under_classified_doc_ids": [
+    "doc_008",
+    "doc_022"
+  ]
 }

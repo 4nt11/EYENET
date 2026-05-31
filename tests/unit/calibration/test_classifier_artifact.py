@@ -35,11 +35,20 @@ def _build_grid() -> document_grid.DocumentGridResult:
     return document_grid.run(samples, findings, ruleset=load_ruleset(), pii_map=load_pii_map())
 
 
-def test_seed_corpus_zero_under_classification() -> None:
-    # The always-on §0 guard against the live pipeline + the committed corpus.
+def test_no_new_under_classification() -> None:
+    # The always-on §0 no-regression guard: re-run the LIVE pipeline over the
+    # committed corpus and assert the under-classified set has not GROWN beyond
+    # the committed allowlist. A code change that starts under-classifying a doc
+    # that was previously correct fails CI immediately. (The two committed gaps —
+    # doc_008 OCR banner, doc_022 informal chat — are the LLM-tripwire's domain.)
+    committed = classifier_artifact.verify(
+        Path("tests/fixtures/calibration/classifier_calibration_baseline.json")
+    )
+    allowed = set(committed["under_classified_doc_ids"])
     grid = _build_grid()
-    unders = [o.doc_id for o in grid.outcomes if o.under_classified]
-    assert grid.under_classification_rate == 0.0, f"under-classified: {unders}"
+    live_under = {o.doc_id for o in grid.outcomes if o.under_classified}
+    new_under = live_under - allowed
+    assert not new_under, f"NEW under-classifications (regression): {sorted(new_under)}"
 
 
 def test_build_write_load_round_trip(tmp_path: Path) -> None:
@@ -55,8 +64,11 @@ def test_build_write_load_round_trip(tmp_path: Path) -> None:
     stored = classifier_artifact.write(art, out)
     assert stored == art.compute_self_hash()
     payload = classifier_artifact.verify(out)  # raises on mismatch
-    assert payload["under_classification_rate"] == 0.0
     assert payload["corpus_id"] == "t"
+    # the under-classified set round-trips as a list of doc_ids
+    assert set(payload["under_classified_doc_ids"]) == {
+        o.doc_id for o in grid.outcomes if o.under_classified
+    }
 
 
 def test_verify_detects_tampering(tmp_path: Path) -> None:

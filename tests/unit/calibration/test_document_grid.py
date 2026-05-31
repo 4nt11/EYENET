@@ -23,21 +23,19 @@ R = SensitivityTier.RESTRICTED
 C = SensitivityTier.CLASSIFIED
 
 # Empirically-verified trigger strings (see slice-9 planning probe).
-_TOP_SECRET = "TOP SECRET//NOFORN\nOperation details follow."
+_TOP_SECRET = "TOP SECRET//NOFORN\nOperation details follow."  # pragma: allowlist secret
 _BENIGN = "a friendly note about lunch plans on friday"
 
 
 def _persons(n: int) -> tuple[PiiFinding, ...]:
-    """n distinct high-confidence PERSON findings (drive the density floor)."""
+    """n distinct high-confidence PERSON findings (NORMAL floor — do NOT escalate)."""
+    return tuple(PiiFinding("PERSON", i * 10, i * 10 + 5, 0.9, "en", f"Name{i}") for i in range(n))
+
+
+def _credit_cards(n: int) -> tuple[PiiFinding, ...]:
+    """n distinct CREDIT_CARD findings — a RESTRICTED-floor strong identifier."""
     return tuple(
-        PiiFinding(
-            entity_type="PERSON",
-            start=i * 10,
-            end=i * 10 + 5,
-            score=0.9,
-            language="en",
-            text=f"Name{i}",
-        )
+        PiiFinding("CREDIT_CARD", i * 20, i * 20 + 16, 0.95, "en", f"4111-1111-1111-{i:04d}")
         for i in range(n)
     )
 
@@ -66,17 +64,22 @@ def test_zero_under_classification_on_correct_corpus(ruleset, pii_map) -> None:
     samples = [
         DocumentSample(doc_id="n1", expected_tier=N, text=_BENIGN),
         DocumentSample(doc_id="c1", expected_tier=C, text=_TOP_SECRET),
-        DocumentSample(doc_id="r1", expected_tier=R, text="staff roster"),
+        DocumentSample(doc_id="r1", expected_tier=R, text="cardholder data export"),
+        DocumentSample(doc_id="n2", expected_tier=N, text="team offsite attendees"),
     ]
-    findings = {"r1": _persons(6)}  # 6 distinct PII → RESTRICTED at default density
+    findings = {
+        "r1": _credit_cards(1),  # a single strong ID → RESTRICTED by per-type floor
+        "n2": _persons(40),  # a name-dense benign doc must STAY NORMAL (v2 finding)
+    }
     res = run(samples, findings, ruleset=ruleset, pii_map=pii_map)
-    assert res.n_samples == 3
+    assert res.n_samples == 4
     assert res.under_classification_rate == 0.0
     by_id = {o.doc_id: o for o in res.outcomes}
     assert by_id["n1"].predicted is N
     assert by_id["c1"].predicted is C
     assert by_id["r1"].predicted is R
     assert by_id["r1"].presidio_floor is R
+    assert by_id["n2"].predicted is N  # 40 names → still NORMAL (density is strong-ID only)
 
 
 def test_metadata_banner_escalates_empty_body(ruleset, pii_map) -> None:
@@ -119,9 +122,9 @@ def test_over_classification_is_counted_not_fatal(ruleset, pii_map) -> None:
 def test_density_sweep_and_recommendation(ruleset, pii_map) -> None:
     samples = [
         DocumentSample(doc_id="n1", expected_tier=N, text=_BENIGN),
-        DocumentSample(doc_id="r1", expected_tier=R, text="roster"),
+        DocumentSample(doc_id="r1", expected_tier=R, text="cardholder export"),
     ]
-    findings = {"r1": _persons(6)}
+    findings = {"r1": _credit_cards(1)}
     res = run(samples, findings, ruleset=ruleset, pii_map=pii_map)
     assert res.density_sweep  # non-empty
     # every swept row has restricted < classified

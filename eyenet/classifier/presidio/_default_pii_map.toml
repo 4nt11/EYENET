@@ -14,22 +14,26 @@
 # calibration but never loaded) — used for the noisiest NER types that fire on
 # near-every document and would collapse the density signal into noise.
 #
-# CALIBRATION (slice 9, SHIPPED): the document grid (`eyenet calibrate classify`)
-# scores these thresholds against a labelled corpus with the under-classification
-# (false-negative) rate as the headline metric. On the committed seed corpus they
-# produce ZERO under-classification. They remain conservative OPERATOR-TUNABLE
-# defaults — re-tune against a LARGER corpus with the grid — NOT hard-validated
-# numbers: a 9-doc synthetic seed cannot justify tightening a security boundary
-# (that is the overfitting direction §0 warns against).
+# CALIBRATION (slice 9, v1->v2 RECALIBRATED against a 50-doc multilingual corpus):
+# the document grid (`eyenet calibrate classify`) proved the v1 map over-classified
+# ~59% of REAL documents at ZERO under-classification. Root cause: raw NER density
+# (PERSON/ORG/LOCATION) and contact-info per-type floors (EMAIL/PHONE/LOCATION/IP)
+# are NON-discriminative — benign news/blogs are the MOST entity-dense documents
+# (normal: up to 55 PII spans; classified: as few as 0, banner-driven). v2 fix:
+# only STRONG single identifiers (gov/financial IDs, crypto, medical license)
+# escalate; names + contact info sit at NORMAL; density counts STRONG identifiers
+# ONLY (a breach-dump cluster), never names. Verified UNDER stays 0.000 on the
+# corpus. Still OPERATOR-TUNABLE — re-run the grid against a larger corpus.
 
-map_version = "v1"
+map_version = "v2"
 
-# Distinct PII spans (after the confidence gate + es/en dedup) at or above each
-# count escalate the floor by clustering. A handful of names + an org in one doc
-# is more sensitive than any one of them alone.
+# Density now counts ONLY findings whose mapped floor is RESTRICTED+ (strong
+# identifiers — see _mapping.py). A cluster of strong IDs (many cards / SSNs /
+# IBANs — a breach dump) escalates; a page full of names/emails does NOT. Names
+# and contact info are NORMAL-floor and never reach this count.
 [density]
-restricted_at = 6
-classified_at = 25
+restricted_at = 4
+classified_at = 8
 
 # --- Strong identifiers: a single high-confidence hit raises the floor ---------
 # Government / financial identifiers that, on their own, mark a document as
@@ -72,7 +76,9 @@ tier_floor = "classified"
 min_score = 0.5
 description = "Medical license number"
 
-# --- Restricted-on-single-hit -------------------------------------------------
+# --- Restricted-on-single-hit: financial account identifiers ------------------
+# Account numbers that mark a document as sensitive on a single hit, and that
+# also drive the strong-identifier density count when clustered.
 
 [[entities]]
 name = "CREDIT_CARD"
@@ -92,39 +98,19 @@ tier_floor = "restricted"
 min_score = 0.4
 description = "US driver license number"
 
-[[entities]]
-name = "EMAIL_ADDRESS"
-tier_floor = "restricted"
-min_score = 0.4
-description = "Email address"
-
-[[entities]]
-name = "PHONE_NUMBER"
-tier_floor = "restricted"
-min_score = 0.4
-description = "Telephone number"
-
-[[entities]]
-name = "IP_ADDRESS"
-tier_floor = "restricted"
-min_score = 0.5
-description = "IPv4/IPv6 address"
-
-[[entities]]
-name = "LOCATION"
-tier_floor = "restricted"
-min_score = 0.6
-description = "Geographic location — a precise address/place is sensitive in evidence"
-
-# --- NER entities: NORMAL base, escalate by DENSITY only ----------------------
-# A lone name or org is low-signal; a cluster of them is not. These contribute to
-# the density count but never raise the floor by themselves.
+# --- NORMAL floor: names + contact info (v2 recalibration) --------------------
+# Slice-9 grid finding: a lone name, email, phone, location, IP, or org does NOT
+# mark a document sensitive — benign news/blogs/business mail are saturated with
+# them, and escalating on their presence over-classified ~59% of real documents.
+# Kept as PROVENANCE (matched + redacted) but NORMAL floor, and they do NOT count
+# toward the strong-identifier density signal. Sensitivity comes from markers
+# (regex banners/caveats/secrets) and strong IDs, not contact-info volume.
 
 [[entities]]
 name = "PERSON"
 tier_floor = "normal"
 min_score = 0.5
-description = "Person name (NER)"
+description = "Person name (NER) — NORMAL: presence alone is not sensitive"
 
 [[entities]]
 name = "NRP"
@@ -137,6 +123,30 @@ name = "ORGANIZATION"
 tier_floor = "normal"
 min_score = 0.5
 description = "Organization name (NER)"
+
+[[entities]]
+name = "EMAIL_ADDRESS"
+tier_floor = "normal"
+min_score = 0.4
+description = "Email address — NORMAL (v2): ubiquitous in benign mail/business docs"
+
+[[entities]]
+name = "PHONE_NUMBER"
+tier_floor = "normal"
+min_score = 0.4
+description = "Telephone number — NORMAL (v2): ubiquitous contact info"
+
+[[entities]]
+name = "IP_ADDRESS"
+tier_floor = "normal"
+min_score = 0.5
+description = "IPv4/IPv6 address — NORMAL (v2): ubiquitous in logs/technical docs"
+
+[[entities]]
+name = "LOCATION"
+tier_floor = "normal"
+min_score = 0.6
+description = "Geographic location — NORMAL (v2): news/travel/business docs are location-dense"
 
 # --- Parked: too noisy for a hard floor ---------------------------------------
 # DATE_TIME and URL fire on a huge fraction of ordinary documents. Counting them

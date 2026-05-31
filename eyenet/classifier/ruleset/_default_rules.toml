@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════
-# EYENET document-classifier — default regex ruleset  (ruleset_version = v3)
+# EYENET document-classifier — default regex ruleset  (ruleset_version = v4)
 #
 # Operator-editable DATA, not code. Each rule maps a regex PATTERN to a
 # sensitivity-tier FLOOR; the engine assigns MAX(floor) over every rule that
@@ -32,7 +32,7 @@
 # is always-high, however, carries no information. Both failure modes matter.
 # ═══════════════════════════════════════════════════════════════════════════
 
-ruleset_version = "v3"
+ruleset_version = "v4"
 
 
 # ── Classification banners — national systems (lang = provenance) ────────────
@@ -302,6 +302,13 @@ pattern = '(?i)\b(?:PHI\b|PROTECTED\s+HEALTH\s+INFORMATION|HIPAA[\s-](?:PROTECTE
 tier_floor = "restricted"
 lang = "en"
 description = "HIPAA/HITECH health-data markings. Not classified but carries breach-notification consequences."
+
+[[rules]]
+name = "regulated_health_es"
+pattern = '(?i)HISTORIA\s+CL[IÍ]NICA|HISTORIAL\s+M[EÉ]DICO|EXPEDIENTE\s+(?:CL[IÍ]NICO|M[EÉ]DICO)|INFORMACI[OÓ]N\s+M[EÉ]DICA\s+PROTEGIDA'
+tier_floor = "restricted"
+lang = "es"
+description = "Spanish clinical-record headers (HISTORIA CLÍNICA / HISTORIAL MÉDICO / EXPEDIENTE CLÍNICO). Document-type titles, not bare numbers — low FP. Slice-9 corpus gap: Spanish medical PHI was missed by the English-only health rule (doc_014)."
 
 [[rules]]
 name = "regulated_finance_en"

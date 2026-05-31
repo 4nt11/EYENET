@@ -68,6 +68,10 @@ def test_subthreshold_known_finding_dropped() -> None:
     assert verdict.matches == ()
 
 
+def _email(start: int, *, score: float = 0.9, language: str = "en") -> PiiFinding:
+    return PiiFinding("EMAIL_ADDRESS", start, start + 13, score, language, "a@example.net")
+
+
 def test_lone_person_stays_normal() -> None:
     # One NER name is low-signal: NORMAL floor, below the density cut-off.
     verdict = map_findings([_person(0)], _map())
@@ -75,27 +79,38 @@ def test_lone_person_stays_normal() -> None:
     assert len(verdict.matches) == 1
 
 
-def test_person_cluster_escalates_by_density() -> None:
-    # restricted_at = 3 distinct PII spans -> RESTRICTED, even though each PERSON
-    # is a NORMAL-floor type. The cluster is the signal (CLASSIFIER_PLAN §2).
-    verdict = map_findings([_person(0), _person(10), _person(20)], _map())
-    assert verdict.tier_floor is SensitivityTier.RESTRICTED
+def test_person_cluster_does_not_escalate_by_density() -> None:
+    # v2 recalibration: NORMAL-floor names do NOT count toward density (slice-9
+    # finding — benign docs are name-dense). A pile of PERSONs stays NORMAL; only
+    # a cluster of STRONG identifiers escalates.
+    verdict = map_findings([_person(i * 10) for i in range(8)], _map())
+    assert verdict.tier_floor is SensitivityTier.NORMAL
 
 
-def test_density_classified_threshold() -> None:
-    findings = [_person(i * 10) for i in range(5)]  # classified_at = 5
-    assert map_findings(findings, _map()).tier_floor is SensitivityTier.CLASSIFIED
+def test_strong_id_cluster_escalates_by_density() -> None:
+    # In this test map EMAIL_ADDRESS is RESTRICTED-floor (a "strong" type), so a
+    # cluster of them counts toward density: restricted_at=3 -> RESTRICTED,
+    # classified_at=5 -> CLASSIFIED (each EMAIL already floors RESTRICTED by type;
+    # the cluster pushes it to CLASSIFIED).
+    assert map_findings([_email(i * 20) for i in range(3)], _map()).tier_floor is (
+        SensitivityTier.RESTRICTED
+    )
+    assert map_findings([_email(i * 20) for i in range(5)], _map()).tier_floor is (
+        SensitivityTier.CLASSIFIED
+    )
 
 
 def test_max_over_mixed_types() -> None:
-    # PERSON (normal) + EMAIL (restricted), below density -> RESTRICTED via type.
-    findings = [_person(0), PiiFinding("EMAIL_ADDRESS", 10, 25, 0.9, "en", "a@example.net")]
+    # PERSON (normal) + EMAIL (restricted in this map), below density -> RESTRICTED
+    # via the per-type floor.
+    findings = [_person(0), _email(10)]
     assert map_findings(findings, _map()).tier_floor is SensitivityTier.RESTRICTED
 
 
 def test_unknown_entity_kept_as_provenance_at_normal() -> None:
     # An entity not in the map is never silently dropped (over-keep is §0-safe):
-    # kept as a match at a NORMAL floor, and it counts toward density.
+    # kept as a match at a NORMAL floor. NORMAL-floor types (including unknowns)
+    # do NOT count toward the strong-identifier density signal (v2).
     unknown = PiiFinding("FOO_TOKEN", 0, 5, 0.99, "en", "XY-99")
     verdict = map_findings([unknown], _map())
     assert verdict.tier_floor is SensitivityTier.NORMAL
@@ -104,9 +119,10 @@ def test_unknown_entity_kept_as_provenance_at_normal() -> None:
 
 
 def test_es_en_overlap_is_deduped_for_density() -> None:
-    # Both engines report the SAME three names at the SAME spans (6 findings).
-    # Dedup by (start,end,type) -> 3 distinct -> RESTRICTED, NOT 6 -> CLASSIFIED.
-    findings = [_person(s, language=lang) for s in (0, 10, 20) for lang in ("es", "en")]
+    # Both engines report the SAME three EMAILs at the SAME spans (6 findings).
+    # Dedup by (start,end,type) -> 3 distinct strong IDs -> RESTRICTED at
+    # restricted_at=3, NOT 6 -> CLASSIFIED (double-counting would over-escalate).
+    findings = [_email(s, language=lang) for s in (0, 20, 40) for lang in ("es", "en")]
     verdict = map_findings(findings, _map())
     assert verdict.tier_floor is SensitivityTier.RESTRICTED
     assert len(verdict.matches) == 3

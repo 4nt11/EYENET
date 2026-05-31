@@ -31,12 +31,15 @@ def _write(tmp_path: Path, body: str) -> Path:
 def test_bundled_default_loads() -> None:
     m = load_pii_map()
     assert isinstance(m, PiiMap)
-    assert m.map_version == "v1"
+    assert m.map_version == "v2"
     assert m.entities["US_SSN"].tier_floor is SensitivityTier.CLASSIFIED
-    assert m.entities["EMAIL_ADDRESS"].tier_floor is SensitivityTier.RESTRICTED
+    # v2 recalibration: contact-info PII (email/phone/location/IP) demoted to
+    # NORMAL — slice-9 grid proved their presence over-classified benign docs.
+    assert m.entities["EMAIL_ADDRESS"].tier_floor is SensitivityTier.NORMAL
     assert m.entities["PERSON"].tier_floor is SensitivityTier.NORMAL
-    assert m.restricted_at == 6
-    assert m.classified_at == 25
+    # v2 density counts STRONG identifiers only, so the cut-offs are small.
+    assert m.restricted_at == 4
+    assert m.classified_at == 8
 
 
 def test_bundled_default_parks_noisy_ner_types() -> None:

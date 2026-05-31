@@ -27,6 +27,7 @@ import typer
 
 from eyenet.classifier.presidio import detect_findings, load_pii_map
 from eyenet.classifier.ruleset import load_ruleset
+from eyenet.classifier.sandbox import arm_sandbox
 
 from . import classifier_artifact, document_grid
 from .document_corpus import load_document_corpus, load_findings, sha256_file
@@ -47,6 +48,19 @@ def cmd_capture(  # pragma: no cover  (jail-gated; proven by the real-jail smoke
     because a missing findings row would model a doc as having no PII and could
     mask an under-classification in the grid.
     """
+    # Arm the chokepoint (boot canary) before any jailed pass — an unarmed gate
+    # fails every extraction closed (CLASSIFIED), which would silently empty the
+    # sidecar. A DEGRADED sandbox means containment could not be proven; refuse to
+    # capture rather than ship findings from an unproven jail.
+    verification = arm_sandbox()
+    if not verification.ok:
+        typer.echo(
+            f"sandbox NOT healthy ({verification.failure_reason}) — refusing to "
+            "capture; fix nsjail + the extract venv first",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     samples = load_document_corpus(corpus)
     typer.echo(f"loaded {len(samples)} samples from {corpus}")
     rows: list[dict[str, object]] = []

@@ -25,11 +25,12 @@ def _write(tmp_path: Path, body: str) -> Path:
 def test_bundled_default_loads_and_compiles() -> None:
     rs = load_ruleset()
     assert isinstance(rs, CompiledRuleset)
-    assert rs.version == "v3"
+    assert rs.version == "v4"
     names = {r.name for r in rs.rules}
     # spine categories must all be present
     assert {
         "secret_private_key_pem",
+        "regulated_health_es",  # slice-9: Spanish clinical-record headers
         "pii_us_ssn",
         "onion_address",
         "banner_en",

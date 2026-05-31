@@ -30,7 +30,7 @@ def test_no_match_is_normal_floor(default_ruleset: object) -> None:
     assert verdict.tier_floor is SensitivityTier.NORMAL
     assert verdict.matches == ()
     assert verdict.engine == "re2"
-    assert verdict.ruleset_version == "v3"
+    assert verdict.ruleset_version == "v4"
 
 
 def test_ssn_match_offsets_are_exact(default_ruleset: object) -> None:
@@ -44,7 +44,7 @@ def test_ssn_match_offsets_are_exact(default_ruleset: object) -> None:
 
 def test_max_floor_over_mixed_matches(default_ruleset: object) -> None:
     # restricted (ssn) + classified (private key header) -> classified
-    text = "123-45-6789\n-----BEGIN OPENSSH PRIVATE KEY-----"
+    text = "123-45-6789\n-----BEGIN OPENSSH PRIVATE KEY-----"  # pragma: allowlist secret
     verdict = _classify(text, default_ruleset)
     fired = {m.rule_name for m in verdict.matches}
     assert {"pii_us_ssn", "secret_private_key_pem"} <= fired

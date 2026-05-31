@@ -9,8 +9,10 @@ Two signals combine, both monotone-up:
 * **per-type floor** — a strong identifier (government ID, IBAN, crypto) raises
   the floor on a single high-confidence hit; NER types (PERSON/ORG/LOCATION) sit
   at NORMAL and escalate only by density.
-* **density floor** — a *cluster* of distinct PII spans escalates even when no
-  single type is strong (the §2 rule: a lone name is low, a cluster is not).
+* **density floor** — a *cluster of strong identifiers* (RESTRICTED+ floor types:
+  many SSNs / cards / IBANs — a breach dump) escalates. Names and contact info
+  (NORMAL floor) do NOT count: slice-9 calibration proved raw NER density is
+  non-discriminative for documents (benign news/blogs are the most entity-dense).
 
 Confidence is fed in, not binarized away: a known-type finding below its
 ``min_score`` is dropped as noise before it can inflate either signal.
@@ -89,11 +91,20 @@ def map_findings(findings: Sequence[PiiFinding], pii_map: PiiMap) -> PresidioVer
             )
         )
 
+    # Density counts ONLY "real identifier" findings — those whose mapped floor is
+    # RESTRICTED or higher. Names, contact info (email/phone/location/IP), and
+    # unknown types sit at NORMAL and DO NOT inflate density. Slice-9 calibration
+    # proved raw NER density is non-discriminative for documents: a benign news
+    # article naming 40 people/orgs/locations is not sensitive, and counting those
+    # collapsed ~59% of real documents upward. A *cluster of strong identifiers*
+    # (many SSNs / cards / IBANs — a breach dump) is the genuine density signal.
+    # This also neutralizes parked types (DATE_TIME/URL), which were previously
+    # kept-as-unknown and silently counted toward density.
+    strong = sum(1 for t in type_floors if t is not SensitivityTier.NORMAL)
     density_floor = SensitivityTier.NORMAL
-    distinct = len(survivors)
-    if distinct >= pii_map.classified_at:
+    if strong >= pii_map.classified_at:
         density_floor = SensitivityTier.CLASSIFIED
-    elif distinct >= pii_map.restricted_at:
+    elif strong >= pii_map.restricted_at:
         density_floor = SensitivityTier.RESTRICTED
 
     floor = max_tier([*type_floors, density_floor])
