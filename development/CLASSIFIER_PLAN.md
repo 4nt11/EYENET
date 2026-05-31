@@ -592,19 +592,22 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
   human-facing demotion *suggestion* surfaces, and suppression errs toward keeping
   the tier high. Lives in `apply_llm_advisory`; `ReviewFlag` gained `corroborated`.
 
-- ✅ **Calibration scope = HARNESS + SEED CORPUS + BASELINE; flip only unambiguous
-  wins** (AskUserQuestion 2026-05-31, slice 9). No large labeled document corpus
-  exists yet, so slice 9 ships the grid/corpus/artifact/CLI/regression-suite + a
-  synthetic seed corpus + a hash-pinned baseline, and makes ZERO functional retuning
-  (a 9-doc synthetic seed cannot justify tightening a security boundary — that is
-  the overfitting/under-classify direction). The headline metric is the
-  under-classification (false-negative) rate; the operating-point strategy is the
-  §0-correct INVERSE of M5/M8's precision-floor. Regex runs in-process, Presidio
-  findings replay from a pre-captured sidecar, so the grid + regression suite are
-  fully offline/CI-runnable; only `eyenet calibrate classify capture` needs the jail.
-  `corp_confidential_en` is corpus-CONFIRMED FP-prone; everything else stays an
-  operator-tunable default. The artifact is SEPARATE from the Rutify/verifier
-  artifact (its own `corpus_sha256` pin).
+- ✅ **Calibration scope: harness + corpus + baseline; recalibrate on grid evidence**
+  (AskUserQuestion ×2, slice 9). Shipped the grid/corpus/artifact/CLI/regression-
+  suite. The headline metric is the under-classification (false-negative) rate; the
+  operating-point strategy is the §0-correct INVERSE of M5/M8's precision-floor.
+  Regex runs in-process, Presidio findings replay from a pre-captured sidecar, so
+  the grid + regression suite are fully offline/CI-runnable; only `eyenet calibrate
+  classify capture` needs the jail. The artifact is SEPARATE from the Rutify/
+  verifier artifact (its own `corpus_sha256` pin). **Initially planned zero retuning
+  (a tiny synthetic seed can't justify tightening a security boundary), but ANTI
+  then supplied 50 real labelled docs and chose RECALIBRATE-NOW** once the grid,
+  run against the real jailed Presidio pass, proved the v1 map over-classified 59%
+  of real documents. So slice 9 DID retune — PII map v1→v2 (strong-IDs-only escalate,
+  density counts strong IDs only) + ruleset v3→v4 (Spanish clinical-record rule),
+  data-justified, UNDER held at the two documented LLM-backstop gaps. Lesson: the
+  grid is only as honest as its corpus + its findings; real docs + a real jailed
+  NER pass changed the calibration conclusion completely.
 8. ✅ **`ClassifierService(ServiceBase)`** — async worker, plural-from-day-one.
    **SHIPPED** as `eyenet/classifier/service.py`. **DECISION (AskUserQuestion
    2026-05-31): classification is ASYNC — this REVERTS slice-7's
@@ -656,22 +659,36 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    direction); operating-point recommendation is the §0-correct INVERSE of M5/M8's
    precision-floor (minimize under-class, then over-class). Sweeps the Presidio
    density cut-offs; reports per-rule firing + per-PII-type hit diagnostics. A
-   committed synthetic seed corpus (9 docs, fictional → committable) + hash-pinned
-   baseline artifact + two test layers (a `@pytest.mark.calibration` regression
-   over the committed numbers AND an always-on unit guard that re-runs the live
-   grid and fails CI if a seed doc starts under-classifying). The LLM↔flag coupling
+   committed corpus (**50 real labelled multilingual docs — 9 languages, 14
+   adversarial traps — supplied by ANTI, + 1 synthetic empty-body-XMP metadata
+   probe**) + hash-pinned baseline artifact + two test layers (a
+   `@pytest.mark.calibration` regression over the committed numbers AND an
+   always-on unit guard that re-runs the live grid). The LLM↔flag coupling
    (build-item 9 open question) resolved CORROBORATE/SUPPRESS: a `POSSIBLE_OVER_
    CLASSIFICATION` flag is corroborated when the LLM agrees NORMAL, dropped when it
-   judges sensitive — tier still never moves (§0). **Outcome (locked scope: flip
-   only unambiguous wins):** zero functional retuning — a 9-doc synthetic seed
-   cannot justify tightening a security boundary (overfitting = the under-classify
-   direction). `corp_confidential_en` is corpus-CONFIRMED FP-prone; the rest of
-   `_FP_PRONE_RULES`, the parked rules/types, and all min_score/density numbers
-   stay as validated-not-contradicted OPERATOR-TUNABLE defaults — the grid is the
-   tool, operators grow the corpus. On the seed corpus: UNDER-classification = 0.000.
-   Carries (now ADDRESSED — re-pointed from "slice 9 tunes" to "grid shipped;
-   operator-tunable via the grid") the accumulated UNCALIBRATED debt from the
-   deterministic slices:
+   judges sensitive — tier still never moves (§0).
+   **Outcome — the grid earned its keep.** Run through the REAL jailed Presidio
+   pass (the extract venv was provisioned in dev this session), the 50-doc corpus
+   surfaced what the synthetic seed could not: the v1 Presidio→tier map
+   over-classified **59%** of real documents (a normal news article → CLASSIFIED)
+   because raw NER density + contact-info per-type floors are NON-discriminative —
+   benign news/blogs are the MOST entity-dense documents. **RECALIBRATED**
+   (AskUserQuestion: recalibrate now, data-driven): PII map **v1→v2** — only STRONG
+   single identifiers escalate (gov/financial IDs, crypto, medical license); names
+   + email/phone/location/IP → NORMAL; density counts STRONG IDs only (a
+   breach-dump cluster), never names (also fixes parked DATE_TIME/URL inflating
+   density). Ruleset **v3→v4** — added `regulated_health_es` (Spanish
+   clinical-record headers, low-FP) to close the doc_014 PHI gap. Result: **OVER
+   0.588→0.137, EXACT 0.412→0.824, UNDER 0.039**. The two residual unders are
+   DOCUMENTED known gaps, NOT regressions: doc_008 (OCR-mangled `SECRET0` banner,
+   `fn_trap`) + doc_022 (informal leaked chat, purely semantic) — the LLM-tripwire
+   + provisional-CLASSIFIED + operator-review backstop's domain (§3); closing them
+   deterministically needs the FP-catastrophic rules we parked. The gate is
+   therefore **no-regression**: the artifact pins `under_classified_doc_ids` and the
+   always-on guard fails CI if any NEW doc joins it. min_score/density numbers
+   remain OPERATOR-TUNABLE — re-run the grid against a larger corpus.
+   Addressed (re-pointed from "slice 9 tunes" to "grid shipped + recalibrated") the
+   accumulated UNCALIBRATED debt from the deterministic slices:
    - regex `enabled=false` parked shape rules (bare-number cédula/AR-DNI, raw
      hash, email, phone) — decide their density-scored home (slice 3);
    - Presidio `min_score`s + density cut-offs (`restricted_at`/`classified_at`)
