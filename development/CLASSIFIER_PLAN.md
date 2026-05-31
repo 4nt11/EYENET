@@ -557,12 +557,56 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    through the slice-6 `sanitize_model_text` before persisting. Pillow added to
    the `[extract]` venv (rebuild ABI-matched with the jail interpreter). Whether
    metadata FEEDS the tier stays a slice-9 call.
-8. **`ClassifierService(ServiceBase)`** — async worker, plural-from-day-one;
-   subscribes to attachment-received + document-uploaded. **NOW ONLY THE BUS
-   HARNESS** around slice-7's `ingest_document` (which already runs the full
-   pipeline, persists the settled tier, and emits the classify audit via an
-   injectable emitter) — the service injects its own `ServiceBase.audit`,
-   owns subject/evidence_ref/publisher, and wires the subscriptions.
+
+- ✅ **Classification is ASYNC; slice-7's synchronous upload is REVERTED**
+  (AskUserQuestion 2026-05-31, slice 8). The slice-7 "full-pipeline-at-upload"
+  fork was reconsidered: §5 always specified an async worker
+  (provisional-CLASSIFIED-on-arrival, settle-when-the-pipeline-finishes) precisely
+  because OCR+NER+LLM are heavy and must not block ingest. Slice 8 restores that.
+  The endpoint stages + publishes `classify.document.uploaded` and returns 202
+  with the provisional tier; the `ClassifierService` settles off the request path.
+  CLI stays synchronous (operator-blocking is acceptable for a one-shot command).
+  The attachment half of §5 scope is wired end to end via a new
+  `classify.attachment.stored` subject the Matrix collector publishes (Telegram
+  is metadata-only → no bytes → no trigger). Fail-closed is preserved by
+  construction (provisional CLASSIFIED in the arrival→settle window).
+8. ✅ **`ClassifierService(ServiceBase)`** — async worker, plural-from-day-one.
+   **SHIPPED** as `eyenet/classifier/service.py`. **DECISION (AskUserQuestion
+   2026-05-31): classification is ASYNC — this REVERTS slice-7's
+   "full-pipeline-at-upload" synchronous choice and restores §5's async-worker +
+   provisional-CLASSIFIED-until-settled model.** A 200-page upload or an
+   adversarial NER pass must not block an HTTP worker or a collector.
+   - **Two trigger subjects** (`eyenet/contracts/classify_events.py`, Surface=bus,
+     pointers not payloads — §4.3): `classify.document.uploaded` (→
+     `settle_document`) and `classify.attachment.stored` (→ `classify_attachment`).
+     Registered in `publisher._ALLOWED_PREFIXES` + surface-gate `_BUS_MODULES`.
+   - **`ingest.py` decomposed** into a pure `classify_blob(blob) -> ClassifiedDoc`
+     core wrapped by four orchestrators: `ingest_document` (sync CLI, unchanged),
+     `stage_document` (store + provisional CLASSIFIED row), `settle_document`
+     (read staged bytes → classify → settle tier + audit), `classify_attachment`
+     (read stored attachment → classify → stamp `AttachmentTable.classifier_tier`).
+     New storage methods `settle_document_classification` + `set_attachment_classification`
+     (generic ORM, idempotent on bus re-delivery). `AttachmentRow` gained tier
+     field-parity (a latent `get_attachment` round-trip bug fixed in passing).
+   - **Upload path = endpoint async, CLI sync.** `POST /v1/documents` now stages +
+     publishes `classify.document.uploaded` → **202** with the provisional tier;
+     the service settles off-path. `get_publisher` dep + `app.state.publisher`
+     added. The `eyenet document ingest` CLI keeps `ingest_document` inline
+     (operator-blocking is fine for a one-shot). OpenAPI 201→202.
+   - **Attachment path = full, new subject.** The Matrix collector (bytes on disk)
+     inserts attachments provisional CLASSIFIED and publishes
+     `classify.attachment.stored` after the message commits; Telegram stays
+     metadata-only (no bytes → no trigger). `eyenet classifier` CLI run command
+     mirrors the verifier harness.
+   - **Fail-closed by construction:** the provisional tier is CLASSIFIED, so
+     nothing below clearance is served in the arrival→settle window; a failed
+     settle is logged (`classifier.error`) and leaves the row CLASSIFIED, safe and
+     re-drivable. Tracing `attach_from_headers` inside the create_task body (§4.5).
+   - **Testing — the slice-7 lesson carried forward:** since the endpoint now
+     always returns provisional CLASSIFIED, the "tier is REAL not hardcoded" proof
+     moved to the service/end-to-end layer — an async httpx test runs a real
+     ClassifierService on the same bus and asserts a benign doc settles NORMAL
+     through the LIVE endpoint. Service driven via MemoryBus (publish→sleep→assert).
 9. **Calibration grid** — labeled corpus; **false-negative (under-classification)
    rate as the headline metric**; per-tier thresholds; calibration-suite-only.
    Carries the accumulated UNCALIBRATED debt from the deterministic slices:
