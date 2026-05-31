@@ -294,6 +294,26 @@ if tier < CLASSIFIED:
   host. Watch for module-global singletons created at import. This directly
   governs the slice-6 jailed LLM (disable model auto-download / HF Hub / DNS).**
 
+- ✅ **Counter-signals are FLAG-ONLY; the tier is never auto-lowered** (slice 5).
+  The ruleset's two `normal`-floor counter-signal rules carried a comment
+  demanding a slice-5 "demote on co-occurrence" path — which collides head-on
+  with §0 ("every ambiguity resolves UPWARD") and §4 ("Monotone MAX… BIND").
+  Resolved in favor of §0: the tier stays a pure monotone MAX, never lowered.
+  A counter-signal co-occurring with an FP-prone marking that ALONE drove the
+  tier raises a `POSSIBLE_OVER_CLASSIFICATION` review flag — the demotion is a
+  HUMAN decision (identical to the LLM tripwire's flag-only posture). Auto-demote
+  was rejected: it *is* the catastrophic under-classify direction. The
+  `_FP_PRONE_RULES` set that arms the flag is an UNCALIBRATED starting list
+  (slice 9 tunes it). The TOML comments were re-pointed at this flag path.
+
+- ✅ **Audit payload now; emit in slice 8** (slice 5). The aggregator has no live
+  subject to emit against (no `ClassifierService`, no `Document` row yet). Slice 5
+  ships the canonical `AuditSubject.CLASSIFY_AGGREGATED` / `CLASSIFY_REVIEW_FLAGGED`
+  constants and a pure `classification_audit_payload(verdict) -> dict` (redacted,
+  JSON-safe, fully unit-tested); the `await audit.emit(...)` glue — which owns
+  `subject_id`/`evidence_ref`/the publisher — lands in slice 8. Mirrors the
+  slice-4 decide-pure-now, persist-later seam.
+
 ---
 
 ## Build plan — milestone "Document Classifier" (worktree, slice-per-commit)
@@ -355,8 +375,8 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    closed a catastrophic under-classification gap a fictional intel-memo fixture
    exposed; fixture adopted as a real-jail extract→classify smoke test. Stage
    returns a FLOOR only — the aggregator (slice 5) binds it; the two `normal`-floor
-   counter-signal rules need the slice-5 demotion path. Pure unit tests + one
-   integration smoke, no DB.
+   counter-signal rules feed slice 5's flag-only review path (no auto-demote — §0).
+   Pure unit tests + one integration smoke, no DB.
 4. **Presidio wiring** — locale-aware via the existing spaCy dep; PII type+density
    → tier floor. **SHIPPED** as `eyenet/classifier/presidio/`. Mirrors the slice-3
    surface: a `PresidioVerdict` (tier floor + per-match provenance + `.redacted()`)
@@ -395,7 +415,27 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    against an ABI-matched (jail-interpreter) extract venv.
 5. **Aggregator + provenance + audit** — monotone MAX of deterministic floors;
    LLM short-circuit gate; classification record (rules/PII/versions) persisted as
-   evidence; `eyenet.audit.classify.*`.
+   evidence; `eyenet.audit.classify.*`. **SHIPPED** as
+   `eyenet/classifier/aggregate/`: pure, I/O-free, deterministic
+   `aggregate(extraction, regex, presidio) -> ClassificationVerdict` =
+   `MAX(extraction_floor, regex_floor, presidio_floor)` — BINDING and never
+   lowered. A `FailedClosed` extraction or a `fail_closed` Presidio pass forces
+   CLASSIFIED (§0). The verdict carries a 3-entry `StageProvenance` tuple
+   (stage/tier_floor/version/fail_closed/detail) + the whole sub-verdicts (raw
+   matches = evidence; `.redacted()` masks every span). `consult_llm` is the §4
+   short-circuit gate (`tier < CLASSIFIED and not fail_closed`); slice 6 reads it,
+   slice 5 never calls the LLM. **Counter-signals are FLAG-ONLY** — when a
+   ruleset `normal`-floor counter-signal (`fp_template_placeholder`/
+   `fp_creative_works`) co-occurs with an FP-prone marking that ALONE drove the
+   tier (Presidio didn't reach it, nothing failed closed, every tier-driving rule
+   is in the UNCALIBRATED `_FP_PRONE_RULES` set), it raises a
+   `POSSIBLE_OVER_CLASSIFICATION` `ReviewFlag` (suggested_tier=NORMAL); the tier
+   is NEVER auto-lowered (§0 — under-classify is the catastrophic direction).
+   Pure `classification_audit_payload(verdict) -> dict` shapes the redacted,
+   JSON-safe `eyenet.audit.classify.*` row; `AuditSubject.CLASSIFY_AGGREGATED` /
+   `CLASSIFY_REVIEW_FLAGGED` added. **Emission deferred to slice 8** (no live
+   subject yet — ClassifierService owns subject_id/evidence_ref/publisher). 46
+   pure unit tests, 100% pkg cov, no nsjail.
 6. **LLM tripwire** — local model, prompt-injection-hardened, flag-only →
    `operator_review` flag (never mutates tier).
 7. **`Document` table + upload surface** — new entity mirroring Attachment
@@ -404,6 +444,20 @@ Ordered by dependency; sandbox first (nothing parses until isolation is proven).
    subscribes to attachment-received + document-uploaded; provisional → settled.
 9. **Calibration grid** — labeled corpus; **false-negative (under-classification)
    rate as the headline metric**; per-tier thresholds; calibration-suite-only.
+   Carries the accumulated UNCALIBRATED debt from the deterministic slices:
+   - regex `enabled=false` parked shape rules (bare-number cédula/AR-DNI, raw
+     hash, email, phone) — decide their density-scored home (slice 3);
+   - Presidio `min_score`s + density cut-offs (`restricted_at`/`classified_at`)
+     + parked DATE_TIME/URL (slice 4);
+   - **`_FP_PRONE_RULES`** in `aggregate/_aggregate.py` — the hand-picked set of
+     markings whose tier is a demotion CANDIDATE when a counter-signal co-occurs
+     (slice 5). It is a GUESS, not a measurement: validate it against the labeled
+     corpus before the flag is treated as authoritative. Both directions matter —
+     a marking wrongly listed mints a noisy over-classification flag on real
+     classified docs; a genuinely-FP-prone marking left OUT silently suppresses
+     the flag (a missed demotion candidate). Tune the set, and decide whether the
+     flag should also gate / be gated by the LLM tripwire's review path. Until
+     this runs, the flag is advisory-quality only — never auto-acted-on (§0).
 
 Deps: 5 needs 2+3+4; 6 feeds 5's flag path; 8 needs the pipeline + 7. Full
 pre-merge battery + `--no-ff` at the end, like Groups A/F.

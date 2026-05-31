@@ -575,23 +575,25 @@ lang = "en"
 description = "PLACEHOLDER operator case-reference shape (CASE-YYYY-NNN). Edit to match your case-numbering scheme."
 
 
-# ── Counter-signals — NEGATIVE evidence (tier_floor=normal → inert under MAX) ─
-# These match common false-positive contexts. Under the current MAX engine they
-# CANNOT lower a tier, so they are recorded as provenance only. The aggregator
-# (Slice 5) must implement an explicit "demote on co-occurrence" path to use
-# them; until then they are informational. Kept enabled so the provenance is
-# captured and the Slice-5 requirement stays visible.
+# ── Counter-signals — NEGATIVE evidence (tier_floor=normal → never lower tier) ─
+# These match common false-positive contexts. Under MAX they CANNOT lower a
+# tier, and Slice 5 deliberately keeps it that way: auto-demotion is the one
+# catastrophic error direction (CLASSIFIER_PLAN §0 — every ambiguity resolves
+# UPWARD). Instead, when a counter-signal co-occurs with an FP-prone marking
+# that alone drove the tier, the aggregator raises an operator_review
+# (possible_over_classification) flag — the demotion is a HUMAN decision, never
+# automatic. Kept enabled so the provenance + the flag input are captured.
 
 [[rules]]
 name = "fp_template_placeholder"
 pattern = '(?i)\b(?:lorem\s+ipsum|placeholder\s+text|sample\s+document|example\s+text|john\s+doe|jane\s+doe|acme\s+corp(?:oration)?|example\.com|example\.org|test@test\.com|changeme|password123|s3cr3t)\b'
 tier_floor = "normal"
 lang = "mul"
-description = "Template/placeholder markers — NEGATIVE evidence. Inert under MAX (normal floor); Slice-5 demotion uses these to downscore other matches."
+description = "Template/placeholder markers — NEGATIVE evidence. Normal floor (never lowers a tier); Slice 5 uses co-occurrence to raise a possible-over-classification review flag, not to auto-demote."
 
 [[rules]]
 name = "fp_creative_works"
 pattern = '(?i)\b(?:top\s+secret\s+(?:recipe|sauce|formula|ingredients?)|secret\s+menu|family\s+secret|trade\s+secret\s+recipe|movie\s+title|episode\s+\d+|season\s+\d+|chapter\s+\d+)\b'
 tier_floor = "normal"
 lang = "mul"
-description = "False-positive contexts for 'TOP SECRET'/'SECRET' (recipes, entertainment). Same demotion semantics as fp_template_placeholder — needs the Slice-5 demotion path."
+description = "False-positive contexts for 'TOP SECRET'/'SECRET' (recipes, entertainment). Same flag-only semantics as fp_template_placeholder — Slice 5 raises a review flag on co-occurrence; the tier is never lowered automatically (§0)."
