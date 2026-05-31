@@ -24,6 +24,7 @@ from pathlib import Path
 import typer
 
 from .artifact import build, corpus_sha256, load, write
+from .classifier_cli import app as classify_app
 from .corpus import group_by_sender, iter_messages
 from .interaction import ActorStats, compute_actor_stats, compute_all, write_csv
 from .labels import assert_matches_corpus, load as load_labels
@@ -32,6 +33,11 @@ from .simhash_grid import render_grid_result, run as run_simhash
 from .verifier_grid import run as run_verifier_grid
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+app.add_typer(
+    classify_app,
+    name="classify",
+    help="M10 document-classifier tier calibration (capture + run)",
+)
 
 
 def _read_stats_csv(path: Path) -> list[ActorStats]:

@@ -24,7 +24,7 @@ without nsjail; only :func:`detect`'s jail round-trip needs the real sandbox.
 
 from __future__ import annotations
 
-from ._detect import PRESIDIO_LIMITS, detect
+from ._detect import PRESIDIO_LIMITS, detect, detect_findings
 from ._loader import PII_MAP_ENV, load_pii_map
 from ._mapping import map_findings
 from ._types import EntityRule, PiiFinding, PiiMap, PresidioMatch, PresidioVerdict
@@ -38,6 +38,7 @@ __all__ = [
     "PresidioMatch",
     "PresidioVerdict",
     "detect",
+    "detect_findings",
     "load_pii_map",
     "map_findings",
 ]

@@ -1,0 +1,9 @@
+{"doc_id": "n_lunch", "findings": []}
+{"doc_id": "n_confid_footer", "findings": []}
+{"doc_id": "n_marketing_internal", "findings": []}
+{"doc_id": "n_blog_draft", "findings": []}
+{"doc_id": "r_internal_memo", "findings": []}
+{"doc_id": "r_contact_roster", "findings": [{"entity_type": "PERSON", "start": 10, "end": 20, "score": 0.9, "language": "en", "text": "Person A"}, {"entity_type": "PERSON", "start": 30, "end": 40, "score": 0.9, "language": "en", "text": "Person B"}, {"entity_type": "PERSON", "start": 50, "end": 60, "score": 0.9, "language": "en", "text": "Person C"}, {"entity_type": "PERSON", "start": 70, "end": 80, "score": 0.9, "language": "en", "text": "Person D"}, {"entity_type": "PERSON", "start": 90, "end": 100, "score": 0.9, "language": "en", "text": "Person E"}, {"entity_type": "PERSON", "start": 110, "end": 120, "score": 0.9, "language": "en", "text": "Person F"}]}
+{"doc_id": "c_banner", "findings": []}
+{"doc_id": "c_meta_banner", "findings": []}
+{"doc_id": "c_privkey", "findings": []}

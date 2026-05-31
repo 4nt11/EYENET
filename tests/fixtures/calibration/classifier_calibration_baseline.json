@@ -1,0 +1,525 @@
+{
+  "corpus_id": "classifier-seed-2026-05-31",
+  "corpus_sha256": "a84622b4d6f7146289313d3273686d6615880fa6bed226e841d09c41e0780595",
+  "exact_match_rate": 0.8888888888888888,
+  "eyenet_version": "0.0.0",
+  "generated_at": "2026-05-31T22:16:28Z",
+  "grid": {
+    "confusion": [
+      {
+        "count": 3,
+        "expected": "normal",
+        "predicted": "normal"
+      },
+      {
+        "count": 1,
+        "expected": "normal",
+        "predicted": "restricted"
+      },
+      {
+        "count": 2,
+        "expected": "restricted",
+        "predicted": "restricted"
+      },
+      {
+        "count": 3,
+        "expected": "classified",
+        "predicted": "classified"
+      }
+    ],
+    "density_sweep": [
+      {
+        "classified_at": 10,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 2,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 2,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 2,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 2,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 2,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 2,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 10,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 3,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 3,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 3,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 3,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 3,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 3,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 10,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 4,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 4,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 4,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 4,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 4,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 4,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 10,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 5,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 5,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 5,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 5,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 5,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 5,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 10,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 6,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 6,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 6,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 6,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 6,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.8888888888888888,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 6,
+        "under_rate": 0.0
+      },
+      {
+        "classified_at": 10,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 7,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 7,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 7,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 7,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 7,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 7,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 10,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 8,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 8,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 8,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 8,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 8,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 8,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 12,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 10,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 15,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 10,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 20,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 10,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 25,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 10,
+        "under_rate": 0.1111111111111111
+      },
+      {
+        "classified_at": 30,
+        "exact_rate": 0.7777777777777778,
+        "over_rate": 0.1111111111111111,
+        "restricted_at": 10,
+        "under_rate": 0.1111111111111111
+      }
+    ],
+    "exact_match_rate": 0.8888888888888888,
+    "map_version": "v1",
+    "n_samples": 9,
+    "outcomes": [
+      {
+        "doc_id": "n_lunch",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "n_confid_footer",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "n_marketing_internal",
+        "expected": "normal",
+        "fired_rules": [
+          "corp_confidential_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "n_blog_draft",
+        "expected": "normal",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "normal",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "r_internal_memo",
+        "expected": "restricted",
+        "fired_rules": [
+          "corp_confidential_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "restricted",
+        "presidio_floor": "normal",
+        "regex_floor": "restricted"
+      },
+      {
+        "doc_id": "r_contact_roster",
+        "expected": "restricted",
+        "fired_rules": [],
+        "metadata_floor": "normal",
+        "n_pii": 6,
+        "predicted": "restricted",
+        "presidio_floor": "restricted",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "c_banner",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "caveats_us_en"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      },
+      {
+        "doc_id": "c_meta_banner",
+        "expected": "classified",
+        "fired_rules": [
+          "banner_en",
+          "caveats_us_en"
+        ],
+        "metadata_floor": "classified",
+        "n_pii": 0,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "normal"
+      },
+      {
+        "doc_id": "c_privkey",
+        "expected": "classified",
+        "fired_rules": [
+          "secret_private_key_pem"
+        ],
+        "metadata_floor": "normal",
+        "n_pii": 0,
+        "predicted": "classified",
+        "presidio_floor": "normal",
+        "regex_floor": "classified"
+      }
+    ],
+    "over_classification_rate": 0.1111111111111111,
+    "pii_type_hits": [
+      {
+        "docs": 1,
+        "entity_type": "PERSON",
+        "matches": 6
+      }
+    ],
+    "recommended_classified_at": 10,
+    "recommended_restricted_at": 2,
+    "rule_firing": [
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "banner_en",
+        "total": 2
+      },
+      {
+        "on_elevated": 2,
+        "on_normal": 0,
+        "rule_name": "caveats_us_en",
+        "total": 2
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 1,
+        "rule_name": "corp_confidential_en",
+        "total": 2
+      },
+      {
+        "on_elevated": 1,
+        "on_normal": 0,
+        "rule_name": "secret_private_key_pem",
+        "total": 1
+      }
+    ],
+    "ruleset_version": "v3",
+    "under_classification_rate": 0.0
+  },
+  "labeler": "dr-ragesworth-via-anti",
+  "map_version": "v1",
+  "n_finding_docs": 9,
+  "n_samples": 9,
+  "notes": [
+    "Synthetic seed corpus (fictional) \u2014 safe to commit; operators grow it with real docs.",
+    "Headline = under-classification (false-negative) rate; the \u00a70 catastrophic direction.",
+    "corp_confidential_en fires on a routine marketing footer (on_normal=1) AND a real internal memo (on_elevated=1): confirms its membership in aggregate._FP_PRONE_RULES.",
+    "recommended_* density is informational on this tiny corpus and is NOT auto-applied; shipped defaults (restricted_at=6, classified_at=25) stay until a real corpus justifies a change.",
+    "Presidio findings are hand-authored to model the jailed NER output (no jail needed for the committed baseline); real corpora use `eyenet calibrate classify capture`."
+  ],
+  "over_classification_rate": 0.1111111111111111,
+  "recommended_classified_at": 10,
+  "recommended_restricted_at": 2,
+  "ruleset_version": "v3",
+  "schema_version": "1.0",
+  "self_hash": "eaccea1b89561e67dc93f2a61fe40b208ca3df90e37d995eced3b89bc333ec74",
+  "under_classification_rate": 0.0
+}

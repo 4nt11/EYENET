@@ -37,7 +37,7 @@ from ._types import PiiFinding, PresidioVerdict
 if TYPE_CHECKING:
     from ._types import PiiMap
 
-__all__ = ["PRESIDIO_LIMITS", "detect"]
+__all__ = ["PRESIDIO_LIMITS", "detect", "detect_findings"]
 
 _log = structlog.get_logger()
 
@@ -93,6 +93,37 @@ def _parse_findings(meta: dict[str, object]) -> list[PiiFinding] | None:
         except (KeyError, TypeError, ValueError):
             return None
     return findings
+
+
+def detect_findings(
+    text: str,
+    *,
+    limits: SandboxLimits = PRESIDIO_LIMITS,
+) -> list[PiiFinding] | None:
+    """Run the jailed NER pass and return the RAW findings (pre-decision).
+
+    Returns ``None`` on any fail-closed condition (venv absent, jail failure,
+    malformed envelope) — the caller decides what that means. This is the
+    calibration-CAPTURE seam (``eyenet calibrate classify capture``): the raw
+    findings are persisted to a sidecar so the offline grid can replay
+    ``map_findings`` under different maps. Production classification uses
+    :func:`detect`, which maps the findings to a verdict in the same pass.
+    """
+    profile = venv_profile()
+    if profile is None:
+        _log.error("classify.presidio_capture_unavailable", reason="extract_venv_unavailable")
+        return None
+    result = extract_sandboxed(
+        text.encode("utf-8"),
+        worker_path=_WORKER_PATH,
+        limits=limits,
+        profile=profile,
+        interpret="envelope",
+    )
+    if not isinstance(result, ExtractResult):
+        _log.error("classify.presidio_capture_failed", reason=result.reason.value)
+        return None
+    return _parse_findings(result.meta)
 
 
 def detect(
