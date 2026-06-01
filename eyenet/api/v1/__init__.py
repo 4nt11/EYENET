@@ -47,6 +47,14 @@ from eyenet.api.v1.auth.api_refresh import router as auth_refresh_router
 from eyenet.api.v1.auth.api_revoke_token import router as auth_revoke_token_router
 from eyenet.api.v1.auth.api_stream_token import router as auth_stream_token_router
 
+# === candidates (M9.D3 discovery triage) ===
+from eyenet.api.v1.candidates.api_approve_candidate import router as candidates_approve_router
+from eyenet.api.v1.candidates.api_get_candidate import router as candidates_get_router
+from eyenet.api.v1.candidates.api_list_candidates import router as candidates_list_router
+from eyenet.api.v1.candidates.api_park_candidate import router as candidates_park_router
+from eyenet.api.v1.candidates.api_reject_candidate import router as candidates_reject_router
+from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_retry_router
+
 # === cases ===
 from eyenet.api.v1.cases.api_add_collaborator import router as cases_add_collaborator_router
 from eyenet.api.v1.cases.api_add_member import router as cases_add_member_router
@@ -65,14 +73,6 @@ from eyenet.api.v1.cases.api_revoke_collaborator import (
     router as cases_revoke_collaborator_router,
 )
 from eyenet.api.v1.cases.api_update_case import router as cases_update_router
-
-# === candidates (M9.D3 discovery triage) ===
-from eyenet.api.v1.candidates.api_approve_candidate import router as candidates_approve_router
-from eyenet.api.v1.candidates.api_get_candidate import router as candidates_get_router
-from eyenet.api.v1.candidates.api_list_candidates import router as candidates_list_router
-from eyenet.api.v1.candidates.api_park_candidate import router as candidates_park_router
-from eyenet.api.v1.candidates.api_reject_candidate import router as candidates_reject_router
-from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_retry_router
 
 # === clearance ===
 from eyenet.api.v1.clearance.api_get_grant import router as clearance_get_grant_router

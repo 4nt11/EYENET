@@ -42,6 +42,12 @@ tags:
     description: Identity-pool operator actions (claim/release/freeze_all).
   - name: control
     description: System-wide operator actions (panic).
+  - name: sources
+    description: Sources & SourceDomains — the discovery storage surface (M9.D1).
+  - name: collectors
+    description: Collector fleet management (M9.D2).
+  - name: candidates
+    description: GroupCandidate triage queue (M9.D3).
   - name: stream
     description: Server-Sent Events. Storage-backed replay via `Last-Event-ID`.
   - name: health
@@ -1619,6 +1625,465 @@ paths:
 # ──────────────────────────────────────────────────────────────────────────
 # Components
 # ──────────────────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.8 Sources & SourceDomains (M9.D1)
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/sources:
+    get:
+      tags: [sources]
+      operationId: sources_list
+      summary: List configured Sources (active-domain count per row).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of sources.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageSourceSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [sources]
+      operationId: sources_create
+      summary: Create (upsert-by-kind+display_name) a Source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSourceRequest' }
+      responses:
+        "201":
+          description: Source created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/sources/{source_id}:
+    get:
+      tags: [sources]
+      operationId: sources_get
+      summary: Get one Source with its active SourceDomains inlined.
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Source detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [sources]
+      operationId: sources_update
+      summary: Update display_name / canonical_url / notes.
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSourceRequest' }
+      responses:
+        "200":
+          description: Source updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/sources/{source_id}/domains:
+    get:
+      tags: [sources]
+      operationId: sources_list_domains
+      summary: List a Source's SourceDomains (active by default).
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: include_removed, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: SourceDomain rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SourceDomainView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [sources]
+      operationId: sources_add_domain
+      summary: Add a SourceDomain (409 on overlap).
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddSourceDomainRequest' }
+      responses:
+        "201":
+          description: SourceDomain added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceDomainView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/sources/{source_id}/domains/{domain_id}:
+    patch:
+      tags: [sources]
+      operationId: sources_update_domain
+      summary: Promote a SourceDomain to primary (swap).
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: domain_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSourceDomainRequest' }
+      responses:
+        "200":
+          description: SourceDomain updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SourceDomainView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [sources]
+      operationId: sources_remove_domain
+      summary: Soft-remove a SourceDomain (retained for audit).
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: domain_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: SourceDomain soft-removed. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/sources/{source_id}/bridge-summary:
+    get:
+      tags: [sources]
+      operationId: sources_bridge_summary
+      summary: Bridge-resolution counts for a Source.
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Bridge summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BridgeSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.9 Collectors (M9.D2)
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/collectors/health:
+    get:
+      tags: [collectors]
+      operationId: collectors_health
+      summary: Fleet health snapshot (counts by observed_state, restart leaders).
+      responses:
+        "200":
+          description: Fleet health.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorFleetHealthView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/collectors:
+    get:
+      tags: [collectors]
+      operationId: collectors_list
+      summary: List the collector fleet (config redacted without read:collectors_config).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of collectors.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCollectorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [collectors]
+      operationId: collectors_create
+      summary: Create a collector (leases an Identity).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCollectorRequest' }
+      responses:
+        "201":
+          description: Collector created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/collectors/{collector_id}:
+    get:
+      tags: [collectors]
+      operationId: collectors_get
+      summary: Get one collector (full config requires read:collectors_config).
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Collector detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [collectors]
+      operationId: collectors_update
+      summary: Update config / instance_name / notes / desired_state.
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCollectorRequest' }
+      responses:
+        "200":
+          description: Collector updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [collectors]
+      operationId: collectors_delete
+      summary: Delete a collector (admin:collectors; must be observed STOPPED).
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Collector deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
+  /v1/collectors/{collector_id}/start:
+    post:
+      tags: [collectors]
+      operationId: collectors_start
+      summary: Request RUNNING (202; supervisor reconciles).
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: Desired state set to RUNNING.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/collectors/{collector_id}/stop:
+    post:
+      tags: [collectors]
+      operationId: collectors_stop
+      summary: Request STOPPED (202; supervisor reconciles).
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: Desired state set to STOPPED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/collectors/{collector_id}/memberships:
+    get:
+      tags: [collectors]
+      operationId: collectors_list_memberships
+      summary: Active group memberships for a collector.
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Active memberships.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CollectorMembershipView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 3.9 Candidate triage (M9.D3)
+  # ────────────────────────────────────────────────────────────────────────
+  /v1/candidates:
+    get:
+      tags: [candidates]
+      operationId: candidates_list
+      summary: The triage queue (filter state / source_id / min_score).
+      parameters:
+        - { name: state, in: query, required: false, schema: { $ref: '#/components/schemas/CandidateState' } }
+        - { name: source_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: min_score, in: query, required: false, schema: { type: number, minimum: 0.0 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of candidates.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCandidateSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/candidates/{candidate_id}:
+    get:
+      tags: [candidates]
+      operationId: candidates_get
+      summary: Candidate detail (mentions, score breakdown, eligibility stub).
+      parameters:
+        - { name: candidate_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Candidate detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/candidates/{candidate_id}/approve:
+    post:
+      tags: [candidates]
+      operationId: candidates_approve
+      summary: queued -> approved (202; eligibility gate is a Group E stub).
+      parameters:
+        - { name: candidate_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproveCandidateRequest' }
+      responses:
+        "202":
+          description: Candidate approved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/candidates/{candidate_id}/reject:
+    post:
+      tags: [candidates]
+      operationId: candidates_reject
+      summary: queued -> rejected (202).
+      parameters:
+        - { name: candidate_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectCandidateRequest' }
+      responses:
+        "202":
+          description: Candidate rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/candidates/{candidate_id}/park:
+    post:
+      tags: [candidates]
+      operationId: candidates_park
+      summary: joined -> parked (202).
+      parameters:
+        - { name: candidate_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ParkCandidateRequest' }
+      responses:
+        "202":
+          description: Candidate parked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/candidates/{candidate_id}/retry:
+    post:
+      tags: [candidates]
+      operationId: candidates_retry
+      summary: failed -> queued (202; admin:candidates).
+      parameters:
+        - { name: candidate_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: Candidate re-queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2978,3 +3443,300 @@ components:
       required: [revocation_reason]
       properties:
         revocation_reason: { type: string, minLength: 1, maxLength: 1024 }
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Discovery enums (M9.D1–D3)
+    # ──────────────────────────────────────────────────────────────────────
+    SourceKind:
+      type: string
+      enum: [telegram, matrix, irc, discord, forum, rss, xmpp]
+    SourceDomainPatternKind:
+      type: string
+      enum: [exact, subdomain_wildcard, suffix_match]
+    GroupKind:
+      type: string
+      enum: [chat, channel, dm, forum_thread, irc_channel, matrix_room]
+    MentionKind:
+      type: string
+      enum: [invite_link, username_mention, forward_origin, link_preview, bio_link, other]
+    JoinedVia:
+      type: string
+      enum: [seed, candidate, manual, restored]
+    CollectorDesiredState:
+      type: string
+      enum: [running, stopped, disabled]
+    CollectorObservedState:
+      type: string
+      enum: [stopped, starting, running, cooling, crashed]
+    CandidateState:
+      type: string
+      enum: [discovered, queued, approved, joining, joined, rejected, failed, parked]
+    CollectorEligibilityResult:
+      type: string
+      description: M9.D3 emits only `deferred_to_runtime`; the rest are the Group E vocabulary.
+      enum: [deferred_to_runtime, ok, skip_dual_cover, no_reachable_root, over_depth, no_scout_available]
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Sources & SourceDomains (M9.D1)
+    # ──────────────────────────────────────────────────────────────────────
+    SourceDomainView:
+      type: object
+      additionalProperties: false
+      properties:
+        domain_id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        pattern: { type: string, maxLength: 253 }
+        pattern_kind: { $ref: '#/components/schemas/SourceDomainPatternKind' }
+        is_primary: { type: boolean }
+        created_at: { type: string, format: date-time }
+        removed_at: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+    SourceSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        source_id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/SourceKind' }
+        display_name: { type: string, maxLength: 512 }
+        canonical_url: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        active_domain_count: { type: integer, minimum: 0 }
+    SourceDetail:
+      type: object
+      additionalProperties: false
+      description: SourceSummary + inlined active domains + resolved-artifact count.
+      properties:
+        source_id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/SourceKind' }
+        display_name: { type: string, maxLength: 512 }
+        canonical_url: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        active_domain_count: { type: integer, minimum: 0 }
+        notes: { type: string, nullable: true }
+        domains:
+          type: array
+          items: { $ref: '#/components/schemas/SourceDomainView' }
+        resolved_artifact_count: { type: integer, minimum: 0 }
+    BridgeSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        source_id: { type: string, format: uuid }
+        resolved: { type: integer, minimum: 0 }
+        unresolved: { type: integer, minimum: 0 }
+        ambiguous: { type: integer, minimum: 0 }
+        not_applicable: { type: integer, minimum: 0 }
+    CreateSourceRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, display_name]
+      properties:
+        kind: { $ref: '#/components/schemas/SourceKind' }
+        display_name: { type: string, minLength: 1, maxLength: 512 }
+        notes: { type: string, nullable: true, maxLength: 2048 }
+    UpdateSourceRequest:
+      type: object
+      additionalProperties: false
+      description: All optional; only present fields are applied. canonical_url may be null to clear.
+      properties:
+        display_name: { type: string, nullable: true, minLength: 1, maxLength: 512 }
+        canonical_url: { type: string, nullable: true, maxLength: 2048 }
+        notes: { type: string, nullable: true, maxLength: 2048 }
+    AddSourceDomainRequest:
+      type: object
+      additionalProperties: false
+      required: [pattern, pattern_kind]
+      properties:
+        pattern: { type: string, minLength: 1, maxLength: 253 }
+        pattern_kind: { $ref: '#/components/schemas/SourceDomainPatternKind' }
+        is_primary: { type: boolean, default: false }
+        notes: { type: string, nullable: true, maxLength: 2048 }
+    UpdateSourceDomainRequest:
+      type: object
+      additionalProperties: false
+      description: pattern/pattern_kind immutable; is_primary=true triggers a primary swap.
+      properties:
+        is_primary: { type: boolean, nullable: true }
+    CursorPageSourceSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/SourceSummary' }
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Collectors (M9.D2)
+    # ──────────────────────────────────────────────────────────────────────
+    CollectorSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        collector_id: { type: string, format: uuid }
+        instance_name: { type: string, maxLength: 128 }
+        kind: { $ref: '#/components/schemas/SourceKind' }
+        source_id: { type: string, format: uuid }
+        desired_state: { $ref: '#/components/schemas/CollectorDesiredState' }
+        observed_state: { $ref: '#/components/schemas/CollectorObservedState' }
+        restart_count: { type: integer, minimum: 0 }
+        last_heartbeat_at: { type: string, format: date-time, nullable: true }
+        config: { type: object, additionalProperties: true }
+    CollectorDetail:
+      type: object
+      additionalProperties: false
+      description: CollectorSummary + identity + error/audit fields.
+      properties:
+        collector_id: { type: string, format: uuid }
+        instance_name: { type: string, maxLength: 128 }
+        kind: { $ref: '#/components/schemas/SourceKind' }
+        source_id: { type: string, format: uuid }
+        desired_state: { $ref: '#/components/schemas/CollectorDesiredState' }
+        observed_state: { $ref: '#/components/schemas/CollectorObservedState' }
+        restart_count: { type: integer, minimum: 0 }
+        last_heartbeat_at: { type: string, format: date-time, nullable: true }
+        config: { type: object, additionalProperties: true }
+        identity_id: { type: string, format: uuid }
+        last_error_type: { type: string, nullable: true }
+        last_error_message: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        notes: { type: string, nullable: true }
+    CollectorMembershipView:
+      type: object
+      additionalProperties: false
+      properties:
+        membership_id: { type: string, format: uuid }
+        collector_id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        joined_at: { type: string, format: date-time }
+        joined_via: { $ref: '#/components/schemas/JoinedVia' }
+        joined_via_candidate_id: { type: string, format: uuid, nullable: true }
+        left_at: { type: string, format: date-time, nullable: true }
+        left_reason: { type: string, nullable: true }
+    CollectorFleetHealthView:
+      type: object
+      additionalProperties: false
+      properties:
+        total: { type: integer, minimum: 0 }
+        counts_by_observed_state: { type: object, additionalProperties: { type: integer } }
+        oldest_heartbeat_at: { type: string, format: date-time, nullable: true }
+        restart_storm_leader_id: { type: string, format: uuid, nullable: true }
+        max_restart_count: { type: integer, minimum: 0 }
+    CreateCollectorRequest:
+      type: object
+      additionalProperties: false
+      required: [instance_name, kind, source_id, identity_id]
+      properties:
+        instance_name: { type: string, minLength: 3, maxLength: 128 }
+        kind: { $ref: '#/components/schemas/SourceKind' }
+        source_id: { type: string, format: uuid }
+        identity_id: { type: string, format: uuid }
+        config: { type: object, additionalProperties: true }
+        notes: { type: string, nullable: true, maxLength: 1024 }
+    UpdateCollectorRequest:
+      type: object
+      additionalProperties: false
+      description: All optional; observed_state is never settable (supervisor-only).
+      properties:
+        config: { type: object, additionalProperties: true, nullable: true }
+        instance_name: { type: string, nullable: true, minLength: 3, maxLength: 128 }
+        notes: { type: string, nullable: true, maxLength: 1024 }
+        desired_state: { $ref: '#/components/schemas/CollectorDesiredState', nullable: true }
+    CursorPageCollectorSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/CollectorSummary' }
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Candidate triage (M9.D3)
+    # ──────────────────────────────────────────────────────────────────────
+    CandidateSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        candidate_id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        platform_groupid: { type: string, maxLength: 512 }
+        kind_hint: { $ref: '#/components/schemas/GroupKind', nullable: true }
+        display_name_hint: { type: string, nullable: true }
+        state: { $ref: '#/components/schemas/CandidateState' }
+        score: { type: number, minimum: 0.0 }
+        first_observed_at_ingest: { type: string, format: date-time }
+        last_observed_at_ingest: { type: string, format: date-time }
+    CandidateMentionView:
+      type: object
+      additionalProperties: false
+      properties:
+        mention_id: { type: string, format: uuid }
+        observed_by_collector_id: { type: string, format: uuid }
+        observed_in_group_id: { type: string, format: uuid }
+        seed_root_id: { type: string, format: uuid, nullable: true }
+        depth_from_root: { type: integer, minimum: 0 }
+        mention_kind: { $ref: '#/components/schemas/MentionKind' }
+        mention_evidence_ref: { type: string }
+        mentioned_at_ingest: { type: string, format: date-time }
+        mentioning_actor_id: { type: string, format: uuid }
+        mentioning_actor_role_signal: { type: string, nullable: true }
+    CandidateEligibilityView:
+      type: object
+      additionalProperties: false
+      properties:
+        collector_id: { type: string, format: uuid }
+        result: { $ref: '#/components/schemas/CollectorEligibilityResult' }
+        reason: { type: string }
+    CandidateDetail:
+      type: object
+      additionalProperties: false
+      description: CandidateSummary + mentions, score breakdown, review state, eligibility stub.
+      properties:
+        candidate_id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        platform_groupid: { type: string, maxLength: 512 }
+        kind_hint: { $ref: '#/components/schemas/GroupKind', nullable: true }
+        display_name_hint: { type: string, nullable: true }
+        state: { $ref: '#/components/schemas/CandidateState' }
+        score: { type: number, minimum: 0.0 }
+        first_observed_at_ingest: { type: string, format: date-time }
+        last_observed_at_ingest: { type: string, format: date-time }
+        score_breakdown: { type: object, additionalProperties: true }
+        reviewed_at: { type: string, format: date-time, nullable: true }
+        reviewed_by: { type: string, nullable: true }
+        rejection_reason: { type: string, nullable: true }
+        assigned_collector_id: { type: string, format: uuid, nullable: true }
+        resulting_group_id: { type: string, format: uuid, nullable: true }
+        mentions:
+          type: array
+          items: { $ref: '#/components/schemas/CandidateMentionView' }
+        eligibility_per_collector:
+          type: array
+          items: { $ref: '#/components/schemas/CandidateEligibilityView' }
+    ApproveCandidateRequest:
+      type: object
+      additionalProperties: false
+      required: [assigned_collector_id]
+      properties:
+        assigned_collector_id: { type: string, format: uuid }
+    RejectCandidateRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2048 }
+    ParkCandidateRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2048 }
+    CursorPageCandidateSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/CandidateSummary' }
