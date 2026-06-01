@@ -32,7 +32,9 @@ _ALLOWED: dict[CandidateState, frozenset[CandidateState]] = {
     CandidateState.APPROVED: frozenset({CandidateState.JOINING, CandidateState.REJECTED}),
     CandidateState.JOINING: frozenset({CandidateState.JOINED, CandidateState.FAILED}),
     CandidateState.JOINED: frozenset({CandidateState.PARKED}),
-    CandidateState.FAILED: frozenset({CandidateState.PARKED}),
+    # FAILED → QUEUED is the M9.D3 retry edge (admin:candidates, can burn an
+    # identity); FAILED → PARKED is the give-up edge.
+    CandidateState.FAILED: frozenset({CandidateState.PARKED, CandidateState.QUEUED}),
     CandidateState.REJECTED: frozenset({CandidateState.PARKED}),
     CandidateState.PARKED: frozenset({CandidateState.APPROVED}),
 }

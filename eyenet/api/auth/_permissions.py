@@ -5,8 +5,8 @@ API_PLAN §4.6 — baseline is a frozen mapping in code (not configuration)
 so the entire policy is reviewable in one diff and cannot drift via
 runtime config changes. Grant-only scopes (read:restricted,
 read:classified, admin:reclassify, admin:case, admin:clearance,
-write:panic, admin:sources, read:collectors_config, admin:collectors)
-are NEVER in any baseline.
+write:panic, admin:sources, read:collectors_config, admin:collectors,
+admin:candidates) are NEVER in any baseline.
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "write:sources",
             "read:collectors",
             "write:collectors",
+            "read:candidates",
+            "write:candidates",
             "stream:linkages",
             "stream:personas",
             "stream:audit",
@@ -62,6 +64,8 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "write:sources",
             "read:collectors",
             "write:collectors",
+            "read:candidates",
+            "write:candidates",
             "stream:linkages",
             "stream:personas",
         },

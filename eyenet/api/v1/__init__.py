@@ -66,6 +66,14 @@ from eyenet.api.v1.cases.api_revoke_collaborator import (
 )
 from eyenet.api.v1.cases.api_update_case import router as cases_update_router
 
+# === candidates (M9.D3 discovery triage) ===
+from eyenet.api.v1.candidates.api_approve_candidate import router as candidates_approve_router
+from eyenet.api.v1.candidates.api_get_candidate import router as candidates_get_router
+from eyenet.api.v1.candidates.api_list_candidates import router as candidates_list_router
+from eyenet.api.v1.candidates.api_park_candidate import router as candidates_park_router
+from eyenet.api.v1.candidates.api_reject_candidate import router as candidates_reject_router
+from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_retry_router
+
 # === clearance ===
 from eyenet.api.v1.clearance.api_get_grant import router as clearance_get_grant_router
 from eyenet.api.v1.clearance.api_grant_clearance import router as clearance_grant_router
@@ -256,6 +264,14 @@ v1_router.include_router(sources_add_domain_router)
 v1_router.include_router(sources_update_domain_router)
 v1_router.include_router(sources_remove_domain_router)
 v1_router.include_router(sources_bridge_summary_router)
+
+# candidates (§4.12 — discovery triage queue, M9.D3)
+v1_router.include_router(candidates_list_router)
+v1_router.include_router(candidates_get_router)
+v1_router.include_router(candidates_approve_router)
+v1_router.include_router(candidates_reject_router)
+v1_router.include_router(candidates_park_router)
+v1_router.include_router(candidates_retry_router)
 
 # identities + panic
 v1_router.include_router(identities_claim_router)
