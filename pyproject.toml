@@ -58,9 +58,9 @@ dependencies = [
   # ids
   "uuid7>=0.1",
 
-  # behave (sibling specs — path-editable until pinned)
-  "behave-core",
-  "behave-text",
+  # behave (sibling specs — now published on PyPI; resolved like any other dep)
+  "behave-core>=0.1.1",
+  "behave-text>=0.1.3",
 
   # nlp (locale-aware primitives — M6.5 spaCy trio).
   # Core dep, not optional: EYENET ships small-operator CTI; operators
@@ -76,10 +76,6 @@ dependencies = [
   # not a jail-only extract dep. Imports as `re2`.
   "google-re2>=1.1",
 ]
-
-[tool.uv.sources]
-behave-core = { path = "../BEHAVE/core", editable = true }
-behave-text = { path = "../BEHAVE/BEHAVE-TEXT", editable = true }
 
 [project.optional-dependencies]
 dev = [
