@@ -14,9 +14,10 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
 
-from eyenet.contracts.collector import CollectorRow
+from eyenet.contracts.collector import CollectorFleetHealth, CollectorRow
 from eyenet.contracts.enums import (
     CollectorDesiredState,
     CollectorObservedState,
@@ -79,11 +80,91 @@ class CollectorsMixin:
             table = await session.get(CollectorTable, collector_id)
             return _row(table) if table is not None else None
 
-    async def list_collectors(self) -> list[CollectorRow]:
+    async def list_collectors(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[CollectorRow]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = select(CollectorTable).order_by(col(CollectorTable.created_at).asc())
+            if offset:
+                stmt = stmt.offset(offset)
+            if limit is not None:
+                stmt = stmt.limit(limit)
             result = await session.exec(stmt)
             return [_row(r) for r in list(result)]
+
+    async def count_collectors(self) -> int:
+        """Total collector rows."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(func.count()).select_from(CollectorTable)
+            result = await session.exec(stmt)
+            return int(result.one())
+
+    async def update_collector(
+        self,
+        *,
+        collector_id: UUID,
+        config: dict[str, Any] | None = None,
+        instance_name: str | None = None,
+        notes: str | None = None,
+    ) -> CollectorRow:
+        """Operator PATCH of editable metadata (API_PLAN §4.11.2).
+
+        ``None`` means *leave unchanged* (consistent with
+        :meth:`record_collector_observed_state`) — so ``notes`` cannot be
+        cleared through this path; remove-and-recreate or a dedicated clear
+        call would be needed. ``desired_state`` and ``observed_state`` are
+        NOT touched here: ``desired_state`` goes through
+        :meth:`set_collector_desired_state`, ``observed_state`` is
+        supervisor-only. Raises :class:`ValueError` if the collector is
+        missing.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(CollectorTable, collector_id)
+            if table is None:
+                raise ValueError(f"collector {collector_id} not found")
+            if config is not None:
+                table.config = dict(config)
+            if instance_name is not None:
+                table.instance_name = instance_name
+            if notes is not None:
+                table.notes = notes
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _row(table)
+
+    async def collector_fleet_health(self) -> CollectorFleetHealth:
+        """Fleet snapshot: counts by observed_state, oldest live heartbeat,
+        restart-storm leader (API_PLAN §3.9)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(CollectorTable))
+            rows = list(result)
+            counts: dict[CollectorObservedState, int] = {}
+            oldest_heartbeat: datetime | None = None
+            leader_id: UUID | None = None
+            max_restart = 0
+            for r in rows:
+                counts[r.observed_state] = counts.get(r.observed_state, 0) + 1
+                if (
+                    r.observed_state is not CollectorObservedState.STOPPED
+                    and r.last_heartbeat_at is not None
+                ):
+                    hb = _coerce_utc(r.last_heartbeat_at)
+                    if hb is not None and (oldest_heartbeat is None or hb < oldest_heartbeat):
+                        oldest_heartbeat = hb
+                if r.restart_count > max_restart:
+                    max_restart = r.restart_count
+                    leader_id = r.id
+            return CollectorFleetHealth(
+                total=len(rows),
+                counts_by_observed_state=counts,
+                oldest_heartbeat_at=oldest_heartbeat,
+                restart_storm_leader_id=leader_id if max_restart > 0 else None,
+                max_restart_count=max_restart,
+            )
 
     async def set_collector_desired_state(
         self,

@@ -11,7 +11,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from eyenet.contracts.candidate import (
     EligibilityInputs,
@@ -176,6 +178,65 @@ class CandidatesMixin:
             stmt = stmt.order_by(col(GroupCandidateTable.score).desc())
             result = await session.exec(stmt)
             return [_candidate_row(r) for r in list(result)]
+
+    def _filtered_stmt(
+        self,
+        *,
+        state: CandidateState | None,
+        source_id: UUID | None,
+        min_score: float | None,
+    ) -> SelectOfScalar[GroupCandidateTable]:
+        stmt = select(GroupCandidateTable)
+        if state is not None:
+            stmt = stmt.where(GroupCandidateTable.state == state)
+        if source_id is not None:
+            stmt = stmt.where(GroupCandidateTable.source_id == source_id)
+        if min_score is not None:
+            stmt = stmt.where(col(GroupCandidateTable.score) >= min_score)
+        return stmt
+
+    async def list_candidates(
+        self,
+        *,
+        state: CandidateState | None = None,
+        source_id: UUID | None = None,
+        min_score: float | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[GroupCandidateRow]:
+        """Triage queue (API_PLAN §4.12) — generalized over
+        :meth:`list_queued_candidates` (which is QUEUED-only).
+
+        Filters compose (AND). Sort: ``score DESC, last_observed_at_ingest
+        DESC`` — the operator's most-signal-first triage order.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                self._filtered_stmt(state=state, source_id=source_id, min_score=min_score)
+                .order_by(
+                    col(GroupCandidateTable.score).desc(),
+                    col(GroupCandidateTable.last_observed_at_ingest).desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [_candidate_row(r) for r in list(result)]
+
+    async def count_candidates(
+        self,
+        *,
+        state: CandidateState | None = None,
+        source_id: UUID | None = None,
+        min_score: float | None = None,
+    ) -> int:
+        """Count candidates matching the same filters as :meth:`list_candidates`."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            inner = self._filtered_stmt(
+                state=state, source_id=source_id, min_score=min_score
+            ).subquery()
+            result = await session.exec(select(func.count()).select_from(inner))
+            return int(result.one())
 
     async def transition_candidate(
         self,

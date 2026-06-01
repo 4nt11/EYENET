@@ -17,12 +17,14 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from eyenet.contracts.enums import SourceDomainPatternKind
-from eyenet.contracts.source import SourceRow
+from eyenet.contracts.enums import ResolutionState, SourceDomainPatternKind
+from eyenet.contracts.source import SourceBridgeSummary, SourceRow
 from eyenet.contracts.source_domain import SourceDomainRow
+from eyenet.models.infrastructure import InfrastructureArtifactTable
 from eyenet.models.source import SourceTable
 from eyenet.models.source_domain import SourceDomainTable
 from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
@@ -63,6 +65,123 @@ _KIND_SPECIFICITY: tuple[SourceDomainPatternKind, ...] = (
 
 class SourcesMixin:
     """SourceDomain CRUD + overlap detection."""
+
+    # ---- M9.D1 read surface (Group C left only get/upsert + domain writes) ----
+
+    async def list_sources(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[SourceRow]:
+        """Return Sources ordered ``created_at ASC``, paginated."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(SourceTable)
+                .order_by(col(SourceTable.created_at).asc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [_source_row(r) for r in list(result)]
+
+    async def count_sources(self) -> int:
+        """Total Source rows."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(func.count()).select_from(SourceTable)
+            result = await session.exec(stmt)
+            return int(result.one())
+
+    async def list_source_domains(
+        self,
+        *,
+        source_id: UUID,
+        include_removed: bool = False,
+    ) -> list[SourceDomainRow]:
+        """Return SourceDomain rows for ``source_id``.
+
+        Active rows only by default; ``include_removed=True`` returns the
+        soft-deleted rows too (audit view). Order: ``created_at ASC``.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(SourceDomainTable).where(
+                col(SourceDomainTable.source_id) == source_id,
+            )
+            if not include_removed:
+                stmt = stmt.where(col(SourceDomainTable.removed_at).is_(None))
+            stmt = stmt.order_by(col(SourceDomainTable.created_at).asc())
+            result = await session.exec(stmt)
+            return [_row(r) for r in list(result)]
+
+    async def swap_source_domain_primary(
+        self,
+        *,
+        source_id: UUID,
+        domain_id: UUID,
+    ) -> SourceDomainRow:
+        """Make ``domain_id`` the active primary domain for ``source_id``.
+
+        Clears ``is_primary`` on any other active primary for the source and
+        sets it on the target — in one transaction, so the partial-unique
+        ``uq_source_domain_one_primary`` never sees two primaries. The
+        target must belong to ``source_id`` and not be soft-removed.
+
+        Raises :class:`ValueError` if the target is missing, removed, or
+        belongs to a different Source.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            target = await session.get(SourceDomainTable, domain_id)
+            if target is None or target.source_id != source_id:
+                raise ValueError(f"source_domain {domain_id} not found for source {source_id}")
+            if target.removed_at is not None:
+                raise ValueError(f"source_domain {domain_id} is removed; cannot be primary")
+            # Demote the current active primary (if any, and not the target).
+            current = select(SourceDomainTable).where(
+                col(SourceDomainTable.source_id) == source_id,
+                col(SourceDomainTable.is_primary).is_(True),
+                col(SourceDomainTable.removed_at).is_(None),
+            )
+            for row in list(await session.exec(current)):
+                if row.id != domain_id:
+                    row.is_primary = False
+                    session.add(row)
+            await session.flush()  # demote before promote → unique never doubles
+            target.is_primary = True
+            session.add(target)
+            await session.commit()
+            await session.refresh(target)
+            return _row(target)
+
+    async def source_bridge_summary(self, *, source_id: UUID) -> SourceBridgeSummary:
+        """Bridge-resolution counts for a Source (API_PLAN §3.8).
+
+        ``resolved`` is per-source (``resolved_to_source_id == source_id``);
+        the other buckets are system-wide outstanding-work context. See
+        :class:`SourceBridgeSummary` for the semantics rationale.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            resolved_stmt = (
+                select(func.count())
+                .select_from(InfrastructureArtifactTable)
+                .where(col(InfrastructureArtifactTable.resolved_to_source_id) == source_id)
+            )
+            resolved = int((await session.exec(resolved_stmt)).one())
+
+            async def _count_state(state: ResolutionState) -> int:
+                stmt = (
+                    select(func.count())
+                    .select_from(InfrastructureArtifactTable)
+                    .where(col(InfrastructureArtifactTable.resolution_state) == state)
+                )
+                return int((await session.exec(stmt)).one())
+
+            return SourceBridgeSummary(
+                source_id=source_id,
+                resolved=resolved,
+                unresolved=await _count_state(ResolutionState.UNRESOLVED),
+                ambiguous=await _count_state(ResolutionState.AMBIGUOUS),
+                not_applicable=await _count_state(ResolutionState.NOT_APPLICABLE),
+            )
 
     async def add_source_domain(
         self,
