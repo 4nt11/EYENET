@@ -33,6 +33,7 @@ from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
 from eyenet.bus.memory import MemoryBus
 from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -154,6 +155,45 @@ def create_app(
             request_id=_request_id(request),
         )
         return _problem_response(problem, 403)
+
+    @app.exception_handler(SourceDomainOverlapError)
+    async def _source_domain_overlap(
+        request: Request,
+        exc: SourceDomainOverlapError,
+    ) -> JSONResponse:
+        # §4.13 — a SourceDomain whose pattern can match a hostname already
+        # owned by another non-removed row. 409; the conflicting id + kind go
+        # in the detail (ProblemDetail forbids extra fields).
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Conflict",
+            status=409,
+            detail=(
+                f"source_domain overlaps existing {exc.conflict_kind} row "
+                f"(conflicting_domain_id={exc.conflicting_id})"
+            ),
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 409)
+
+    @app.exception_handler(SourceCanonicalUrlError)
+    async def _source_canonical_url(
+        request: Request,
+        exc: SourceCanonicalUrlError,
+    ) -> JSONResponse:
+        # §4.13 — canonical_url must agree with the primary SourceDomain. The
+        # stable reason tag (invalid_url / no_primary_domain / host_not_owned)
+        # is part of the contract; surface it in the detail. 422.
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Validation Failed",
+            status=422,
+            detail=f"canonical_url rejected: {exc.reason}",
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 422)
 
     # Evidence-access audit (§5.5): every successful read emits a durable
     # audit row before its body is served; audit-append failure → 503.

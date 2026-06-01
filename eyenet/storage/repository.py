@@ -1026,6 +1026,20 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def update_source(
+        self,
+        *,
+        source_id: UUID,
+        display_name: str | None = None,
+        notes: str | None = None,
+    ) -> SourceRow:
+        """Operator PATCH of editable Source metadata (API_PLAN §4.13, M9.D1).
+
+        ``None`` means *leave unchanged*. ``canonical_url`` goes through
+        :meth:`set_source_canonical_url`. Raises :class:`ValueError` if missing.
+        """
+
+    @abstractmethod
     async def source_bridge_summary(self, *, source_id: UUID) -> SourceBridgeSummary:
         """Bridge-resolution counts for a Source (API_PLAN §3.8, M9.D1).
 

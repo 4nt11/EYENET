@@ -112,6 +112,17 @@ from eyenet.api.v1.reclassify.api_reclassify_observation import (
 )
 from eyenet.api.v1.schemas.errors import ProblemDetail
 
+# === sources (M9.D1 discovery) ===
+from eyenet.api.v1.sources.api_add_source_domain import router as sources_add_domain_router
+from eyenet.api.v1.sources.api_create_source import router as sources_create_router
+from eyenet.api.v1.sources.api_get_bridge_summary import router as sources_bridge_summary_router
+from eyenet.api.v1.sources.api_get_source import router as sources_get_router
+from eyenet.api.v1.sources.api_list_source_domains import router as sources_list_domains_router
+from eyenet.api.v1.sources.api_list_sources import router as sources_list_router
+from eyenet.api.v1.sources.api_remove_source_domain import router as sources_remove_domain_router
+from eyenet.api.v1.sources.api_update_source import router as sources_update_router
+from eyenet.api.v1.sources.api_update_source_domain import router as sources_update_domain_router
+
 # === stream ===
 from eyenet.api.v1.stream.api_stream_all import router as stream_all_router
 from eyenet.api.v1.stream.api_stream_audit import router as stream_audit_router
@@ -211,6 +222,17 @@ v1_router.include_router(clearance_list_grants_router)
 v1_router.include_router(clearance_grant_router)
 v1_router.include_router(clearance_get_grant_router)
 v1_router.include_router(clearance_revoke_grant_router)
+
+# sources + source domains (§4.13 — discovery storage surface, M9.D1)
+v1_router.include_router(sources_list_router)
+v1_router.include_router(sources_create_router)
+v1_router.include_router(sources_get_router)
+v1_router.include_router(sources_update_router)
+v1_router.include_router(sources_list_domains_router)
+v1_router.include_router(sources_add_domain_router)
+v1_router.include_router(sources_update_domain_router)
+v1_router.include_router(sources_remove_domain_router)
+v1_router.include_router(sources_bridge_summary_router)
 
 # identities + panic
 v1_router.include_router(identities_claim_router)

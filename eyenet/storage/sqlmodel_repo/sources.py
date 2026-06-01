@@ -152,6 +152,32 @@ class SourcesMixin:
             await session.refresh(target)
             return _row(target)
 
+    async def update_source(
+        self,
+        *,
+        source_id: UUID,
+        display_name: str | None = None,
+        notes: str | None = None,
+    ) -> SourceRow:
+        """Operator PATCH of editable Source metadata (API_PLAN §4.13, M9.D1).
+
+        ``None`` means *leave unchanged* — ``canonical_url`` is NOT touched
+        here (it goes through :meth:`set_source_canonical_url`, which enforces
+        the primary-domain invariant). Raises :class:`ValueError` if missing.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(SourceTable, source_id)
+            if table is None:
+                raise ValueError(f"source {source_id} not found")
+            if display_name is not None:
+                table.display_name = display_name
+            if notes is not None:
+                table.notes = notes
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _source_row(table)
+
     async def source_bridge_summary(self, *, source_id: UUID) -> SourceBridgeSummary:
         """Bridge-resolution counts for a Source (API_PLAN §3.8).
 
