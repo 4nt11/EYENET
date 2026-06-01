@@ -74,6 +74,16 @@ class ResourceNotFound(Exception):  # noqa: N818 — domain term, not the generi
         self.resource = resource
 
 
+class ConflictError(Exception):
+    """409-class failure: a request that conflicts with current state — e.g.
+    deleting a still-running collector, or an illegal candidate state
+    transition. ``detail`` is operator-facing and surfaced in the problem body."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class CurrentUser:
     """Per-request identity + resolved authority.
@@ -323,6 +333,7 @@ def RequireScope(  # noqa: N802 — FastAPI dependency factory convention
 
 __all__ = [
     "AuthError",
+    "ConflictError",
     "CurrentUser",
     "RequireScope",
     "ResourceNotFound",

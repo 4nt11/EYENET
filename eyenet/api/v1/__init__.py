@@ -72,6 +72,17 @@ from eyenet.api.v1.clearance.api_grant_clearance import router as clearance_gran
 from eyenet.api.v1.clearance.api_list_grants import router as clearance_list_grants_router
 from eyenet.api.v1.clearance.api_revoke_grant import router as clearance_revoke_grant_router
 
+# === collectors (M9.D2 discovery) ===
+from eyenet.api.v1.collectors.api_collector_health import router as collectors_health_router
+from eyenet.api.v1.collectors.api_create_collector import router as collectors_create_router
+from eyenet.api.v1.collectors.api_delete_collector import router as collectors_delete_router
+from eyenet.api.v1.collectors.api_get_collector import router as collectors_get_router
+from eyenet.api.v1.collectors.api_list_collectors import router as collectors_list_router
+from eyenet.api.v1.collectors.api_list_memberships import router as collectors_memberships_router
+from eyenet.api.v1.collectors.api_start_collector import router as collectors_start_router
+from eyenet.api.v1.collectors.api_stop_collector import router as collectors_stop_router
+from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
+
 # === documents (M10 classifier) ===
 from eyenet.api.v1.documents.api_upload_document import router as documents_upload_router
 
@@ -222,6 +233,18 @@ v1_router.include_router(clearance_list_grants_router)
 v1_router.include_router(clearance_grant_router)
 v1_router.include_router(clearance_get_grant_router)
 v1_router.include_router(clearance_revoke_grant_router)
+
+# collectors (§4.11 — discovery fleet, M9.D2).
+# /collectors/health MUST precede /collectors/{collector_id} (literal vs UUID).
+v1_router.include_router(collectors_health_router)
+v1_router.include_router(collectors_list_router)
+v1_router.include_router(collectors_create_router)
+v1_router.include_router(collectors_get_router)
+v1_router.include_router(collectors_update_router)
+v1_router.include_router(collectors_start_router)
+v1_router.include_router(collectors_stop_router)
+v1_router.include_router(collectors_memberships_router)
+v1_router.include_router(collectors_delete_router)
 
 # sources + source domains (§4.13 — discovery storage surface, M9.D1)
 v1_router.include_router(sources_list_router)
