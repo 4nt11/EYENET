@@ -2908,7 +2908,29 @@ Independent of A, B, F, G, H. Lands the schema half of every concept modelled th
 
 Depends on C (storage), parallel to E (runtime). Surface map §3.7–§3.9, contracts §4.11–§4.13.
 
-#### M9.D1 — Sources + SourceDomains handlers
+**As-built (M9.D1–D3 ✅ SHIPPED on `worktree-groupD-discovery-api`; D4 deferred).**
+Slice commits: storage gaps `cd7c9f2`, D1 `558b7f5`, D2 `1dee40c`, D3 `a2b94f6`.
+One operation per `api_<verb>_<noun>.py` (NOT the single-file `sources.py`/`collectors.py`/
+`candidates.py` the "Files touched" lines below predate). Deviations, all grounded in
+Group C's actual storage surface + documented in code:
+- **D1:** `DELETE /v1/sources/{id}` deferred (needs `delete_source` + multi-table FK guard);
+  atomic initial-`domains[]` in POST deferred (`add_source_domain` commits per call → add
+  domains individually); `?force`/`?hard` overlap-bypass + domain-notes PATCH deferred.
+  Added storage `update_source` (display_name/notes) — Group C only shipped canonical-url.
+- **D2:** `pause` dropped (no PAUSED in `CollectorDesiredState`); `?include_left` historical
+  memberships deferred (no closed-membership read); config validated as opaque kind-tagged
+  dict (discriminated union deferred). start/stop → 202 + CollectorDetail.
+- **D3:** **eligibility is a STUB** — `eligibility_for_candidate` returns
+  `DEFERRED_TO_RUNTIME` per mentioning collector; `approve` does NOT gate on it (validates
+  existence + assigned_collector_id + legal transition only — operator-trusted pending Group
+  E). Added `FAILED→QUEUED` to the transition map (the retry edge Group C omitted).
+  Transitions → 202 + CandidateDetail (audit.emit returns None → no WriteAccepted event_id).
+- Scopes added to baselines: `read:sources`+`write:sources`, `read:collectors`+`write:collectors`,
+  `read:candidates`+`write:candidates` (ANALYST+ADMIN); grant-only: `admin:sources`,
+  `read:collectors_config`, `admin:collectors`, `admin:candidates`. Surface pinned in
+  `contracts/openapi/eyenet.v1.yaml`; ASGI smoke in `tests/integration/api/test_discovery_surface.py`.
+
+#### M9.D1 — Sources + SourceDomains handlers ✅ SHIPPED (`558b7f5`)
 - Handlers under §4.13: `GET/POST/PATCH/DELETE /v1/sources`, `GET/POST/PATCH/DELETE /v1/sources/{id}/domains`. Atomic bulk-create for domains. 409 conflict shape for overlap.
 - Schemas in `eyenet/api/v1/schemas/sources.py` with `MODELS.md §1.1 / §2.26` docstrings.
 - Audit subjects: `eyenet.audit.source.{created,updated,deleted}`, `eyenet.audit.source_domain.{added,removed,primary_swapped}`.
@@ -2916,7 +2938,7 @@ Depends on C (storage), parallel to E (runtime). Surface map §3.7–§3.9, cont
 - **Files touched:** `eyenet/api/v1/sources.py`, `eyenet/api/v1/schemas/sources.py`
 - **DoD:** overlap-conflict returns 409 with `conflicting_domain_id`; pattern + pattern_kind immutable post-create (remove + re-add path enforced); Schemathesis stateful pass.
 
-#### M9.D2 — Collectors handlers
+#### M9.D2 — Collectors handlers ✅ SHIPPED (`1dee40c`)
 - Handlers under §4.11: `GET/POST/PATCH/DELETE /v1/collectors`, `POST /v1/collectors/{id}/start|stop|pause`.
 - Config redaction per §4.11 sensitivity contract.
 - SystemLog event taxonomy emitted on every supervisor-driven transition.
@@ -2924,14 +2946,16 @@ Depends on C (storage), parallel to E (runtime). Surface map §3.7–§3.9, cont
 - **Files touched:** `eyenet/api/v1/collectors.py`, `eyenet/api/v1/schemas/collectors.py`
 - **DoD:** create → start → pause → stop → delete round-trip; redacted config never leaks `telegram_api_hash`; SystemLog rows materialized.
 
-#### M9.D3 — Candidates triage handlers
+#### M9.D3 — Candidates triage handlers ✅ SHIPPED (`a2b94f6`) — eligibility STUB
 - Handlers under §4.12: `GET /v1/candidates`, `GET /v1/candidates/{id}` (with per-collector eligibility precomputed), `POST /approve|reject|park|retry`.
 - Eligibility predicate from §4.12.3 lives in `eyenet/services/discovery/eligibility.py`.
 - **Depends on:** M9.C4, M9.C5, M9.D2
 - **Files touched:** `eyenet/api/v1/candidates.py`, `eyenet/api/v1/schemas/candidates.py`, `eyenet/services/discovery/eligibility.py`
 - **DoD:** approve with ineligible collector rejected with reason code; precomputed `eligibility_per_collector` matches the predicate run server-side; Schemathesis stateful pass.
 
-#### M9.D4 — Seed-roots + Case.auto_join_policy
+#### M9.D4 — Seed-roots + Case.auto_join_policy — ⏸ DEFERRED (pairs with Group E)
+- Deferred from the D1–D3 milestone: mutates the `Case` model and its eligibility-recompute
+  couples to the Group E runtime that doesn't exist yet. Land alongside E.
 - Handlers: `GET/PUT /v1/cases/{id}/seed-roots`, `POST /v1/cases/{id}/seed-roots/{group_id}`.
 - `Case.auto_join_policy` + `Case.redundancy_policy` extension applied to existing `case_v2` table — *no Alembic, just schema change + `rm data/*.db && eyenet init`* per pre-public posture.
 - Emits `case.seed_roots_changed`; triggers candidate eligibility recompute (idempotent).

@@ -47,6 +47,14 @@ from eyenet.api.v1.auth.api_refresh import router as auth_refresh_router
 from eyenet.api.v1.auth.api_revoke_token import router as auth_revoke_token_router
 from eyenet.api.v1.auth.api_stream_token import router as auth_stream_token_router
 
+# === candidates (M9.D3 discovery triage) ===
+from eyenet.api.v1.candidates.api_approve_candidate import router as candidates_approve_router
+from eyenet.api.v1.candidates.api_get_candidate import router as candidates_get_router
+from eyenet.api.v1.candidates.api_list_candidates import router as candidates_list_router
+from eyenet.api.v1.candidates.api_park_candidate import router as candidates_park_router
+from eyenet.api.v1.candidates.api_reject_candidate import router as candidates_reject_router
+from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_retry_router
+
 # === cases ===
 from eyenet.api.v1.cases.api_add_collaborator import router as cases_add_collaborator_router
 from eyenet.api.v1.cases.api_add_member import router as cases_add_member_router
@@ -71,6 +79,17 @@ from eyenet.api.v1.clearance.api_get_grant import router as clearance_get_grant_
 from eyenet.api.v1.clearance.api_grant_clearance import router as clearance_grant_router
 from eyenet.api.v1.clearance.api_list_grants import router as clearance_list_grants_router
 from eyenet.api.v1.clearance.api_revoke_grant import router as clearance_revoke_grant_router
+
+# === collectors (M9.D2 discovery) ===
+from eyenet.api.v1.collectors.api_collector_health import router as collectors_health_router
+from eyenet.api.v1.collectors.api_create_collector import router as collectors_create_router
+from eyenet.api.v1.collectors.api_delete_collector import router as collectors_delete_router
+from eyenet.api.v1.collectors.api_get_collector import router as collectors_get_router
+from eyenet.api.v1.collectors.api_list_collectors import router as collectors_list_router
+from eyenet.api.v1.collectors.api_list_memberships import router as collectors_memberships_router
+from eyenet.api.v1.collectors.api_start_collector import router as collectors_start_router
+from eyenet.api.v1.collectors.api_stop_collector import router as collectors_stop_router
+from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
 
 # === documents (M10 classifier) ===
 from eyenet.api.v1.documents.api_upload_document import router as documents_upload_router
@@ -111,6 +130,17 @@ from eyenet.api.v1.reclassify.api_reclassify_observation import (
     router as reclassify_observation_router,
 )
 from eyenet.api.v1.schemas.errors import ProblemDetail
+
+# === sources (M9.D1 discovery) ===
+from eyenet.api.v1.sources.api_add_source_domain import router as sources_add_domain_router
+from eyenet.api.v1.sources.api_create_source import router as sources_create_router
+from eyenet.api.v1.sources.api_get_bridge_summary import router as sources_bridge_summary_router
+from eyenet.api.v1.sources.api_get_source import router as sources_get_router
+from eyenet.api.v1.sources.api_list_source_domains import router as sources_list_domains_router
+from eyenet.api.v1.sources.api_list_sources import router as sources_list_router
+from eyenet.api.v1.sources.api_remove_source_domain import router as sources_remove_domain_router
+from eyenet.api.v1.sources.api_update_source import router as sources_update_router
+from eyenet.api.v1.sources.api_update_source_domain import router as sources_update_domain_router
 
 # === stream ===
 from eyenet.api.v1.stream.api_stream_all import router as stream_all_router
@@ -211,6 +241,37 @@ v1_router.include_router(clearance_list_grants_router)
 v1_router.include_router(clearance_grant_router)
 v1_router.include_router(clearance_get_grant_router)
 v1_router.include_router(clearance_revoke_grant_router)
+
+# collectors (§4.11 — discovery fleet, M9.D2).
+# /collectors/health MUST precede /collectors/{collector_id} (literal vs UUID).
+v1_router.include_router(collectors_health_router)
+v1_router.include_router(collectors_list_router)
+v1_router.include_router(collectors_create_router)
+v1_router.include_router(collectors_get_router)
+v1_router.include_router(collectors_update_router)
+v1_router.include_router(collectors_start_router)
+v1_router.include_router(collectors_stop_router)
+v1_router.include_router(collectors_memberships_router)
+v1_router.include_router(collectors_delete_router)
+
+# sources + source domains (§4.13 — discovery storage surface, M9.D1)
+v1_router.include_router(sources_list_router)
+v1_router.include_router(sources_create_router)
+v1_router.include_router(sources_get_router)
+v1_router.include_router(sources_update_router)
+v1_router.include_router(sources_list_domains_router)
+v1_router.include_router(sources_add_domain_router)
+v1_router.include_router(sources_update_domain_router)
+v1_router.include_router(sources_remove_domain_router)
+v1_router.include_router(sources_bridge_summary_router)
+
+# candidates (§4.12 — discovery triage queue, M9.D3)
+v1_router.include_router(candidates_list_router)
+v1_router.include_router(candidates_get_router)
+v1_router.include_router(candidates_approve_router)
+v1_router.include_router(candidates_reject_router)
+v1_router.include_router(candidates_park_router)
+v1_router.include_router(candidates_retry_router)
 
 # identities + panic
 v1_router.include_router(identities_claim_router)

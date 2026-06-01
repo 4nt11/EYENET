@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     )
     from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
-    from eyenet.contracts.collector import CollectorRow
+    from eyenet.contracts.collector import CollectorFleetHealth, CollectorRow
     from eyenet.contracts.document import DocumentRow
     from eyenet.contracts.enums import (
         ArtifactSubjectKind,
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
     from eyenet.contracts.mfa import MfaChallengeRow
-    from eyenet.contracts.source import SourceRow
+    from eyenet.contracts.source import SourceBridgeSummary, SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
     from eyenet.contracts.system_user import SystemUserRow
 
@@ -989,6 +989,64 @@ class BaseRepository(ABC):
         (oldest claim wins).
         """
 
+    @abstractmethod
+    async def list_sources(self, *, limit: int, offset: int = 0) -> list[SourceRow]:
+        """Return Sources ordered ``created_at ASC``, paginated (M9.D1)."""
+
+    @abstractmethod
+    async def count_sources(self) -> int:
+        """Total Source rows (M9.D1 pagination)."""
+
+    @abstractmethod
+    async def list_source_domains(
+        self,
+        *,
+        source_id: UUID,
+        include_removed: bool = False,
+    ) -> list[SourceDomainRow]:
+        """Return SourceDomain rows for ``source_id``, ``created_at ASC``.
+
+        Active rows only by default; ``include_removed=True`` includes the
+        soft-deleted rows (audit view). (M9.D1)
+        """
+
+    @abstractmethod
+    async def swap_source_domain_primary(
+        self,
+        *,
+        source_id: UUID,
+        domain_id: UUID,
+    ) -> SourceDomainRow:
+        """Make ``domain_id`` the active primary for ``source_id`` (M9.D1).
+
+        Demotes any other active primary and promotes the target in one
+        transaction so ``uq_source_domain_one_primary`` never sees two.
+        Raises :class:`ValueError` if the target is missing, soft-removed,
+        or belongs to a different Source.
+        """
+
+    @abstractmethod
+    async def update_source(
+        self,
+        *,
+        source_id: UUID,
+        display_name: str | None = None,
+        notes: str | None = None,
+    ) -> SourceRow:
+        """Operator PATCH of editable Source metadata (API_PLAN §4.13, M9.D1).
+
+        ``None`` means *leave unchanged*. ``canonical_url`` goes through
+        :meth:`set_source_canonical_url`. Raises :class:`ValueError` if missing.
+        """
+
+    @abstractmethod
+    async def source_bridge_summary(self, *, source_id: UUID) -> SourceBridgeSummary:
+        """Bridge-resolution counts for a Source (API_PLAN §3.8, M9.D1).
+
+        ``resolved`` is per-source; the other buckets are system-wide
+        outstanding-work context — see :class:`SourceBridgeSummary`.
+        """
+
     # =================================================================
     # COLLECTORS (MODELS §2.19, API_PLAN §4.11)
     # =================================================================
@@ -1023,8 +1081,42 @@ class BaseRepository(ABC):
         """Return one collector row by id, or ``None``."""
 
     @abstractmethod
-    async def list_collectors(self) -> list[CollectorRow]:
-        """Return every collector row. Order: ``created_at ASC``."""
+    async def list_collectors(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[CollectorRow]:
+        """Return collector rows, ``created_at ASC``.
+
+        ``limit=None`` returns all (the supervisor's whole-fleet view);
+        pass ``limit``/``offset`` for the paginated API surface (M9.D2).
+        """
+
+    @abstractmethod
+    async def count_collectors(self) -> int:
+        """Total collector rows (M9.D2 pagination)."""
+
+    @abstractmethod
+    async def update_collector(
+        self,
+        *,
+        collector_id: UUID,
+        config: dict[str, Any] | None = None,
+        instance_name: str | None = None,
+        notes: str | None = None,
+    ) -> CollectorRow:
+        """Operator PATCH of editable metadata (API_PLAN §4.11.2, M9.D2).
+
+        ``None`` means *leave unchanged*. ``desired_state`` goes through
+        :meth:`set_collector_desired_state`; ``observed_state`` is
+        supervisor-only. Raises :class:`ValueError` if missing.
+        """
+
+    @abstractmethod
+    async def collector_fleet_health(self) -> CollectorFleetHealth:
+        """Fleet snapshot — counts by observed_state, oldest live heartbeat,
+        restart-storm leader (API_PLAN §3.9, M9.D2)."""
 
     @abstractmethod
     async def set_collector_desired_state(
@@ -1114,6 +1206,33 @@ class BaseRepository(ABC):
 
         Pass ``source_id`` to restrict to one Source; omit for all Sources.
         """
+
+    @abstractmethod
+    async def list_candidates(
+        self,
+        *,
+        state: CandidateState | None = None,
+        source_id: UUID | None = None,
+        min_score: float | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[GroupCandidateRow]:
+        """Triage queue (API_PLAN §4.12, M9.D3) — generalizes
+        :meth:`list_queued_candidates` to any state + score filter.
+
+        Filters compose (AND). Sort: ``score DESC, last_observed_at_ingest
+        DESC``.
+        """
+
+    @abstractmethod
+    async def count_candidates(
+        self,
+        *,
+        state: CandidateState | None = None,
+        source_id: UUID | None = None,
+        min_score: float | None = None,
+    ) -> int:
+        """Count candidates matching :meth:`list_candidates` filters (M9.D3)."""
 
     @abstractmethod
     async def transition_candidate(

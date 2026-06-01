@@ -89,6 +89,27 @@ class CollectorBase(ABC):
     async def health(self) -> CollectorHealth: ...
 
 
+class CollectorFleetHealth(BaseModel):
+    """Fleet snapshot for ``GET /v1/collectors/health`` (API_PLAN §3.9).
+
+    Aggregate over every :class:`CollectorRow`; distinct from
+    :class:`CollectorHealth` (a single live collector's self-report).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(ge=0)
+    counts_by_observed_state: dict[CollectorObservedState, int] = Field(default_factory=dict)
+    oldest_heartbeat_at: datetime | None = Field(
+        default=None,
+        description="Oldest last_heartbeat_at among non-STOPPED collectors; null if none.",
+    )
+    restart_storm_leader_id: UUID | None = Field(
+        default=None, description="Collector with the highest restart_count, if > 0."
+    )
+    max_restart_count: int = Field(default=0, ge=0)
+
+
 class CollectorRow(DbRowBase):
     """Persisted Collector row (API_PLAN §4.11.1, MODELS §2.19).
 
@@ -147,6 +168,7 @@ def redact_config(
 
 __all__ = [
     "CollectorBase",
+    "CollectorFleetHealth",
     "CollectorHealth",
     "CollectorRow",
     "compute_instance_id",
