@@ -88,7 +88,7 @@ class ChannelReferenceExtractor(DiscoveryExtractor):
             # Don't record a self-reference to the group the message is in.
             if ref.platform_groupid == str(ctx.observed_in_group_id):
                 continue
-            await storage.record_candidate_mention(
+            candidate, _ = await storage.record_candidate_mention(
                 source_id=ctx.source_id,
                 platform_groupid=ref.platform_groupid,
                 observed_by_collector_id=ctx.observed_by_collector_id,
@@ -101,6 +101,9 @@ class ChannelReferenceExtractor(DiscoveryExtractor):
                 mentioned_at_ingest=ctx.collected_at,
                 mentioning_actor_id=ctx.mentioning_actor_id,
             )
+            # §4.12.2 step 3: recompute the candidate score on the new mention
+            # (this also runs the step-4 auto-queue if a Case threshold is set).
+            await storage.score_candidate(candidate.id)
             recorded += 1
         if recorded:
             _log.debug(

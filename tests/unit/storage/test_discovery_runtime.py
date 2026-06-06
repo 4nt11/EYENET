@@ -14,8 +14,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from eyenet.contracts.audit_subjects import AuditSubject
+from eyenet.contracts.collector import compute_instance_id
 from eyenet.contracts.enums import (
     AutoJoinPolicy,
+    CandidateState,
     GroupKind,
     IdentityRole,
     IdentityState,
@@ -310,8 +312,6 @@ async def test_group_lineage_discovered_group(storage: BaseRepository) -> None:
     # promote the candidate to a resulting group
     joined_group = uuid4()
     # walk the legal state machine: discovered→queued→approved→joining→joined
-    from eyenet.contracts.enums import CandidateState
-
     await storage.transition_candidate(candidate_id=cand_id, to_state=CandidateState.QUEUED)
     await storage.transition_candidate(candidate_id=cand_id, to_state=CandidateState.APPROVED)
     await storage.transition_candidate(candidate_id=cand_id, to_state=CandidateState.JOINING)
@@ -384,3 +384,107 @@ async def test_reachable_roots_for_collector(storage: BaseRepository) -> None:
     assert root in reachable
     # a different collector sees nothing
     assert await storage.reachable_roots_for_collector(uuid4()) == set()
+
+
+# -- score_candidate + resolve_collector_by_instance_id ----------------------
+
+
+async def _collector(storage: BaseRepository, src: UUID, identity_name: str) -> UUID:
+    ident = await storage.create_identity(
+        name=identity_name, source_id=src, session_path=f"/{identity_name}"
+    )
+    row = await storage.create_collector(
+        instance_name=f"collector-{identity_name}",
+        kind=SourceKind.TELEGRAM,
+        source_id=src,
+        identity_id=ident.id,
+        config={},
+        created_at=_NOW,
+        created_by_user_id=uuid4(),
+    )
+    return row.id
+
+
+@pytest.mark.unit
+async def test_resolve_collector_by_instance_id(storage: BaseRepository) -> None:
+    src = await _source(storage)
+    coll_id = await _collector(storage, src, "tg_alpha")
+    iid = compute_instance_id("tg_alpha", SourceKind.TELEGRAM)
+    found = await storage.resolve_collector_by_instance_id(iid)
+    assert found is not None
+    assert found.id == coll_id
+    assert await storage.resolve_collector_by_instance_id("zzzzzzzz") is None
+
+
+@pytest.mark.unit
+async def test_score_candidate_deterministic(storage: BaseRepository) -> None:
+    src = await _source(storage)
+    g1, g2 = uuid4(), uuid4()
+    cand_id = await _mention(
+        storage,
+        src=src,
+        groupid="@t",
+        collector=_FAKE_COLLECTOR,
+        observed_in=g1,
+        seed_root=g1,
+        depth=1,
+        evidence="e1",
+    )
+    # second mention: different observed group + different actor → both counts rise
+    await storage.record_candidate_mention(
+        source_id=src,
+        platform_groupid="@t",
+        observed_by_collector_id=_FAKE_COLLECTOR,
+        observed_in_group_id=g2,
+        seed_root_id=g1,
+        depth_from_root=1,
+        mention_evidence_ref="e2",
+        mention_kind=MentionKind.USERNAME_MENTION,
+        mentioned_at_source=_NOW,
+        mentioned_at_ingest=_NOW,
+        mentioning_actor_id=uuid4(),
+        kind_hint=GroupKind.CHANNEL,
+    )
+    scored = await storage.score_candidate(cand_id)
+    # 2 groups * 0.3 + 2 actors * 0.2 = 1.0
+    assert scored.score == 1.0
+    assert scored.score_breakdown["distinct_mentioning_groups"] == 2
+    assert scored.score_breakdown["distinct_mentioning_actors"] == 2
+    # no Case threshold → stays DISCOVERED
+    assert scored.state is CandidateState.DISCOVERED
+
+
+@pytest.mark.unit
+async def test_score_candidate_auto_queues_on_threshold(storage: BaseRepository) -> None:
+    src = await _source(storage)
+    root = uuid4()
+    cand_id = await _mention(
+        storage,
+        src=src,
+        groupid="@t",
+        collector=_FAKE_COLLECTOR,
+        observed_in=root,
+        seed_root=root,
+        depth=1,
+        evidence="e1",
+    )
+    case_id = await _case(storage)
+    await storage.update_case_discovery_policy(
+        case_id=case_id,
+        seed_root_group_ids=[root],
+        auto_join_policy=AutoJoinPolicy.SCORE_THRESHOLD,
+        auto_join_score_threshold=0.2,
+        editor_user_id=uuid4(),
+        now=_NOW,
+        service="t",
+        instance_id="t1",
+    )
+    scored = await storage.score_candidate(cand_id)
+    # one group (0.3) + one actor (0.2) = 0.5 ≥ 0.2 threshold → auto-queued
+    assert scored.state is CandidateState.QUEUED
+
+
+@pytest.mark.unit
+async def test_score_candidate_missing_raises(storage: BaseRepository) -> None:
+    with pytest.raises(ValueError, match="not found"):
+        await storage.score_candidate(uuid4())

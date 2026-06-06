@@ -1119,6 +1119,12 @@ class BaseRepository(ABC):
         """Return one collector row by id, or ``None``."""
 
     @abstractmethod
+    async def resolve_collector_by_instance_id(self, instance_id: str) -> CollectorRow | None:
+        """Reverse the 8-char bus ``instance_id`` to its collector row, or None
+        (M9.E2). Recomputes ``compute_instance_id(identity name, kind)`` per
+        collector and matches — the id isn't stored on the row."""
+
+    @abstractmethod
     async def list_collectors(
         self,
         *,
@@ -1299,6 +1305,12 @@ class BaseRepository(ABC):
 
         Raises :class:`ValueError` if the candidate doesn't exist.
         """
+
+    @abstractmethod
+    async def score_candidate(self, candidate_id: UUID) -> GroupCandidateRow:
+        """Recompute a candidate's score from its mentions (frozen v1, §4.12.2)
+        and auto-queue ``discovered → queued`` if a resolving Case's
+        ``auto_join_score_threshold`` is crossed. Raises ValueError if absent."""
 
     @abstractmethod
     async def group_lineage(self, group_id: UUID) -> tuple[UUID | None, int]:
