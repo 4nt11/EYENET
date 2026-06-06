@@ -1,4 +1,4 @@
-# EYENET — session handoff (2026-06-06, pm)
+# EYENET — session handoff (2026-06-06, eve)
 
 Start-here note. Read this, then
 `~/.claude/projects/-home-anti-Tools-EYENET/memory/MEMORY.md` and
@@ -8,99 +8,104 @@ Start-here note. Read this, then
 
 ## Where we are
 
-- **`/v1/cases` CRUD + D4 seed-roots + M9.E5 Telegram recursion — DONE.**
-  Worktree branch `worktree-cases-d4-e5`, slice-per-commit, `--no-ff` merge.
-- Battery: `unit or contract or integration` = **2051 passed / 16 skipped / 6 failed**.
-  The 6 are the documented §3.3 verifier log-capture flakes
-  (`test_impostor_pool_loader` ×3 + `test_service_branches` ×3) — **all pass in
-  isolation** (`8 passed`), no verifier code was touched, NOT regressions.
-  Coverage **90.98%** (gate 84%; baseline `.coverage-baseline` 0.8906 → no-drop
-  satisfied, up). ruff/mypy --strict (413 files)/bandit (0)/deptry/detect-secrets
-  all clean.
+- **M9.E5.5 — access-artifact join path — DONE.** Worktree branch
+  `worktree-e5.5-artifact-join`, slice-per-commit (A–E), `--no-ff` merge
+  `1f6cdea`. Worktree + branch removed.
+- Battery: `unit or contract or integration` = **2081 passed / 16 skipped /
+  8 failed**. The 8 are the documented §3.3 flakes — the 6 verifier
+  log-capture ones (`test_impostor_pool_loader` ×3 + `test_service_branches`
+  ×3) **plus** `test_stylometric_kernel_memo` ×2 (CLAUDE.md §3.3 names the
+  memo/throughput tests too; the E5 memory notes "7–8 jitter"). **All 8 pass
+  in isolation** (`8 passed`), no verifier/stylometric code was touched — NOT
+  regressions. The 16 skips are the `eyenet-extract` venv classifier tests.
+- Coverage **91.03%** (gate 84%; `.coverage-baseline` 0.8906 → no-drop
+  satisfied, up — baseline NOT bumped, consistent with the E5 merge). ruff
+  format+check / mypy --strict (413 files) / bandit (0) / deptry /
+  detect-secrets all clean (baseline got only a line-shift, no new secrets).
 
-### `/v1/cases` CRUD (Slices A–D)
-- Storage `list_cases`/`count_cases` added (mirrors `list_candidates`); §4.10.4
-  collaborator list-visibility predicate lives in storage.
-- All 15 handlers filled (`eyenet/api/v1/cases/api_*.py`) over the already-complete
-  `CasesMixin`. **Case storage methods self-audit the hash-chain row** (no bus emit
-  — that's Group H); handlers pass attribution via `cases/_detail.py:audit_ctx`
-  and do NOT double-emit. Creator auto-enrolled as OWNER collaborator.
-- New storage `reopen_archived_case` (archived→open mints a `parent_case_id`
-  successor). Scopes: read/write:cases + `admin:case` (archive, collaborators).
-- `CaseCollaboratorRevokeRequest.revocation_reason` min 1→16 (was a 422-vs-409 wart).
-- D4: `GET/PUT /v1/cases/{id}/seed-roots` + `POST .../seed-roots/{group_id}` over
-  `update_case_discovery_policy`; eligibility recompute is implicit (the §4.12.3
-  predicate reads the live set — proven by a `resolve_case_for_candidate` shift test).
-- OpenAPI surface-pin updated (3 ops + `CaseSeedRoots`/`CaseSeedRootsReplaceRequest`).
+### What E5.5 shipped (Slices A–E)
+- **Slice A — storage** (`sqlmodel_repo/artifacts.py` + ABC): three generic-ORM
+  methods — `get_group_access_artifact`, `list_group_access_artifacts_for_candidate`
+  (unordered; ranking is the supervisor's job), `set_artifact_validation_state`
+  (dead-link writeback). No dialect leak.
+- **Slice B — `CandidateState.REQUESTED`** for approval-gated joins. `_ALLOWED`:
+  `JOINING→REQUESTED` (entry) + `REQUESTED→{JOINED,FAILED,PARKED}`. `ck_candidate_state`
+  CHECK + OpenAPI `CandidateState` enum pin updated (uppercase NAME in the CHECK,
+  lowercase in the yaml). New audit subject `CANDIDATE_JOIN_REQUESTED`.
+- **Slice C — telethon-free `_join.py`** (coverage-credited): `JoinOutcome.REQUESTED`
+  + `classify_join_error` maps `InviteRequestSentError`; `JoinAction` enum +
+  `select_join_action(kind)` (PUBLIC / INVITE_HASH / UNSUPPORTED — **invite-link-only
+  scope**, QR + others UNSUPPORTED); `parse_invite_hash` (t.me/+, /joinchat/,
+  tg://join?invite=); `artifact_state_for_error` (Expired→EXPIRED, Invalid→REVOKED,
+  else None); handler `mark_join_requested` + `record_artifact_validation`.
+- **Slice D — supervisor selection** (`collector_supervisor.py`): pure
+  `select_access_artifact(artifacts)` — cheapest usable by `_KIND_PREFERENCE`
+  (public<invite), filtering `{VALID,UNVERIFIED}` + not `requires_admin_approval`
+  + collector-actionable kinds; `None` → public fallback. Wired into
+  `dispatch_approved`; the chosen `access_artifact_id` rides the published
+  `JoinGroupCommand` (captured in the `candidate.joining` audit for free).
+- **Slice E — `real.py` `_handle_join`** (coverage-omitted glue): `_resolve_join_target`
+  (fetch→select→parse, fails cleanly on missing/unsupported/unparseable) +
+  `_handle_join_error` (ban→quarantine, request-sent→requested, else fail +
+  dead-link writeback). INVITE_HASH → `ImportChatInviteRequest`; PUBLIC →
+  `JoinChannelRequest`. Two helpers extracted to stay under the branch limit.
 
-### M9.E5 Telegram recursion (Slices E1–E4)
-- **Decisions (operator):** bus command channel (supervisor publishes); FULL
-  scout/monitor separation (command keyed to the leased scout's `instance_id`);
-  ban-on-join → `joining→failed` + burn (candidate never reached `joined`); scout
-  role signal = optional `role` field in `identities.toml`.
-- `command_subject_for(scout_instance_id)` = `eyenet.control.collector.{id}.command`;
-  new `CANDIDATE_JOINED`/`CANDIDATE_FAILED` audit subjects.
-- Supervisor `dispatch_approved` now **publishes** the `JoinGroupCommand` (raw
-  `bus.publish` — it's a bare BaseModel, not a BusEnvelope) after the joining
-  transition + `candidate.joining` audit (kept as the record of intent).
-- **Telethon-free join core** `eyenet/collectors/telegram/_join.py` (coverage-
-  credited): `classify_join_error(exc_name)` switches on the telethon error CLASS
-  NAME (import-free); `CollectorJoinHandler` does finalize_joined / fail_candidate /
-  quarantine_on_ban (burn scout via `ScoutGraduationService` + file-pool BURNED
-  release so restart-recovery can't re-offer it). `real.py` is the coverage-omitted
-  telethon glue (`_handle_join` issues `JoinChannelRequest`).
-- file↔DB bridge: optional `role` on `IdentityFileEntry`; `provision_identities()`
-  (`eyenet/services/discovery/identity_provisioning.py`) + `eyenet identity sync`
-  CLI. After sync, `has_available_scout()` is true → loop runs end-to-end.
+## Operator decisions baked into E5.5
+1. **Invite-link ONLY.** QR_CODE + direct/paid/blocked/other → UNSUPPORTED →
+   `fail_candidate("unsupported_access_artifact")`. QR deferred (needs decode-at-discovery).
+2. **Cheapest usable, else public fallback** for supervisor selection.
+3. **Validation-state writeback YES** on dead links (expired/revoked).
+4. **Real `REQUESTED` state** for `InviteRequestSentError` (not folded into FAILED).
 
 ## What's still open
-
-- **E5.5 — access-artifact join path:** `_handle_join` only does the public-identifier
-  `JoinChannelRequest` (`access_artifact_id is None`). Invite-link / QR / artifact-kind
-  dispatch (`ImportChatInviteRequest`, MODELS §2.24 selection + a `get_access_artifact`
-  storage getter) + the supervisor setting `access_artifact_id` are deferred. Unsupported
-  artifact kinds currently `fail_candidate("unsupported_access_artifact")`.
-- **Live ban-on-the-wire → quarantine:** `quarantine_on_ban` is wired for the *join*
-  path; a ban detected LATER on the live message/health path (403s on an
-  already-joined group → `joined→parked` + close membership) is not yet wired.
-- **`joining` redelivery:** a crash between the supervisor's transition and publish
-  leaves a candidate in `joining` with no retry rescan (the collector is the source
-  of truth for the next transition). A supervisor `joining`-rescan is a follow-up.
+- **`REQUESTED → JOINED` resolution detector:** nothing flips a pending request
+  to joined yet — needs live platform membership detection (poll the group, or
+  catch the admit event). The entry + give-up/fail edges are wired; resolution
+  is the follow-on. This is the #1 E5.5 loose end.
+- **QR_CODE join dispatch:** decode-at-discovery must populate the artifact
+  `value` with a usable t.me link first, then `select_join_action` adds QR_CODE.
+- **`_KIND_PREFERENCE` ↔ `select_join_action` coupling:** the supervisor's
+  supported-kind set and the collector's actionable set must grow in lockstep
+  (both documented in-code). A shared source would be cleaner if a 3rd platform lands.
+- **Live ban-on-the-wire → `joined→parked`:** still deferred from E5 (403s on an
+  already-joined group → close membership). `quarantine_on_ban` only covers the
+  join path.
+- **`joining`/`requested` redelivery rescan:** a supervisor crash between the
+  `joining` transition and the publish leaves a candidate stranded (collector is
+  the source of truth for the next transition). A supervisor rescan is a follow-up.
 - **Supervisor structural-fail surfacing** (OVER_DEPTH / SKIP_DUAL_COVER /
-  NO_REACHABLE_ROOT) still only logs — no operator-facing surface (Group H stream).
-- **Cases:** bulk member ops are best-effort sequential (stop on first conflict, no
-  rollback); `audit_event_ids` in `CaseMemberBulkResult` is empty (storage self-audits
-  internally, ids not surfaced). Soft-removed member/collaborator listing (`active_only`)
-  not exposed. Case mutations write the audit DB row but don't emit a bus AuditEvent
-  (stream:audit is Group H).
+  NO_REACHABLE_ROOT) still only logs — Group H stream.
+- **Cases:** bulk member ops best-effort sequential; `audit_event_ids` empty;
+  soft-removed listing not exposed; no bus AuditEvent emit (Group H).
 
 ## Environment gotchas
-
-- **Worktree venv trap:** the shared `.venv` editable install (`_editable_impl_eyenet.pth`)
-  points at a STALE deleted worktree (`groupA-auth-tokens`), so `eyenet` only resolves
-  via cwd-shadowing. ALWAYS run tests as `cd <worktree> && .venv/bin/python -m pytest …`
-  (never the bare `.venv/bin/pytest` console script — no cwd on sys.path → wrong tree).
-  Use `--no-cov` for fast inner-loop runs (the `--cov-fail-under=84` fails per-file runs).
-- **telethon IS installed** (1.43.2) — `real.py` imports fine; the recon's "not installed"
-  claim was wrong. The `_join.py` extraction still earns coverage credit + clean separation.
+- **Worktree path trap (bit me this session):** when in a worktree, Edit/Read with
+  the MAIN-tree absolute path silently edits the WRONG tree — tests pass against
+  the unchanged worktree and `git commit` says "nothing to commit". ALWAYS use the
+  worktree absolute path (`.claude/worktrees/<name>/…`) for every Edit/Read.
+- **Worktree venv:** the `.venv` lives in the MAIN tree only. From a worktree run
+  `/home/anti/Tools/EYENET/.venv/bin/python -m pytest …` with **cwd = the worktree**
+  (cwd-shadowing resolves `import eyenet` to the worktree). `--no-cov` for inner loop
+  (`--cov-fail-under=84` fails partial runs). Never the bare `.venv/bin/pytest`.
 - ASGI / shared in-memory aiosqlite: seed all `await storage` state BEFORE the first
-  TestClient call (MissingGreenlet). `active_case_id` pydantic serializer UserWarning on
-  every collaborator op is pre-existing (in `add_case_collaborator`), harmless.
-- §3.3 flakes: confirm any failure under `-p no:randomly` + in isolation before treating
-  as a regression. The 6 verifier ones are known offenders.
+  TestClient call (MissingGreenlet).
+- §3.3 flakes: confirm any failure under `-p no:randomly` + in isolation before
+  treating as a regression. The 8 above are known offenders.
 - Stray untracked artifacts — NEVER commit: `DSR-2026-NH-00417-FICTIONAL.docx`,
-  `classifier_corpus.py`, `docs-1.jsonl`, `ruleset-additive.toml`, `development/.$eyenet-erd.drawio.dtmp`.
+  `classifier_corpus.py`, `docs-1.jsonl`, `ruleset-additive.toml`,
+  `development/.$eyenet-erd.drawio.dtmp`.
 
 ---
 
-## NEXT: candidates for the follow-up milestone
+## NEXT: candidates for the follow-up
 
-1. **E5.5 — access-artifact join path** — invite-links/QR + supervisor artifact selection;
-   closes the join story for private groups.
-2. **Group G — Write surface** — idempotency middleware + event-log tables + persona
-   merge/split.
-3. **Group H — Stream surface** — SSE for candidate.* / case.* / audit; surfaces the
-   supervisor structural-fail verdicts + case-audit bus events.
+1. **`REQUESTED → JOINED` resolution detector** — closes the approval-gated join
+   loop E5.5 opened (membership polling or admit-event capture).
+2. **Group G — Write surface** — idempotency middleware + event-log tables +
+   persona merge/split.
+3. **Group H — Stream surface** — SSE for candidate.* / case.* / audit; surfaces
+   the supervisor structural-fail verdicts + REQUESTED transitions + case-audit
+   bus events.
 
 ---
 
@@ -110,8 +115,8 @@ Start-here note. Read this, then
 cd /home/anti/Tools/EYENET
 git log --oneline -8
 .venv/bin/python -m pytest -m "unit or contract" -q --no-cov              # fast inner loop
-.venv/bin/python -m pytest -m "unit or contract or integration" -q        # full (6 known §3.3 flakes)
+.venv/bin/python -m pytest -m "unit or contract or integration" -q        # full (8 known §3.3 flakes)
 ```
 
 Deep refactor / new milestone → worktree branch + atomic `--no-ff` merge (CLAUDE.md §6).
-Heed the worktree venv trap above: `python -m pytest` from inside the worktree.
+Heed BOTH worktree traps above: worktree paths for edits, `python -m pytest` from cwd.
