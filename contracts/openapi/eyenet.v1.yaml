@@ -1214,6 +1214,82 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/cases/{case_id}/seed-roots:
+    get:
+      tags: [cases]
+      operationId: cases_get_seed_roots
+      summary: List the seed-root groups anchoring a case's discovery tree.
+      description: |
+        Requires `read:cases` + case visibility (§4.10.4). Returns the internal
+        Group UUIDs the §4.12.3 eligibility predicate reaches from.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      responses:
+        "200":
+          description: The case's seed-root set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseSeedRoots' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    put:
+      tags: [cases]
+      operationId: cases_replace_seed_roots
+      summary: Replace the seed-root set (write:cases).
+      description: |
+        Replaces the whole set (an empty list clears it). Emits
+        `eyenet.audit.case.seed_roots_changed`; the §4.12.3 eligibility recompute
+        is implicit (the predicate reads the live set). 409 on archived cases.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseSeedRootsReplaceRequest' }
+      responses:
+        "200":
+          description: Updated seed-root set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseSeedRoots' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/seed-roots/{group_id}:
+    post:
+      tags: [cases]
+      operationId: cases_promote_seed_root
+      summary: Promote one group to a seed root (admin:case).
+      description: |
+        Idempotent append of `group_id` to the case's seed roots. Requires
+        `admin:case`. Emits `eyenet.audit.case.seed_roots_changed` when the set
+        changes.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+        - name: group_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated seed-root set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseSeedRoots' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/cases/{case_id}/members:
     get:
       tags: [cases]
@@ -3298,6 +3374,30 @@ components:
       required: [archive_reason]
       properties:
         archive_reason: { type: string, minLength: 32, maxLength: 1024 }
+    CaseSeedRoots:
+      description: |
+        Seed-root groups anchoring a case's discovery tree (§4.12.3). Internal
+        Group UUIDs, not platform ids.
+      type: object
+      additionalProperties: false
+      required: [case_id]
+      properties:
+        case_id: { type: string, format: uuid }
+        seed_root_group_ids:
+          type: array
+          maxItems: 4096
+          items: { type: string, format: uuid }
+    CaseSeedRootsReplaceRequest:
+      description: |
+        Body for `PUT /v1/cases/{case_id}/seed-roots`. Replaces the whole set;
+        an empty list clears it.
+      type: object
+      additionalProperties: false
+      properties:
+        seed_root_group_ids:
+          type: array
+          maxItems: 4096
+          items: { type: string, format: uuid }
 
     # ── Case members ──────────────────────────────────────────────────────
     CaseMemberSummary:
