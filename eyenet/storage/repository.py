@@ -1461,6 +1461,12 @@ class BaseRepository(ABC):
         None (M9.E3). A second lease can't re-grab the same scout."""
 
     @abstractmethod
+    async def list_graduating_scouts(self, joined_before: datetime) -> list[UUID]:
+        """Identity ids of SCOUTs whose collector has held an active membership
+        since at/before ``joined_before`` — clean windows ready to graduate
+        (M9.E4 §4.12.5)."""
+
+    @abstractmethod
     async def has_available_scout(self, source_id: UUID) -> bool:
         """True iff at least one AVAILABLE SCOUT exists for ``source_id``."""
 

@@ -14,12 +14,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, null
 from sqlmodel import col, select
 
 from eyenet.contracts.enums import IdentityRole, IdentityState
 from eyenet.contracts.identity import IdentityRow
+from eyenet.models.collector import CollectorTable
 from eyenet.models.identity import IdentityTable
+from eyenet.models.membership import CollectorGroupMembershipTable
 
 from ._helpers import safe_session
 
@@ -222,6 +224,32 @@ class IdentitiesMixin:
             await session.commit()
             await session.refresh(table)
             return _identity_row(table)
+
+    async def list_graduating_scouts(self, joined_before: datetime) -> list[UUID]:
+        """Identity ids of SCOUTs whose collector has held an active membership
+        since at or before ``joined_before`` (M9.E4 §4.12.5).
+
+        A still-active membership (``left_at IS NULL``) that old is, by
+        definition, a clean observation window — a ban would have closed it.
+        Joins identity → collector (one identity per collector) → membership.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(IdentityTable.id)
+                .join(CollectorTable, col(CollectorTable.identity_id) == col(IdentityTable.id))
+                .join(
+                    CollectorGroupMembershipTable,
+                    col(CollectorGroupMembershipTable.collector_id) == col(CollectorTable.id),
+                )
+                .where(
+                    IdentityTable.role == IdentityRole.SCOUT,
+                    col(CollectorGroupMembershipTable.left_at) == null(),
+                    CollectorGroupMembershipTable.joined_at <= joined_before,
+                )
+                .distinct()
+            )
+            result = await session.exec(stmt)
+            return list(result)
 
     async def has_available_scout(self, source_id: UUID) -> bool:
         """True iff at least one AVAILABLE SCOUT exists for ``source_id``."""
