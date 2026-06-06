@@ -17,11 +17,18 @@ from eyenet.bus.memory import MemoryBus
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.collectors.telegram._join import (
     CollectorJoinHandler,
+    JoinAction,
     JoinOutcome,
+    artifact_state_for_error,
     classify_join_error,
+    parse_invite_hash,
+    select_join_action,
 )
 from eyenet.contracts.enums import (
+    ArtifactSubjectKind,
+    ArtifactValidationState,
     CandidateState,
+    GroupAccessKind,
     GroupKind,
     IdentityRole,
     IdentityState,
@@ -122,6 +129,54 @@ def test_classify_ban_vs_fail() -> None:
     assert classify_join_error("SomeBrandNewTelethonError") is JoinOutcome.FAILED
 
 
+def test_classify_join_request_sent_is_requested() -> None:
+    # M9.E5.5: an approval-gated group accepted the request → pending, not failed.
+    assert classify_join_error("InviteRequestSentError") is JoinOutcome.REQUESTED
+
+
+# -- E5.5 pure helpers: select_join_action / parse_invite_hash / artifact_state
+
+
+def test_select_join_action_per_kind() -> None:
+    assert select_join_action(GroupAccessKind.PUBLIC_IDENTIFIER) is JoinAction.PUBLIC
+    assert select_join_action(GroupAccessKind.INVITE_LINK) is JoinAction.INVITE_HASH
+    # invite-link-only scope: everything else is unsupported for now.
+    for kind in (
+        GroupAccessKind.QR_CODE,
+        GroupAccessKind.DIRECT_INVITE,
+        GroupAccessKind.PAID_SUBSCRIPTION,
+        GroupAccessKind.ACCESS_BLOCKED,
+        GroupAccessKind.RESTRICTED_OTHER,
+    ):
+        assert select_join_action(kind) is JoinAction.UNSUPPORTED
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("https://t.me/+AbC_dEf-123", "AbC_dEf-123"),
+        ("t.me/+xyz789", "xyz789"),
+        ("https://t.me/joinchat/AAAAAEHbEkabc", "AAAAAEHbEkabc"),
+        ("tg://join?invite=Qw3rTy", "Qw3rTy"),
+        # public handles / channel links carry no invite token → None
+        ("https://t.me/publicchannel", None),
+        ("@publichandle", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_parse_invite_hash(value: str | None, expected: str | None) -> None:
+    assert parse_invite_hash(value) == expected
+
+
+def test_artifact_state_for_error_maps_dead_links_only() -> None:
+    assert artifact_state_for_error("InviteHashExpiredError") is ArtifactValidationState.EXPIRED
+    assert artifact_state_for_error("InviteHashInvalidError") is ArtifactValidationState.REVOKED
+    # errors that aren't the link's fault leave the artifact untouched
+    assert artifact_state_for_error("FloodWaitError") is None
+    assert artifact_state_for_error("UserBannedInChannelError") is None
+
+
 # -- finalize_joined ---------------------------------------------------------
 
 
@@ -212,3 +267,71 @@ async def test_quarantine_on_ban_fails_candidate_and_burns_scout(storage: BaseRe
     events = [r.event for r in await storage.all_audit()]
     assert "eyenet.audit.candidate.failed" in events
     assert "eyenet.audit.identity.burned" in events
+
+
+# -- mark_join_requested (E5.5) ----------------------------------------------
+
+
+async def test_mark_join_requested_transitions_and_audits(storage: BaseRepository) -> None:
+    src = await _source(storage)
+    coll = await _collector(storage, src)
+    cand = await _joining_candidate(storage, src, coll)
+    cmd = JoinGroupCommand(candidate_id=cand, platform_groupid="@target", scout_identity_id=uuid4())
+
+    handler = _handler(storage, _FakePool())
+    await handler.mark_join_requested(cmd)
+
+    row = await storage.get_candidate(cand)
+    assert row.state is CandidateState.REQUESTED
+    assert row.rejection_reason == "join_request_sent"
+    events = [r.event for r in await storage.all_audit()]
+    assert "eyenet.audit.candidate.join_requested" in events
+
+
+# -- record_artifact_validation (E5.5) ---------------------------------------
+
+
+async def _candidate_invite_artifact(storage: BaseRepository, src: UUID, coll: UUID) -> UUID:
+    cand = await _joining_candidate(storage, src, coll)
+    art = await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=cand,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+dead",
+        discovered_at_ingest=_NOW,
+    )
+    return art.id
+
+
+async def test_record_artifact_validation_writes_dead_link_state(
+    storage: BaseRepository,
+) -> None:
+    src = await _source(storage)
+    coll = await _collector(storage, src)
+    artifact_id = await _candidate_invite_artifact(storage, src, coll)
+
+    handler = _handler(storage, _FakePool())
+    await handler.record_artifact_validation(artifact_id, "InviteHashExpiredError", now=_NOW)
+
+    art = await storage.get_group_access_artifact(artifact_id)
+    assert art is not None
+    assert art.validation_state is ArtifactValidationState.EXPIRED
+    assert art.last_validated_at == _NOW
+
+
+async def test_record_artifact_validation_noop_for_non_link_error(
+    storage: BaseRepository,
+) -> None:
+    src = await _source(storage)
+    coll = await _collector(storage, src)
+    artifact_id = await _candidate_invite_artifact(storage, src, coll)
+
+    handler = _handler(storage, _FakePool())
+    # A flood-wait says nothing about the link — leave the artifact untouched.
+    await handler.record_artifact_validation(artifact_id, "FloodWaitError", now=_NOW)
+
+    art = await storage.get_group_access_artifact(artifact_id)
+    assert art is not None
+    assert art.validation_state is ArtifactValidationState.UNVERIFIED
+    assert art.last_validated_at is None
