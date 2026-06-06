@@ -219,6 +219,31 @@ class CaseCollaboratorRevokeRequest(ApiSchema):
     revocation_reason: str = Field(min_length=16, max_length=1024)
 
 
+# ── Seed roots (discovery loop — M9.D4, §4.12) ─────────────────────────────
+
+
+class CaseSeedRoots(ApiSchema):
+    """The seed-root groups anchoring a case's discovery tree (§4.12.3).
+
+    ``seed_root_group_ids`` are internal Group UUIDs (not platform ids) — the
+    §4.12.3 eligibility predicate reaches candidates whose mention seed-roots
+    intersect this set.
+    """
+
+    case_id: UUID
+    seed_root_group_ids: list[UUID] = Field(default_factory=list, max_length=4096)
+
+
+class CaseSeedRootsReplaceRequest(ApiSchema):
+    """Body for PUT /v1/cases/{case_id}/seed-roots — replace the whole set.
+
+    An empty list clears all seed roots. Emits ``case.seed_roots_changed`` (the
+    prior + new lists are frozen in the audit payload) when the set changes.
+    """
+
+    seed_root_group_ids: list[UUID] = Field(default_factory=list, max_length=4096)
+
+
 __all__ = [
     "CaseArchiveRequest",
     "CaseCloseRequest",
@@ -235,6 +260,8 @@ __all__ = [
     "CaseMemberSubjectRef",
     "CaseMemberSummary",
     "CaseReopenRequest",
+    "CaseSeedRoots",
+    "CaseSeedRootsReplaceRequest",
     "CaseSummary",
     "CaseUpdateRequest",
     "CursorPageCaseCollaboratorSummary",
