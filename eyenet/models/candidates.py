@@ -38,7 +38,7 @@ class GroupCandidateTable(SQLModel, table=True):
         UniqueConstraint("source_id", "platform_groupid", name="uq_candidate_source_platform"),
         CheckConstraint(
             "state IN ('DISCOVERED','QUEUED','APPROVED','JOINING',"
-            "'JOINED','REJECTED','FAILED','PARKED')",
+            "'JOINED','REQUESTED','REJECTED','FAILED','PARKED')",
             name="ck_candidate_state",
         ),
         CheckConstraint("score >= 0.0", name="ck_candidate_score_nonneg"),

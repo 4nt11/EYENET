@@ -340,6 +340,66 @@ async def test_transition_illegal_raises(storage: BaseRepository) -> None:
         await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINED)
 
 
+async def _drive_to_joining(storage: BaseRepository) -> GroupCandidateRow:
+    src = await _make_source(storage)
+    grp = await _make_group(storage, src, "root_grp")
+    actor = await _make_actor(storage, src, "u01")
+    cand, _ = await _record(storage, src, grp, actor)
+    cand = await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id,
+        to_state=CandidateState.APPROVED,
+        assigned_collector_id=_FAKE_COLLECTOR,
+    )
+    return await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINING)
+
+
+@pytest.mark.unit
+async def test_transition_joining_to_requested_to_joined(storage: BaseRepository) -> None:
+    # M9.E5.5: an approval-gated group accepts a join request, then later
+    # admits us → requested → joined.
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.REQUESTED
+    )
+    assert cand.state is CandidateState.REQUESTED
+
+    result_group_id = uuid4()
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id,
+        to_state=CandidateState.JOINED,
+        resulting_group_id=result_group_id,
+    )
+    assert cand.state is CandidateState.JOINED
+    assert cand.resulting_group_id == result_group_id
+
+
+@pytest.mark.unit
+async def test_transition_requested_to_failed(storage: BaseRepository) -> None:
+    # A pending request can still be denied/expire → requested → failed.
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.REQUESTED
+    )
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id,
+        to_state=CandidateState.FAILED,
+        rejection_reason="join request denied",
+    )
+    assert cand.state is CandidateState.FAILED
+
+
+@pytest.mark.unit
+async def test_transition_requested_to_queued_illegal(storage: BaseRepository) -> None:
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.REQUESTED
+    )
+    # requested → queued is NOT a legal edge.
+    with pytest.raises(ValueError, match="illegal candidate transition"):
+        await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+
+
 @pytest.mark.unit
 async def test_transition_not_found_raises(storage: BaseRepository) -> None:
     with pytest.raises(ValueError, match="not found"):

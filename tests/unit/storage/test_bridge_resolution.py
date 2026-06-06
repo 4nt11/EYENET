@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -23,6 +23,7 @@ from eyenet.contracts.enums import (
     GroupAccessKind,
     GroupKind,
     InfrastructureKind,
+    MentionKind,
     ResolutionState,
     SourceDomainPatternKind,
     SourceKind,
@@ -332,3 +333,143 @@ async def test_add_group_access_artifact_for_group(storage: BaseRepository) -> N
     assert row.kind is GroupAccessKind.PUBLIC_IDENTIFIER
     assert row.value == "@rutify"
     assert row.validation_state is ArtifactValidationState.VALID
+
+
+# --- M9.E5.5: getter / list-for-candidate / validation-state writeback ---
+
+_FAKE_COLLECTOR_E55 = UUID("00000000-0000-0000-0000-0000000000e5")
+
+
+async def _candidate_for_artifacts(storage: BaseRepository, name: str) -> UUID:
+    """Create a GroupCandidate (via a mention) to hang access artifacts off of."""
+    src = await _make_source(storage, name)
+    group_id = await storage.upsert_group(
+        source_id=src,
+        platform_groupid=f"observed_{name}",
+        kind=GroupKind.CHANNEL,
+        title=f"observed_{name}",
+        seen_at=_NOW,
+    )
+    actor = await storage.upsert_actor(
+        source_id=src,
+        actor_key=f"actor:{'a' * 60}{name[:4]}",
+        platform_userid=f"u_{name}",
+        handle=None,
+        display_name=None,
+        seen_at=_NOW,
+    )
+    candidate, _mention = await storage.record_candidate_mention(
+        source_id=src,
+        platform_groupid=f"cand_{name}",
+        observed_by_collector_id=_FAKE_COLLECTOR_E55,
+        observed_in_group_id=group_id,
+        seed_root_id=None,
+        depth_from_root=1,
+        mention_evidence_ref=f"telegram:-100000:{name}",
+        mention_kind=MentionKind.INVITE_LINK,
+        mentioned_at_source=_NOW,
+        mentioned_at_ingest=_NOW,
+        mentioning_actor_id=actor,
+    )
+    return candidate.id
+
+
+@pytest.mark.unit
+async def test_get_group_access_artifact_round_trips(storage: BaseRepository) -> None:
+    cand = await _candidate_for_artifacts(storage, "getter")
+    created = await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=cand,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+abc123",
+        discovered_at_ingest=_NOW,
+    )
+    fetched = await storage.get_group_access_artifact(created.id)
+    assert fetched is not None
+    assert fetched.id == created.id
+    assert fetched.candidate_id == cand
+    assert fetched.kind is GroupAccessKind.INVITE_LINK
+    assert fetched.value == "https://t.me/+abc123"
+
+
+@pytest.mark.unit
+async def test_get_group_access_artifact_missing_returns_none(
+    storage: BaseRepository,
+) -> None:
+    assert await storage.get_group_access_artifact(uuid4()) is None
+
+
+@pytest.mark.unit
+async def test_list_group_access_artifacts_for_candidate_filters_by_subject(
+    storage: BaseRepository,
+) -> None:
+    cand = await _candidate_for_artifacts(storage, "lister")
+    other = await _candidate_for_artifacts(storage, "other")
+    a1 = await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=cand,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+one",
+        discovered_at_ingest=_NOW,
+    )
+    a2 = await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=cand,
+        kind=GroupAccessKind.PUBLIC_IDENTIFIER,
+        value="@two",
+        discovered_at_ingest=_NOW,
+    )
+    # An artifact on a different candidate must NOT leak into the list.
+    await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=other,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+three",
+        discovered_at_ingest=_NOW,
+    )
+    rows = await storage.list_group_access_artifacts_for_candidate(cand)
+    assert {r.id for r in rows} == {a1.id, a2.id}
+    assert all(r.candidate_id == cand for r in rows)
+
+
+@pytest.mark.unit
+async def test_set_artifact_validation_state_writes_back(storage: BaseRepository) -> None:
+    cand = await _candidate_for_artifacts(storage, "writeback")
+    created = await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=cand,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+dead",
+        discovered_at_ingest=_NOW,
+    )
+    assert created.validation_state is ArtifactValidationState.UNVERIFIED
+    validated_at = datetime(2026, 5, 26, tzinfo=UTC)
+    updated = await storage.set_artifact_validation_state(
+        artifact_id=created.id,
+        validation_state=ArtifactValidationState.EXPIRED,
+        last_validated_at=validated_at,
+    )
+    assert updated is not None
+    assert updated.validation_state is ArtifactValidationState.EXPIRED
+    assert updated.last_validated_at == validated_at
+    # Durable: a fresh read sees the new state.
+    refetched = await storage.get_group_access_artifact(created.id)
+    assert refetched is not None
+    assert refetched.validation_state is ArtifactValidationState.EXPIRED
+
+
+@pytest.mark.unit
+async def test_set_artifact_validation_state_missing_returns_none(
+    storage: BaseRepository,
+) -> None:
+    result = await storage.set_artifact_validation_state(
+        artifact_id=uuid4(),
+        validation_state=ArtifactValidationState.REVOKED,
+        last_validated_at=_NOW,
+    )
+    assert result is None

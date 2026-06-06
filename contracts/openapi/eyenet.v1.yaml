@@ -3570,7 +3570,7 @@ components:
       enum: [stopped, starting, running, cooling, crashed]
     CandidateState:
       type: string
-      enum: [discovered, queued, approved, joining, joined, rejected, failed, parked]
+      enum: [discovered, queued, approved, joining, joined, requested, rejected, failed, parked]
     CollectorEligibilityResult:
       type: string
       description: M9.D3 emits only `deferred_to_runtime`; the rest are the Group E vocabulary.

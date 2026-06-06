@@ -19,13 +19,21 @@ Outcome of a join attempt:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eyenet.contracts.audit_subjects import AuditSubject
-from eyenet.contracts.enums import CandidateState, GroupKind, IdentityState, JoinedVia
+from eyenet.contracts.enums import (
+    ArtifactValidationState,
+    CandidateState,
+    GroupAccessKind,
+    GroupKind,
+    IdentityState,
+    JoinedVia,
+)
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
@@ -43,17 +51,30 @@ class JoinOutcome(Enum):
 
     FAILED = "failed"
     BANNED = "banned"
+    # Approval-gated group accepted a join *request* (M9.E5.5) — pending, not
+    # failed: the candidate goes joining→requested.
+    REQUESTED = "requested"
+
+
+class JoinAction(Enum):
+    """Which telethon request the collector should issue for an artifact kind."""
+
+    PUBLIC = "public"  # JoinChannelRequest on the public identifier
+    INVITE_HASH = "invite_hash"  # ImportChatInviteRequest on a parsed hash
+    UNSUPPORTED = "unsupported"  # fail_candidate("unsupported_access_artifact")
 
 
 # Unambiguous ban signal — the scout is no longer usable in this group.
 _BAN_ERRORS = frozenset({"UserBannedInChannelError"})
+# Approval-gated join: the request was sent, awaiting platform-side admin
+# approval (candidate joining→requested), distinct from a hard failure.
+_JOIN_REQUEST_ERRORS = frozenset({"InviteRequestSentError"})
 # Refusals / transient failures: the candidate fails, the scout survives.
 _FAIL_ERRORS = frozenset(
     {
         "FloodWaitError",
         "InviteHashExpiredError",
         "InviteHashInvalidError",
-        "InviteRequestSentError",
         "ChannelPrivateError",
         "ChatWriteForbiddenError",
         "ChannelsTooMuchError",
@@ -61,6 +82,19 @@ _FAIL_ERRORS = frozenset(
         "UsernameNotOccupiedError",
     }
 )
+# Dead-link verdicts written back onto the access artifact's validation_state so
+# the supervisor's selection won't re-offer the same broken invite (M9.E5.5).
+_ARTIFACT_STATE_BY_ERROR: dict[str, ArtifactValidationState] = {
+    "InviteHashExpiredError": ArtifactValidationState.EXPIRED,
+    "InviteHashInvalidError": ArtifactValidationState.REVOKED,
+}
+
+# Telegram invite tokens follow `+HASH`, `joinchat/HASH`, or `invite=HASH`
+# (covering t.me/+, t.me/joinchat/, and tg://join?invite= forms). The token is
+# base64url-ish; a bare public handle (t.me/name, @name) carries none of these
+# markers and yields no match. ASCII classes are correct here (telethon hashes
+# are ASCII).
+_INVITE_HASH_RE = re.compile(r"(?:joinchat/|invite=|\+)([A-Za-z0-9_-]+)")
 
 
 def classify_join_error(exc_name: str) -> JoinOutcome:
@@ -72,7 +106,41 @@ def classify_join_error(exc_name: str) -> JoinOutcome:
     burn a scout on an error we don't understand)."""
     if exc_name in _BAN_ERRORS:
         return JoinOutcome.BANNED
+    if exc_name in _JOIN_REQUEST_ERRORS:
+        return JoinOutcome.REQUESTED
     return JoinOutcome.FAILED
+
+
+def select_join_action(kind: GroupAccessKind) -> JoinAction:
+    """Map an access-artifact kind to the join action (M9.E5.5, invite-link scope).
+
+    PUBLIC_IDENTIFIER → public join; INVITE_LINK → invite-hash join. Every other
+    kind (QR_CODE, DIRECT_INVITE, PAID_SUBSCRIPTION, ACCESS_BLOCKED,
+    RESTRICTED_OTHER) is unsupported for now and fails the candidate cleanly."""
+    if kind is GroupAccessKind.PUBLIC_IDENTIFIER:
+        return JoinAction.PUBLIC
+    if kind is GroupAccessKind.INVITE_LINK:
+        return JoinAction.INVITE_HASH
+    return JoinAction.UNSUPPORTED
+
+
+def parse_invite_hash(value: str | None) -> str | None:
+    """Extract the invite hash from a Telegram invite-link value, or ``None``.
+
+    Handles ``t.me/+HASH``, ``t.me/joinchat/HASH``, ``tg://join?invite=HASH``
+    (with or without scheme/host). Returns ``None`` for a public handle or any
+    value that carries no invite token."""
+    if not value:
+        return None
+    match = _INVITE_HASH_RE.search(value)
+    return match.group(1) if match else None
+
+
+def artifact_state_for_error(exc_name: str) -> ArtifactValidationState | None:
+    """Map a telethon join-error class name to a dead-link validation verdict,
+    or ``None`` when the error says nothing about the artifact itself (e.g. a
+    FloodWait or a ban — those aren't the link's fault) (M9.E5.5)."""
+    return _ARTIFACT_STATE_BY_ERROR.get(exc_name)
 
 
 class CollectorJoinHandler:
@@ -163,6 +231,54 @@ class CollectorJoinHandler:
             "collector.candidate_failed", candidate_id=str(cmd.candidate_id), reason=reason
         )
 
+    async def mark_join_requested(
+        self, cmd: JoinGroupCommand, *, reason: str = "join_request_sent"
+    ) -> None:
+        """Record a pending approval-gated join (candidate joining→requested).
+
+        The scout sent a join *request* (telethon ``InviteRequestSentError``);
+        a platform admin must approve it. The candidate is not failed — it waits
+        in ``requested`` until the (future) approval detector resolves it."""
+        await self._storage.transition_candidate(
+            candidate_id=cmd.candidate_id,
+            to_state=CandidateState.REQUESTED,
+            rejection_reason=reason,
+        )
+        await self._audit.emit(
+            event=AuditSubject.CANDIDATE_JOIN_REQUESTED.value,
+            subject_kind="candidate",
+            subject_id=cmd.candidate_id,
+            payload={"reason": reason, "scout_identity_id": str(cmd.scout_identity_id)},
+        )
+        _log.info(
+            "collector.candidate_join_requested",
+            candidate_id=str(cmd.candidate_id),
+            reason=reason,
+        )
+
+    async def record_artifact_validation(
+        self, artifact_id: UUID, exc_name: str, *, now: datetime | None = None
+    ) -> None:
+        """Write a dead-link verdict back onto the access artifact (M9.E5.5).
+
+        No-op unless ``exc_name`` maps to a validation state (expired/revoked) —
+        a flood-wait or ban says nothing about the link itself, so the artifact
+        is left untouched. Idempotent and best-effort: the candidate failure is
+        recorded separately by the caller regardless."""
+        state = artifact_state_for_error(exc_name)
+        if state is None:
+            return
+        await self._storage.set_artifact_validation_state(
+            artifact_id=artifact_id,
+            validation_state=state,
+            last_validated_at=now or datetime.now(tz=UTC),
+        )
+        _log.info(
+            "collector.artifact_validation_recorded",
+            artifact_id=str(artifact_id),
+            validation_state=state.value,
+        )
+
     async def quarantine_on_ban(
         self, cmd: JoinGroupCommand, *, reason: str = "banned_on_join"
     ) -> None:
@@ -187,4 +303,12 @@ class CollectorJoinHandler:
             )
 
 
-__all__ = ["CollectorJoinHandler", "JoinOutcome", "classify_join_error"]
+__all__ = [
+    "CollectorJoinHandler",
+    "JoinAction",
+    "JoinOutcome",
+    "artifact_state_for_error",
+    "classify_join_error",
+    "parse_invite_hash",
+    "select_join_action",
+]
