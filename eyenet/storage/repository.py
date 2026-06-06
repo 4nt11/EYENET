@@ -1581,6 +1581,39 @@ class BaseRepository(ABC):
         ``validation_state`` defaults to ``UNVERIFIED`` when ``None``.
         """
 
+    @abstractmethod
+    async def get_group_access_artifact(
+        self,
+        artifact_id: UUID,
+    ) -> GroupAccessArtifactRow | None:
+        """Return one GroupAccessArtifactRow by id, or ``None`` (M9.E5.5)."""
+
+    @abstractmethod
+    async def list_group_access_artifacts_for_candidate(
+        self,
+        candidate_id: UUID,
+    ) -> list[GroupAccessArtifactRow]:
+        """Return every GroupAccessArtifact whose subject is ``candidate_id``.
+
+        Unordered — the supervisor ranks by ``GroupAccessKind`` preference in
+        Python (M9.E5.5, §4.12.4).
+        """
+
+    @abstractmethod
+    async def set_artifact_validation_state(
+        self,
+        *,
+        artifact_id: UUID,
+        validation_state: ArtifactValidationState,
+        last_validated_at: datetime,
+    ) -> GroupAccessArtifactRow | None:
+        """Update a GroupAccessArtifact's validation lifecycle, or ``None`` if
+        the row is gone (M9.E5.5).
+
+        A failed invite join writes the dead-link verdict back here so the
+        supervisor's selection won't re-offer the artifact next tick.
+        """
+
     # =================================================================
     # AUTH (API_PLAN §4.1-§4.6, M9.A1)
     # =================================================================

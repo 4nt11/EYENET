@@ -217,6 +217,56 @@ class ArtifactsMixin:
             await session.refresh(row)
             return _access_row(row)
 
+    async def get_group_access_artifact(
+        self,
+        artifact_id: UUID,
+    ) -> GroupAccessArtifactRow | None:
+        """Return one GroupAccessArtifactRow by id, or ``None`` (M9.E5.5)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(GroupAccessArtifactTable, artifact_id)
+            return _access_row(table) if table is not None else None
+
+    async def list_group_access_artifacts_for_candidate(
+        self,
+        candidate_id: UUID,
+    ) -> list[GroupAccessArtifactRow]:
+        """Return every GroupAccessArtifact whose subject is ``candidate_id``.
+
+        No SQL-side ordering — the supervisor ranks by ``GroupAccessKind``
+        preference (not enum-string order) in Python (M9.E5.5, §4.12.4).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(GroupAccessArtifactTable).where(
+                GroupAccessArtifactTable.candidate_id == candidate_id,
+            )
+            result = await session.exec(stmt)
+            return [_access_row(r) for r in list(result)]
+
+    async def set_artifact_validation_state(
+        self,
+        *,
+        artifact_id: UUID,
+        validation_state: ArtifactValidationState,
+        last_validated_at: datetime,
+    ) -> GroupAccessArtifactRow | None:
+        """Update a GroupAccessArtifact's validation lifecycle, or ``None`` if
+        the row is gone (M9.E5.5).
+
+        A failed invite join writes the dead-link verdict back here
+        (``EXPIRED`` / ``REVOKED``) so the supervisor's selection won't
+        re-offer it on the next tick.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(GroupAccessArtifactTable, artifact_id)
+            if row is None:
+                return None
+            row.validation_state = validation_state
+            row.last_validated_at = last_validated_at
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _access_row(row)
+
     async def _resolve_existing_artifacts_for_new_domain_in_session(
         self,
         session: AsyncSession,
