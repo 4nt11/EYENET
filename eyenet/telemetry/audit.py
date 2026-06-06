@@ -39,6 +39,17 @@ class AuditEmitter:
         self._service = service
         self._instance_id = instance_id
 
+    @property
+    def service(self) -> str:
+        """The configured service name (for callers passing it to self-auditing
+        storage methods, e.g. the Case mixin)."""
+        return self._service
+
+    @property
+    def instance_id(self) -> str:
+        """The configured instance id (see :attr:`service`)."""
+        return self._instance_id
+
     async def emit(
         self,
         *,

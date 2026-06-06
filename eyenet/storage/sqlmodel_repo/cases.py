@@ -237,6 +237,58 @@ class CasesMixin:
         )
         return row
 
+    async def reopen_archived_case(
+        self,
+        *,
+        case_id: UUID,
+        reopener_user_id: UUID,
+        reason: str,
+        now: datetime | None = None,
+        service: str,
+        instance_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> CaseRow:
+        if len(reason) < _MIN_REASON_LEN:
+            raise CaseError("reopen reason must be at least 16 characters")
+        at = now or datetime.now(tz=UTC)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            archived = await _require_case(session, case_id)
+            if archived.status is not CaseStatus.ARCHIVED:
+                raise CaseError(
+                    f"only ARCHIVED cases reopen into a successor "
+                    f"(got {archived.status.value})"
+                )
+            successor = CaseTable(
+                title=archived.title,
+                description=archived.description,
+                status=CaseStatus.OPEN,
+                effective_tier=SensitivityTier.NORMAL,
+                created_by_user_id=reopener_user_id,
+                created_at=at,
+                parent_case_id=archived.id,
+                seed_root_group_ids=list(archived.seed_root_group_ids),
+                redundancy_policy=archived.redundancy_policy,
+                auto_join_policy=archived.auto_join_policy,
+                auto_join_score_threshold=archived.auto_join_score_threshold,
+            )
+            session.add(successor)
+            await session.commit()
+            await session.refresh(successor)
+            row = _case_row(successor)
+        await self._emit_case_audit(
+            event=AuditSubject.CASE_REOPENED,
+            actor=reopener_user_id,
+            subject_id=row.id,
+            payload={"parent_case_id": str(case_id), "reason": reason},
+            at=at,
+            service=service,
+            instance_id=instance_id,
+            trace_id=trace_id,
+            span_id=span_id,
+        )
+        return row
+
     async def archive_case(
         self,
         *,

@@ -209,9 +209,14 @@ class CaseCollaboratorAddRequest(ApiSchema):
 
 
 class CaseCollaboratorRevokeRequest(ApiSchema):
-    """Body for DELETE /v1/cases/{case_id}/collaborators/{collaborator_id}."""
+    """Body for DELETE /v1/cases/{case_id}/collaborators/{collaborator_id}.
 
-    revocation_reason: str = Field(min_length=1, max_length=1024)
+    ``revocation_reason`` floors at 16 chars to match the storage layer (and
+    every other case reason field) — a shorter reason is rejected at validation
+    (422) rather than surfacing as a 409 from storage.
+    """
+
+    revocation_reason: str = Field(min_length=16, max_length=1024)
 
 
 __all__ = [

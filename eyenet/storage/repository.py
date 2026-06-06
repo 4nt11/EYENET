@@ -206,6 +206,28 @@ class BaseRepository(ABC):
     ) -> CaseRow: ...
 
     @abstractmethod
+    async def reopen_archived_case(
+        self,
+        *,
+        case_id: UUID,
+        reopener_user_id: UUID,
+        reason: str,
+        now: datetime | None = None,
+        service: str,
+        instance_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> CaseRow:
+        """Archived → open via a fresh successor case (API_PLAN §4.10.3).
+
+        Archived cases are immutable, so reopening creates a NEW ``open`` case
+        carrying ``parent_case_id`` = the archived id and copying the title,
+        description, and discovery policy (seed roots / redundancy / auto-join).
+        Members and collaborators are NOT copied — the successor is a fresh
+        investigation the operator re-populates. Returns the successor row.
+        Raises if the source case isn't ARCHIVED."""
+
+    @abstractmethod
     async def archive_case(
         self,
         *,
