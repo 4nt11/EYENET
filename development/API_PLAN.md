@@ -2953,50 +2953,69 @@ Group C's actual storage surface + documented in code:
 - **Files touched:** `eyenet/api/v1/candidates.py`, `eyenet/api/v1/schemas/candidates.py`, `eyenet/services/discovery/eligibility.py`
 - **DoD:** approve with ineligible collector rejected with reason code; precomputed `eligibility_per_collector` matches the predicate run server-side; Schemathesis stateful pass.
 
-#### M9.D4 — Seed-roots + Case.auto_join_policy — ⏸ DEFERRED (pairs with Group E)
-- Deferred from the D1–D3 milestone: mutates the `Case` model and its eligibility-recompute
-  couples to the Group E runtime that doesn't exist yet. Land alongside E.
-- Handlers: `GET/PUT /v1/cases/{id}/seed-roots`, `POST /v1/cases/{id}/seed-roots/{group_id}`.
-- `Case.auto_join_policy` + `Case.redundancy_policy` extension applied to existing `case_v2` table — *no Alembic, just schema change + `rm data/*.db && eyenet init`* per pre-public posture.
-- Emits `case.seed_roots_changed`; triggers candidate eligibility recompute (idempotent).
-- **Depends on:** M9.D3
-- **Files touched:** `eyenet/models/cases.py` (extension), `eyenet/api/v1/cases_discovery.py`
-- **DoD:** seed-root change → eligibility recompute reflected in next `GET /v1/candidates`; policy field round-trip persisted.
+#### M9.D4 — Seed-roots + Case.auto_join_policy — ◑ MODEL+STORAGE SHIPPED with Group E; HTTP endpoints DEFERRED
+- The **Case model + storage fold-in landed with Group E slice 0** (the real §4.12.3
+  eligibility predicate needs `Case.redundancy_policy` + candidate→Case resolution).
+  `case_v2` gained `seed_root_group_ids` / `redundancy_policy` / `auto_join_policy` /
+  `auto_join_score_threshold` (+ `RedundancyPolicy`/`AutoJoinPolicy` enums); storage
+  `update_case_discovery_policy` (emits `case.seed_roots_changed`) +
+  `resolve_case_for_candidate`. *No Alembic — `rm data/*.db && eyenet init`.*
+- The **eligibility recompute is live**: a seed-root change shifts
+  `reachable_roots_for_collector`, so the next `GET /v1/candidates/{id}` reflects it
+  (the predicate is computed at read time, not cached) — the original DoD is met.
+- **Still DEFERRED — the HTTP endpoints** `GET/PUT /v1/cases/{id}/seed-roots`,
+  `POST /v1/cases/{id}/seed-roots/{group_id}`. They sit on the `/v1/cases` tree whose
+  CRUD handlers are still `NotImplementedError` stubs (a separate Case-API group). The
+  storage + model they need is done; wiring the operator-facing surface is a thin
+  follow-on once `/v1/cases` CRUD lands.
+- **Files touched (as built):** `eyenet/models/case.py`, `eyenet/contracts/{case,enums}.py`,
+  `eyenet/storage/sqlmodel_repo/{cases,candidates}.py`.
 
 ---
 
-### Group E — Discovery runtime
+### Group E — Discovery runtime — ✅ E1–E4 SHIPPED; E5 DEFERRED
 
 Depends on C (storage), parallel to D (API). Sensor primitives + supervisor + scout pipeline + Telegram-layer recursion.
 
-#### M9.E1 — `url_extraction` sensor primitive
-- New primitive at `eyenet/sensor/primitives/url_extraction.py` — extracts URLs from message text, normalizes via `normalize_host` from M9.C1, writes `InfrastructureArtifact` rows. Triggers Path A bridge resolution on insert.
-- **Depends on:** M9.C1, M9.C6
-- **Files touched:** `eyenet/sensor/primitives/url_extraction.py`, `tests/unit/sensor/test_url_extraction.py`
-- **DoD:** unicode/punycode duplicates collapse to one artifact; resolved/unresolved branches both tested.
+**As-built deviations (whole group):** the discovery extractors live under a NEW
+`eyenet/sensor/discovery/` seam (`DiscoveryExtractor` ABC + resolved `MessageContext`),
+NOT `eyenet/sensor/primitives/` — the stylometric primitives are pure
+`compute(corpus,bodies)→Observation`, while discovery extractors write storage per
+message with collector/group context. The live `DiscoverySensor` resolves a
+`RawMessageEnvelope` → `MessageContext` (collector via a new
+`resolve_collector_by_instance_id` reverse-lookup since the 8-char `instance_id`
+isn't stored on `CollectorTable`; actor via `resolve_actor_id`; group + lineage via
+`upsert_group`/`group_lineage`). The **DB `IdentityTable` is the source of truth for
+the discovery-loop role/state/graduation machine**; the file pool stays the
+credential store; the file↔DB provisioning bridge is deferred to E5.
 
-#### M9.E2 — `channel_reference_extraction` sensor primitive
-- New primitive — detects platform-native channel references (Telegram `@channel`, Matrix `#room:server`, etc.) and writes `GroupCandidateMention` rows.
-- **Depends on:** M9.C4
-- **Files touched:** `eyenet/sensor/primitives/channel_reference_extraction.py`, `tests/unit/sensor/test_channel_reference_extraction.py`
-- **DoD:** mention upsert idempotent; `depth_from_root` propagated from triggering Message's group lineage.
+#### M9.E1 — `url_extraction` discovery extractor — ✅ SHIPPED
+- `eyenet/sensor/discovery/url_extraction.py` — extracts scheme-qualified URLs + bare
+  onion addresses, `normalize_host`-collapses unicode↔punycode dupes to one artifact,
+  classifies onion vs domain, upserts via `put_infrastructure_artifact` (Path-A inline).
+- **Files (as built):** `eyenet/sensor/discovery/{_base,url_extraction}.py`, `tests/unit/sensor/test_url_extraction.py`
+- **DoD met:** punycode collapse + resolved/unresolved branches tested.
 
-#### M9.E3 — CollectorSupervisor service scaffold
-- New service `eyenet/services/collector_supervisor.py` inheriting `ServiceBase`. In-process async supervisor, NOT systemd flag-watcher (decision per session).
-- Reads `Collector.desired_state`, drives `observed_state`, leases identities atomically (single writer of `Identity.state=in_use`).
-- Emits `eyenet.audit.collector.*` on every operator-initiated transition.
-- **Depends on:** M9.C3
-- **Files touched:** `eyenet/services/collector_supervisor.py`, `tests/integration/services/test_supervisor.py`
-- **DoD:** desired=running + observed=stopped → supervisor transitions to running; crash recovery resumes from `observed_state`; identity-lease race tested.
+#### M9.E2 — `channel_reference_extraction` discovery extractor — ✅ SHIPPED
+- `eyenet/sensor/discovery/channel_reference_extraction.py` — Telegram t.me invite/public/@handle + Matrix `#room:server` → `record_candidate_mention`; depth = observed-group depth + 1 with inherited seed root; storage-idempotent on `{evidence_ref}#{ref}`. Plus the frozen deterministic `score_candidate` (distinct groups/actors) + `discovered→queued` auto-queue (auto-*approve* stays off by default).
+- **Files (as built):** `.../channel_reference_extraction.py`, `eyenet/sensor/discovery_sensor.py`, `tests/unit/sensor/test_channel_reference_extraction.py`, `tests/integration/test_discovery_sensor.py`
+- **DoD met:** idempotent mention + depth propagation tested end-to-end.
 
-#### M9.E4 — Scout graduation pipeline
-- Scout identities observe a candidate group for 7 days before graduating to `role=monitor`. Lives in `eyenet/services/discovery/scout_graduation.py`.
-- Periodic tick (every hour) inspects active scout memberships, promotes eligible ones.
-- **Depends on:** M9.C5, M9.E3
-- **Files touched:** `eyenet/services/discovery/scout_graduation.py`
-- **DoD:** scout with 7d+ continuous membership graduates; graduation emits audit subject; failed scout (kicked, banned) is quarantined instead.
+#### M9.E3 — CollectorSupervisor + real eligibility predicate — ✅ SHIPPED
+- `eyenet/services/collector_supervisor.py` (`ServiceBase`, in-process async, NOT a flag-watcher). Tick-driven: reconciles `observed_state`→`desired_state` (crash-safe by polling, audited `collector.reconciled`); dispatches approved candidates — real §4.12.3 eligibility gate, leases a scout (`lease_scout`, single writer of `state=in_use`), writes `approved→joining`, records a `JoinGroupCommand` in the `candidate.joining` audit payload.
+- **Retires the D3 eligibility stub**: `eyenet/services/discovery/eligibility.py` now implements dedup/redundancy + depth + scout-availability; `GET /v1/candidates/{id}` surfaces real verdicts.
+- **Files (as built):** `eyenet/services/collector_supervisor.py`, `eyenet/services/discovery/eligibility.py`, `eyenet/contracts/supervisor.py`, `tests/{unit/services/test_eligibility,integration/services/test_supervisor}.py`
+- **DoD met:** desired/observed reconcile, crash-resume, identity-lease invariant tested.
+- **Deferred to E5:** the actual platform join (`joining→joined`) + the command's bus dispatch.
 
-#### M9.E5 — Telegram collector recursion
+#### M9.E4 — Scout graduation pipeline — ✅ SHIPPED
+- `eyenet/services/discovery/scout_graduation.py` (`ServiceBase`, hourly tick). `graduate_due` promotes SCOUTs past the observation window (default 7d, still-active membership = clean window) → MONITOR + `graduated_at` + `identity.graduated`. `quarantine_scout` (burn path) → BURNED/QUARANTINE + park candidate + `identity.burned`; live ban-detection trigger is E5.
+- **Files (as built):** `eyenet/services/discovery/scout_graduation.py`, `eyenet/storage/...list_graduating_scouts`, `tests/integration/services/test_scout_graduation.py`
+- **DoD met:** graduate / too-fresh / burn+park tested.
+- **Deviation:** window is a service default; per-source `Source.scout_observation_window_days` override deferred with the other `Source.default_*` discovery fields.
+
+#### M9.E5 — Telegram collector recursion — ⏸ DEFERRED (needs a live Telethon client)
+- Lands after E1–E4; the collector consuming `JoinGroupCommand`, the platform join, `joining→joined`, FloodWait/InviteExpired mapping. Coverage-omitted live-service code (CLAUDE.md §3.4). Also closes the file↔DB identity bridge + the live scout-burn trigger.
 - Telegram collector consumes approved `GroupCandidate` rows, joins via the access artifact's `kind_preference`-ordered method list, opens `CollectorGroupMembership`, transitions candidate to `joined`.
 - Cross-source candidates (`source_id != collector.source_id`) remain inert per §4.12.10 deferred-items note.
 - **Depends on:** M9.D3 (approval surface), M9.E2 (candidates being populated), M9.E3 (supervisor)

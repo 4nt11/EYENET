@@ -9,6 +9,7 @@ map — every illegal edge raises ValueError before touching the database.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func
@@ -22,6 +23,8 @@ from eyenet.contracts.candidate import (
 )
 from eyenet.contracts.enums import CandidateState, GroupKind, MentionKind
 from eyenet.models.candidates import GroupCandidateMentionTable, GroupCandidateTable
+from eyenet.models.case import CaseTable
+from eyenet.models.membership import CollectorGroupMembershipTable
 
 from ._helpers import safe_session
 
@@ -38,6 +41,28 @@ _ALLOWED: dict[CandidateState, frozenset[CandidateState]] = {
     CandidateState.REJECTED: frozenset({CandidateState.PARKED}),
     CandidateState.PARKED: frozenset({CandidateState.APPROVED}),
 }
+
+
+# Frozen, deterministic candidate score function (API_PLAN §4.12.2). v1 weights
+# distinct mentioning groups + distinct mentioning actors — the breadth signals
+# that a referenced group is genuinely circulating, not a one-off. Changing this
+# math MUST bump _SCORE_FUNCTION_VERSION (a `candidate.score_function_upgraded`
+# release event; see §4.12.2). Capped at 1.0.
+_SCORE_FUNCTION_VERSION = 1
+_W_GROUPS = 0.3
+_W_ACTORS = 0.2
+
+
+def _score_candidate(distinct_groups: int, distinct_actors: int) -> tuple[float, dict[str, Any]]:
+    """Pure, deterministic candidate score + breakdown (frozen v1)."""
+    raw = _W_GROUPS * distinct_groups + _W_ACTORS * distinct_actors
+    score = min(1.0, raw)
+    breakdown: dict[str, Any] = {
+        "distinct_mentioning_groups": distinct_groups,
+        "distinct_mentioning_actors": distinct_actors,
+        "score_function_version": _SCORE_FUNCTION_VERSION,
+    }
+    return score, breakdown
 
 
 def _coerce_utc(value: datetime | None) -> datetime | None:
@@ -326,6 +351,119 @@ class CandidatesMixin:
                 mentions=mentions,
                 min_depth_by_collector=min_depth,
             )
+
+    async def score_candidate(self, candidate_id: UUID) -> GroupCandidateRow:
+        """Recompute a candidate's score from its mentions + maybe auto-queue.
+
+        Deterministic, frozen v1 (API_PLAN §4.12.2): score weights distinct
+        mentioning groups + actors, writes ``score`` / ``score_breakdown`` /
+        ``score_function_version``. If the candidate is still ``discovered`` and
+        a resolving Case sets ``auto_join_score_threshold`` that the new score
+        crosses, it auto-transitions ``discovered → queued`` (the §4.12.2 step-4
+        auto-queue; auto-*approve* is a separate, opt-in gate not fired here).
+
+        Raises :class:`ValueError` if the candidate does not exist.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            candidate = await session.get(GroupCandidateTable, candidate_id)
+            if candidate is None:
+                raise ValueError(f"candidate {candidate_id} not found")
+            mention_stmt = select(GroupCandidateMentionTable).where(
+                GroupCandidateMentionTable.candidate_id == candidate_id,
+            )
+            mentions = list(await session.exec(mention_stmt))
+            distinct_groups = len({m.observed_in_group_id for m in mentions})
+            distinct_actors = len({m.mentioning_actor_id for m in mentions})
+            score, breakdown = _score_candidate(distinct_groups, distinct_actors)
+            candidate.score = score
+            candidate.score_breakdown = breakdown
+            candidate.score_function_version = _SCORE_FUNCTION_VERSION
+            session.add(candidate)
+            await session.commit()
+            await session.refresh(candidate)
+            row = _candidate_row(candidate)
+
+        if row.state is CandidateState.DISCOVERED:
+            case = await self.resolve_case_for_candidate(candidate_id)  # type: ignore[attr-defined]
+            threshold = case.auto_join_score_threshold if case is not None else None
+            if threshold is not None and row.score >= threshold:
+                row = await self.transition_candidate(
+                    candidate_id=candidate_id,
+                    to_state=CandidateState.QUEUED,
+                )
+        return row
+
+    async def group_lineage(self, group_id: UUID) -> tuple[UUID | None, int]:
+        """Return ``(seed_root_id, depth_from_root)`` for a group (API_PLAN §4.12).
+
+        Resolution order:
+
+        1. **Seed root** — the group is listed in some Case's
+           ``seed_root_group_ids`` → ``(group_id, 0)``.
+        2. **Discovered** — a candidate's ``resulting_group_id`` points here →
+           the min-depth mention of that candidate carries the lineage
+           ``(seed_root_id, depth_from_root)``.
+        3. **Unknown** — neither (a seed/manual group not registered as a root)
+           → ``(None, 0)``. Mentions extracted from it cannot propagate a root.
+
+        Used by ``channel_reference_extraction`` (E2): a mention observed in
+        group G gets ``seed_root_id = root`` and ``depth_from_root = depth + 1``.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            gid = str(group_id)
+            case_result = await session.exec(select(CaseTable))
+            for case_table in case_result:
+                if gid in case_table.seed_root_group_ids:
+                    return (group_id, 0)
+
+            cand_stmt = select(GroupCandidateTable).where(
+                col(GroupCandidateTable.resulting_group_id) == group_id,
+            )
+            candidate = (await session.exec(cand_stmt)).first()
+            if candidate is not None:
+                mention_stmt = select(GroupCandidateMentionTable).where(
+                    col(GroupCandidateMentionTable.candidate_id) == candidate.id,
+                    col(GroupCandidateMentionTable.seed_root_id).is_not(None),
+                )
+                mentions = list(await session.exec(mention_stmt))
+                if mentions:
+                    best = min(mentions, key=lambda m: m.depth_from_root)
+                    return (best.seed_root_id, best.depth_from_root)
+
+            return (None, 0)
+
+    async def reachable_roots_for_collector(self, collector_id: UUID) -> set[UUID]:
+        """Return the seed-root group ids reachable by a collector (§4.12.3).
+
+        A root is reachable when the collector has either (a) observed a mention
+        carrying that ``seed_root_id``, or (b) an active membership in a group
+        that is itself a registered seed root. The eligibility predicate
+        intersects this set with a candidate's mention seed-roots to find the
+        minimum reachable depth.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            roots: set[UUID] = set()
+
+            mention_stmt = select(GroupCandidateMentionTable.seed_root_id).where(
+                col(GroupCandidateMentionTable.observed_by_collector_id) == collector_id,
+                col(GroupCandidateMentionTable.seed_root_id).is_not(None),
+            )
+            for seed_root_id in await session.exec(mention_stmt):
+                if seed_root_id is not None:
+                    roots.add(seed_root_id)
+
+            mem_stmt = select(CollectorGroupMembershipTable.group_id).where(
+                col(CollectorGroupMembershipTable.collector_id) == collector_id,
+                col(CollectorGroupMembershipTable.left_at).is_(None),
+            )
+            member_group_ids = set(await session.exec(mem_stmt))
+            if member_group_ids:
+                seed_set: set[str] = set()
+                for case_table in await session.exec(select(CaseTable)):
+                    seed_set.update(case_table.seed_root_group_ids)
+                roots.update(g for g in member_group_ids if str(g) in seed_set)
+
+            return roots
 
 
 __all__ = ["CandidatesMixin"]

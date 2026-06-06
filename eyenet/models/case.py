@@ -20,13 +20,15 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CHAR, CheckConstraint, Column, Computed, Index, UniqueConstraint
+from sqlalchemy import CHAR, JSON, CheckConstraint, Column, Computed, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import (
+    AutoJoinPolicy,
     CaseRoleOnCase,
     CaseStatus,
     CaseSubjectKind,
+    RedundancyPolicy,
     SensitivityTier,
 )
 
@@ -61,6 +63,17 @@ class CaseTable(SQLModel, table=True):
             "archive_reason",
         ),
         CheckConstraint("length(title) >= 3", name="ck_case_v2_title_min"),
+        # SQLAlchemy's Enum column persists the enum NAME (uppercase), matching
+        # the existing ck_candidate_state / ck_identity_role discipline — NOT
+        # the lowercase .value used at the JSON wire boundary.
+        CheckConstraint(
+            "redundancy_policy IN ('PREFER_SINGLE', 'PREFER_DUAL', 'REQUIRED_DUAL')",
+            name="ck_case_v2_redundancy_policy",
+        ),
+        CheckConstraint(
+            "auto_join_policy IN ('DISABLED', 'SCORE_THRESHOLD', 'SCORE_THRESHOLD_WITH_ROLE_GATE')",
+            name="ck_case_v2_auto_join_policy",
+        ),
         Index("ix_case_v2_status_created", "status", "created_at"),
         Index("ix_case_v2_effective_tier", "effective_tier"),
     )
@@ -82,6 +95,21 @@ class CaseTable(SQLModel, table=True):
     # No FK because the predecessor may have been deleted in test fixtures;
     # production cases never delete, but the storage layer doesn't enforce.
     parent_case_id: UUID | None = Field(default=None, index=True)
+    # -- Discovery-loop policy (API_PLAN §4.12, M9.D4 / Group E fold-in) -------
+    # Operator-curated initial root set; depth-0 in the discovery tree. Stored
+    # as a JSON list of stringified UUIDs (SQLAlchemy's JSON type can't bind a
+    # raw UUID); the CaseRow contract exposes list[UUID] and the storage layer
+    # coerces. Mutating this list emits `case.seed_roots_changed` and changes
+    # downstream candidate eligibility.
+    seed_root_group_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    # Collector-coverage policy — the dedup/dual-cover dimension of the §4.12.3
+    # eligibility predicate.
+    redundancy_policy: RedundancyPolicy = Field(default=RedundancyPolicy.PREFER_SINGLE)
+    # Automation posture — `disabled` by default (§4.12.1: auto-join is opt-in
+    # per Case). Auto-approve never fires while this is `disabled`.
+    auto_join_policy: AutoJoinPolicy = Field(default=AutoJoinPolicy.DISABLED)
+    # Applied only when auto_join_policy != disabled.
+    auto_join_score_threshold: float | None = Field(default=None)
 
 
 class CaseMemberTable(SQLModel, table=True):

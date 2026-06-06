@@ -20,6 +20,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+# Runtime import (cheap, no cycle — enums.py imports only stdlib): needed for
+# the IdentityRole/IdentityState defaults on create_identity below. Every other
+# contract stays under TYPE_CHECKING.
+from eyenet.contracts.enums import IdentityRole as _IdentityRole, IdentityState as _IdentityState
+
 if TYPE_CHECKING:
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.attribution import LinkageRow
@@ -43,6 +48,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.enums import (
         ArtifactSubjectKind,
         ArtifactValidationState,
+        AutoJoinPolicy,
         CandidateState,
         CaseRoleOnCase,
         CaseSubjectKind,
@@ -51,9 +57,12 @@ if TYPE_CHECKING:
         CollectorObservedState,
         GroupAccessKind,
         GroupKind,
+        IdentityRole,
+        IdentityState,
         InfrastructureKind,
         JoinedVia,
         MentionKind,
+        RedundancyPolicy,
         SensitivityTier,
         SourceDomainPatternKind,
         SourceKind,
@@ -61,6 +70,7 @@ if TYPE_CHECKING:
         SystemUserRole,
     )
     from eyenet.contracts.feedback import FeedbackPairRow
+    from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
@@ -210,6 +220,34 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def get_case(self, case_id: UUID) -> CaseRow | None: ...
+
+    @abstractmethod
+    async def update_case_discovery_policy(
+        self,
+        *,
+        case_id: UUID,
+        seed_root_group_ids: list[UUID] | None = None,
+        redundancy_policy: RedundancyPolicy | None = None,
+        auto_join_policy: AutoJoinPolicy | None = None,
+        auto_join_score_threshold: float | None = None,
+        clear_score_threshold: bool = False,
+        editor_user_id: UUID,
+        now: datetime | None = None,
+        service: str,
+        instance_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> CaseRow:
+        """Set discovery-loop policy on a Case (API_PLAN §4.12, M9.D4).
+
+        ``None`` policy args leave the field unchanged; pass
+        ``clear_score_threshold=True`` to null the threshold. Changing
+        ``seed_root_group_ids`` emits ``case.seed_roots_changed``."""
+
+    @abstractmethod
+    async def resolve_case_for_candidate(self, candidate_id: UUID) -> CaseRow | None:
+        """Return the Case whose seed roots reach this candidate, or None
+        (API_PLAN §4.12.3). Oldest case wins on overlap."""
 
     @abstractmethod
     async def list_case_members(self, case_id: UUID) -> list[CaseMemberRow]: ...
@@ -1081,6 +1119,12 @@ class BaseRepository(ABC):
         """Return one collector row by id, or ``None``."""
 
     @abstractmethod
+    async def resolve_collector_by_instance_id(self, instance_id: str) -> CollectorRow | None:
+        """Reverse the 8-char bus ``instance_id`` to its collector row, or None
+        (M9.E2). Recomputes ``compute_instance_id(identity name, kind)`` per
+        collector and matches — the id isn't stored on the row."""
+
+    @abstractmethod
     async def list_collectors(
         self,
         *,
@@ -1262,6 +1306,25 @@ class BaseRepository(ABC):
         Raises :class:`ValueError` if the candidate doesn't exist.
         """
 
+    @abstractmethod
+    async def score_candidate(self, candidate_id: UUID) -> GroupCandidateRow:
+        """Recompute a candidate's score from its mentions (frozen v1, §4.12.2)
+        and auto-queue ``discovered → queued`` if a resolving Case's
+        ``auto_join_score_threshold`` is crossed. Raises ValueError if absent."""
+
+    @abstractmethod
+    async def group_lineage(self, group_id: UUID) -> tuple[UUID | None, int]:
+        """Return ``(seed_root_id, depth_from_root)`` for a group (API_PLAN §4.12).
+
+        Seed root → ``(group_id, 0)``; discovered group → its min-depth mention's
+        lineage; unknown → ``(None, 0)``. Used by E2 depth propagation."""
+
+    @abstractmethod
+    async def reachable_roots_for_collector(self, collector_id: UUID) -> set[UUID]:
+        """Return seed-root group ids reachable by a collector (API_PLAN §4.12.3):
+        roots observed via its mentions plus its active-membership groups that
+        are registered seed roots."""
+
     # =================================================================
     # MEMBERSHIPS (MODELS §2.22-2.23, M9.C5)
     # =================================================================
@@ -1323,6 +1386,89 @@ class BaseRepository(ABC):
         ``was_first_sighting`` is True iff this is the first call for this
         ``message_id``. Idempotent on ``(message_id, collector_id)``.
         """
+
+    # =================================================================
+    # IDENTITIES (MODELS §2.1, API_PLAN §4.12 discovery-loop role machine)
+    # =================================================================
+
+    @abstractmethod
+    async def create_identity(
+        self,
+        *,
+        name: str,
+        source_id: UUID,
+        session_path: str,
+        role: IdentityRole = _IdentityRole.MONITOR,
+        state: IdentityState = _IdentityState.AVAILABLE,
+        proxy_uri: str | None = None,
+        cooldown_seconds: int = 21_600,
+        notes: str | None = None,
+    ) -> IdentityRow:
+        """Insert a new identity row. Raises on duplicate ``name``."""
+
+    @abstractmethod
+    async def get_identity(self, identity_id: UUID) -> IdentityRow | None: ...
+
+    @abstractmethod
+    async def list_identities(
+        self,
+        *,
+        source_id: UUID | None = None,
+        role: IdentityRole | None = None,
+        state: IdentityState | None = None,
+    ) -> list[IdentityRow]:
+        """Return identities matching the AND-combined filters, name-ordered."""
+
+    @abstractmethod
+    async def set_identity_role(
+        self,
+        *,
+        identity_id: UUID,
+        role: IdentityRole,
+    ) -> IdentityRow:
+        """Set an identity's discovery-loop role. Raises if it doesn't exist."""
+
+    @abstractmethod
+    async def set_identity_state(
+        self,
+        *,
+        identity_id: UUID,
+        state: IdentityState,
+    ) -> IdentityRow:
+        """Set an identity's lifecycle state. Raises if it doesn't exist."""
+
+    @abstractmethod
+    async def graduate_identity(
+        self,
+        *,
+        identity_id: UUID,
+        now: datetime | None = None,
+    ) -> IdentityRow:
+        """Promote a SCOUT to MONITOR + stamp ``graduated_at`` (§4.12.5, M9.E4)."""
+
+    @abstractmethod
+    async def burn_identity(self, *, identity_id: UUID) -> IdentityRow:
+        """Quarantine a burned identity: ``state=BURNED``, ``role=QUARANTINE``
+        (§4.12.5, M9.E4)."""
+
+    @abstractmethod
+    async def find_available_scout(self, source_id: UUID) -> IdentityRow | None:
+        """Return an AVAILABLE SCOUT for ``source_id`` (§4.12.3), or None."""
+
+    @abstractmethod
+    async def lease_scout(self, source_id: UUID) -> IdentityRow | None:
+        """Atomically claim an AVAILABLE SCOUT (→ IN_USE) for ``source_id``, or
+        None (M9.E3). A second lease can't re-grab the same scout."""
+
+    @abstractmethod
+    async def list_graduating_scouts(self, joined_before: datetime) -> list[UUID]:
+        """Identity ids of SCOUTs whose collector has held an active membership
+        since at/before ``joined_before`` — clean windows ready to graduate
+        (M9.E4 §4.12.5)."""
+
+    @abstractmethod
+    async def has_available_scout(self, source_id: UUID) -> bool:
+        """True iff at least one AVAILABLE SCOUT exists for ``source_id``."""
 
     # =================================================================
     # ARTIFACTS (MODELS §2.7, §2.24, §2.25 bridge resolution, M9.C6)

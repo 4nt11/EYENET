@@ -20,7 +20,13 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from ._base import BusEnvelope, DbRowBase
-from .enums import ConfidenceTier, EngagementScope, EngagementSubjectKind, IdentityState
+from .enums import (
+    ConfidenceTier,
+    EngagementScope,
+    EngagementSubjectKind,
+    IdentityRole,
+    IdentityState,
+)
 
 SUBJECT_LABEL: str = "identity.label.applied"
 SUBJECT_ENGAGEMENT: str = "identity.engagement.authorized"
@@ -39,6 +45,11 @@ class IdentityRow(DbRowBase):
     cooldown_seconds: int = Field(default=21_600, description="default 6h between sessions")
     last_used_at: datetime | None = None
     state: IdentityState = IdentityState.AVAILABLE
+    # Discovery-loop role + graduation (API_PLAN §4.12). The DB identity is the
+    # source of truth for role/state/graduation; the file pool stays the
+    # credential/session store. The file↔DB provisioning bridge lands with E5.
+    role: IdentityRole = IdentityRole.MONITOR
+    graduated_at: datetime | None = None
     notes: str | None = None
 
 

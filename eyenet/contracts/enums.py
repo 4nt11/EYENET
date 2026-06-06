@@ -135,6 +135,44 @@ class CaseRoleOnCase(StrEnum):
     REVIEWER = "reviewer"
 
 
+class RedundancyPolicy(StrEnum):
+    """Per-Case collector-coverage policy for the discovery loop (API_PLAN §4.12).
+
+    Governs whether a second collector may join a group an active collector
+    already covers (the dedup/dual-cover dimension of the §4.12.3 eligibility
+    predicate):
+
+    - ``prefer_single`` (default) — skip the join if any collector is already
+      in the group.
+    - ``prefer_dual`` — allow a second collector when bandwidth permits; a
+      third is skipped.
+    - ``required_dual`` — refuse to operate on single coverage; alert on
+      degradation. (The alerting half lands with the supervisor runtime.)
+    """
+
+    PREFER_SINGLE = "prefer_single"
+    PREFER_DUAL = "prefer_dual"
+    REQUIRED_DUAL = "required_dual"
+
+
+class AutoJoinPolicy(StrEnum):
+    """Per-Case automation posture for candidate approval (API_PLAN §4.12.1).
+
+    ``disabled`` is the default for every new Case — auto-join is opt-in per
+    investigation; there is no fleet-wide setting that quietly auto-expands.
+
+    - ``disabled`` — every candidate is operator-triaged.
+    - ``score_threshold`` — auto-approve when ``GroupCandidate.score`` crosses
+      the Case ``auto_join_score_threshold`` AND eligibility passes.
+    - ``score_threshold_with_role_gate`` — additionally require the mentioning
+      actor's role signal to clear the gate.
+    """
+
+    DISABLED = "disabled"
+    SCORE_THRESHOLD = "score_threshold"
+    SCORE_THRESHOLD_WITH_ROLE_GATE = "score_threshold_with_role_gate"
+
+
 class SensitivityTier(StrEnum):
     """Evidence sensitivity tier (API_PLAN §4.7).
 
@@ -441,6 +479,7 @@ __all__ = [
     "ArtifactSubjectKind",
     "ArtifactValidationState",
     "AttachmentKind",
+    "AutoJoinPolicy",
     "CandidateState",
     "CaseRoleOnCase",
     "CaseStatus",
@@ -463,6 +502,7 @@ __all__ = [
     "MembershipRole",
     "MentionKind",
     "ReclassificationSubjectKind",
+    "RedundancyPolicy",
     "ResolutionState",
     "SensitivityTier",
     "SourceDomainPatternKind",

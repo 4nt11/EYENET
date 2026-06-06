@@ -1,4 +1,4 @@
-# EYENET — session handoff (2026-05-31)
+# EYENET — session handoff (2026-06-06)
 
 Start-here note. Read this, then
 `~/.claude/projects/-home-anti-Tools-EYENET/memory/MEMORY.md` and
@@ -8,45 +8,67 @@ Start-here note. Read this, then
 
 ## Where we are
 
-- **M9 Group D — Discovery API surface (D1–D3) — DONE + MERGED to `main`.**
-  - Worktree `worktree-groupD-discovery-api`, slice-per-commit, `--no-ff` merge.
-  - Slices: storage gaps `cd7c9f2`, D1 Sources `558b7f5`, D2 Collectors `1dee40c`,
-    D3 Candidate triage `a2b94f6`, surface-pin/docs/smoke `<slice4>`.
-  - **D4 (seed-roots + `Case.auto_join_policy`) DEFERRED** — mutates the Case model and
-    its eligibility-recompute couples to the unbuilt Group E runtime. Lands with E.
-- 24 endpoints over Group C's discovery storage: `/v1/sources` (9), `/v1/collectors` (9),
-  `/v1/candidates` (6). All scope-gated, audited, OpenAPI-pinned (surface test green),
-  with direct-call unit tests + an ASGI smoke test (`tests/integration/api/test_discovery_surface.py`).
-- Battery: full `unit or contract or integration` run = **1952 passed / 16 skipped / 7 failed**.
-  The 7 are the documented §3.3 log-capture flakes (impostor-pool ×3, verifier
-  service-branches ×3, stylometric kernel-memo ×1) — all pass in isolation, NOT regressions.
-  Coverage **89.59%** (gate 84%; `.coverage-baseline` left at 0.8906 — no-drop satisfied, not
-  ratcheted to avoid the unit-only-vs-full measurement mismatch).
+- **M9 Group E — Discovery runtime (E1–E4) + D4 Case-model fold-in — DONE + MERGED to `main`.**
+  - Branch `groupE-discovery-runtime`, slice-per-commit, `--no-ff` merge.
+  - Slices: storage+D4-Case `2ffe2de`, E1 url_extraction `7f7251c`, E2a channel_ref
+    `87547ed`, E2b scoring+DiscoverySensor `8d68e70`, E3 supervisor+eligibility `4b1c869`,
+    E4 scout graduation `2826186`, wrap `<slice5>`.
+- **This turns the D3 eligibility stub into a real gate.** `GET /v1/candidates/{id}` now
+  surfaces real §4.12.3 verdicts (dedup/redundancy + depth + scout availability).
+- Battery: full `unit or contract or integration` run = **2004 passed / 16 skipped / 8 failed**.
+  The 7–8 (count jitters run-to-run, confirming nondeterministic state pollution) are the
+  documented §3.3 log-capture flakes (verifier service-branches, impostor-pool, stylometric
+  kernel-memo) — all pass in isolation, NOT regressions (none of those modules were touched).
+  Coverage **89.83%** (gate 84%; `.coverage-baseline` left at 0.8906 — no-drop satisfied, not
+  ratcheted, to avoid locking the baseline into flaky-run jitter, per the Group D precedent).
 
-## Group D as-built deviations (all documented in code + API_PLAN §Group D)
+## Group E as-built deviations (all documented in code + API_PLAN §Group E)
 
-- **Eligibility is a STUB.** `eyenet/services/discovery/eligibility.py` returns
-  `DEFERRED_TO_RUNTIME` per mentioning collector; `POST /v1/candidates/{id}/approve` does
-  **NOT** enforce an eligibility gate (validates existence + assigned_collector_id + legal
-  state transition only). The real predicate (dedup/depth/scout availability) lands with
-  **Group E**. This is a deliberate, documented weaker-safety v1.
-- Deferred for lack of Group C storage / by design: `DELETE /v1/sources/{id}` (needs
-  `delete_source` + multi-table FK guard), atomic initial-`domains[]` POST, `?force`/`?hard`
-  bypasses, domain-notes PATCH, collector `pause` (no enum), `?include_left` memberships,
-  config discriminated-union.
-- Storage added this milestone: `update_source`, `list/count_sources`, `list_source_domains`,
-  `swap_source_domain_primary`, `source_bridge_summary`; collector `count`/`update`/paginated
-  `list`/`collector_fleet_health`; candidate filtered `list`/`count`; `FAILED→QUEUED` retry edge.
+- **New `eyenet/sensor/discovery/` seam**, NOT `sensor/primitives/`: discovery extractors
+  write storage per message with collector/group context (`DiscoveryExtractor` ABC +
+  resolved `MessageContext`); the pure stylometric primitive contract was kept clean.
+- **`DiscoverySensor`** (`eyenet/sensor/discovery_sensor.py`) resolves `RawMessageEnvelope`
+  → `MessageContext`: collector via **`resolve_collector_by_instance_id`** (the 8-char bus
+  `instance_id` is a hash, reverse-matched across the fleet — it is NOT stored on
+  `CollectorTable`); actor via `resolve_actor_id`; group + lineage via
+  `upsert_group`/`group_lineage`.
+- **DB `IdentityTable` is the source of truth for the discovery-loop role/state/graduation
+  machine.** The file pool (`FileIdentityPool`) stays the credential/session store; the
+  **file↔DB provisioning bridge is deferred to E5**. An empty identity table correctly
+  yields `NO_SCOUT_AVAILABLE` / no graduations.
+- **`SQLAlchemy Enum` persists the enum NAME (uppercase)** — Case-policy CHECK constraints
+  use `'PREFER_SINGLE'` etc., matching `ck_candidate_state`/`ck_identity_role`. Lowercase is
+  only the JSON wire boundary.
+- **Scoring v1 is frozen + deterministic** (distinct mentioning groups·0.3 + actors·0.2,
+  capped). Auto-*queue* fires on a Case `auto_join_score_threshold`; auto-*approve* stays
+  OFF by default (per-Case opt-in, §4.12.1).
+- **`lease_scout`** is atomic find+claim for the single-supervisor case; cross-process
+  concurrency needs a `BEGIN IMMEDIATE` override like the audit chain (CLAUDE.md §2.6) —
+  deferred while there is one supervisor process.
+
+## What's still open
+
+- **M9.E5 — Telegram collector recursion** (the one deferred E slice): the collector
+  consuming `JoinGroupCommand`, the platform join, `joining→joined`,
+  FloodWait/InviteExpired mapping. Coverage-omitted live-service code (§3.4). Also closes
+  the **file↔DB identity bridge** + the **live scout-burn trigger** (`quarantine_scout` is
+  built + tested; nothing calls it yet).
+- **D4 HTTP endpoints** (`GET/PUT /v1/cases/{id}/seed-roots`, `POST .../{group_id}`): the
+  Case model + storage are done; the endpoints sit on the `/v1/cases` tree whose CRUD
+  handlers are still `NotImplementedError` stubs (a Case-API group). Thin follow-on.
+- The supervisor's eligibility verdict at dispatch: a structural fail (OVER_DEPTH /
+  SKIP_DUAL_COVER / NO_REACHABLE_ROOT) currently leaves the candidate APPROVED and logs
+  each tick — no operator-facing surfacing yet (Group H stream / an admin override path).
 
 ## Environment gotchas
 
-- Extract venv: `/home/anti/Tools/EYENET/.venv-extract` (py3.14); set
-  `EYENET_EXTRACT_VENV=...` for jailed Presidio/extract paths.
-- **Worktree git hooks don't auto-fire** (`core.hooksPath`→`.git/hooks`). Run gates manually:
-  `ruff format --check && ruff check && mypy --strict eyenet && bandit -c pyproject.toml -r eyenet
-  && detect-secrets-hook --baseline .secrets.baseline <files> && pytest`.
-- **ASGI integration tests:** seed all `await storage` state BEFORE the first TestClient call —
-  the in-memory aiosqlite connection is shared across loops; interleaving raises MissingGreenlet.
+- **No worktree this milestone** — the worktree's edits landed in the main checkout (paths
+  were absolute-main, not worktree-relative), so work moved to branch
+  `groupE-discovery-runtime` in the main checkout. Lesson: in a worktree session, use
+  worktree-relative paths or `cd` into it.
+- **ASGI / shared in-memory aiosqlite:** seed all `await storage` state BEFORE the first
+  TestClient call; interleaving raises `MissingGreenlet`. The same StaticPool teardown
+  raises a harmless `MissingGreenlet` at interpreter exit in standalone scripts (ignore it).
 - Stray untracked artifacts — NEVER commit: `DSR-2026-NH-00417-FICTIONAL.docx`,
   `classifier_corpus.py`, `docs-1.jsonl`, `ruleset-additive.toml`, `development/.$eyenet-erd.drawio.dtmp`.
 
@@ -54,22 +76,13 @@ Start-here note. Read this, then
 
 ## NEXT: candidates for the follow-up milestone
 
-M9 group map (confirmed against merge commits): A ✅, B ⚠ partial (file-access journal —
-`evidence_access.py` middleware landed with F; §5.6 signed journal open), C ✅, **D1–D3 ✅
-(this session)**, E ❌ open, F ✅, G ⚠ (idempotency + event-log spine open), H ⚠ (501 stream
-stubs), I ⚠ (rate-limit/CORS/metrics partial). Strong candidates:
-
-1. **Group E — Discovery runtime** — the natural pair for D. CollectorSupervisor service,
-   `url_extraction` / `channel_reference_extraction` sensor primitives, scout graduation,
-   Telegram recursion. **This is what turns the D3 eligibility stub into a real gate** and
-   makes `approve` actually execute a join. Also unblocks **D4** (seed-roots + auto-join).
-2. **Documents API** — the M10 read/reclassify/review-queue surface (still unbuilt; the
-   original handoff target before "groups" took priority).
+1. **M9.E5 — Telegram recursion** — closes the discovery loop end-to-end (approve → real
+   join → joined Group + membership), the file↔DB identity bridge, and the live scout-burn
+   trigger. Needs a live Telethon client; lands coverage-omitted with an in-memory fake.
+2. **D4 HTTP surface + the `/v1/cases` CRUD group** — make seed-roots operator-editable.
 3. **Group G — Write surface** — idempotency middleware + event-log tables + persona merge/split.
 
-Recommend **Group E (+ D4)** — it closes the discovery loop D1–D3 opened and retires the
-eligibility stub. Also outstanding: M9.2 PAT `read:metrics` scrape example, M9.6 Grafana
-dashboard (marketing deliverable).
+Recommend **E5 (+ the `/v1/cases` CRUD that unblocks D4's endpoints)**.
 
 ---
 
@@ -77,9 +90,9 @@ dashboard (marketing deliverable).
 
 ```bash
 cd /home/anti/Tools/EYENET
-git log --oneline -6
+git log --oneline -8
 .venv/bin/pytest -m "unit or contract" -q                       # fast inner loop
-.venv/bin/pytest -m "unit or contract or integration" -q        # full (7 known §3.3 flakes)
+.venv/bin/pytest -m "unit or contract or integration" -q        # full (8 known §3.3 flakes)
 ```
 
 Deep refactor / new milestone → worktree branch + atomic `--no-ff` merge (CLAUDE.md §6).

@@ -17,13 +17,14 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlmodel import col, select
 
-from eyenet.contracts.collector import CollectorFleetHealth, CollectorRow
+from eyenet.contracts.collector import CollectorFleetHealth, CollectorRow, compute_instance_id
 from eyenet.contracts.enums import (
     CollectorDesiredState,
     CollectorObservedState,
     SourceKind,
 )
 from eyenet.models.collector import CollectorTable
+from eyenet.models.identity import IdentityTable
 
 from ._helpers import safe_session
 
@@ -79,6 +80,26 @@ class CollectorsMixin:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(CollectorTable, collector_id)
             return _row(table) if table is not None else None
+
+    async def resolve_collector_by_instance_id(self, instance_id: str) -> CollectorRow | None:
+        """Reverse the 8-char bus ``instance_id`` to its collector row (M9.E2).
+
+        ``RawMessageEnvelope.instance_id`` is ``compute_instance_id(identity
+        name, kind)`` — a one-way hash not stored on the collector. We recompute
+        it from each collector's identity name + kind and match. Small-operator
+        scope keeps the fleet tiny, so the linear scan is fine. Returns ``None``
+        if no collector matches (the message can't be attributed → skipped).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(CollectorTable, IdentityTable.name).join(
+                IdentityTable,
+                col(CollectorTable.identity_id) == col(IdentityTable.id),
+            )
+            result = await session.exec(stmt)
+            for collector, identity_name in result:
+                if compute_instance_id(identity_name, collector.kind) == instance_id:
+                    return _row(collector)
+            return None
 
     async def list_collectors(
         self,

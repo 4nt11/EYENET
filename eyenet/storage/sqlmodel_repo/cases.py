@@ -13,11 +13,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.case import CaseCollaboratorRow, CaseMemberRow, CaseRow
 from eyenet.contracts.enums import (
+    AutoJoinPolicy,
     CaseRoleOnCase,
     CaseStatus,
     CaseSubjectKind,
+    RedundancyPolicy,
     SensitivityTier,
 )
+from eyenet.models.candidates import GroupCandidateMentionTable
 from eyenet.models.case import CaseCollaboratorTable, CaseMemberTable, CaseTable
 from eyenet.models.message import AttachmentTable
 from eyenet.models.observation import ObservationTable
@@ -273,12 +276,106 @@ class CasesMixin:
         )
         return row
 
+    async def update_case_discovery_policy(
+        self,
+        *,
+        case_id: UUID,
+        seed_root_group_ids: list[UUID] | None = None,
+        redundancy_policy: RedundancyPolicy | None = None,
+        auto_join_policy: AutoJoinPolicy | None = None,
+        auto_join_score_threshold: float | None = None,
+        clear_score_threshold: bool = False,
+        editor_user_id: UUID,
+        now: datetime | None = None,
+        service: str,
+        instance_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> CaseRow:
+        """Set the discovery-loop policy fields on a Case (API_PLAN §4.12 / M9.D4).
+
+        Each policy argument is optional; ``None`` leaves the field unchanged.
+        ``auto_join_score_threshold=None`` is therefore *leave unchanged* — pass
+        ``clear_score_threshold=True`` to explicitly null it.
+
+        Changing ``seed_root_group_ids`` emits ``case.seed_roots_changed`` (the
+        reachable-root dimension of the §4.12.3 eligibility predicate shifts);
+        the prior + new lists are frozen in the audit payload. Archived cases
+        refuse the mutation.
+        """
+        at = now or datetime.now(tz=UTC)
+        seed_roots_changed = False
+        prior_roots: list[str] = []
+        new_roots: list[str] = []
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await _require_case(session, case_id)
+            if table.status is CaseStatus.ARCHIVED:
+                raise CaseError("archived cases cannot be updated")
+            if seed_root_group_ids is not None:
+                prior_roots = list(table.seed_root_group_ids)
+                new_roots = [str(g) for g in seed_root_group_ids]
+                if new_roots != prior_roots:
+                    seed_roots_changed = True
+                    table.seed_root_group_ids = new_roots
+            if redundancy_policy is not None:
+                table.redundancy_policy = redundancy_policy
+            if auto_join_policy is not None:
+                table.auto_join_policy = auto_join_policy
+            if clear_score_threshold:
+                table.auto_join_score_threshold = None
+            elif auto_join_score_threshold is not None:
+                table.auto_join_score_threshold = auto_join_score_threshold
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            row = _case_row(table)
+        if seed_roots_changed:
+            await self._emit_case_audit(
+                event=AuditSubject.CASE_SEED_ROOTS_CHANGED,
+                actor=editor_user_id,
+                subject_id=case_id,
+                payload={"from": prior_roots, "to": new_roots},
+                at=at,
+                service=service,
+                instance_id=instance_id,
+                trace_id=trace_id,
+                span_id=span_id,
+            )
+        return row
+
     # -- reads -----------------------------------------------------------------
 
     async def get_case(self, case_id: UUID) -> CaseRow | None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(CaseTable, case_id)
             return _case_row(table) if table is not None else None
+
+    async def resolve_case_for_candidate(self, candidate_id: UUID) -> CaseRow | None:
+        """Return the Case whose seed roots reach a candidate (API_PLAN §4.12.3).
+
+        A candidate is in scope for a Case when any of its mentions'
+        ``seed_root_id`` appears in that Case's ``seed_root_group_ids``. If
+        several Cases match (overlapping seed sets — an operator-created
+        ambiguity), the oldest by ``created_at`` wins deterministically.
+        Returns ``None`` when no Case claims the candidate's seed roots (the
+        eligibility predicate then has no redundancy policy to apply).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            mention_stmt = select(GroupCandidateMentionTable.seed_root_id).where(
+                col(GroupCandidateMentionTable.candidate_id) == candidate_id,
+                col(GroupCandidateMentionTable.seed_root_id).is_not(None),
+            )
+            mention_result = await session.exec(mention_stmt)
+            seed_roots = {str(r) for r in mention_result if r is not None}
+            if not seed_roots:
+                return None
+
+            case_stmt = select(CaseTable).order_by(col(CaseTable.created_at).asc())
+            case_result = await session.exec(case_stmt)
+            for table in case_result:
+                if seed_roots.intersection(table.seed_root_group_ids):
+                    return _case_row(table)
+            return None
 
     async def list_case_members(self, case_id: UUID) -> list[CaseMemberRow]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]

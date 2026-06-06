@@ -42,6 +42,19 @@ class AuditSubject(StrEnum):
     CASE_ARCHIVED = "eyenet.audit.case.archived"
     CASE_TIER_CHANGED = "eyenet.audit.case.tier_changed"
     CASE_ACCESS_DENIED = "eyenet.audit.case.access_denied"
+    # --- §4.12 discovery-loop seed roots (M9.D4 / Group E) -----------------
+    # Mutating Case.seed_root_group_ids changes downstream candidate
+    # eligibility (the reachable-root dimension of the §4.12.3 predicate).
+    CASE_SEED_ROOTS_CHANGED = "eyenet.audit.case.seed_roots_changed"
+
+    # --- §4.12.4 CollectorSupervisor runtime (M9.E3) -----------------------
+    # Supervisor reconciled a collector's observed_state toward desired_state.
+    COLLECTOR_RECONCILED = "eyenet.audit.collector.reconciled"
+    # Supervisor leased a scout + dispatched a join (candidate approved→joining).
+    CANDIDATE_JOINING = "eyenet.audit.candidate.joining"
+    # --- §4.12.5 scout graduation (M9.E4) ----------------------------------
+    IDENTITY_GRADUATED = "eyenet.audit.identity.graduated"
+    IDENTITY_BURNED = "eyenet.audit.identity.burned"
 
     # --- §M10 document classification --------------------------------------
     # Emitted by the ClassifierService (a later slice); the aggregator builds

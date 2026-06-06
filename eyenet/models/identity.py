@@ -46,6 +46,9 @@ class IdentityTable(SQLModel, table=True):
     # GroupCandidates, and graduate back to MONITOR after a 7-day
     # observation window.
     role: IdentityRole = Field(default=IdentityRole.MONITOR, index=True)
+    # Set when a SCOUT graduates to MONITOR after a clean observation window
+    # (M9.E4 scout graduation). NULL for identities that never scouted.
+    graduated_at: datetime | None = None
     notes: str | None = None
 
 
