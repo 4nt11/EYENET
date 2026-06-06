@@ -21,16 +21,23 @@ eligibility gate + scout lease + ``joining`` transition.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 from eyenet.contracts.audit_subjects import AuditSubject
+from eyenet.contracts.collector import compute_instance_id
 from eyenet.contracts.enums import (
     CandidateState,
     CollectorDesiredState,
     CollectorObservedState,
 )
-from eyenet.contracts.supervisor import JoinGroupCommand
+from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
 from eyenet.service import ServiceBase
 from eyenet.services.discovery.eligibility import CollectorEligibilityResult, collector_eligibility
 from eyenet.telemetry.logging import get_logger
+
+if TYPE_CHECKING:
+    from eyenet.contracts.identity import IdentityRow
+    from eyenet.contracts.source import SourceRow
 
 _log = get_logger()
 _APPROVED_BATCH = 1000
@@ -133,6 +140,30 @@ class CollectorSupervisor(ServiceBase):
                     "scout_identity_id": str(scout.id),
                 },
             )
+            await self._publish_join_command(scout, command)
+
+    async def _publish_join_command(self, scout: IdentityRow, command: JoinGroupCommand) -> None:
+        """Publish the JoinGroupCommand to the scout's command channel (M9.E5).
+
+        Routed by the leased scout's ``instance_id`` so the collector process
+        running that identity receives it. The command is a bare pydantic model
+        (not a BusEnvelope), so it goes out via raw ``bus.publish`` — the
+        ``candidate.joining`` audit row above remains the record of intent.
+        """
+        source = cast("SourceRow | None", await self._storage.get_source(scout.source_id))
+        if source is None:
+            _log.warning(
+                "supervisor.join_command_unpublished",
+                candidate_id=str(command.candidate_id),
+                reason="scout source missing",
+            )
+            return
+        scout_instance_id = compute_instance_id(scout.name, source.kind)
+        await self.bus.publish(
+            command_subject_for(scout_instance_id),
+            command.model_dump_json().encode("utf-8"),
+            headers={"command-kind": command.kind},
+        )
 
 
 __all__ = ["CollectorSupervisor"]

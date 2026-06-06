@@ -17,6 +17,7 @@ import pytest
 
 from eyenet.bus.memory import MemoryBus
 from eyenet.contracts.audit_subjects import AuditSubject
+from eyenet.contracts.collector import compute_instance_id
 from eyenet.contracts.enums import (
     CandidateState,
     CollectorDesiredState,
@@ -27,6 +28,7 @@ from eyenet.contracts.enums import (
     MentionKind,
     SourceKind,
 )
+from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
 from eyenet.services.collector_supervisor import CollectorSupervisor
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -145,3 +147,38 @@ async def test_dispatch_no_scout_stays_approved(storage: BaseRepository) -> None
     cand = await _approved_candidate(storage, src, coll)
     await _supervisor(storage).dispatch_approved()
     assert (await storage.get_candidate(cand)).state is CandidateState.APPROVED
+
+
+async def test_dispatch_publishes_join_command_to_scout_channel(storage: BaseRepository) -> None:
+    """E5: the supervisor publishes the JoinGroupCommand to the leased scout's
+    command channel (keyed by the scout's instance_id), while keeping the
+    candidate.joining audit record of intent."""
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    scout = await storage.create_identity(
+        name="scout", source_id=src, session_path="/s", role=IdentityRole.SCOUT
+    )
+    coll = await _collector(storage, src, "a")
+    cand = await _approved_candidate(storage, src, coll)
+
+    bus = MemoryBus()
+    captured: list[tuple[str, bytes, dict[str, str]]] = []
+
+    async def _capture(subject: str, payload: bytes, headers: dict[str, str]) -> None:
+        captured.append((subject, payload, headers))
+
+    scout_iid = compute_instance_id("scout", SourceKind.TELEGRAM)
+    await bus.subscribe(command_subject_for(scout_iid), _capture)
+    await CollectorSupervisor(bus=bus, storage=storage).dispatch_approved()
+
+    assert len(captured) == 1
+    subject, payload, headers = captured[0]
+    assert subject == command_subject_for(scout_iid)
+    assert headers["command-kind"] == "join_group"
+    cmd = JoinGroupCommand.model_validate_json(payload)
+    assert cmd.candidate_id == cand
+    assert cmd.scout_identity_id == scout.id
+
+    events = [r.event for r in await storage.all_audit()]
+    assert AuditSubject.CANDIDATE_JOINING.value in events
