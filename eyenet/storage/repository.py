@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         AutoJoinPolicy,
         CandidateState,
         CaseRoleOnCase,
+        CaseStatus,
         CaseSubjectKind,
         ClearanceScope,
         CollectorDesiredState,
@@ -205,6 +206,28 @@ class BaseRepository(ABC):
     ) -> CaseRow: ...
 
     @abstractmethod
+    async def reopen_archived_case(
+        self,
+        *,
+        case_id: UUID,
+        reopener_user_id: UUID,
+        reason: str,
+        now: datetime | None = None,
+        service: str,
+        instance_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> CaseRow:
+        """Archived → open via a fresh successor case (API_PLAN §4.10.3).
+
+        Archived cases are immutable, so reopening creates a NEW ``open`` case
+        carrying ``parent_case_id`` = the archived id and copying the title,
+        description, and discovery policy (seed roots / redundancy / auto-join).
+        Members and collaborators are NOT copied — the successor is a fresh
+        investigation the operator re-populates. Returns the successor row.
+        Raises if the source case isn't ARCHIVED."""
+
+    @abstractmethod
     async def archive_case(
         self,
         *,
@@ -220,6 +243,36 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def get_case(self, case_id: UUID) -> CaseRow | None: ...
+
+    @abstractmethod
+    async def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        collaborator_user_id: UUID | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[CaseRow]:
+        """Cases newest-first (``created_at DESC``), filters AND-compose (§4.10).
+
+        ``collaborator_user_id`` set → restrict to cases where that user is an
+        active collaborator (``case_collaborator.revoked_at IS NULL``) — the
+        §4.10.4 list-visibility predicate. Omit (``None``) for the unrestricted
+        listing an ``admin:case`` holder sees.
+        """
+
+    @abstractmethod
+    async def count_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        collaborator_user_id: UUID | None = None,
+    ) -> int:
+        """Count cases matching the same filters as :meth:`list_cases`."""
 
     @abstractmethod
     async def update_case_discovery_policy(

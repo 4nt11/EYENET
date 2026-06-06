@@ -145,8 +145,7 @@ async def test_get_candidate_detail_eligibility(
     assert len(detail.eligibility_per_collector) == 1
     assert detail.eligibility_per_collector[0].collector_id == coll
     assert (
-        detail.eligibility_per_collector[0].result
-        is CollectorEligibilityResult.NO_REACHABLE_ROOT
+        detail.eligibility_per_collector[0].result is CollectorEligibilityResult.NO_REACHABLE_ROOT
     )
 
 

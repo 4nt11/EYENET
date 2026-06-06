@@ -64,11 +64,14 @@ from eyenet.api.v1.cases.api_bulk_remove_members import router as cases_bulk_rem
 from eyenet.api.v1.cases.api_close_case import router as cases_close_router
 from eyenet.api.v1.cases.api_create_case import router as cases_create_router
 from eyenet.api.v1.cases.api_get_case import router as cases_get_router
+from eyenet.api.v1.cases.api_get_seed_roots import router as cases_get_seed_roots_router
 from eyenet.api.v1.cases.api_list_cases import router as cases_list_router
 from eyenet.api.v1.cases.api_list_collaborators import router as cases_list_collaborators_router
 from eyenet.api.v1.cases.api_list_members import router as cases_list_members_router
+from eyenet.api.v1.cases.api_promote_seed_root import router as cases_promote_seed_root_router
 from eyenet.api.v1.cases.api_remove_member import router as cases_remove_member_router
 from eyenet.api.v1.cases.api_reopen_case import router as cases_reopen_router
+from eyenet.api.v1.cases.api_replace_seed_roots import router as cases_replace_seed_roots_router
 from eyenet.api.v1.cases.api_revoke_collaborator import (
     router as cases_revoke_collaborator_router,
 )
@@ -235,6 +238,10 @@ v1_router.include_router(cases_remove_member_router)
 v1_router.include_router(cases_list_collaborators_router)
 v1_router.include_router(cases_add_collaborator_router)
 v1_router.include_router(cases_revoke_collaborator_router)
+# cases — seed roots (§4.12 discovery loop, M9.D4)
+v1_router.include_router(cases_get_seed_roots_router)
+v1_router.include_router(cases_replace_seed_roots_router)
+v1_router.include_router(cases_promote_seed_root_router)
 
 # clearance
 v1_router.include_router(clearance_list_grants_router)

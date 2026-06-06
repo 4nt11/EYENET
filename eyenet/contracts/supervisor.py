@@ -2,8 +2,9 @@
 
 Typed commands the supervisor emits onto a collector's command channel. In
 M9.E3 the supervisor records the command in the ``candidate.joining`` audit
-payload as the record of intent and writes ``approved → joining``; the actual
-platform dispatch + ``joining → joined`` is the collector's job in E5. The
+payload as the record of intent and writes ``approved → joining``; in M9.E5 it
+*also* publishes the command (via :func:`command_subject_for`) and the collector
+process running the leased scout identity executes the platform join. The
 ``access_artifact_id`` selection (MODELS §2.24) also lands with E5 — it is
 optional here.
 """
@@ -39,4 +40,15 @@ class LeaveGroupCommand(BaseModel):
     reason: str
 
 
-__all__ = ["JoinGroupCommand", "LeaveGroupCommand"]
+def command_subject_for(scout_instance_id: str) -> str:
+    """Bus subject for a collector's command channel (M9.E5, §4.12.4).
+
+    Keyed by the *scout's* ``instance_id`` (``compute_instance_id(scout_name,
+    source_kind)``) so the command reaches the collector process running that
+    leased scout identity. Lives under the ``eyenet.control.`` prefix the
+    panic/kill-switch channel already uses.
+    """
+    return f"eyenet.control.collector.{scout_instance_id}.command"
+
+
+__all__ = ["JoinGroupCommand", "LeaveGroupCommand", "command_subject_for"]

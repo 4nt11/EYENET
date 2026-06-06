@@ -52,6 +52,13 @@ class AuditSubject(StrEnum):
     COLLECTOR_RECONCILED = "eyenet.audit.collector.reconciled"
     # Supervisor leased a scout + dispatched a join (candidate approved→joining).
     CANDIDATE_JOINING = "eyenet.audit.candidate.joining"
+    # --- §4.12.4 collector join execution (M9.E5) --------------------------
+    # Collector confirmed the platform join (candidate joining→joined); the
+    # Group row + CollectorGroupMembership(joined_via=candidate) are written.
+    CANDIDATE_JOINED = "eyenet.audit.candidate.joined"
+    # Platform refused / timed out the join (candidate joining→failed); the
+    # error is frozen in the candidate's rejection_reason.
+    CANDIDATE_FAILED = "eyenet.audit.candidate.failed"
     # --- §4.12.5 scout graduation (M9.E4) ----------------------------------
     IDENTITY_GRADUATED = "eyenet.audit.identity.graduated"
     IDENTITY_BURNED = "eyenet.audit.identity.burned"
