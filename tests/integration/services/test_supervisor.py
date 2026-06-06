@@ -19,9 +19,12 @@ from eyenet.bus.memory import MemoryBus
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.collector import compute_instance_id
 from eyenet.contracts.enums import (
+    ArtifactSubjectKind,
+    ArtifactValidationState,
     CandidateState,
     CollectorDesiredState,
     CollectorObservedState,
+    GroupAccessKind,
     GroupKind,
     IdentityRole,
     IdentityState,
@@ -182,3 +185,99 @@ async def test_dispatch_publishes_join_command_to_scout_channel(storage: BaseRep
 
     events = [r.event for r in await storage.all_audit()]
     assert AuditSubject.CANDIDATE_JOINING.value in events
+
+
+# -- E5.5: access-artifact selection on dispatch -----------------------------
+
+
+async def _dispatch_and_capture_command(storage: BaseRepository) -> JoinGroupCommand:
+    """Run one dispatch tick and return the single published JoinGroupCommand."""
+    bus = MemoryBus()
+    captured: list[bytes] = []
+
+    async def _capture(subject: str, payload: bytes, headers: dict[str, str]) -> None:
+        captured.append(payload)
+
+    scout_iid = compute_instance_id("scout", SourceKind.TELEGRAM)
+    await bus.subscribe(command_subject_for(scout_iid), _capture)
+    await CollectorSupervisor(bus=bus, storage=storage).dispatch_approved()
+    assert len(captured) == 1
+    return JoinGroupCommand.model_validate_json(captured[0])
+
+
+async def _seed_scout_collector_candidate(storage: BaseRepository) -> UUID:
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    await storage.create_identity(
+        name="scout", source_id=src, session_path="/s", role=IdentityRole.SCOUT
+    )
+    coll = await _collector(storage, src, "a")
+    return await _approved_candidate(storage, src, coll)
+
+
+async def _add_candidate_artifact(
+    storage: BaseRepository,
+    candidate_id: UUID,
+    *,
+    kind: GroupAccessKind,
+    value: str,
+    validation_state: ArtifactValidationState = ArtifactValidationState.UNVERIFIED,
+    requires_admin_approval: bool = False,
+) -> UUID:
+    art = await storage.add_group_access_artifact(
+        subject_kind=ArtifactSubjectKind.CANDIDATE,
+        group_id=None,
+        candidate_id=candidate_id,
+        kind=kind,
+        value=value,
+        discovered_at_ingest=_NOW,
+        validation_state=validation_state,
+        requires_admin_approval=requires_admin_approval,
+    )
+    return art.id
+
+
+async def test_dispatch_selects_usable_invite_artifact(storage: BaseRepository) -> None:
+    cand = await _seed_scout_collector_candidate(storage)
+    invite_id = await _add_candidate_artifact(
+        storage, cand, kind=GroupAccessKind.INVITE_LINK, value="https://t.me/+abc"
+    )
+    cmd = await _dispatch_and_capture_command(storage)
+    assert cmd.access_artifact_id == invite_id
+
+
+async def test_dispatch_prefers_cheapest_kind(storage: BaseRepository) -> None:
+    cand = await _seed_scout_collector_candidate(storage)
+    public_id = await _add_candidate_artifact(
+        storage, cand, kind=GroupAccessKind.PUBLIC_IDENTIFIER, value="@target"
+    )
+    await _add_candidate_artifact(
+        storage, cand, kind=GroupAccessKind.INVITE_LINK, value="https://t.me/+abc"
+    )
+    cmd = await _dispatch_and_capture_command(storage)
+    # public_identifier outranks invite_link in the preference order.
+    assert cmd.access_artifact_id == public_id
+
+
+async def test_dispatch_falls_back_to_public_when_no_usable_artifact(
+    storage: BaseRepository,
+) -> None:
+    cand = await _seed_scout_collector_candidate(storage)
+    # Expired invite + an admin-approval-gated invite → neither usable.
+    await _add_candidate_artifact(
+        storage,
+        cand,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+dead",
+        validation_state=ArtifactValidationState.EXPIRED,
+    )
+    await _add_candidate_artifact(
+        storage,
+        cand,
+        kind=GroupAccessKind.INVITE_LINK,
+        value="https://t.me/+gated",
+        requires_admin_approval=True,
+    )
+    cmd = await _dispatch_and_capture_command(storage)
+    assert cmd.access_artifact_id is None

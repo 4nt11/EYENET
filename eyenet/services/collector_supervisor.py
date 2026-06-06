@@ -26,9 +26,11 @@ from typing import TYPE_CHECKING, cast
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.collector import compute_instance_id
 from eyenet.contracts.enums import (
+    ArtifactValidationState,
     CandidateState,
     CollectorDesiredState,
     CollectorObservedState,
+    GroupAccessKind,
 )
 from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
 from eyenet.service import ServiceBase
@@ -36,11 +38,52 @@ from eyenet.services.discovery.eligibility import CollectorEligibilityResult, co
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.source import SourceRow
 
 _log = get_logger()
 _APPROVED_BATCH = 1000
+
+# Access-artifact selection preference (M9.E5.5): cheapest / lowest-OPSEC kind
+# first. Only kinds the collector can currently action are listed — an
+# artifact of any other kind (or none usable) falls through to the
+# public-identifier path (``access_artifact_id=None`` on ``platform_groupid``),
+# which never fails worse than dispatching an artifact the collector would
+# reject outright. Extend in lockstep with ``telegram._join.select_join_action``
+# as more kinds gain support.
+_KIND_PREFERENCE: tuple[GroupAccessKind, ...] = (
+    GroupAccessKind.PUBLIC_IDENTIFIER,
+    GroupAccessKind.INVITE_LINK,
+)
+_USABLE_VALIDATION_STATES = frozenset(
+    {ArtifactValidationState.VALID, ArtifactValidationState.UNVERIFIED}
+)
+
+
+def select_access_artifact(
+    artifacts: Iterable[GroupAccessArtifactRow],
+) -> GroupAccessArtifactRow | None:
+    """Pick the cheapest usable access artifact for a join, or ``None`` for the
+    public-identifier fallback (M9.E5.5, §4.12.4).
+
+    Usable = ``validation_state`` in {VALID, UNVERIFIED}, NOT
+    ``requires_admin_approval``, and a kind the collector can action (present in
+    :data:`_KIND_PREFERENCE`). Ranked by preference order; ties broken
+    deterministically by artifact id so selection is stable across ticks.
+    """
+    usable = [
+        art
+        for art in artifacts
+        if art.validation_state in _USABLE_VALIDATION_STATES
+        and not art.requires_admin_approval
+        and art.kind in _KIND_PREFERENCE
+    ]
+    if not usable:
+        return None
+    return min(usable, key=lambda a: (_KIND_PREFERENCE.index(a.kind), a.id))
 
 
 class CollectorSupervisor(ServiceBase):
@@ -121,10 +164,15 @@ class CollectorSupervisor(ServiceBase):
                 # Lost the scout to a concurrent lease — retry next tick.
                 _log.info("supervisor.scout_lease_lost", candidate_id=str(candidate.id))
                 continue
+            # E5.5: pick the cheapest usable access artifact (invite link, etc.);
+            # None → the public-identifier path on platform_groupid.
+            artifacts = await self._storage.list_group_access_artifacts_for_candidate(candidate.id)
+            selected = select_access_artifact(artifacts)
             command = JoinGroupCommand(
                 candidate_id=candidate.id,
                 platform_groupid=candidate.platform_groupid,
                 scout_identity_id=scout.id,
+                access_artifact_id=selected.id if selected is not None else None,
             )
             await self._storage.transition_candidate(
                 candidate_id=candidate.id,
@@ -166,4 +214,4 @@ class CollectorSupervisor(ServiceBase):
         )
 
 
-__all__ = ["CollectorSupervisor"]
+__all__ = ["CollectorSupervisor", "select_access_artifact"]
