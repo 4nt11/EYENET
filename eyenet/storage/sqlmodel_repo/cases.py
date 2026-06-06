@@ -256,8 +256,7 @@ class CasesMixin:
             archived = await _require_case(session, case_id)
             if archived.status is not CaseStatus.ARCHIVED:
                 raise CaseError(
-                    f"only ARCHIVED cases reopen into a successor "
-                    f"(got {archived.status.value})"
+                    f"only ARCHIVED cases reopen into a successor (got {archived.status.value})"
                 )
             successor = CaseTable(
                 title=archived.title,
