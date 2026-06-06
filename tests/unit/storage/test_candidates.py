@@ -351,9 +351,7 @@ async def _drive_to_joining(storage: BaseRepository) -> GroupCandidateRow:
         to_state=CandidateState.APPROVED,
         assigned_collector_id=_FAKE_COLLECTOR,
     )
-    return await storage.transition_candidate(
-        candidate_id=cand.id, to_state=CandidateState.JOINING
-    )
+    return await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINING)
 
 
 @pytest.mark.unit

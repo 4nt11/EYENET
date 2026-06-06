@@ -38,8 +38,11 @@ from telethon.tl.types import (
 from eyenet.collectors.base.skeleton import CollectorSkeleton
 from eyenet.collectors.telegram._join import (
     CollectorJoinHandler,
+    JoinAction,
     JoinOutcome,
     classify_join_error,
+    parse_invite_hash,
+    select_join_action,
 )
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.bus import Bus
@@ -207,13 +210,60 @@ class TelegramCollector(CollectorSkeleton):
         if self._backfill:
             asyncio.create_task(self._run_backfill())  # noqa: RUF006
 
+    async def _resolve_join_target(
+        self, cmd: JoinGroupCommand
+    ) -> tuple[JoinAction, str | None] | None:
+        """Map the command's selected access artifact to a (action, invite_hash)
+        pair, or ``None`` if the candidate was already failed (E5.5).
+
+        No artifact → the public-identifier path. Returns ``None`` after failing
+        the candidate for a missing artifact, an unsupported kind, or an
+        unparseable invite — the caller just returns when it sees ``None``."""
+        if self._join is None:  # pragma: no cover — guarded by caller
+            raise RuntimeError("join handler not ready")
+        if cmd.access_artifact_id is None:
+            return JoinAction.PUBLIC, None
+        artifact = await self._storage.get_group_access_artifact(cmd.access_artifact_id)
+        if artifact is None:
+            await self._join.fail_candidate(cmd, reason="access_artifact_not_found")
+            return None
+        action = select_join_action(artifact.kind)
+        if action is JoinAction.UNSUPPORTED:
+            await self._join.fail_candidate(cmd, reason="unsupported_access_artifact")
+            return None
+        if action is JoinAction.INVITE_HASH:
+            invite_hash = parse_invite_hash(artifact.value)
+            if invite_hash is None:
+                await self._join.fail_candidate(cmd, reason="unparseable_invite")
+                return None
+            return action, invite_hash
+        return action, None
+
+    async def _handle_join_error(self, cmd: JoinGroupCommand, exc: BaseException) -> None:
+        """Route a telethon join failure onto the candidate state machine (E5.5):
+        ban → quarantine + burn scout; request-sent → requested; otherwise fail
+        (writing a dead-link verdict back onto the artifact when one was used)."""
+        if self._join is None:  # pragma: no cover — guarded by caller
+            raise RuntimeError("join handler not ready")
+        exc_name = type(exc).__name__
+        outcome = classify_join_error(exc_name)
+        if outcome is JoinOutcome.BANNED:
+            await self._join.quarantine_on_ban(cmd)
+        elif outcome is JoinOutcome.REQUESTED:
+            await self._join.mark_join_requested(cmd, reason=f"{exc_name}: {exc}")
+        else:
+            if cmd.access_artifact_id is not None:
+                await self._join.record_artifact_validation(cmd.access_artifact_id, exc_name)
+            await self._join.fail_candidate(cmd, reason=f"{exc_name}: {exc}")
+
     async def _handle_join(self, cmd: JoinGroupCommand) -> None:
-        """Execute a supervisor-dispatched join (E5, §4.12.4).
+        """Execute a supervisor-dispatched join (E5/E5.5, §4.12.4).
 
         Live telethon path (coverage-omitted, §3.4); the DB/transition logic
-        lives in the tested :class:`CollectorJoinHandler`. v1 handles the
-        public-identifier path (``access_artifact_id is None``); invite-link /
-        artifact-kind dispatch is the E5.5 follow-on."""
+        lives in the tested :class:`CollectorJoinHandler` + the pure ``_join``
+        helpers. The public-identifier path issues ``JoinChannelRequest`` on
+        ``platform_groupid``; the invite-link path (E5.5) resolves the selected
+        access artifact, parses its hash, and issues ``ImportChatInviteRequest``."""
         if self._join is None or self._source_uuid is None:
             raise RuntimeError("join requested before on_subscribe completed")
         if self._collector_id is None:
@@ -221,20 +271,25 @@ class TelegramCollector(CollectorSkeleton):
             return
         if self._client is None:
             raise RuntimeError("join requested before telethon client started")
-        if cmd.access_artifact_id is not None:
-            await self._join.fail_candidate(cmd, reason="unsupported_access_artifact")
-            return
 
-        from telethon.tl.functions.channels import JoinChannelRequest  # noqa: PLC0415 — lazy
+        target = await self._resolve_join_target(cmd)
+        if target is None:
+            return  # candidate already failed inside _resolve_join_target
+        action, invite_hash = target
+
+        # Lazy telethon imports keep _join.py import-free / testable.
+        from telethon.tl.functions.channels import JoinChannelRequest  # noqa: PLC0415
+        from telethon.tl.functions.messages import ImportChatInviteRequest  # noqa: PLC0415
 
         try:
-            entity = await self._client.get_entity(cmd.platform_groupid)
-            await self._client(JoinChannelRequest(entity))
-        except Exception as exc:
-            if classify_join_error(type(exc).__name__) is JoinOutcome.BANNED:
-                await self._join.quarantine_on_ban(cmd)
+            if action is JoinAction.INVITE_HASH:
+                updates = await self._client(ImportChatInviteRequest(invite_hash))
+                entity = updates.chats[0]
             else:
-                await self._join.fail_candidate(cmd, reason=f"{type(exc).__name__}: {exc}")
+                entity = await self._client.get_entity(cmd.platform_groupid)
+                await self._client(JoinChannelRequest(entity))
+        except Exception as exc:
+            await self._handle_join_error(cmd, exc)
             return
 
         group_id = await self._join.finalize_joined(
