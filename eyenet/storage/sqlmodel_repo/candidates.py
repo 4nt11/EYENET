@@ -33,8 +33,17 @@ _ALLOWED: dict[CandidateState, frozenset[CandidateState]] = {
     CandidateState.DISCOVERED: frozenset({CandidateState.QUEUED, CandidateState.REJECTED}),
     CandidateState.QUEUED: frozenset({CandidateState.APPROVED, CandidateState.REJECTED}),
     CandidateState.APPROVED: frozenset({CandidateState.JOINING, CandidateState.REJECTED}),
-    CandidateState.JOINING: frozenset({CandidateState.JOINED, CandidateState.FAILED}),
+    # JOINING → REQUESTED (M9.E5.5): an approval-gated group accepted a join
+    # *request* (telethon InviteRequestSentError) rather than joining outright.
+    CandidateState.JOINING: frozenset(
+        {CandidateState.JOINED, CandidateState.FAILED, CandidateState.REQUESTED}
+    ),
     CandidateState.JOINED: frozenset({CandidateState.PARKED}),
+    # REQUESTED → JOINED is the (future) approval-detected edge; FAILED/PARKED
+    # are the denied / give-up edges wired now (M9.E5.5).
+    CandidateState.REQUESTED: frozenset(
+        {CandidateState.JOINED, CandidateState.FAILED, CandidateState.PARKED}
+    ),
     # FAILED → QUEUED is the M9.D3 retry edge (admin:candidates, can burn an
     # identity); FAILED → PARKED is the give-up edge.
     CandidateState.FAILED: frozenset({CandidateState.PARKED, CandidateState.QUEUED}),

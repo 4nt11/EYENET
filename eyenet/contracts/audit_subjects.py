@@ -59,6 +59,9 @@ class AuditSubject(StrEnum):
     # Platform refused / timed out the join (candidate joining→failed); the
     # error is frozen in the candidate's rejection_reason.
     CANDIDATE_FAILED = "eyenet.audit.candidate.failed"
+    # Approval-gated group accepted a join *request* (candidate joining→requested);
+    # awaits a platform-side admin decision (M9.E5.5).
+    CANDIDATE_JOIN_REQUESTED = "eyenet.audit.candidate.join_requested"
     # --- §4.12.5 scout graduation (M9.E4) ----------------------------------
     IDENTITY_GRADUATED = "eyenet.audit.identity.graduated"
     IDENTITY_BURNED = "eyenet.audit.identity.burned"

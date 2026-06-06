@@ -373,14 +373,19 @@ class CandidateState(StrEnum):
     .. code-block::
 
         discovered → queued → approved → joining → joined
-                      │           │          │
-                      ↓           ↓          ↓
-                   rejected    rejected   failed
-                      │                     │
-                      └──── parked ──────────┘
+                      │           │          │  │
+                      ↓           ↓          ↓  └→ requested → joined
+                   rejected    rejected   failed       │
+                      │                     │          ↓
+                      └──── parked ──────────┘     failed / parked
                                 │
                                 ↓ (re-entry, fresh operator decision)
                              approved
+
+    ``requested`` (M9.E5.5): the collector sent a join *request* to an
+    approval-gated group (telethon ``InviteRequestSentError``); it awaits a
+    platform-side admin decision. Resolution (``requested → joined``) needs
+    live membership detection — a follow-on; the entry + give-up edges land now.
     """
 
     DISCOVERED = "discovered"
@@ -388,6 +393,7 @@ class CandidateState(StrEnum):
     APPROVED = "approved"
     JOINING = "joining"
     JOINED = "joined"
+    REQUESTED = "requested"
     REJECTED = "rejected"
     FAILED = "failed"
     PARKED = "parked"
