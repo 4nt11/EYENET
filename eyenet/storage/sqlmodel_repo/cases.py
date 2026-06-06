@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -349,6 +350,76 @@ class CasesMixin:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(CaseTable, case_id)
             return _case_row(table) if table is not None else None
+
+    def _cases_filtered_stmt(
+        self,
+        *,
+        status: CaseStatus | None,
+        since: datetime | None,
+        until: datetime | None,
+        collaborator_user_id: UUID | None,
+    ) -> Any:
+        stmt = select(CaseTable)
+        if status is not None:
+            stmt = stmt.where(col(CaseTable.status) == status)
+        if since is not None:
+            stmt = stmt.where(col(CaseTable.created_at) >= since)
+        if until is not None:
+            stmt = stmt.where(col(CaseTable.created_at) < until)
+        if collaborator_user_id is not None:
+            # §4.10.4 list-visibility: only cases the user actively collaborates on.
+            stmt = stmt.where(
+                col(CaseTable.id).in_(
+                    select(CaseCollaboratorTable.case_id).where(
+                        col(CaseCollaboratorTable.user_id) == collaborator_user_id,
+                        col(CaseCollaboratorTable.revoked_at).is_(None),
+                    )
+                )
+            )
+        return stmt
+
+    async def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        collaborator_user_id: UUID | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[CaseRow]:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                self._cases_filtered_stmt(
+                    status=status,
+                    since=since,
+                    until=until,
+                    collaborator_user_id=collaborator_user_id,
+                )
+                .order_by(col(CaseTable.created_at).desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [_case_row(r) for r in list(result)]
+
+    async def count_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        collaborator_user_id: UUID | None = None,
+    ) -> int:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            inner = self._cases_filtered_stmt(
+                status=status,
+                since=since,
+                until=until,
+                collaborator_user_id=collaborator_user_id,
+            ).subquery()
+            result = await session.exec(select(func.count()).select_from(inner))
+            return int(result.one())
 
     async def resolve_case_for_candidate(self, candidate_id: UUID) -> CaseRow | None:
         """Return the Case whose seed roots reach a candidate (API_PLAN §4.12.3).

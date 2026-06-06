@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         AutoJoinPolicy,
         CandidateState,
         CaseRoleOnCase,
+        CaseStatus,
         CaseSubjectKind,
         ClearanceScope,
         CollectorDesiredState,
@@ -220,6 +221,36 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def get_case(self, case_id: UUID) -> CaseRow | None: ...
+
+    @abstractmethod
+    async def list_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        collaborator_user_id: UUID | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[CaseRow]:
+        """Cases newest-first (``created_at DESC``), filters AND-compose (§4.10).
+
+        ``collaborator_user_id`` set → restrict to cases where that user is an
+        active collaborator (``case_collaborator.revoked_at IS NULL``) — the
+        §4.10.4 list-visibility predicate. Omit (``None``) for the unrestricted
+        listing an ``admin:case`` holder sees.
+        """
+
+    @abstractmethod
+    async def count_cases(
+        self,
+        *,
+        status: CaseStatus | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        collaborator_user_id: UUID | None = None,
+    ) -> int:
+        """Count cases matching the same filters as :meth:`list_cases`."""
 
     @abstractmethod
     async def update_case_discovery_policy(
