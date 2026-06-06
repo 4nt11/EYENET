@@ -36,6 +36,11 @@ from telethon.tl.types import (
 )
 
 from eyenet.collectors.base.skeleton import CollectorSkeleton
+from eyenet.collectors.telegram._join import (
+    CollectorJoinHandler,
+    JoinOutcome,
+    classify_join_error,
+)
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.collector import CollectorHealth
@@ -48,9 +53,11 @@ from eyenet.contracts.enums import (
 )
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
+from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
 from eyenet.identity_pool.loader import IdentityFileEntry
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
+from eyenet.services.discovery.scout_graduation import ScoutGraduationService
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
 
@@ -95,6 +102,9 @@ class TelegramCollector(CollectorSkeleton):
         self._monitor_raw_ids: set[int] | None = None
         self._backfill = backfill
         self._recent: deque[float] = deque(maxlen=3600)
+        # E5 discovery recursion: this collector's own DB row + the join core.
+        self._collector_id: UUID | None = None
+        self._join: CollectorJoinHandler | None = None
 
     async def on_subscribe(self) -> None:
         await super().on_subscribe()
@@ -152,6 +162,27 @@ class TelegramCollector(CollectorSkeleton):
 
         await self._bus.subscribe("eyenet.control.global.panic", _on_panic)
 
+        # E5 discovery recursion: resolve our own collector row + wire the join
+        # core, then subscribe to the command channel keyed by our instance_id
+        # (the supervisor publishes JoinGroupCommand here for the leased scout).
+        collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
+        self._collector_id = collector.id if collector is not None else None
+        self._join = CollectorJoinHandler(
+            storage=self._storage,
+            audit=self.audit,
+            pool=self._pool,
+            scout_graduation=ScoutGraduationService(bus=self._bus, storage=self._storage),
+            identity_name=self._identity_name,
+        )
+
+        async def _on_command(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
+            try:
+                await self._handle_join(JoinGroupCommand.model_validate_json(payload))
+            except Exception as exc:
+                _log.error("collector.command_error", error=str(exc))
+
+        await self._bus.subscribe(command_subject_for(self.instance_id), _on_command)
+
         _log.info(
             "collector.ready",
             identity=entry.name,
@@ -175,6 +206,54 @@ class TelegramCollector(CollectorSkeleton):
 
         if self._backfill:
             asyncio.create_task(self._run_backfill())  # noqa: RUF006
+
+    async def _handle_join(self, cmd: JoinGroupCommand) -> None:
+        """Execute a supervisor-dispatched join (E5, §4.12.4).
+
+        Live telethon path (coverage-omitted, §3.4); the DB/transition logic
+        lives in the tested :class:`CollectorJoinHandler`. v1 handles the
+        public-identifier path (``access_artifact_id is None``); invite-link /
+        artifact-kind dispatch is the E5.5 follow-on."""
+        if self._join is None or self._source_uuid is None:
+            raise RuntimeError("join requested before on_subscribe completed")
+        if self._collector_id is None:
+            await self._join.fail_candidate(cmd, reason="collector_not_provisioned")
+            return
+        if self._client is None:
+            raise RuntimeError("join requested before telethon client started")
+        if cmd.access_artifact_id is not None:
+            await self._join.fail_candidate(cmd, reason="unsupported_access_artifact")
+            return
+
+        from telethon.tl.functions.channels import JoinChannelRequest  # noqa: PLC0415 — lazy
+
+        try:
+            entity = await self._client.get_entity(cmd.platform_groupid)
+            await self._client(JoinChannelRequest(entity))
+        except Exception as exc:
+            if classify_join_error(type(exc).__name__) is JoinOutcome.BANNED:
+                await self._join.quarantine_on_ban(cmd)
+            else:
+                await self._join.fail_candidate(cmd, reason=f"{type(exc).__name__}: {exc}")
+            return
+
+        group_id = await self._join.finalize_joined(
+            cmd,
+            source_uuid=self._source_uuid,
+            collector_id=self._collector_id,
+            kind=_chat_kind(entity),
+            title=getattr(entity, "title", None),
+        )
+        # Observe the freshly joined group on the live session (else the 7-day
+        # graduation window sees no traffic). None => we already watch all.
+        raw_id = getattr(entity, "id", None)
+        if self._monitor_raw_ids is not None and isinstance(raw_id, int):
+            self._monitor_raw_ids.add(raw_id)
+        _log.info(
+            "collector.join_complete",
+            candidate_id=str(cmd.candidate_id),
+            group_id=str(group_id),
+        )
 
     async def _ingest_message(self, event: events.NewMessage.Event) -> None:
         """Live handler: filter, extract, delegate to _ingest_msg."""
