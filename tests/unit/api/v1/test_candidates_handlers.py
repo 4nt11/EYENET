@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Direct-call unit tests for the D3 Candidate triage handlers (M9.D3).
 
-Bypasses ASGI routing (coverage can't trace it). Eligibility is a stub — these
-tests assert it's surfaced (DEFERRED_TO_RUNTIME) and that approve does NOT gate
-on it (only existence + legal transition).
+Bypasses ASGI routing (coverage can't trace it). The §4.12.3 eligibility
+predicate is real (M9.E3) and surfaced on GET; approve itself still does NOT
+gate on it (only existence + legal transition) — the supervisor gates at
+dispatch.
 """
 
 from __future__ import annotations
@@ -130,18 +131,22 @@ async def test_list_candidates_filters(
     assert [c.candidate_id for c in queued.items] == [c1]
 
 
-async def test_get_candidate_detail_has_eligibility_stub(
+async def test_get_candidate_detail_eligibility(
     storage: BaseRepository, mkuser: Callable[..., CurrentUser]
 ) -> None:
     src = await _source(storage)
+    coll = await _real_collector(storage, src)
     cid = await _candidate(storage, src)
     detail = await candidates_get(cid, mkuser("read:candidates"), storage)
     assert detail.candidate_id == cid
     assert len(detail.mentions) == 1
-    # one mentioning collector → one (stubbed) eligibility entry
+    # the real §4.12.3 predicate evaluates the fleet — one collector, and the
+    # mention carries no seed root the collector reaches → NO_REACHABLE_ROOT.
     assert len(detail.eligibility_per_collector) == 1
+    assert detail.eligibility_per_collector[0].collector_id == coll
     assert (
-        detail.eligibility_per_collector[0].result is CollectorEligibilityResult.DEFERRED_TO_RUNTIME
+        detail.eligibility_per_collector[0].result
+        is CollectorEligibilityResult.NO_REACHABLE_ROOT
     )
 
 

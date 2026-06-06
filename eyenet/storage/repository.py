@@ -1456,6 +1456,11 @@ class BaseRepository(ABC):
         """Return an AVAILABLE SCOUT for ``source_id`` (§4.12.3), or None."""
 
     @abstractmethod
+    async def lease_scout(self, source_id: UUID) -> IdentityRow | None:
+        """Atomically claim an AVAILABLE SCOUT (→ IN_USE) for ``source_id``, or
+        None (M9.E3). A second lease can't re-grab the same scout."""
+
+    @abstractmethod
     async def has_available_scout(self, source_id: UUID) -> bool:
         """True iff at least one AVAILABLE SCOUT exists for ``source_id``."""
 

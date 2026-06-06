@@ -47,6 +47,15 @@ class AuditSubject(StrEnum):
     # eligibility (the reachable-root dimension of the §4.12.3 predicate).
     CASE_SEED_ROOTS_CHANGED = "eyenet.audit.case.seed_roots_changed"
 
+    # --- §4.12.4 CollectorSupervisor runtime (M9.E3) -----------------------
+    # Supervisor reconciled a collector's observed_state toward desired_state.
+    COLLECTOR_RECONCILED = "eyenet.audit.collector.reconciled"
+    # Supervisor leased a scout + dispatched a join (candidate approved→joining).
+    CANDIDATE_JOINING = "eyenet.audit.candidate.joining"
+    # --- §4.12.5 scout graduation (M9.E4) ----------------------------------
+    IDENTITY_GRADUATED = "eyenet.audit.identity.graduated"
+    IDENTITY_BURNED = "eyenet.audit.identity.burned"
+
     # --- §M10 document classification --------------------------------------
     # Emitted by the ClassifierService (a later slice); the aggregator builds
     # the payload now (eyenet/classifier/aggregate/_audit.py) so callers and the

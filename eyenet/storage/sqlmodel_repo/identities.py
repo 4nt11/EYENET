@@ -193,6 +193,36 @@ class IdentitiesMixin:
             table = result.first()
             return _identity_row(table) if table is not None else None
 
+    async def lease_scout(self, source_id: UUID) -> IdentityRow | None:
+        """Atomically claim an AVAILABLE SCOUT for ``source_id`` (M9.E3).
+
+        Selects the name-ordered first available scout and flips it to
+        ``IN_USE`` in one transaction, so a subsequent lease can't re-grab it
+        (the single-supervisor sequential case). Returns ``None`` when none are
+        available. Cross-process concurrency would need a ``BEGIN IMMEDIATE``
+        override in the SQLite backend, like the audit chain (CLAUDE.md §2.6);
+        deferred while there is one supervisor process.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(IdentityTable)
+                .where(
+                    IdentityTable.source_id == source_id,
+                    IdentityTable.role == IdentityRole.SCOUT,
+                    IdentityTable.state == IdentityState.AVAILABLE,
+                )
+                .order_by(col(IdentityTable.name).asc())
+                .limit(1)
+            )
+            table = (await session.exec(stmt)).first()
+            if table is None:
+                return None
+            table.state = IdentityState.IN_USE
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _identity_row(table)
+
     async def has_available_scout(self, source_id: UUID) -> bool:
         """True iff at least one AVAILABLE SCOUT exists for ``source_id``."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]

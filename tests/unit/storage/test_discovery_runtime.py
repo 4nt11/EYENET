@@ -488,3 +488,24 @@ async def test_score_candidate_auto_queues_on_threshold(storage: BaseRepository)
 async def test_score_candidate_missing_raises(storage: BaseRepository) -> None:
     with pytest.raises(ValueError, match="not found"):
         await storage.score_candidate(uuid4())
+
+
+@pytest.mark.unit
+async def test_lease_scout_marks_in_use_no_double_lease(storage: BaseRepository) -> None:
+    src = await _source(storage)
+    scout = await storage.create_identity(
+        name="s", source_id=src, session_path="/s", role=IdentityRole.SCOUT
+    )
+    first = await storage.lease_scout(src)
+    assert first is not None
+    assert first.id == scout.id
+    assert first.state is IdentityState.IN_USE
+    # the only scout is now leased — a second lease can't re-grab it
+    assert await storage.lease_scout(src) is None
+
+
+@pytest.mark.unit
+async def test_lease_scout_none_when_no_scouts(storage: BaseRepository) -> None:
+    src = await _source(storage)
+    await storage.create_identity(name="mon", source_id=src, session_path="/m")  # monitor only
+    assert await storage.lease_scout(src) is None

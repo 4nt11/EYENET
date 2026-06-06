@@ -210,6 +210,7 @@ async def test_candidates_approve_through_router(
     )
     assert approved.status_code == 202, approved.text
     assert approved.json()["state"] == "approved"
-    assert all(
-        e["result"] == "deferred_to_runtime" for e in approved.json()["eligibility_per_collector"]
-    )
+    # The real §4.12.3 predicate now runs: the mention has no seed root the
+    # collector reaches → NO_REACHABLE_ROOT (no longer the deferred stub).
+    results = [e["result"] for e in approved.json()["eligibility_per_collector"]]
+    assert results == ["no_reachable_root"]
