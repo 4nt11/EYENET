@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from eyenet.contracts.enums import IdentityState, SourceKind
+from eyenet.contracts.enums import IdentityRole, IdentityState, SourceKind
 
 
 class IdentityFileEntry(BaseModel):
@@ -29,6 +29,10 @@ class IdentityFileEntry(BaseModel):
     cooldown_seconds: int = 21_600
     last_used_at: datetime | None = None
     state: IdentityState = IdentityState.AVAILABLE
+    # Discovery-loop role for the file↔DB bridge (M9.E5). None → MONITOR when
+    # provisioned into the IdentityTable. Set `role = "scout"` to make an
+    # identity leasable by the supervisor for candidate joins.
+    role: IdentityRole | None = None
     notes: str | None = None
 
     # Telegram-specific (required when source=telegram)
@@ -119,6 +123,8 @@ def dump(model: IdentityFile, path: Path) -> None:
         if entry.last_used_at is not None:
             lines.append(f"last_used_at = {entry.last_used_at.isoformat()!r}")
         lines.append(f"state = {_q(entry.state.value)}")
+        if entry.role is not None:
+            lines.append(f"role = {_q(entry.role.value)}")
         if entry.notes is not None:
             lines.append(f"notes = {_q(entry.notes)}")
         if entry.telegram_api_id is not None:
