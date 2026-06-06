@@ -20,9 +20,11 @@ from pydantic import Field
 
 from ._base import DbRowBase
 from .enums import (
+    AutoJoinPolicy,
     CaseRoleOnCase,
     CaseStatus,
     CaseSubjectKind,
+    RedundancyPolicy,
     SensitivityTier,
 )
 
@@ -50,6 +52,15 @@ class CaseRow(DbRowBase):
         description="Predecessor case when this row is a successor "
         "created by reopening an archived case (§4.10.3).",
     )
+    # -- Discovery-loop policy (API_PLAN §4.12, M9.D4 / Group E fold-in) -------
+    seed_root_group_ids: list[UUID] = Field(
+        default_factory=list,
+        description="Operator-curated initial root groups (depth-0 in the "
+        "discovery tree). Mutating emits `case.seed_roots_changed`.",
+    )
+    redundancy_policy: RedundancyPolicy = RedundancyPolicy.PREFER_SINGLE
+    auto_join_policy: AutoJoinPolicy = AutoJoinPolicy.DISABLED
+    auto_join_score_threshold: float | None = None
 
 
 class CaseMemberRow(DbRowBase):

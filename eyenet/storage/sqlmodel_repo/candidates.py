@@ -22,6 +22,8 @@ from eyenet.contracts.candidate import (
 )
 from eyenet.contracts.enums import CandidateState, GroupKind, MentionKind
 from eyenet.models.candidates import GroupCandidateMentionTable, GroupCandidateTable
+from eyenet.models.case import CaseTable
+from eyenet.models.membership import CollectorGroupMembershipTable
 
 from ._helpers import safe_session
 
@@ -326,6 +328,78 @@ class CandidatesMixin:
                 mentions=mentions,
                 min_depth_by_collector=min_depth,
             )
+
+    async def group_lineage(self, group_id: UUID) -> tuple[UUID | None, int]:
+        """Return ``(seed_root_id, depth_from_root)`` for a group (API_PLAN §4.12).
+
+        Resolution order:
+
+        1. **Seed root** — the group is listed in some Case's
+           ``seed_root_group_ids`` → ``(group_id, 0)``.
+        2. **Discovered** — a candidate's ``resulting_group_id`` points here →
+           the min-depth mention of that candidate carries the lineage
+           ``(seed_root_id, depth_from_root)``.
+        3. **Unknown** — neither (a seed/manual group not registered as a root)
+           → ``(None, 0)``. Mentions extracted from it cannot propagate a root.
+
+        Used by ``channel_reference_extraction`` (E2): a mention observed in
+        group G gets ``seed_root_id = root`` and ``depth_from_root = depth + 1``.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            gid = str(group_id)
+            case_result = await session.exec(select(CaseTable))
+            for case_table in case_result:
+                if gid in case_table.seed_root_group_ids:
+                    return (group_id, 0)
+
+            cand_stmt = select(GroupCandidateTable).where(
+                col(GroupCandidateTable.resulting_group_id) == group_id,
+            )
+            candidate = (await session.exec(cand_stmt)).first()
+            if candidate is not None:
+                mention_stmt = select(GroupCandidateMentionTable).where(
+                    col(GroupCandidateMentionTable.candidate_id) == candidate.id,
+                    col(GroupCandidateMentionTable.seed_root_id).is_not(None),
+                )
+                mentions = list(await session.exec(mention_stmt))
+                if mentions:
+                    best = min(mentions, key=lambda m: m.depth_from_root)
+                    return (best.seed_root_id, best.depth_from_root)
+
+            return (None, 0)
+
+    async def reachable_roots_for_collector(self, collector_id: UUID) -> set[UUID]:
+        """Return the seed-root group ids reachable by a collector (§4.12.3).
+
+        A root is reachable when the collector has either (a) observed a mention
+        carrying that ``seed_root_id``, or (b) an active membership in a group
+        that is itself a registered seed root. The eligibility predicate
+        intersects this set with a candidate's mention seed-roots to find the
+        minimum reachable depth.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            roots: set[UUID] = set()
+
+            mention_stmt = select(GroupCandidateMentionTable.seed_root_id).where(
+                col(GroupCandidateMentionTable.observed_by_collector_id) == collector_id,
+                col(GroupCandidateMentionTable.seed_root_id).is_not(None),
+            )
+            for seed_root_id in await session.exec(mention_stmt):
+                if seed_root_id is not None:
+                    roots.add(seed_root_id)
+
+            mem_stmt = select(CollectorGroupMembershipTable.group_id).where(
+                col(CollectorGroupMembershipTable.collector_id) == collector_id,
+                col(CollectorGroupMembershipTable.left_at).is_(None),
+            )
+            member_group_ids = set(await session.exec(mem_stmt))
+            if member_group_ids:
+                seed_set: set[str] = set()
+                for case_table in await session.exec(select(CaseTable)):
+                    seed_set.update(case_table.seed_root_group_ids)
+                roots.update(g for g in member_group_ids if str(g) in seed_set)
+
+            return roots
 
 
 __all__ = ["CandidatesMixin"]

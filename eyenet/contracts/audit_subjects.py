@@ -42,6 +42,10 @@ class AuditSubject(StrEnum):
     CASE_ARCHIVED = "eyenet.audit.case.archived"
     CASE_TIER_CHANGED = "eyenet.audit.case.tier_changed"
     CASE_ACCESS_DENIED = "eyenet.audit.case.access_denied"
+    # --- §4.12 discovery-loop seed roots (M9.D4 / Group E) -----------------
+    # Mutating Case.seed_root_group_ids changes downstream candidate
+    # eligibility (the reachable-root dimension of the §4.12.3 predicate).
+    CASE_SEED_ROOTS_CHANGED = "eyenet.audit.case.seed_roots_changed"
 
     # --- §M10 document classification --------------------------------------
     # Emitted by the ClassifierService (a later slice); the aggregator builds
