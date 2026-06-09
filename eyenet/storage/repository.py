@@ -445,6 +445,53 @@ class BaseRepository(ABC):
     ) -> frozenset[ClearanceScope]: ...
 
     # =================================================================
+    # FILE-ACCESS CRYPTO FOUNDATION (API_PLAN §5.6-5.7, M9.B1)
+    # Signing-key registry + single-use acknowledgment nonces. Tables
+    # live in audit.db. Verification-side only — no private key at rest.
+    # =================================================================
+
+    @abstractmethod
+    async def record_signing_key(
+        self,
+        user_id: UUID,
+        verifying_key_bytes: bytes,
+        *,
+        now: datetime | None = None,
+    ) -> str:
+        """Register a new active Ed25519 verifying key; retire the prior
+        active key. Returns the new key's 16-hex fingerprint (kid)."""
+
+    @abstractmethod
+    async def lookup_key_for_user(
+        self,
+        user_id: UUID,
+        fingerprint: str,
+    ) -> tuple[bytes, bool] | None:
+        """Resolve THIS user's key (active or retired) by fingerprint →
+        (verifying_key_bytes, retired) | None. Bound to the authenticated
+        asserting user so verification never attributes to an arbitrary
+        user sharing a raw key."""
+
+    @abstractmethod
+    async def active_signing_key_for(self, user_id: UUID) -> bytes | None:
+        """Return the user's current active verifying key bytes, or None."""
+
+    @abstractmethod
+    async def record_acknowledgment(
+        self,
+        user_id: UUID,
+        content_hash: str,
+        *,
+        now: datetime,
+    ) -> UUID:
+        """Mint a single-use acknowledgment nonce (expires now + 60s)."""
+
+    @abstractmethod
+    async def consume_acknowledgment(self, nonce: UUID, *, now: datetime) -> bool:
+        """Atomically consume a nonce exactly once. True iff a live,
+        unconsumed, unexpired nonce was claimed by this call."""
+
+    # =================================================================
     # OBSERVATIONS (MODELS §2.3, API_PLAN §4.9)
     # =================================================================
 

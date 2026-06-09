@@ -27,6 +27,10 @@ from .collector import CollectorTable
 from .corpus import CorpusCursorTable
 from .document import DocumentTable
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
+from .file_access import (
+    FileAccessAcknowledgmentTable,
+    SystemUserSigningPubkeyHistoryTable,
+)
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from .group import GroupSnapshotTable, GroupTable
 from .identity import (
@@ -65,6 +69,7 @@ __all__ = [
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",
     "FeedbackPairTable",
+    "FileAccessAcknowledgmentTable",
     "GraphEdgeTable",
     "GraphEdgeType",
     "GraphNodeTable",
@@ -97,5 +102,6 @@ __all__ = [
     "SystemUserClearanceGrantTable",
     "SystemUserCredentialTable",
     "SystemUserScopeTable",
+    "SystemUserSigningPubkeyHistoryTable",
     "SystemUserTable",
 ]
