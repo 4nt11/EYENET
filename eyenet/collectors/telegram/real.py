@@ -23,7 +23,8 @@ from uuid import UUID
 
 import structlog
 from opentelemetry import trace
-from telethon import TelegramClient, events
+from sqlalchemy.exc import SQLAlchemyError
+from telethon import TelegramClient, errors, events
 from telethon.tl.types import (
     Channel,
     Chat,
@@ -40,6 +41,7 @@ from eyenet.collectors.telegram._join import (
     CollectorJoinHandler,
     JoinAction,
     JoinOutcome,
+    candidate_match_forms,
     classify_join_error,
     parse_invite_hash,
     select_join_action,
@@ -71,6 +73,10 @@ _tracer = trace.get_tracer("eyenet.collector.telegram")
 _HEALTH_SUBS_CAP = 100
 # length of the "100" marked-peer prefix in stringified Telegram peer IDs
 _MARKED_PEER_PREFIX_LEN = 3
+# Low-cadence backstop: at most one REQUESTED-membership probe sweep per this
+# many seconds, regardless of the runner's tick_interval. The event path is the
+# primary detector; the probe just catches approvals that arrived silently.
+_REQUESTED_PROBE_INTERVAL_S = 300.0
 
 
 def _zero_traceparent() -> str:
@@ -108,6 +114,13 @@ class TelegramCollector(CollectorSkeleton):
         # E5 discovery recursion: this collector's own DB row + the join core.
         self._collector_id: UUID | None = None
         self._join: CollectorJoinHandler | None = None
+        # Monotonic timestamp of the last REQUESTED-membership probe sweep.
+        self._last_requested_probe: float = 0.0
+        # Hot-path guard (Defect 6): lowercased event-matchable platform_groupid
+        # forms of this collector's REQUESTED candidates. Empty ⇒ _maybe_confirm
+        # does ZERO DB work per message. Refreshed in tick(); seeded in
+        # on_subscribe. joinchat: candidates are NOT here (probe-only, Defect 1).
+        self._requested_match_forms: set[str] = set()
 
     async def on_subscribe(self) -> None:
         await super().on_subscribe()
@@ -186,6 +199,11 @@ class TelegramCollector(CollectorSkeleton):
 
         await self._bus.subscribe(command_subject_for(self.instance_id), _on_command)
 
+        # Seed the hot-path REQUESTED match-form set (Defect 6) so the very
+        # first messages after a restart can confirm a pending approval without
+        # waiting for the first tick().
+        await self._refresh_requested_match_forms()
+
         _log.info(
             "collector.ready",
             identity=entry.name,
@@ -251,6 +269,17 @@ class TelegramCollector(CollectorSkeleton):
             await self._join.quarantine_on_ban(cmd)
         elif outcome is JoinOutcome.REQUESTED:
             await self._join.mark_join_requested(cmd, reason=f"{exc_name}: {exc}")
+            # FIX 3 — the candidate just became REQUESTED at runtime. Seed its
+            # event-matchable forms into the hot-path set NOW so the event path
+            # is live immediately, instead of being hollow until the next tick()
+            # (≤_REQUESTED_PROBE_INTERVAL_S away). Add the specific forms (same
+            # lowercased shape as _refresh_requested_match_forms) rather than a
+            # full DB round-trip on the dispatch path. joinchat: candidates
+            # produce no event-matchable form (probe-only, Defect 1) — they're
+            # simply not added.
+            gid = cmd.platform_groupid
+            if not gid.startswith("joinchat:"):
+                self._requested_match_forms.add(gid.lower())
         else:
             if cmd.access_artifact_id is not None:
                 await self._join.record_artifact_validation(cmd.access_artifact_id, exc_name)
@@ -301,6 +330,15 @@ class TelegramCollector(CollectorSkeleton):
         )
         # Observe the freshly joined group on the live session (else the 7-day
         # graduation window sees no traffic). None => we already watch all.
+        if group_id is None:
+            # FIX 4 — finalize_joined lost the CAS (already-finalized / a
+            # concurrent caller settled this candidate). Do NOT log a success
+            # line with group_id="None"; emit a distinct, accurate INFO.
+            _log.info(
+                "collector.join_already_finalized",
+                candidate_id=str(cmd.candidate_id),
+            )
+            return
         raw_id = getattr(entity, "id", None)
         if self._monitor_raw_ids is not None and isinstance(raw_id, int):
             self._monitor_raw_ids.add(raw_id)
@@ -310,8 +348,200 @@ class TelegramCollector(CollectorSkeleton):
             group_id=str(group_id),
         )
 
+    async def _refresh_requested_match_forms(self) -> None:
+        """Rebuild the hot-path event-matchable form set (Defect 6).
+
+        For each REQUESTED candidate assigned to this collector, add the
+        event-matchable forms of its ``platform_groupid`` (numeric → str; an
+        ``@username``/bare-username, lowercased — Defect 2). ``joinchat:``
+        candidates are deliberately SKIPPED: their hash is not recoverable from a
+        live ``event.chat_id``, so they are PROBE-ONLY (Defect 1). When the set
+        is empty, ``_maybe_confirm_requested`` does zero DB work per message."""
+        if self._collector_id is None:
+            return
+        candidates = await self._storage.requested_candidates_for_collector(self._collector_id)
+        forms: set[str] = set()
+        for candidate in candidates:
+            gid = candidate.platform_groupid
+            if gid.startswith("joinchat:"):
+                continue  # probe-only (Defect 1)
+            forms.add(gid.lower())
+        self._requested_match_forms = forms
+
+    def _event_match_forms(self, event: events.NewMessage.Event, chat: object) -> list[str]:
+        """Lowercased forms the arriving chat could match a REQUESTED candidate by.
+
+        Numeric (signed + -100-stripped) + the chat ``@username`` forms, built by
+        the pure telethon-free :func:`candidate_match_forms` (unit-tested) so the
+        case-folding (Defect 2) is exercised in coverage. ``joinchat:`` candidates
+        are unreachable here by construction — probe-only (Defect 1)."""
+        username = getattr(chat, "username", None)
+        return candidate_match_forms(event.chat_id, username if isinstance(username, str) else None)
+
+    async def _maybe_confirm_requested(self, event: events.NewMessage.Event) -> None:
+        """Event-path approval detector (E5.6): a message arriving from a group
+        this collector requested-to-join means the request was approved — flip
+        the REQUESTED candidate to JOINED via the tested core.
+
+        Hot-path-cheap (Defect 6): the cheap numeric forms are checked against the
+        in-memory ``_requested_match_forms`` set FIRST; only on a hit (or a
+        possible username match) do we pay ``get_chat()`` + the DB query. Empty
+        set ⇒ zero DB work."""
+        if self._join is None or self._collector_id is None or not self._requested_match_forms:
+            return
+        # Cheap pre-filter: numeric forms need no get_chat(). No numeric hit AND
+        # no @username candidate requested at all ⇒ skip the get_chat() + DB.
+        numeric_forms = candidate_match_forms(event.chat_id, None)
+        numeric_hit = any(f in self._requested_match_forms for f in numeric_forms)
+        username_possible = any(f.startswith("@") for f in self._requested_match_forms)
+        if not numeric_hit and not username_possible:
+            return
+        chat = await event.get_chat()
+        for form in self._event_match_forms(event, chat):
+            if form not in self._requested_match_forms:
+                continue
+            candidate = await self._storage.requested_candidate_for_group(
+                collector_id=self._collector_id, platform_groupid=form
+            )
+            if candidate is None:
+                continue
+            confirmed = await self._join.confirm_requested_membership(candidate.id)
+            if confirmed:
+                if self._monitor_raw_ids is not None:
+                    self._monitor_raw_ids.add(_chat_raw_id(event.chat_id))
+                self._requested_match_forms.discard(form)
+                _log.info(
+                    "collector.requested_join_confirmed",
+                    candidate_id=str(candidate.id),
+                    via="event",
+                )
+            return
+
+    async def tick(self) -> None:
+        """Periodic heartbeat. Refreshes the hot-path match-form set (Defect 6)
+        and runs the low-cadence REQUESTED-membership probe backstop (E5.6) — the
+        event path is primary; this catches approvals that produced no observed
+        message AND is the ONLY path that can confirm invite-link candidates."""
+        await self._refresh_requested_match_forms()
+        await self._probe_requested_memberships()
+
+    async def _probe_requested_memberships(self) -> None:
+        """Backstop approval detector: for each REQUESTED candidate assigned to
+        this collector, probe GENUINE live membership and, on confirmation, flip
+        it JOINED via the same tested core the event path uses.
+
+        Throttled to one sweep per ``_REQUESTED_PROBE_INTERVAL_S``. Per-candidate
+        isolation (Defect 5): one bad candidate (missing collector / telethon
+        error) is logged and skipped, never aborting the sweep."""
+        if self._join is None or self._collector_id is None or self._client is None:
+            return
+        now = _time.monotonic()
+        if now - self._last_requested_probe < _REQUESTED_PROBE_INTERVAL_S:
+            return
+        self._last_requested_probe = now
+
+        candidates = await self._storage.requested_candidates_for_collector(self._collector_id)
+        for candidate in candidates:
+            try:
+                await self._probe_one_requested(candidate)
+            except (RuntimeError, errors.RPCError, ValueError, SQLAlchemyError) as exc:
+                # Defect 5 / FIX 2: one bad candidate must not starve the rest.
+                # Every telethon call in the per-candidate probe (incl.
+                # get_entity) is INSIDE this guarded body. telethon raises a
+                # plain ValueError — not an RPCError — for an unresolvable /
+                # deleted / renamed username, so one dead channel must NOT abort
+                # the whole sweep. The confirm path also hits storage
+                # (open_membership), which can raise SQLAlchemyError (e.g.
+                # OperationalError "database is locked", IntegrityError) — that
+                # too must NOT abort the sweep; the candidate self-heals next
+                # sweep (compensation already rolled it back to REQUESTED before
+                # re-raising). Specific tuple (never bare Exception, never
+                # try/except/pass): log + continue.
+                _log.warning(
+                    "collector.requested_probe_candidate_error",
+                    candidate_id=str(candidate.id),
+                    error=str(exc),
+                )
+
+    async def _probe_one_requested(self, candidate: object) -> None:
+        """Probe + confirm a single REQUESTED candidate (Defect 1 + 3).
+
+        ``joinchat:<hash>`` → resolve the invite via ``CheckChatInviteRequest``;
+        only a ``ChatInviteAlready`` (we ARE a member) confirms — its ``.chat``
+        carries the real numeric id + title, passed through so the membership
+        opens against the resolved group. ``@username``/numeric → resolve the
+        entity then ``GetParticipantRequest(channel, 'me')``; membership is proven
+        only when that succeeds (Defect 3 — resolvability ≠ membership). Anything
+        else leaves the candidate REQUESTED for the next sweep."""
+        if self._join is None or self._client is None:  # pragma: no cover — guarded
+            return
+        candidate_id = cast("UUID", candidate.id)  # type: ignore[attr-defined]
+        platform_groupid = cast("str", candidate.platform_groupid)  # type: ignore[attr-defined]
+
+        if platform_groupid.startswith("joinchat:"):
+            confirmed = await self._confirm_joinchat_candidate(candidate_id, platform_groupid)
+        else:
+            confirmed = await self._confirm_public_candidate(candidate_id, platform_groupid)
+        if confirmed:
+            self._requested_match_forms.discard(platform_groupid.lower())
+            _log.info(
+                "collector.requested_join_confirmed",
+                candidate_id=str(candidate_id),
+                via="probe",
+            )
+
+    async def _confirm_joinchat_candidate(self, candidate_id: UUID, platform_groupid: str) -> bool:
+        """Invite-link (``joinchat:<hash>``) probe (Defect 1).
+
+        ``CheckChatInviteRequest(hash)`` → ``ChatInviteAlready`` means the scout
+        is already a member (the approval landed); its ``.chat`` is the real
+        resolved group. A plain ``ChatInvite`` (still pending) or any error means
+        not yet approved → no confirmation."""
+        if self._join is None or self._client is None:  # pragma: no cover — guarded
+            return False
+        from telethon.tl.functions.messages import CheckChatInviteRequest  # noqa: PLC0415
+        from telethon.tl.types import ChatInviteAlready  # noqa: PLC0415
+
+        invite_hash = platform_groupid[len("joinchat:") :]
+        invite = await self._client(CheckChatInviteRequest(invite_hash))
+        if not isinstance(invite, ChatInviteAlready):
+            return False  # still pending (ChatInvite) — not yet a member
+        chat = invite.chat
+        resolved_id = getattr(chat, "id", None)
+        if not isinstance(resolved_id, int):
+            return False
+        return await self._join.confirm_requested_membership(
+            candidate_id,
+            kind=_chat_kind(chat),
+            title=getattr(chat, "title", None),
+            resolved_platform_groupid=str(_strip_100(resolved_id)),
+        )
+
+    async def _confirm_public_candidate(self, candidate_id: UUID, platform_groupid: str) -> bool:
+        """Public/numeric candidate probe (Defect 3 — GENUINE membership only).
+
+        Resolve the entity, then ``GetParticipantRequest(channel, 'me')``: a
+        ``UserNotParticipantError`` means we are NOT a member (resolvability of a
+        public channel is not membership) → no confirmation. Success ⇒ member."""
+        if self._join is None or self._client is None:  # pragma: no cover — guarded
+            return False
+        from telethon.tl.functions.channels import GetParticipantRequest  # noqa: PLC0415
+
+        entity = await self._client.get_entity(platform_groupid)
+        try:
+            await self._client(GetParticipantRequest(entity, "me"))
+        except errors.UserNotParticipantError:
+            return False  # resolvable but not a member — stays REQUESTED
+        return await self._join.confirm_requested_membership(candidate_id)
+
     async def _ingest_message(self, event: events.NewMessage.Event) -> None:
         """Live handler: filter, extract, delegate to _ingest_msg."""
+        # _maybe_confirm_requested MUST run before the monitor filter: a freshly
+        # APPROVED group is not yet in _monitor_raw_ids (it's added on
+        # confirmation), so the filter would otherwise drop the very message that
+        # proves the approval. The Defect-6 hot-path set makes this near-free
+        # (a set lookup; zero DB work when no REQUESTED candidates exist).
+        await self._maybe_confirm_requested(event)
         if (
             self._monitor_raw_ids is not None
             and _chat_raw_id(event.chat_id) not in self._monitor_raw_ids

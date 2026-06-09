@@ -96,6 +96,9 @@ _ARTIFACT_STATE_BY_ERROR: dict[str, ArtifactValidationState] = {
 # are ASCII).
 _INVITE_HASH_RE = re.compile(r"(?:joinchat/|invite=|\+)([A-Za-z0-9_-]+)")
 
+# Length of the Telegram "100" marked-peer prefix (-100<rawid>).
+_MARKED_PEER_PREFIX_LEN = 3
+
 
 def classify_join_error(exc_name: str) -> JoinOutcome:
     """Map a telethon exception *class name* to a :class:`JoinOutcome`.
@@ -136,6 +139,43 @@ def parse_invite_hash(value: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def _strip_marked_peer_prefix(n: int) -> int:
+    """Strip the Telegram -100 marked-peer prefix: -1004964840750 → 4964840750.
+
+    Mirrors ``real._strip_100`` but lives here (telethon-free) so the
+    event-path candidate-form generation is unit-testable. ``abs()`` first, then
+    drop a leading ``100`` when it leaves at least one digit."""
+    a = abs(n)
+    s = str(a)
+    if s.startswith("100") and len(s) > _MARKED_PEER_PREFIX_LEN:
+        return int(s[_MARKED_PEER_PREFIX_LEN:])
+    return a
+
+
+def candidate_match_forms(chat_id: int, username: str | None) -> list[str]:
+    """Lowercased ``platform_groupid`` forms an arriving message could match.
+
+    Discovery stores numeric ids, ``@username`` (lowercased — see
+    ``channel_reference_extraction._detect``), or ``joinchat:<hash>``. A live
+    message exposes only ``event.chat_id`` (in one of several signed/prefixed
+    forms) and the chat's raw ``username``; it can NEVER reconstruct a
+    ``joinchat:<hash>`` (the hash is not recoverable from a chat id) — those
+    candidates are PROBE-ONLY (Defect 1). This yields the numeric + stripped +
+    ``@username``/bare-username forms, lowercased to match how discovery stores
+    them (Defect 2: ``@CryptoNews`` → ``@cryptonews``). A falsy username yields
+    NO username form (never a broad-matching empty ``@``).
+
+    Pure + telethon-free so it carries coverage; the live ``event.get_chat()``
+    call stays in coverage-omitted ``real.py``."""
+    forms: list[str] = [str(chat_id), str(_strip_marked_peer_prefix(chat_id))]
+    if username:
+        lowered = username.lower()
+        forms.append(f"@{lowered}")
+        forms.append(lowered)
+    # Preserve order, drop dups.
+    return list(dict.fromkeys(forms))
+
+
 def artifact_state_for_error(exc_name: str) -> ArtifactValidationState | None:
     """Map a telethon join-error class name to a dead-link validation verdict,
     or ``None`` when the error says nothing about the artifact itself (e.g. a
@@ -170,48 +210,204 @@ class CollectorJoinHandler:
         kind: GroupKind,
         title: str | None,
         now: datetime | None = None,
-    ) -> UUID:
+    ) -> UUID | None:
         """Record a confirmed platform join (candidate joining→joined).
 
-        Upserts the Group, opens a ``joined_via=candidate`` membership carrying
-        the originating ``candidate_id``, sets the candidate's
-        ``resulting_group_id``, and emits ``candidate.joined``. Returns the
-        Group id."""
+        Atomically claims the ``joining → joined`` transition (CAS, Defect 4)
+        FIRST; only the winner upserts the Group, opens a
+        ``joined_via=candidate`` membership carrying the originating
+        ``candidate_id``, sets ``resulting_group_id``, and emits
+        ``candidate.joined``. Returns the Group id, or ``None`` if the candidate
+        was no longer ``joining`` (lost the race / already settled)."""
+        return await self._open_joined_membership(
+            candidate_id=cmd.candidate_id,
+            from_state=CandidateState.JOINING,
+            source_uuid=source_uuid,
+            collector_id=collector_id,
+            platform_groupid=cmd.platform_groupid,
+            kind=kind,
+            title=title,
+            scout_identity_id=cmd.scout_identity_id,
+            now=now,
+        )
+
+    async def _open_joined_membership(
+        self,
+        *,
+        candidate_id: UUID,
+        from_state: CandidateState,
+        source_uuid: UUID,
+        collector_id: UUID,
+        platform_groupid: str,
+        kind: GroupKind,
+        title: str | None,
+        scout_identity_id: UUID | None,
+        now: datetime | None = None,
+    ) -> UUID | None:
+        """Shared confirmed-join writeback (Defect 4 — transition FIRST, atomic).
+
+        Upserts the Group, then ATOMICALLY claims ``from_state → joined`` with
+        ``resulting_group_id`` via :meth:`claim_candidate_transition` (a single
+        conditional UPDATE). Only the CAS winner opens a ``joined_via=candidate``
+        membership and emits ``candidate.joined`` — so a redundant event + probe
+        firing for one approval (REQUESTED) or a duplicate join callback
+        (JOINING) opens EXACTLY ONE membership and emits exactly one audit.
+        Returns the Group id on a win, ``None`` on a loss (no membership opened).
+
+        Reused by :meth:`finalize_joined` (``from_state=JOINING``) and
+        :meth:`confirm_requested_membership` (``from_state=REQUESTED``)."""
         at = now or datetime.now(tz=UTC)
         group_id = await self._storage.upsert_group(
             source_id=source_uuid,
-            platform_groupid=cmd.platform_groupid,
+            platform_groupid=platform_groupid,
             kind=kind,
             title=title,
             seen_at=at,
         )
-        await self._storage.open_membership(
-            collector_id=collector_id,
-            group_id=group_id,
-            joined_at=at,
-            joined_via=JoinedVia.CANDIDATE,
-            joined_via_candidate_id=cmd.candidate_id,
-        )
-        await self._storage.transition_candidate(
-            candidate_id=cmd.candidate_id,
+        won = await self._storage.claim_candidate_transition(
+            candidate_id,
+            from_state=from_state,
             to_state=CandidateState.JOINED,
             resulting_group_id=group_id,
         )
-        await self._audit.emit(
-            event=AuditSubject.CANDIDATE_JOINED.value,
-            subject_kind="candidate",
-            subject_id=cmd.candidate_id,
-            payload={
-                "group_id": str(group_id),
-                "scout_identity_id": str(cmd.scout_identity_id),
-            },
-        )
+        if not won:
+            # Lost the CAS (a concurrent caller already settled this candidate,
+            # or it left ``from_state``). Open NOTHING — the winner owns the
+            # single membership + audit. The upserted Group is harmless (idempotent).
+            _log.info(
+                "collector.join_cas_lost",
+                candidate_id=str(candidate_id),
+                from_state=from_state.value,
+            )
+            return None
+        # FIX 1 — the CAS already committed ``from_state → JOINED``. The
+        # membership open (durable evidence in main.db) and the audit emit
+        # (audit.db / bus) are SEPARATE awaited writes; a failure between them
+        # would otherwise leave the candidate permanently JOINED with no
+        # membership and no audit, and a retry CAS-loses (state is JOINED) so it
+        # never self-heals. Membership FIRST (it is the evidence), audit SECOND.
+        try:
+            await self._storage.open_membership(
+                collector_id=collector_id,
+                group_id=group_id,
+                joined_at=at,
+                joined_via=JoinedVia.CANDIDATE,
+                joined_via_candidate_id=candidate_id,
+            )
+        except Exception:
+            # Compensate: roll the candidate back JOINED → ``from_state`` via a
+            # raw CAS so the next probe/event sweep retries cleanly. The raw CAS
+            # is a conditional UPDATE that does NOT consult the FSM ``_ALLOWED``
+            # guard — this compensation edge is a failure rollback only and must
+            # NOT be added to the state machine. Loud, never silent: re-raise so
+            # the caller's per-candidate guard logs + continues.
+            rolled_back = await self._storage.claim_candidate_transition(
+                candidate_id,
+                from_state=CandidateState.JOINED,
+                to_state=from_state,
+                resulting_group_id=None,
+            )
+            _log.warning(
+                "collector.join_membership_open_failed_rolled_back",
+                candidate_id=str(candidate_id),
+                from_state=from_state.value,
+                rolled_back=rolled_back,
+            )
+            raise
+        try:
+            await self._audit.emit(
+                event=AuditSubject.CANDIDATE_JOINED.value,
+                subject_kind="candidate",
+                subject_id=candidate_id,
+                payload={
+                    "group_id": str(group_id),
+                    "scout_identity_id": (
+                        str(scout_identity_id) if scout_identity_id is not None else None
+                    ),
+                },
+            )
+        except Exception:
+            # Membership (the durable evidence) already exists — do NOT roll
+            # back. A missing audit is a lesser, logged inconsistency, not a
+            # reason to discard a real join. Loud WARN + re-raise.
+            _log.warning(
+                "collector.join_audit_emit_failed",
+                candidate_id=str(candidate_id),
+                group_id=str(group_id),
+                note="candidate joined, membership opened, audit emit failed",
+            )
+            raise
         _log.info(
             "collector.candidate_joined",
-            candidate_id=str(cmd.candidate_id),
+            candidate_id=str(candidate_id),
             group_id=str(group_id),
         )
         return group_id
+
+    async def confirm_requested_membership(
+        self,
+        candidate_id: UUID,
+        *,
+        kind: GroupKind | None = None,
+        title: str | None = None,
+        scout_identity_id: UUID | None = None,
+        resolved_platform_groupid: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Flip an approval-gated candidate ``requested → joined`` once the join
+        is confirmed real (M9.E5.5 → E5.6).
+
+        The group context (source, platform_groupid, assigned collector) is read
+        off the candidate row itself — the approval detector only knows *which*
+        candidate cleared, not the full join command. ``kind``/``title`` refine
+        the upserted Group; ``kind`` falls back to the candidate's ``kind_hint``
+        and ``title`` to its ``display_name_hint`` when not supplied.
+
+        GUARDED + IDEMPOTENT + DUAL-CALLER-SAFE (Defect 4): the
+        ``requested → joined`` flip is an atomic compare-and-swap done FIRST
+        inside :meth:`_open_joined_membership`. A missing candidate, a terminal
+        state (rejected/failed/parked), an already-``joined`` one, or a
+        concurrent caller that already won the CAS all yield ``False`` (no-op) —
+        so a redundant event + probe firing for the same candidate opens exactly
+        one membership and emits exactly one ``candidate.joined`` audit. Returns
+        ``True`` only when THIS call performed the flip.
+
+        ``platform_groupid``/``source``/collector context is read off the
+        candidate row. When the probe resolves an invite-link (``joinchat:``)
+        candidate it passes ``resolved_platform_groupid``/``kind``/``title`` from
+        the live ``CheckChatInviteRequest`` so the membership opens against the
+        REAL numeric group, not the unresolvable ``joinchat:<hash>`` placeholder
+        (Defect 1).
+
+        It deliberately does not need a telethon client: the live membership
+        *confirmation* (an event arriving / a CheckChatInvite/GetParticipant
+        probe) belongs to ``real.py``; the decision + DB writeback live here."""
+        candidate = await self._storage.get_candidate(candidate_id)
+        if candidate is None or candidate.state is not CandidateState.REQUESTED:
+            return False
+        if candidate.assigned_collector_id is None:
+            # A requested candidate without an assigned collector is a data
+            # invariant violation (the join could not have been dispatched);
+            # refuse rather than open a membership against an unknown collector.
+            raise RuntimeError(
+                f"candidate {candidate_id} is REQUESTED but has no assigned_collector_id"
+            )
+        group_id = await self._open_joined_membership(
+            candidate_id=candidate_id,
+            from_state=CandidateState.REQUESTED,
+            source_uuid=candidate.source_id,
+            collector_id=candidate.assigned_collector_id,
+            platform_groupid=(
+                resolved_platform_groupid
+                if resolved_platform_groupid is not None
+                else candidate.platform_groupid
+            ),
+            kind=kind if kind is not None else (candidate.kind_hint or GroupKind.CHANNEL),
+            title=title if title is not None else candidate.display_name_hint,
+            scout_identity_id=scout_identity_id,
+            now=now,
+        )
+        return group_id is not None
 
     async def fail_candidate(self, cmd: JoinGroupCommand, *, reason: str) -> None:
         """Record a refused/failed join (candidate joining→failed). The scout
@@ -308,6 +504,7 @@ __all__ = [
     "JoinAction",
     "JoinOutcome",
     "artifact_state_for_error",
+    "candidate_match_forms",
     "classify_join_error",
     "parse_invite_hash",
     "select_join_action",

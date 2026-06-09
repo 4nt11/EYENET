@@ -522,3 +522,178 @@ async def test_depth_from_root_preserved(storage: BaseRepository) -> None:
     )
     assert mention.depth_from_root == 0
     assert mention.seed_root_id == grp
+
+
+# -- requested-candidate queries (M9.E5.6) -----------------------------------
+
+
+async def _requested_for(
+    storage: BaseRepository,
+    src: UUID,
+    collector_id: UUID,
+    *,
+    platform_groupid: str,
+    evidence_ref: str,
+) -> GroupCandidateRow:
+    """Drive a fresh candidate JOINING→REQUESTED assigned to ``collector_id``."""
+    grp = await _make_group(storage, src, f"g_{evidence_ref}")
+    actor = await _make_actor(storage, src, evidence_ref)
+    cand, _ = await _record(
+        storage, src, grp, actor, platform_groupid=platform_groupid, evidence_ref=evidence_ref
+    )
+    await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=cand.id,
+        to_state=CandidateState.APPROVED,
+        assigned_collector_id=collector_id,
+    )
+    await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINING)
+    return await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.REQUESTED
+    )
+
+
+@pytest.mark.unit
+async def test_requested_candidates_for_collector_filters_state_and_collector(
+    storage: BaseRepository,
+) -> None:
+    src = await _make_source(storage)
+    coll_a = UUID("00000000-0000-0000-0000-0000000000aa")
+    coll_b = UUID("00000000-0000-0000-0000-0000000000bb")
+
+    want = await _requested_for(
+        storage, src, coll_a, platform_groupid="@wanted", evidence_ref="ev_a"
+    )
+    # Other collector's REQUESTED candidate — must be excluded.
+    await _requested_for(storage, src, coll_b, platform_groupid="@other", evidence_ref="ev_b")
+    # Same collector but still JOINING (not REQUESTED) — must be excluded.
+    grp = await _make_group(storage, src, "g_joining")
+    actor = await _make_actor(storage, src, "ev_c")
+    joining, _ = await _record(
+        storage, src, grp, actor, platform_groupid="@joining", evidence_ref="ev_c"
+    )
+    await storage.transition_candidate(candidate_id=joining.id, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=joining.id, to_state=CandidateState.APPROVED, assigned_collector_id=coll_a
+    )
+    await storage.transition_candidate(candidate_id=joining.id, to_state=CandidateState.JOINING)
+
+    rows = await storage.requested_candidates_for_collector(coll_a)
+    assert [r.id for r in rows] == [want.id]
+
+
+@pytest.mark.unit
+async def test_requested_candidate_for_group_scoped_by_collector_and_groupid(
+    storage: BaseRepository,
+) -> None:
+    src = await _make_source(storage)
+    coll_a = UUID("00000000-0000-0000-0000-0000000000aa")
+    coll_b = UUID("00000000-0000-0000-0000-0000000000bb")
+
+    want = await _requested_for(storage, src, coll_a, platform_groupid="@grp", evidence_ref="ev_a")
+    # Different collector, same platform_groupid — must NOT cross-match.
+    await _requested_for(storage, src, coll_b, platform_groupid="@grp_b", evidence_ref="ev_b")
+
+    hit = await storage.requested_candidate_for_group(collector_id=coll_a, platform_groupid="@grp")
+    assert hit is not None
+    assert hit.id == want.id
+
+    # Wrong group id for the right collector → no match.
+    miss = await storage.requested_candidate_for_group(
+        collector_id=coll_a, platform_groupid="@grp_b"
+    )
+    assert miss is None
+
+    # Right group id but wrong collector → no match (cross-collector isolation).
+    cross = await storage.requested_candidate_for_group(
+        collector_id=coll_b, platform_groupid="@grp"
+    )
+    assert cross is None
+
+
+# -- claim_candidate_transition (Defect 4 — atomic CAS) ----------------------
+
+
+@pytest.mark.unit
+async def test_claim_candidate_transition_winner_updates_state_and_group(
+    storage: BaseRepository,
+) -> None:
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.REQUESTED
+    )
+    group_id = uuid4()
+
+    won = await storage.claim_candidate_transition(
+        cand.id,
+        from_state=CandidateState.REQUESTED,
+        to_state=CandidateState.JOINED,
+        resulting_group_id=group_id,
+    )
+    assert won is True
+    row = await storage.get_candidate(cand.id)
+    assert row.state is CandidateState.JOINED
+    assert row.resulting_group_id == group_id
+
+
+@pytest.mark.unit
+async def test_claim_candidate_transition_second_call_loses(
+    storage: BaseRepository,
+) -> None:
+    # The CAS is the idempotency primitive: once the state moved off REQUESTED,
+    # a second identical claim finds no matching row → False, no further update.
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.REQUESTED
+    )
+    first_group = uuid4()
+    second_group = uuid4()
+
+    first = await storage.claim_candidate_transition(
+        cand.id,
+        from_state=CandidateState.REQUESTED,
+        to_state=CandidateState.JOINED,
+        resulting_group_id=first_group,
+    )
+    second = await storage.claim_candidate_transition(
+        cand.id,
+        from_state=CandidateState.REQUESTED,
+        to_state=CandidateState.JOINED,
+        resulting_group_id=second_group,
+    )
+    assert first is True
+    assert second is False
+    row = await storage.get_candidate(cand.id)
+    # the loser changed NOTHING — the first winner's group id stands
+    assert row.resulting_group_id == first_group
+
+
+@pytest.mark.unit
+async def test_claim_candidate_transition_wrong_from_state_noop(
+    storage: BaseRepository,
+) -> None:
+    # A claim whose from_state doesn't match the live state matches no row and
+    # mutates nothing.
+    cand = await _drive_to_joining(storage)  # state == JOINING
+    won = await storage.claim_candidate_transition(
+        cand.id,
+        from_state=CandidateState.REQUESTED,  # wrong: candidate is JOINING
+        to_state=CandidateState.JOINED,
+        resulting_group_id=uuid4(),
+    )
+    assert won is False
+    row = await storage.get_candidate(cand.id)
+    assert row.state is CandidateState.JOINING
+    assert row.resulting_group_id is None
+
+
+@pytest.mark.unit
+async def test_claim_candidate_transition_missing_candidate_false(
+    storage: BaseRepository,
+) -> None:
+    won = await storage.claim_candidate_transition(
+        uuid4(),
+        from_state=CandidateState.REQUESTED,
+        to_state=CandidateState.JOINED,
+    )
+    assert won is False

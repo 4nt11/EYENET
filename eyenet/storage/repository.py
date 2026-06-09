@@ -1305,6 +1305,32 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def requested_candidates_for_collector(
+        self,
+        collector_id: UUID,
+    ) -> list[GroupCandidateRow]:
+        """Return REQUESTED candidates assigned to ``collector_id`` (M9.E5.6).
+
+        The collector's periodic membership probe iterates this set to confirm
+        approval-gated joins. Scoped to one collector so a probe never confirms
+        another collector's pending join.
+        """
+
+    @abstractmethod
+    async def requested_candidate_for_group(
+        self,
+        *,
+        collector_id: UUID,
+        platform_groupid: str,
+    ) -> GroupCandidateRow | None:
+        """Return the REQUESTED candidate this collector awaits for
+        ``platform_groupid``, or ``None`` (M9.E5.6).
+
+        The live event path uses this: a message from a requested group means
+        the join was approved. Scoped by ``assigned_collector_id``.
+        """
+
+    @abstractmethod
     async def list_candidates(
         self,
         *,
@@ -1347,6 +1373,32 @@ class BaseRepository(ABC):
 
         Raises :class:`ValueError` on an illegal transition or if the
         candidate doesn't exist.
+        """
+
+    @abstractmethod
+    async def claim_candidate_transition(
+        self,
+        candidate_id: UUID,
+        *,
+        from_state: CandidateState,
+        to_state: CandidateState,
+        resulting_group_id: UUID | None = None,
+        reviewed_at: datetime | None = None,
+    ) -> bool:
+        """Atomic compare-and-swap candidate state (M9.E5.6 dual-caller safety).
+
+        Conditionally moves the candidate ``from_state → to_state`` in a single
+        ``UPDATE ... WHERE id=:id AND state=:from`` and returns ``True`` iff
+        exactly one row changed (this caller won the race). Returns ``False``
+        when the candidate is absent or no longer in ``from_state`` — the event
+        path and the membership probe can both fire for one approval; only the
+        CAS winner proceeds to open a membership, so exactly one membership row
+        is ever opened.
+
+        ANSI-generic (no dialect SQL): SQLModel/SQLAlchemy ``update()`` +
+        ``.where()``. Does NOT enforce the ``_ALLOWED`` transition map — the
+        caller picks ``from_state``/``to_state``; this is a CAS primitive, not
+        the guarded :meth:`transition_candidate`.
         """
 
     @abstractmethod
