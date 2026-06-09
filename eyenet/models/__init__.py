@@ -29,6 +29,7 @@ from .document import DocumentTable
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .file_access import (
     FileAccessAcknowledgmentTable,
+    FileAccessJournalTable,
     SystemUserSigningPubkeyHistoryTable,
 )
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
@@ -70,6 +71,7 @@ __all__ = [
     "FeedbackGroundTruth",
     "FeedbackPairTable",
     "FileAccessAcknowledgmentTable",
+    "FileAccessJournalTable",
     "GraphEdgeTable",
     "GraphEdgeType",
     "GraphNodeTable",

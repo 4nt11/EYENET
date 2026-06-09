@@ -102,6 +102,8 @@ _AUDIT_TABLES: frozenset[str] = frozenset(
         # M9.B1 — file-access crypto foundation (co-located in audit.db per §5.5)
         "system_user_signing_pubkey_history",
         "file_access_acknowledgment",
+        # M9.B2 — hash-chained file-access journal (second chain in audit.db)
+        "file_access_journal",
     }
 )
 

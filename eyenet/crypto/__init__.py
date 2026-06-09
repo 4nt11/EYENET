@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from ._file_access_signing import (
     build_canonical,
+    build_journal_row_canonical,
     fingerprint,
     verify_signature,
 )
 
 __all__ = [
     "build_canonical",
+    "build_journal_row_canonical",
     "fingerprint",
     "verify_signature",
 ]

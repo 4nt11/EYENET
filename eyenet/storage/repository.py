@@ -16,7 +16,7 @@ and operate against this ABC only.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         ClearanceScope,
         CollectorDesiredState,
         CollectorObservedState,
+        FileServedVia,
         GroupAccessKind,
         GroupKind,
         IdentityRole,
@@ -490,6 +491,51 @@ class BaseRepository(ABC):
     async def consume_acknowledgment(self, nonce: UUID, *, now: datetime) -> bool:
         """Atomically consume a nonce exactly once. True iff a live,
         unconsumed, unexpired nonce was claimed by this call."""
+
+    @abstractmethod
+    async def record_access(
+        self,
+        *,
+        user_id: UUID,
+        audit_event_id: UUID | None,
+        grant_id: UUID | None,
+        acknowledgment_id: UUID | None,
+        content_hash: bytes,
+        content_size: int,
+        content_mime: str,
+        tier: SensitivityTier,
+        served_via: FileServedVia,
+        signing_pubkey_fingerprint: str,
+        operator_signature: bytes,
+        sig_method: str,
+        sig_url: str,
+        sig_request_id: str,
+        sig_timestamp: str,
+        sig_body_hash: str,
+        now: datetime | None = None,
+        freshness_window: timedelta = timedelta(seconds=300),
+    ) -> UUID:
+        """Verify + journal a single file access as a hash-chained row (§5.6).
+
+        Fail-closed: resolves the operator key by ``(user_id, fingerprint)``,
+        verifies the operator's Ed25519 signature over the EYENET-SIG-v1
+        request canonical, then enforces FRESHNESS — the signed
+        ``sig_timestamp`` is parsed (unparseable → raise) and must be within
+        ``freshness_window`` (default 300s) of ``now`` (stale OR future →
+        raise), closing the NORMAL-tier replay hole. For any non-normal tier a
+        grant + acknowledgment are required and the nonce is consumed ATOMICALLY
+        inside the same single-writer audit.db transaction as the journal
+        INSERT (a failed append leaves the nonce unconsumed/retryable and writes
+        no row). Raises (and writes NO row) on any failure. Returns the new
+        ``access_id``.
+
+        Backends overriding the dialect-specific append MUST perform the
+        nonce-consume and the journal-insert in ONE serialized transaction."""
+
+    @abstractmethod
+    async def verify_file_access_chain(self) -> bool:
+        """Walk the file-access journal; recompute every ``self_hash`` and
+        confirm linkage. False on the first broken/tampered/reordered link."""
 
     # =================================================================
     # OBSERVATIONS (MODELS §2.3, API_PLAN §4.9)

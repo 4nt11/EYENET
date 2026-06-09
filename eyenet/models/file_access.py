@@ -30,10 +30,24 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Index, LargeBinary, UniqueConstraint
+from sqlalchemy import CheckConstraint, Index, LargeBinary, UniqueConstraint
 from sqlmodel import Column, Field, SQLModel
 
+from eyenet.contracts.enums import FileServedVia, SensitivityTier
+
 from ._base import new_uuid7
+
+# Tier-conditional integrity (API_PLAN §5.6). A non-``normal`` access MUST
+# carry both a clearance grant and a consumed acknowledgment nonce. Expressed
+# as a DB-level CHECK so the invariant holds even on a raw INSERT that bypasses
+# the application path (defense in depth above ``record_access``'s typed
+# guard). SQLModel persists a StrEnum by its NAME (uppercase) — the stored
+# value is ``'NORMAL'`` / ``'RESTRICTED'`` / ``'CLASSIFIED'`` — so the CHECK
+# compares against the uppercase name, NOT the lowercase StrEnum value.
+# ANSI-portable (plain CheckConstraint, no dialect SQL) per CLAUDE.md §2.3.
+_TIER_REQUIRES_GRANT_AND_ACK_CK = (
+    "tier = 'NORMAL' OR (grant_id IS NOT NULL AND acknowledgment_id IS NOT NULL)"
+)
 
 
 class SystemUserSigningPubkeyHistoryTable(SQLModel, table=True):
@@ -96,7 +110,67 @@ class FileAccessAcknowledgmentTable(SQLModel, table=True):
     consumed_at: datetime | None = None
 
 
+class FileAccessJournalTable(SQLModel, table=True):
+    """Hash-chained, signature-bearing file-access journal (API_PLAN §5.6, M9.B2).
+
+    A SECOND tamper-evident chain (physically co-located with ``audit_log`` in
+    ``audit.db``), mirroring the audit hash-chain EXACTLY: every row carries
+    ``prev_journal_hash`` (the prior row's ``self_hash``; the genesis row links
+    to the all-zero seed) and ``self_hash`` (sha256 over an injection-proof
+    length-prefixed framing of this row's identity fields, concatenated with
+    ``prev_journal_hash``). The single-writer ``BEGIN IMMEDIATE`` append path
+    lives in the SQLite backend override (``record_access``).
+
+    ``operator_signature`` is MANDATORY on every row — the non-repudiation
+    anchor. The signature is verified against the operator's registered
+    verifying key (resolved by ``signing_pubkey_fingerprint``) BEFORE the row
+    is written; an unverifiable access is never journalled (fail closed).
+
+    ``content_hash`` is the exoneration key (indexed): "prove who accessed the
+    blob with this hash, and that nothing else was served under it."
+    """
+
+    __tablename__ = "file_access_journal"
+    __table_args__ = (
+        # Exoneration lookups pivot on the served blob's content hash.
+        Index("ix_file_access_journal_content_hash", "content_hash"),
+        CheckConstraint(
+            _TIER_REQUIRES_GRANT_AND_ACK_CK,
+            name="ck_file_access_journal_tier_requires_grant_ack",
+        ),
+    )
+
+    access_id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    # Cross-store reference to the ``audit_log`` row this access also emitted
+    # (main.db audit chain). Nullable for now — no FK across physical stores
+    # (mirrors the clearance-grant / signing-key cross-store convention).
+    audit_event_id: UUID | None = None
+    # Cross-store reference to ``system_user`` (main.db) — no FK.
+    user_id: UUID = Field(index=True)
+    # Clearance grant that authorized a non-normal access (§4.8). MUST be
+    # present for tier != normal (enforced by the CHECK above + typed guard).
+    grant_id: UUID | None = None
+    # 32-byte sha256 of the served bytes — the exoneration key.
+    content_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    content_size: int
+    content_mime: str
+    tier: SensitivityTier
+    served_at: datetime
+    served_via: FileServedVia
+    # Consumed acknowledgment nonce. MUST be present for tier != normal.
+    acknowledgment_id: UUID | None = None
+    # Detached Ed25519 operator signature over the EYENET-SIG-v1 canonical
+    # request form (§5.7). MANDATORY every row.
+    operator_signature: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    # 16-hex kid of the verifying key that authorized this access (§5.7).
+    signing_pubkey_fingerprint: str = Field(max_length=16)
+    # Hash-chain linkage: 32-byte digests (genesis = 32 zero bytes).
+    prev_journal_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+    self_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+
+
 __all__ = [
     "FileAccessAcknowledgmentTable",
+    "FileAccessJournalTable",
     "SystemUserSigningPubkeyHistoryTable",
 ]

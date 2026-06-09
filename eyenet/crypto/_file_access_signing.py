@@ -115,6 +115,62 @@ def build_canonical(
     )
 
 
+# Domain-separation tag for the JOURNAL-ROW canonical serialization. This is
+# DISTINCT from ``_SIG_SCHEME`` (the operator-signed request form): the
+# journal-row canonical feeds ``self_hash`` (the chain), NOT signature
+# verification. A separate tag guarantees a row-hash preimage can never collide
+# with a signing-string preimage even if the field bytes overlap.
+_JOURNAL_ROW_SCHEME = b"EYENET-FAJ-v1"
+
+
+def build_journal_row_canonical(
+    *,
+    access_id: bytes,
+    audit_event_id: bytes,
+    user_id: bytes,
+    grant_id: bytes,
+    content_hash: bytes,
+    content_size: int,
+    content_mime: str,
+    tier: str,
+    served_at: str,
+    served_via: str,
+    acknowledgment_id: bytes,
+    operator_signature: bytes,
+    signing_pubkey_fingerprint: str,
+) -> bytes:
+    """Injection-proof length-prefixed serialization of a journal row's identity.
+
+    The ``self_hash`` of a :class:`FileAccessJournalTable` row is
+    ``sha256(build_journal_row_canonical(...) || prev_journal_hash)``. Every
+    field is length-prefixed (``_frame_bytes`` framing) so no field value —
+    a mime string, a signature blob — can be made to look like an adjacent
+    field, exactly as the request-signing canonical is injection-proof.
+
+    Optional UUID fields (``audit_event_id``, ``grant_id``,
+    ``acknowledgment_id``) are passed as their raw 16 bytes when present and as
+    a zero-length frame (``b""``) when absent — the length prefix distinguishes
+    a present-empty from an absent field unambiguously.
+    """
+    return _frame_bytes(_JOURNAL_ROW_SCHEME) + b"".join(
+        (
+            _frame_bytes(access_id),
+            _frame_bytes(audit_event_id),
+            _frame_bytes(user_id),
+            _frame_bytes(grant_id),
+            _frame_bytes(content_hash),
+            _frame(str(content_size)),
+            _frame(content_mime),
+            _frame(tier),
+            _frame(served_at),
+            _frame(served_via),
+            _frame_bytes(acknowledgment_id),
+            _frame_bytes(operator_signature),
+            _frame(signing_pubkey_fingerprint),
+        )
+    )
+
+
 def verify_signature(
     verifying_key: Ed25519PublicKey,
     canonical: object,
@@ -148,6 +204,7 @@ def verify_signature(
 
 __all__ = [
     "build_canonical",
+    "build_journal_row_canonical",
     "fingerprint",
     "verify_signature",
 ]
