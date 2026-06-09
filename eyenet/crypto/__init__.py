@@ -10,13 +10,17 @@ from __future__ import annotations
 from ._file_access_signing import (
     build_canonical,
     build_journal_row_canonical,
+    build_signing_key_challenge_canonical,
     fingerprint,
+    load_ed25519_public_key,
     verify_signature,
 )
 
 __all__ = [
     "build_canonical",
     "build_journal_row_canonical",
+    "build_signing_key_challenge_canonical",
     "fingerprint",
+    "load_ed25519_public_key",
     "verify_signature",
 ]

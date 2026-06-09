@@ -44,7 +44,11 @@ from eyenet.api.v1.auth.api_mfa_enroll import router as auth_mfa_enroll_router
 from eyenet.api.v1.auth.api_mfa_verify_enroll import router as auth_mfa_verify_enroll_router
 from eyenet.api.v1.auth.api_mint_token import router as auth_mint_token_router
 from eyenet.api.v1.auth.api_refresh import router as auth_refresh_router
+from eyenet.api.v1.auth.api_register_signing_key import router as auth_register_signing_key_router
 from eyenet.api.v1.auth.api_revoke_token import router as auth_revoke_token_router
+from eyenet.api.v1.auth.api_signing_key_challenge import (
+    router as auth_signing_key_challenge_router,
+)
 from eyenet.api.v1.auth.api_stream_token import router as auth_stream_token_router
 
 # === candidates (M9.D3 discovery triage) ===
@@ -182,6 +186,8 @@ v1_router.include_router(auth_list_tokens_router)
 v1_router.include_router(auth_mint_token_router)
 v1_router.include_router(auth_revoke_token_router)
 v1_router.include_router(auth_stream_token_router)
+v1_router.include_router(auth_signing_key_challenge_router)
+v1_router.include_router(auth_register_signing_key_router)
 
 # actors
 v1_router.include_router(actors_get_router)

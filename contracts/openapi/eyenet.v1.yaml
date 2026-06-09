@@ -306,6 +306,53 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/auth/signing-key/challenge:
+    post:
+      tags: [auth]
+      operationId: auth_signing_key_challenge
+      summary: Mint a single-use proof-of-possession challenge for signing-key registration.
+      description: |
+        PHASE-4 self-service. The authenticated operator requests a short-lived
+        (60s), single-use, user-bound nonce, signs
+        `EYENET-SIGNING-KEY-CHALLENGE-v1(nonce, public_key)` with the candidate
+        Ed25519 private key, and submits the signature to
+        `POST /v1/auth/signing-key`. No special scope — the bearer identity is
+        the authorization (like MFA enroll).
+      responses:
+        "200":
+          description: Challenge minted (transient, single-use).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningKeyChallengeResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/auth/signing-key:
+    post:
+      tags: [auth]
+      operationId: auth_register_signing_key
+      summary: Register an operator verifying key by proving possession of the private key.
+      description: |
+        PHASE-4 self-service registration (no admin-override). Verifies the
+        proof-of-possession signature against the SUBMITTED key, then atomically
+        consumes the user-bound challenge nonce, then records the key — rotating
+        and retiring any prior active key (one-active invariant). A failed proof
+        or an unusable (replayed/expired/unknown/wrong-user) nonce returns 401
+        and registers nothing; malformed key/signature material is rejected as
+        422 at the schema boundary.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SigningKeyRegisterRequest' }
+      responses:
+        "200":
+          description: Key registered and now active; prior active key retired.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SigningKeyRegisterResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   # ────────────────────────────────────────────────────────────────────────
   # 3.2 Reads
   # ────────────────────────────────────────────────────────────────────────
@@ -2547,6 +2594,40 @@ components:
       required: [current_password]
       properties:
         current_password: { type: string, minLength: 1, maxLength: 1024, format: password }
+    SigningKeyChallengeResponse:
+      description: |
+        PHASE-4 — single-use, user-bound signing-key registration challenge.
+        Sign `EYENET-SIGNING-KEY-CHALLENGE-v1(nonce, public_key)` with the
+        candidate private key and submit before `expires_at` (60s).
+      type: object
+      additionalProperties: false
+      required: [nonce, expires_at]
+      properties:
+        nonce:      { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+    SigningKeyRegisterRequest:
+      description: |
+        PHASE-4 — proof-of-possession registration body. `public_key_bytes`
+        (32-byte raw Ed25519 key) and `challenge_signature` (64-byte detached
+        signature) are base64-encoded; decoded + length-validated at the schema
+        boundary (malformed → 422, never 500).
+      type: object
+      additionalProperties: false
+      required: [public_key_bytes, challenge_nonce, challenge_signature]
+      properties:
+        public_key_bytes:    { type: string, format: byte }
+        challenge_nonce:     { type: string, format: uuid }
+        challenge_signature: { type: string, format: byte }
+    SigningKeyRegisterResponse:
+      description: |
+        PHASE-4 — the now-active key fingerprint (16-hex `kid`). Any prior
+        active key for this operator has been retired (one-active invariant).
+      type: object
+      additionalProperties: false
+      required: [fingerprint, active_at]
+      properties:
+        fingerprint: { type: string, minLength: 16, maxLength: 16 }
+        active_at:   { type: string, format: date-time }
     SystemUserRole:
       description: Operator-tier role (MODELS §2.17).
       type: string

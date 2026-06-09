@@ -493,6 +493,24 @@ class BaseRepository(ABC):
         unconsumed, unexpired nonce was claimed by this call."""
 
     @abstractmethod
+    async def mint_signing_key_challenge(self, user_id: UUID, *, now: datetime) -> UUID:
+        """Mint a single-use, user-bound signing-key registration challenge
+        (PHASE-4 proof-of-possession). Expires at now + 60s; returns the nonce."""
+
+    @abstractmethod
+    async def consume_signing_key_challenge(
+        self,
+        nonce: UUID,
+        user_id: UUID,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Atomically consume a signing-key challenge exactly once, bound to
+        ``user_id``. True iff a live, unconsumed, unexpired nonce minted for
+        THIS user was claimed by this call — a nonce minted for another user
+        can never be consumed here (cross-user replay defense)."""
+
+    @abstractmethod
     async def record_access(
         self,
         *,

@@ -110,6 +110,42 @@ class FileAccessAcknowledgmentTable(SQLModel, table=True):
     consumed_at: datetime | None = None
 
 
+class SigningKeyChallengeTable(SQLModel, table=True):
+    """Single-use operator signing-key registration challenge (PHASE-4).
+
+    Self-service public-key registration is proof-of-possession: the server
+    mints a short-lived ``nonce``, the operator signs
+    ``EYENET-SIGNING-KEY-CHALLENGE-v1(nonce, public_key)`` with the private
+    half, and the registration step verifies the signature then consumes the
+    nonce ATOMICALLY (exactly once). Co-located in ``audit.db`` because the
+    challenge establishes WHO could subsequently sign — forensically relevant
+    to the non-repudiation chain (§5.5 durability gate).
+
+    Consumption is a conditional UPDATE (``consumed_at IS NULL AND
+    expires_at > now``) bound to ``user_id`` so the nonce is single-use,
+    time-boxed, AND user-bound: a nonce minted for user A can NEVER be
+    consumed under user B's authenticated identity. Mirrors
+    :class:`FileAccessAcknowledgmentTable`'s race-safe CAS.
+
+    ANSI SQL column types only (CLAUDE.md §2.3 Rule 1).
+    """
+
+    __tablename__ = "signing_key_challenge"
+    __table_args__ = (
+        # "what challenges were minted for user X, and when?" + backs the
+        # user-bound consume predicate.
+        Index("ix_signing_key_challenge_user_expires", "user_id", "expires_at"),
+    )
+
+    nonce: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    # Cross-store reference to ``system_user`` (main.db) — no FK across
+    # physical files (mirrors the signing-key / acknowledgment convention).
+    user_id: UUID = Field(index=True)
+    expires_at: datetime
+    # ``None`` == not yet consumed.
+    consumed_at: datetime | None = None
+
+
 class FileAccessJournalTable(SQLModel, table=True):
     """Hash-chained, signature-bearing file-access journal (API_PLAN §5.6, M9.B2).
 
@@ -172,5 +208,6 @@ class FileAccessJournalTable(SQLModel, table=True):
 __all__ = [
     "FileAccessAcknowledgmentTable",
     "FileAccessJournalTable",
+    "SigningKeyChallengeTable",
     "SystemUserSigningPubkeyHistoryTable",
 ]

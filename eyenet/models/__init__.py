@@ -30,6 +30,7 @@ from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .file_access import (
     FileAccessAcknowledgmentTable,
     FileAccessJournalTable,
+    SigningKeyChallengeTable,
     SystemUserSigningPubkeyHistoryTable,
 )
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
@@ -98,6 +99,7 @@ __all__ = [
     "ReactionTable",
     "RefreshTokenTable",
     "SQLModel",
+    "SigningKeyChallengeTable",
     "SourceDomainTable",
     "SourceTable",
     "SystemLogTable",

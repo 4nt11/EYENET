@@ -31,6 +31,7 @@ from eyenet.models._base import new_uuid7
 from eyenet.models.file_access import (
     FileAccessAcknowledgmentTable,
     FileAccessJournalTable,
+    SigningKeyChallengeTable,
     SystemUserSigningPubkeyHistoryTable,
 )
 
@@ -38,6 +39,10 @@ from ._helpers import safe_session
 
 # §5.6 — acknowledgment nonces are short-lived single-use tokens.
 _ACK_TTL = timedelta(seconds=60)
+
+# PHASE-4 — signing-key registration challenges are short-lived single-use
+# proof-of-possession tokens (same 60s lifetime posture as the ack nonce).
+_SIGNING_KEY_CHALLENGE_TTL = timedelta(seconds=60)
 
 # §5.7 anti-replay — the operator-signed ``sig_timestamp`` must be within this
 # window of the server's clock or the request is rejected (stale OR future).
@@ -274,6 +279,68 @@ class FileAccessMixin:
                 col(FileAccessAcknowledgmentTable.nonce) == nonce,
                 col(FileAccessAcknowledgmentTable.consumed_at).is_(None),
                 col(FileAccessAcknowledgmentTable.expires_at) > now,
+            )
+            .values(consumed_at=now)
+        )
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(stmt)
+            await session.commit()
+            return int(result.rowcount) == 1
+
+    async def mint_signing_key_challenge(self, user_id: UUID, *, now: datetime) -> UUID:
+        """Mint a single-use signing-key registration challenge (PHASE-4).
+
+        Inserts a nonce bound to ``user_id`` expiring at ``now + 60s`` and
+        returns it. The operator signs
+        ``EYENET-SIGNING-KEY-CHALLENGE-v1(nonce, public_key)`` with the
+        candidate private key and presents the signature to
+        ``POST /v1/auth/signing-key``; that path verifies the proof then
+        consumes this nonce atomically via
+        :meth:`consume_signing_key_challenge`.
+        """
+        row = SigningKeyChallengeTable(
+            user_id=user_id,
+            expires_at=now + _SIGNING_KEY_CHALLENGE_TTL,
+            consumed_at=None,
+        )
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row.nonce
+
+    async def consume_signing_key_challenge(
+        self,
+        nonce: UUID,
+        user_id: UUID,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Atomically consume a signing-key challenge exactly once (PHASE-4).
+
+        ANSI-generic compare-and-swap (mirrors :meth:`consume_acknowledgment`):
+        ``UPDATE signing_key_challenge SET consumed_at=:now
+          WHERE nonce=:n AND user_id=:uid AND consumed_at IS NULL
+            AND expires_at > :now``.
+
+        Returns ``True`` iff exactly one row changed — i.e. the nonce existed,
+        belonged to ``user_id``, was unconsumed, and was unexpired. A
+        double-spend (replay), an expired nonce, an unknown nonce, AND a nonce
+        minted for a DIFFERENT user all return ``False``.
+
+        USER-BOUND by the ``user_id`` predicate: a nonce minted for user A can
+        NEVER be consumed under user B's identity — the conditional UPDATE
+        matches zero rows. This is the anti-cross-user-replay commit point of
+        the registration flow; atomicity (only one concurrent caller can flip
+        ``consumed_at IS NULL``) makes it the single-use anchor.
+        """
+        stmt = (
+            update(SigningKeyChallengeTable)
+            .where(
+                col(SigningKeyChallengeTable.nonce) == nonce,
+                col(SigningKeyChallengeTable.user_id) == user_id,
+                col(SigningKeyChallengeTable.consumed_at).is_(None),
+                col(SigningKeyChallengeTable.expires_at) > now,
             )
             .values(consumed_at=now)
         )

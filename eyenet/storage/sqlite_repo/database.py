@@ -104,6 +104,9 @@ _AUDIT_TABLES: frozenset[str] = frozenset(
         "file_access_acknowledgment",
         # M9.B2 — hash-chained file-access journal (second chain in audit.db)
         "file_access_journal",
+        # PHASE-4 — operator signing-key registration proof-of-possession
+        # challenge (forensically relevant: it establishes who could sign).
+        "signing_key_challenge",
     }
 )
 
