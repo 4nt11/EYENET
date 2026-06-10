@@ -1,0 +1,35 @@
+# PHASE-5 — Group B: file-access manifest + access handlers + byte-serving
+
+**Status:** ✅ SHIPPED (worktree `worktree-e55-requested-to-joined`, un-merged — series checkpoint)
+**Date:** 2026-06-09
+**PLAN item:** Group B HTTP surface (§5.6) — the two-step signed-access flow that actually serves a classified-aware file behind a journaled, signature-verified access. Grouped/mechanical phase on top of the B1–B4 crypto spine.
+
+## What shipped
+- **`GET /v1/attachments/{blob_id}/manifest`** — 404 if missing; **403 if tier != NORMAL** (fail-closed); else returns `FileManifest` (content_hash=row sha256, size, mime, tier, source refs) + a freshly-minted acknowledgment nonce (B1 `record_acknowledgment`). No bytes, no journal row.
+- **`POST /v1/attachments/{blob_id}/access`** — body `FileAccessAcknowledgment` → 404/403 (non-NORMAL) → `expected_content_hash == row.sha256` (else 409) → resolve operator's active key → `record_access` (verify EYENET-SIG-v1, freshness, **atomic nonce-consume**, chain-append) → **then** stream bytes from `row.storage_uri`. Evidence-first: bytes only after the journal row is durable.
+- **`FileAccessAcknowledgment` extended** with `request_id` + `signed_at`; `compute_access_body_hash` (deterministic, signature-excluded) binds the whole acknowledgment (reason/viewing_context/case_refs/nonce/content) into the signature. OpenAPI yaml + surface-pin updated.
+- Direct-call handler unit tests (Group-F pattern — ASGI routing isn't coverage-traced).
+
+## Decisions made (and why)
+- ✅ **Canonical reconstruction** — server rebuilds `build_canonical("POST", request.url.path, request_id, signed_at, body_hash, content_hash.hex())`; `body_hash = sha256(canonical-JSON of the body minus operator_signature)`. Single shared `compute_access_body_hash` helper (server + future client must match byte-for-byte). Key resolved server-side via `active_signing_key_for` — no `kid` header.
+- ✅ **Nonce ENFORCED for NORMAL too** (round-2 fix) — `record_access` consume gate generalized from `tier != NORMAL` to **`acknowledgment_id is not None`**; the handler passes the manifest nonce as `acknowledgment_id` for every tier. The nonce is single-use → **replay blocked entirely** (not just bounded by the 300s freshness window). Closed a MED where the minted+signed nonce was dead code on the live NORMAL path. Atomicity unchanged (consume + journal INSERT in one `BEGIN IMMEDIATE`).
+- ✅ **Evidence-first / §5.5 posture** — the `record_access` journal append IS the durability gate; bytes stream only after it succeeds. No duplicate evidence-access-middleware audit (attachments aren't in `_EVIDENCE_FAMILIES`; the journal row is the record).
+- ✅ **Serve-what-was-signed** — `expected_content_hash == row.sha256` enforced + content_hash signed into the canonical; bytes read from the row backing that sha256 (row's `storage_uri` only — no user path → no traversal).
+
+## Validation
+- Tests: `pytest -m 'unit or contract' -q` → **2057 passed**, 1 pre-existing live-NATS flake. **Coverage 89.25% ≥ 0.8906 baseline** (no-drop guard clears — required direct-call unit tests for the handlers + the AttachmentsMixin/ClearanceMixin surfaces, since ASGI routing isn't traced). Integration 177 passed (1 known throughput flake). Surface-pin ✓. mypy --strict + ruff clean (421 files).
+- Adversarial review: **2 rounds.** R1: fail-closed-non-NORMAL **solid** (no bytes/metadata/journal for RESTRICTED/CLASSIFIED at either endpoint; tier check is enum-identity before any side effect; monotone-override CheckConstraint blocks downgrade), conventions **solid** (generic 401 no oracle, tz-aware now, off-thread read, no assert/try-except-pass) — but serve-what-was-signed reviewer found a **MED** (nonce not enforced on NORMAL → 300s replay). R2 (after enforcing the nonce): **solid** — replay closed (atomic single-use, integration-proven), B2 back-compat intact. Residual LOWs: nonce keyed by nonce-only (signature + per-user auth + content-hash gate cover it; PHASE-6 (user_id, content_hash) binding noted in code); 404-vs-403 existence oracle (subsumed by PHASE-6 gating).
+
+## State for the NEXT agent (continuation token)
+- **Where we are:** NORMAL-tier files serve end-to-end through a signed, single-use-nonce, journaled, tamper-evident access. Non-NORMAL is hard-403 fail-closed pending PHASE-6. B1–B5 all green, un-merged.
+- **Next PLAN item:** **PHASE-6 = tier/clearance gating + §5.5 503 gate** (ISOLATED, authz boundary). Replace the non-NORMAL 403 stub with the real clearance decision: does the authenticated operator's active grant authorize RESTRICTED/CLASSIFIED at access time (against `system_user_clearance_grant` / the ClearanceMixin)? Produce the `grant_id` that `record_access` records for non-NORMAL (the DB CHECK already requires it). Also: add `UNIQUE(user_id, sig_request_id)` for belt-and-suspenders replay dedup; consider binding the acknowledgment nonce to (user_id, content_hash) on consume; case_refs validation (the §4.10 hybrid case-membership rule). Then PHASE-7 (server-key + exoneration §5.8), PHASE-8 (anchoring §5.9).
+- **Gotchas / landmines:**
+  - Worktree env: `/home/anti/Tools/EYENET/.venv/bin/python -m ...` from worktree dir. See `feedback_worktree_venv_cwd_shadowing`.
+  - **ASGI-routed handlers are NOT coverage-traced** — every new handler group needs DIRECT-CALL unit tests under `tests/unit/api/v1/<group>/` or coverage drops below the 0.8906 no-drop baseline and the pre-commit guard blocks. (Bit us this phase.)
+  - `record_access` consumes the nonce whenever `acknowledgment_id is not None` (any tier). PHASE-6 must pass BOTH `grant_id` and `acknowledgment_id` for non-NORMAL (the CHECK + typed guard require both).
+  - Effective tier = `operator_tier_override or classifier_tier` (`classifier_tier` defaults NORMAL, non-nullable; monotone-up CheckConstraint prevents override downgrade).
+  - `compute_access_body_hash` is the client-signing contract — any real signing client must reproduce its canonical JSON (sorted keys, ISO datetimes, UUID→str, operator_signature excluded) exactly.
+- **Files to start from:** `eyenet/api/v1/attachments/api_access_file.py` + `api_get_manifest.py` (the 403 stub to replace), `eyenet/storage/sqlmodel_repo/clearance.py` (ClearanceMixin), `eyenet/storage/sqlmodel_repo/file_access.py` (`record_access`), `development/API_PLAN.md §5.5 + §4.6–4.8`.
+
+## OUT OF SCOPE (deferred — explicit, per request)
+**Tier / clearance gating is OUT OF SCOPE for PHASE-5 and deferred to PHASE-6.** PHASE-5 serves **NORMAL-tier only**; any blob whose effective tier is RESTRICTED or CLASSIFIED is **fail-closed with HTTP 403** ("clearance gating not yet implemented") at BOTH the manifest and access endpoints — no metadata, no bytes, no journal row. No clearance-grant check, no `grant_id` production, and no `read:restricted`/`read:classified` scope enforcement exists yet; that is PHASE-6's authorization boundary. Also out of scope here: `UNIQUE(user_id, sig_request_id)` replay dedup, (user_id, content_hash) nonce binding, `case_refs` validation, exoneration queries (§5.8), external anchoring (§5.9), thumbnails / inline_json serving.

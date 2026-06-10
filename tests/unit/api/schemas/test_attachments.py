@@ -129,6 +129,8 @@ def test_acknowledgment_happy(uid: UUID) -> None:
     ack = FileAccessAcknowledgment(
         access_nonce=uid,
         expected_content_hash=_HASH,
+        request_id="req-001",
+        signed_at=datetime(2026, 6, 9, 12, 0, 0, tzinfo=UTC),
         reason="case=APT-29-2026Q2 peer=bob",
         viewing_context="incident=INC-001",
         operator_signature=_SIG,
@@ -141,6 +143,8 @@ def test_acknowledgment_reason_too_short(uid: UUID) -> None:
         FileAccessAcknowledgment(
             access_nonce=uid,
             expected_content_hash=_HASH,
+            request_id="req-001",
+            signed_at=datetime(2026, 6, 9, 12, 0, 0, tzinfo=UTC),
             reason="ok",  # too short
             operator_signature=_SIG,
         )
@@ -151,6 +155,8 @@ def test_acknowledgment_rejects_bad_signature(uid: UUID) -> None:
         FileAccessAcknowledgment(
             access_nonce=uid,
             expected_content_hash=_HASH,
+            request_id="req-001",
+            signed_at=datetime(2026, 6, 9, 12, 0, 0, tzinfo=UTC),
             reason="enough characters here",
             operator_signature="rsa:abc",
         )

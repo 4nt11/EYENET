@@ -272,6 +272,14 @@ class FileAccessMixin:
         ``False``. Atomicity is the single conditional UPDATE: the
         ``consumed_at IS NULL`` predicate guarantees only one concurrent
         caller can win the row.
+
+        NOTE (PHASE-6): the consume keys by ``nonce`` ONLY (not user_id /
+        content_hash). That is acceptable here — the operator signature already
+        binds ``content_hash`` and the nonce is single-use — but a future
+        enhancement could additionally bind the consume to
+        ``(user_id, content_hash)`` (mirroring
+        :meth:`consume_signing_key_challenge`'s user_id predicate). Not
+        implemented now.
         """
         stmt = (
             update(FileAccessAcknowledgmentTable)
@@ -393,14 +401,18 @@ class FileAccessMixin:
            every tier even once the PHASE-4 HTTP handler also validates it.
            ``freshness_window`` defaults to 300s.
         c. For ``tier != normal`` both ``grant_id`` and ``acknowledgment_id``
-           MUST be present (defense in depth above the DB CHECK). The nonce is
-           NOT consumed here — consumption is deferred into the serialized
-           chain-append transaction (step d) so consume+journal-insert are
-           ATOMIC: a failed append leaves the nonce UNCONSUMED (client may
+           MUST be present (defense in depth above the DB CHECK). SEPARATELY,
+           the nonce is CONSUMED whenever an ``acknowledgment_id`` is supplied
+           (ANY tier, including NORMAL) — this closes the NORMAL replay hole:
+           the minted single-use nonce is now actually burned on the live path.
+           The nonce is NOT consumed here — consumption is deferred into the
+           serialized chain-append transaction (step d) so consume+journal-insert
+           are ATOMIC: a failed append leaves the nonce UNCONSUMED (client may
            retry) and writes no row; a successful append consumes the nonce
            exactly once (no double-spend). A used/expired/unknown nonce makes
            the in-transaction conditional UPDATE affect 0 rows → the whole
-           transaction rolls back and raises.
+           transaction rolls back and raises. NORMAL WITHOUT an
+           ``acknowledgment_id`` still works (back-compat — appends, no consume).
         d. Under the audit.db single-writer serialization (``asyncio.Lock`` +
            ``BEGIN IMMEDIATE`` raw-cursor, the SQLite override), the nonce is
            consumed (when required), the prior journal head's ``self_hash`` is
@@ -458,17 +470,23 @@ class FileAccessMixin:
                 f"of {freshness_window} (now={at.isoformat()})"
             )
 
-        # (c) Tier-conditional grant + acknowledgment presence guard (defense in
-        # depth above the DB CHECK). The nonce is consumed ATOMICALLY inside the
-        # serialized chain append (step d), NOT here — so a failed append leaves
-        # the nonce unconsumed and the client can retry.
-        require_nonce = tier is not SensitivityTier.NORMAL
-        if require_nonce and (grant_id is None or acknowledgment_id is None):
+        # (c) Tier-conditional grant + acknowledgment PRESENCE guard (defense in
+        # depth above the DB CHECK): non-NORMAL access still REQUIRES both
+        # grant_id and acknowledgment_id.
+        if tier is not SensitivityTier.NORMAL and (grant_id is None or acknowledgment_id is None):
             raise FileAccessJournalError(
                 f"tier {tier.value} access requires both grant_id and "
                 f"acknowledgment_id (got grant_id={grant_id}, "
                 f"acknowledgment_id={acknowledgment_id})"
             )
+
+        # CONSUME gate (FIX 2 — close the NORMAL replay hole): the single-use
+        # nonce is consumed whenever an acknowledgment_id is supplied, for ANY
+        # tier. So NORMAL-with-nonce now burns it (replay blocked, single-use)
+        # while NORMAL-without-nonce stays back-compat (append, no consume).
+        # The nonce is consumed ATOMICALLY inside the serialized chain append
+        # (step d), NOT here — a failed append leaves it unconsumed (retryable).
+        consume_nonce = acknowledgment_id is not None
 
         prepared = _PreparedJournalRow(
             access_id=new_uuid7(),
@@ -487,9 +505,9 @@ class FileAccessMixin:
         )
 
         # (d) Single-writer chain append — dialect-specific override. Consumes
-        # the nonce (when ``require_nonce``) in the SAME transaction as the
+        # the nonce (when ``consume_nonce``) in the SAME transaction as the
         # journal INSERT.
-        return await self._append_file_access_locked(prepared, require_nonce=require_nonce, now=at)
+        return await self._append_file_access_locked(prepared, require_nonce=consume_nonce, now=at)
 
     async def _append_file_access_locked(  # pragma: no cover — overridden
         self,
@@ -505,7 +523,8 @@ class FileAccessMixin:
         under its own single-writer transaction (SQLite: ``BEGIN IMMEDIATE``
         on a raw aiosqlite cursor + an in-process ``asyncio.Lock``).
 
-        CONTRACT (every backend MUST honor): when ``require_nonce`` is true the
+        CONTRACT (every backend MUST honor): when ``require_nonce`` is true
+        (i.e. an ``acknowledgment_id`` was supplied — ANY tier, FIX 2) the
         override MUST consume ``prepared.acknowledgment_id`` (conditional
         ``consumed_at IS NULL AND expires_at > now`` compare-and-swap) and
         INSERT the journal row in ONE serialized transaction. If the consume

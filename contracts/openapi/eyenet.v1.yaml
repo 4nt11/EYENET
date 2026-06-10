@@ -3113,10 +3113,13 @@ components:
       type: object
       additionalProperties: false
       required:
-        [access_nonce, expected_content_hash, reason, operator_signature]
+        [access_nonce, expected_content_hash, request_id, signed_at, reason,
+         operator_signature]
       properties:
         access_nonce:          { type: string, format: uuid }
         expected_content_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        request_id:            { type: string, minLength: 1, maxLength: 128 }
+        signed_at:             { type: string, format: date-time }
         reason:                { type: string, minLength: 16, maxLength: 1024 }
         viewing_context:       { type: string, maxLength: 512, nullable: true }
         operator_signature:    { type: string, pattern: '^ed25519:[A-Za-z0-9_-]{86,90}={0,2}$' }
