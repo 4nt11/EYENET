@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlmodel import col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -215,6 +215,49 @@ class CandidatesMixin:
             result = await session.exec(stmt)
             return [_candidate_row(r) for r in list(result)]
 
+    async def requested_candidates_for_collector(
+        self,
+        collector_id: UUID,
+    ) -> list[GroupCandidateRow]:
+        """Return REQUESTED candidates assigned to ``collector_id`` (M9.E5.6).
+
+        These are approval-gated joins awaiting confirmation: the collector's
+        periodic membership probe iterates this set and confirms each via
+        :meth:`CollectorJoinHandler.confirm_requested_membership`. Scoped to one
+        collector so a probe never confirms another collector's pending join.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(GroupCandidateTable).where(
+                GroupCandidateTable.state == CandidateState.REQUESTED,
+                GroupCandidateTable.assigned_collector_id == collector_id,
+            )
+            result = await session.exec(stmt)
+            return [_candidate_row(r) for r in list(result)]
+
+    async def requested_candidate_for_group(
+        self,
+        *,
+        collector_id: UUID,
+        platform_groupid: str,
+    ) -> GroupCandidateRow | None:
+        """Return the REQUESTED candidate this collector is awaiting for
+        ``platform_groupid``, or ``None`` (M9.E5.6).
+
+        The event path uses this: a live message arriving from a group the
+        collector requested-to-join means the request was approved. Scoped by
+        ``assigned_collector_id`` so a message can never confirm another
+        collector's pending join for the same group id.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(GroupCandidateTable).where(
+                GroupCandidateTable.state == CandidateState.REQUESTED,
+                GroupCandidateTable.assigned_collector_id == collector_id,
+                GroupCandidateTable.platform_groupid == platform_groupid,
+            )
+            result = await session.exec(stmt)
+            row = result.first()
+            return _candidate_row(row) if row is not None else None
+
     def _filtered_stmt(
         self,
         *,
@@ -324,6 +367,42 @@ class CandidatesMixin:
             await session.commit()
             await session.refresh(candidate)
             return _candidate_row(candidate)
+
+    async def claim_candidate_transition(
+        self,
+        candidate_id: UUID,
+        *,
+        from_state: CandidateState,
+        to_state: CandidateState,
+        resulting_group_id: UUID | None = None,
+        reviewed_at: datetime | None = None,
+    ) -> bool:
+        """Atomic compare-and-swap of candidate state (M9.E5.6).
+
+        ANSI-generic conditional UPDATE (no dialect SQL — CLAUDE.md §2.3 Rule 1):
+        ``UPDATE candidates SET state=:to, ... WHERE id=:id AND state=:from``.
+        Returns ``True`` iff exactly one row changed (the caller won the race);
+        ``False`` if the candidate is gone or no longer in ``from_state``. This
+        is the dual-caller-safe + idempotent primitive behind
+        :meth:`CollectorJoinHandler.confirm_requested_membership`.
+        """
+        values: dict[str, Any] = {"state": to_state}
+        if resulting_group_id is not None:
+            values["resulting_group_id"] = resulting_group_id
+        if reviewed_at is not None:
+            values["reviewed_at"] = reviewed_at
+        stmt = (
+            update(GroupCandidateTable)
+            .where(
+                col(GroupCandidateTable.id) == candidate_id,
+                col(GroupCandidateTable.state) == from_state,
+            )
+            .values(**values)
+        )
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(stmt)
+            await session.commit()
+            return int(result.rowcount) == 1
 
     async def compute_eligibility_inputs(
         self,

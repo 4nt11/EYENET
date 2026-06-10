@@ -96,7 +96,19 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "personal_access_token",
     }
 )
-_AUDIT_TABLES: frozenset[str] = frozenset({"audit_log"})
+_AUDIT_TABLES: frozenset[str] = frozenset(
+    {
+        "audit_log",
+        # M9.B1 — file-access crypto foundation (co-located in audit.db per §5.5)
+        "system_user_signing_pubkey_history",
+        "file_access_acknowledgment",
+        # M9.B2 — hash-chained file-access journal (second chain in audit.db)
+        "file_access_journal",
+        # PHASE-4 — operator signing-key registration proof-of-possession
+        # challenge (forensically relevant: it establishes who could sign).
+        "signing_key_challenge",
+    }
+)
 
 # ``vector_signature`` lives outside SQLModel.metadata — it's created via raw
 # DDL below because there is no SQLModel table class for it.
@@ -110,6 +122,19 @@ CREATE TABLE IF NOT EXISTS vector_signature (
 """
 _VECTOR_SIGNATURE_INDEX = (
     "CREATE INDEX IF NOT EXISTS ix_vs_primitive ON vector_signature(primitive_name)"
+)
+
+# M9.B1 — single-active-key enforcement (§5.7). A user must have AT MOST ONE
+# row with ``retired_at IS NULL``. A partial (filtered) UNIQUE index makes a
+# concurrent rotation race STRUCTURALLY impossible to leave two active keys:
+# the second INSERT of an active row violates the index and rolls back.
+# This is SQLite-dialect DDL (``WHERE`` on a UNIQUE index) so it lives in the
+# backend layer — NOT the ANSI-clean model/mixin (CLAUDE.md §2.3 Rule 1).
+# Future MySQL/Postgres backends express the same invariant their own way.
+_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_signing_pubkey_active "
+    "ON system_user_signing_pubkey_history(user_id) "
+    "WHERE retired_at IS NULL"
 )
 
 
@@ -260,11 +285,15 @@ def init_main_db(sync_engine: Engine) -> None:
 def init_audit_db(sync_engine: Engine) -> None:
     """Create the audit-log table on the audit DB (sync)."""
 
+    from sqlalchemy import text  # noqa: PLC0415
+
     import eyenet.models  # noqa: F401, PLC0415
 
     tables = _filtered_tables(_AUDIT_TABLES)
     if tables:
         SQLModel.metadata.create_all(sync_engine, tables=tables)
+    with sync_engine.begin() as conn:
+        conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
 
 
 async def init_main_db_async(engine: AsyncEngine) -> None:
@@ -291,6 +320,8 @@ async def init_main_db_async(engine: AsyncEngine) -> None:
 async def init_audit_db_async(engine: AsyncEngine) -> None:
     """Create audit_log on an AsyncEngine."""
 
+    from sqlalchemy import text  # noqa: PLC0415
+
     import eyenet.models  # noqa: F401, PLC0415
 
     tables = _filtered_tables(_AUDIT_TABLES)
@@ -299,6 +330,7 @@ async def init_audit_db_async(engine: AsyncEngine) -> None:
             await conn.run_sync(
                 lambda sync_conn: SQLModel.metadata.create_all(sync_conn, tables=tables)
             )
+        await conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
 
 
 __all__ = [

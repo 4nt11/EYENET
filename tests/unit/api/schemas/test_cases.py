@@ -395,6 +395,8 @@ def test_file_access_acknowledgment_carries_case_refs(uid: UUID, uid2: UUID) -> 
     ack = FileAccessAcknowledgment(
         access_nonce=uid,
         expected_content_hash="0" * 64,
+        request_id="req-001",
+        signed_at=datetime(2026, 6, 9, 12, 0, 0, tzinfo=UTC),
         reason="case=APT-29 routine review",
         operator_signature=sig,
         case_refs=[uid2],

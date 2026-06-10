@@ -28,6 +28,7 @@ from .corpus import CorpusMixin
 from .cursors import CursorsMixin
 from .documents import DocumentsMixin
 from .feedback import FeedbackMixin
+from .file_access import FileAccessMixin
 from .graph import GraphMixin
 from .identities import IdentitiesMixin
 from .linkages import LinkagesMixin
@@ -61,6 +62,7 @@ class SQLModelRepository(
     CursorsMixin,
     DocumentsMixin,
     FeedbackMixin,
+    FileAccessMixin,
     GraphMixin,
     IdentitiesMixin,
     LinkagesMixin,

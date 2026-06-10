@@ -58,6 +58,21 @@ class FileAccessAcknowledgment(ApiSchema):
 
     access_nonce: UUID
     expected_content_hash: str = Field(pattern=_HEX_64)
+    request_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description=(
+            "Client-chosen opaque request identifier, signed into the §5.7 "
+            "canonical. Anti-replay residual until PHASE-6 adds "
+            "UNIQUE(user_id, sig_request_id)."
+        ),
+    )
+    signed_at: datetime = Field(
+        description=(
+            "Operator-signed ISO-8601 timestamp. record_access rejects a "
+            "stale OR future value outside the freshness window (§5.7)."
+        ),
+    )
     reason: str = Field(
         min_length=16,
         max_length=1024,

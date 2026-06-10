@@ -16,7 +16,7 @@ and operate against this ABC only.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         ClearanceScope,
         CollectorDesiredState,
         CollectorObservedState,
+        FileServedVia,
         GroupAccessKind,
         GroupKind,
         IdentityRole,
@@ -443,6 +444,116 @@ class BaseRepository(ABC):
         *,
         now: datetime | None = None,
     ) -> frozenset[ClearanceScope]: ...
+
+    # =================================================================
+    # FILE-ACCESS CRYPTO FOUNDATION (API_PLAN §5.6-5.7, M9.B1)
+    # Signing-key registry + single-use acknowledgment nonces. Tables
+    # live in audit.db. Verification-side only — no private key at rest.
+    # =================================================================
+
+    @abstractmethod
+    async def record_signing_key(
+        self,
+        user_id: UUID,
+        verifying_key_bytes: bytes,
+        *,
+        now: datetime | None = None,
+    ) -> str:
+        """Register a new active Ed25519 verifying key; retire the prior
+        active key. Returns the new key's 16-hex fingerprint (kid)."""
+
+    @abstractmethod
+    async def lookup_key_for_user(
+        self,
+        user_id: UUID,
+        fingerprint: str,
+    ) -> tuple[bytes, bool] | None:
+        """Resolve THIS user's key (active or retired) by fingerprint →
+        (verifying_key_bytes, retired) | None. Bound to the authenticated
+        asserting user so verification never attributes to an arbitrary
+        user sharing a raw key."""
+
+    @abstractmethod
+    async def active_signing_key_for(self, user_id: UUID) -> bytes | None:
+        """Return the user's current active verifying key bytes, or None."""
+
+    @abstractmethod
+    async def record_acknowledgment(
+        self,
+        user_id: UUID,
+        content_hash: str,
+        *,
+        now: datetime,
+    ) -> UUID:
+        """Mint a single-use acknowledgment nonce (expires now + 60s)."""
+
+    @abstractmethod
+    async def consume_acknowledgment(self, nonce: UUID, *, now: datetime) -> bool:
+        """Atomically consume a nonce exactly once. True iff a live,
+        unconsumed, unexpired nonce was claimed by this call."""
+
+    @abstractmethod
+    async def mint_signing_key_challenge(self, user_id: UUID, *, now: datetime) -> UUID:
+        """Mint a single-use, user-bound signing-key registration challenge
+        (PHASE-4 proof-of-possession). Expires at now + 60s; returns the nonce."""
+
+    @abstractmethod
+    async def consume_signing_key_challenge(
+        self,
+        nonce: UUID,
+        user_id: UUID,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Atomically consume a signing-key challenge exactly once, bound to
+        ``user_id``. True iff a live, unconsumed, unexpired nonce minted for
+        THIS user was claimed by this call — a nonce minted for another user
+        can never be consumed here (cross-user replay defense)."""
+
+    @abstractmethod
+    async def record_access(
+        self,
+        *,
+        user_id: UUID,
+        audit_event_id: UUID | None,
+        grant_id: UUID | None,
+        acknowledgment_id: UUID | None,
+        content_hash: bytes,
+        content_size: int,
+        content_mime: str,
+        tier: SensitivityTier,
+        served_via: FileServedVia,
+        signing_pubkey_fingerprint: str,
+        operator_signature: bytes,
+        sig_method: str,
+        sig_url: str,
+        sig_request_id: str,
+        sig_timestamp: str,
+        sig_body_hash: str,
+        now: datetime | None = None,
+        freshness_window: timedelta = timedelta(seconds=300),
+    ) -> UUID:
+        """Verify + journal a single file access as a hash-chained row (§5.6).
+
+        Fail-closed: resolves the operator key by ``(user_id, fingerprint)``,
+        verifies the operator's Ed25519 signature over the EYENET-SIG-v1
+        request canonical, then enforces FRESHNESS — the signed
+        ``sig_timestamp`` is parsed (unparseable → raise) and must be within
+        ``freshness_window`` (default 300s) of ``now`` (stale OR future →
+        raise), closing the NORMAL-tier replay hole. For any non-normal tier a
+        grant + acknowledgment are required and the nonce is consumed ATOMICALLY
+        inside the same single-writer audit.db transaction as the journal
+        INSERT (a failed append leaves the nonce unconsumed/retryable and writes
+        no row). Raises (and writes NO row) on any failure. Returns the new
+        ``access_id``.
+
+        Backends overriding the dialect-specific append MUST perform the
+        nonce-consume and the journal-insert in ONE serialized transaction."""
+
+    @abstractmethod
+    async def verify_file_access_chain(self) -> bool:
+        """Walk the file-access journal; recompute every ``self_hash`` and
+        confirm linkage. False on the first broken/tampered/reordered link."""
 
     # =================================================================
     # OBSERVATIONS (MODELS §2.3, API_PLAN §4.9)
@@ -1305,6 +1416,32 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def requested_candidates_for_collector(
+        self,
+        collector_id: UUID,
+    ) -> list[GroupCandidateRow]:
+        """Return REQUESTED candidates assigned to ``collector_id`` (M9.E5.6).
+
+        The collector's periodic membership probe iterates this set to confirm
+        approval-gated joins. Scoped to one collector so a probe never confirms
+        another collector's pending join.
+        """
+
+    @abstractmethod
+    async def requested_candidate_for_group(
+        self,
+        *,
+        collector_id: UUID,
+        platform_groupid: str,
+    ) -> GroupCandidateRow | None:
+        """Return the REQUESTED candidate this collector awaits for
+        ``platform_groupid``, or ``None`` (M9.E5.6).
+
+        The live event path uses this: a message from a requested group means
+        the join was approved. Scoped by ``assigned_collector_id``.
+        """
+
+    @abstractmethod
     async def list_candidates(
         self,
         *,
@@ -1347,6 +1484,32 @@ class BaseRepository(ABC):
 
         Raises :class:`ValueError` on an illegal transition or if the
         candidate doesn't exist.
+        """
+
+    @abstractmethod
+    async def claim_candidate_transition(
+        self,
+        candidate_id: UUID,
+        *,
+        from_state: CandidateState,
+        to_state: CandidateState,
+        resulting_group_id: UUID | None = None,
+        reviewed_at: datetime | None = None,
+    ) -> bool:
+        """Atomic compare-and-swap candidate state (M9.E5.6 dual-caller safety).
+
+        Conditionally moves the candidate ``from_state → to_state`` in a single
+        ``UPDATE ... WHERE id=:id AND state=:from`` and returns ``True`` iff
+        exactly one row changed (this caller won the race). Returns ``False``
+        when the candidate is absent or no longer in ``from_state`` — the event
+        path and the membership probe can both fire for one approval; only the
+        CAS winner proceeds to open a membership, so exactly one membership row
+        is ever opened.
+
+        ANSI-generic (no dialect SQL): SQLModel/SQLAlchemy ``update()`` +
+        ``.where()``. Does NOT enforce the ``_ALLOWED`` transition map — the
+        caller picks ``from_state``/``to_state``; this is a CAS primitive, not
+        the guarded :meth:`transition_candidate`.
         """
 
     @abstractmethod
