@@ -119,6 +119,8 @@ from .stream import (
     LinkageProposedEvent,
     LinkageStateChangedEvent,
     PersonaUpdatedEvent,
+    StreamBackpressureEvent,
+    StreamExpiredEvent,
     StreamGapEvent,
 )
 from .writes import WriteAccepted
@@ -221,6 +223,8 @@ __all__ = [
     "SigningKeyChallengeResponse",
     "SigningKeyRegisterRequest",
     "SigningKeyRegisterResponse",
+    "StreamBackpressureEvent",
+    "StreamExpiredEvent",
     "StreamGapEvent",
     "StreamTokenMinted",
     "StreamTokenRequest",

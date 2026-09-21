@@ -1,15 +1,27 @@
-"""GET /v1/stream/audit — SSE stream of eyenet.audit.* events."""
+"""GET /v1/stream/audit — SSE stream of eyenet.audit.* events.
+
+Live-tail only: the audit hash chain is the durable record (§11.5), so there is
+no audit event log to replay from. A reconnect resumes live; backfill is via
+`GET /v1/audit`.
+"""
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
-from eyenet.api.deps import StreamPrincipal, get_stream_principal
+from eyenet.api.deps import StreamPrincipal, get_bus, get_storage, get_stream_principal
+from eyenet.api.streaming import make_sse_response, require_topic
+from eyenet.api.streaming.sse import sse_events_ext
+from eyenet.api.v1.schemas.enums import StreamTopic
+from eyenet.contracts.bus import Bus
+from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["stream"])
+
+_TOPIC = StreamTopic.EYENET_AUDIT
 
 
 @router.get(
@@ -17,11 +29,24 @@ router = APIRouter(tags=["stream"])
     operation_id="stream_audit",
     response_class=StreamingResponse,
     status_code=200,
+    openapi_extra=sse_events_ext([_TOPIC.value]),
 )
 async def stream_audit(
+    request: Request,
     principal: Annotated[StreamPrincipal, Depends(get_stream_principal)],
-    token: str | None = Query(default=None, max_length=2048),
+    bus: Annotated[Bus, Depends(get_bus)],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+    token: str | None = Query(  # noqa: ARG001 — OpenAPI ?token= surface; read from the request by get_stream_principal
+        default=None, max_length=2048
+    ),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID", max_length=128),
 ) -> StreamingResponse:
-    # Auth runs first via the dependency; 401 on bad ?token= precedes this 501.
-    raise NotImplementedError("stream_audit (M9.0 skeleton)")
+    require_topic(principal, _TOPIC.value)
+    return make_sse_response(
+        request=request,
+        bus=bus,
+        storage=storage,
+        principal=principal,
+        topics=[_TOPIC.value],
+        last_event_id=last_event_id,
+    )

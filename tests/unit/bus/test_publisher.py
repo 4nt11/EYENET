@@ -92,3 +92,48 @@ async def test_renders_raw_message_subject() -> None:
 
     await asyncio.sleep(0)
     assert seen == ["raw.message.telegram.abcd1234"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stamps_event_id_header_when_given() -> None:
+    # The durable event_id rides as a header so the SSE stream can dedup a live
+    # event against the same event replayed from the event log (M9.H2).
+    bus = MemoryBus()
+    headers: list[dict[str, str]] = []
+
+    async def handler(_s: str, _p: bytes, h: dict[str, str]) -> None:
+        headers.append(h)
+
+    await bus.subscribe("attribution.profile.candidate", handler)
+    pub = BusEnvelopePublisher(bus)
+    eid = UUID("06ab1493-2552-7a7a-8000-1bc7b549e8dd")
+    await pub.publish("attribution.profile.candidate", _envelope(), event_id=eid)
+    import asyncio
+
+    await asyncio.sleep(0)
+    assert headers and headers[0]["eyenet-event-id"] == str(eid)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_no_event_id_header_by_default() -> None:
+    bus = MemoryBus()
+    headers: list[dict[str, str]] = []
+
+    async def handler(_s: str, _p: bytes, h: dict[str, str]) -> None:
+        headers.append(h)
+
+    await bus.subscribe("attribution.profile.candidate", handler)
+    pub = BusEnvelopePublisher(bus)
+    await pub.publish("attribution.profile.candidate", _envelope())
+    import asyncio
+
+    await asyncio.sleep(0)
+    assert headers and "eyenet-event-id" not in headers[0]
+
+
+@pytest.mark.unit
+def test_bus_property_exposes_wrapped_bus() -> None:
+    bus = MemoryBus()
+    assert BusEnvelopePublisher(bus).bus is bus

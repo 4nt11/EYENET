@@ -2148,6 +2148,30 @@ class BaseRepository(ABC):
     async def identity_events(self, identity_id: UUID) -> list[EventLogRow]:
         """Replay-ordered ``(ts, event_seq)`` events for one identity."""
 
+    # Cross-parent cursor reads — the Group H ``StreamReplaySource`` (§6.5)
+    # feeds these. The cursor is the ``event_id`` (uuid7): time-ordered and
+    # fixed-width, so ``event_id > after`` is a global chronological scan across
+    # all parents and a single opaque ``Last-Event-ID`` token. ``after=None``
+    # replays from the beginning. Bounded by ``limit`` (one replay page).
+
+    @abstractmethod
+    async def linkage_events_since(
+        self, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        """All linkage events with ``event_id > after_event_id``, event_id-ordered."""
+
+    @abstractmethod
+    async def persona_events_since(
+        self, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        """All persona events with ``event_id > after_event_id``, event_id-ordered."""
+
+    @abstractmethod
+    async def identity_events_since(
+        self, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        """All identity events with ``event_id > after_event_id``, event_id-ordered."""
+
     # =================================================================
     # IDEMPOTENCY (MODELS §2.28, API_PLAN §6/§10.3 — write replay guard)
     # =================================================================

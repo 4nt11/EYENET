@@ -54,7 +54,7 @@ async def decide_linkage(
             actor=str(current_user.user_id),
         )
 
-    async def _publish(event_id: UUID, traceparent: str) -> None:  # noqa: ARG001 — event_id rides in the event log; the envelope carries the trace
+    async def _publish(event_id: UUID, traceparent: str) -> None:
         envelope = envelope_cls.from_pair(
             linkage.actor_a_id,
             linkage.actor_b_id,
@@ -64,7 +64,7 @@ async def decide_linkage(
             notes=body.note,
             trace_context=TraceContext(traceparent=traceparent),
         )
-        await publisher.publish(subject, envelope)
+        await publisher.publish(subject, envelope, event_id=event_id)
 
     return await operator_write(
         audit=audit,
