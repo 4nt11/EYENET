@@ -188,9 +188,7 @@ class IdentitiesMixin:
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = select(IdentityTable).where(
-                col(IdentityTable.state).not_in(
-                    [IdentityState.FROZEN, IdentityState.BURNED]
-                ),
+                col(IdentityTable.state).not_in([IdentityState.FROZEN, IdentityState.BURNED]),
                 col(IdentityTable.role) != IdentityRole.QUARANTINE,
             )
             if source_id is not None:

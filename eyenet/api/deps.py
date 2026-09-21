@@ -84,6 +84,17 @@ class ConflictError(Exception):
         self.detail = detail
 
 
+class ServiceUnavailableError(Exception):
+    """503-class failure: a durable write could not be gated because the audit
+    log is unavailable (API_PLAN §5.5/§10.3 — no operator decision is accepted
+    without its durable, non-repudiable audit record). ``detail`` is
+    operator-facing."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class CurrentUser:
     """Per-request identity + resolved authority.

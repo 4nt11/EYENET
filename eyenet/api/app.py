@@ -28,8 +28,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from eyenet.api.auth import AuthCache, load_mfa_key, load_pat_pepper, load_verifying_keys
-from eyenet.api.deps import AuthError, ConflictError, ResourceNotFound, ScopeForbidden
-from eyenet.api.middleware import evidence_access_dispatch
+from eyenet.api.deps import (
+    AuthError,
+    ConflictError,
+    ResourceNotFound,
+    ScopeForbidden,
+    ServiceUnavailableError,
+)
+from eyenet.api.middleware import IdempotencyMiddleware, evidence_access_dispatch
 from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
 from eyenet.bus.memory import MemoryBus
@@ -169,6 +175,18 @@ def create_app(
         )
         return _problem_response(problem, 409)
 
+    @app.exception_handler(ServiceUnavailableError)
+    async def _service_unavailable(request: Request, exc: ServiceUnavailableError) -> JSONResponse:
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Service Unavailable",
+            status=503,
+            detail=exc.detail,
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 503)
+
     @app.exception_handler(IntegrityError)
     async def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:  # noqa: ARG001 — handler signature; DB message withheld (no oracle / no internal leak)
         # A unique/FK violation surfaced from a create (e.g. a collector reusing
@@ -228,6 +246,11 @@ def create_app(
     # `app.middleware("http")` wraps it as a BaseHTTPMiddleware internally —
     # no direct starlette import needed.
     app.middleware("http")(evidence_access_dispatch)
+
+    # Idempotency-Key replay guard (M9.G1, §6/§10.3) for POST /v1/* writes.
+    # Pure ASGI so it can read the request body and capture the response.
+    # Guards only writes (POST) with the header; reads flow through untouched.
+    app.add_middleware(IdempotencyMiddleware)
 
     app.include_router(v1_router)
     return app

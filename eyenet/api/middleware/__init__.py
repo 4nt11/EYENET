@@ -2,5 +2,6 @@
 """ASGI middleware for the EYENET v1 API."""
 
 from eyenet.api.middleware.evidence_access import evidence_access_dispatch
+from eyenet.api.middleware.idempotency import IdempotencyMiddleware
 
-__all__ = ["evidence_access_dispatch"]
+__all__ = ["IdempotencyMiddleware", "evidence_access_dispatch"]

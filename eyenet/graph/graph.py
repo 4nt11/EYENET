@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import cast
+from uuid import UUID
 
 import structlog
 from opentelemetry import trace
@@ -32,6 +33,7 @@ from eyenet.contracts.attribution import (
     PersonaUpdatedEnvelope,
     ProfileCurrentEnvelope,
 )
+from eyenet.contracts.enums import LinkageState
 from eyenet.models.graph import GraphEdgeType, GraphNodeType
 from eyenet.service import ServiceBase
 from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
@@ -117,6 +119,31 @@ class Graph(ServiceBase):
         else:
             _log.debug("graph.unknown_linkage_subject", subject=subject)
 
+    async def _apply_linkage_state(
+        self,
+        linkage_id: UUID,
+        target: LinkageState,
+        *,
+        decided_by: str,
+        notes: str | None,
+    ) -> None:
+        """Apply the operator's decision to the linkage row (Graph is the sole
+        applier — invariant #2). Tolerant of replay / already-terminal linkages:
+        ``transition_linkage`` raises ``ValueError`` on an illegal transition,
+        which on a redelivered event just means the state is already applied, so
+        we log and let the idempotent graph-edge/persona sync below proceed."""
+        try:
+            await self._storage.transition_linkage(
+                linkage_id, target.value, decided_by=decided_by, notes=notes
+            )
+        except ValueError as exc:
+            _log.info(
+                "graph.linkage_transition_skipped",
+                linkage_id=str(linkage_id),
+                target=target.value,
+                reason=str(exc),
+            )
+
     async def _handle_proposed(self, payload: bytes) -> None:
         try:
             env = LinkageProposedEnvelope.model_validate_json(payload)
@@ -152,6 +179,10 @@ class Graph(ServiceBase):
             _log.error("graph.suspected_parse_error", error=str(exc))
             return
 
+        await self._apply_linkage_state(
+            env.linkage_id, LinkageState.SUSPECTED, decided_by=env.decided_by, notes=env.notes
+        )
+
         with _tracer.start_as_current_span(
             "graph.upsert",
             attributes={
@@ -180,6 +211,10 @@ class Graph(ServiceBase):
         except Exception as exc:
             _log.error("graph.confirmed_parse_error", error=str(exc))
             return
+
+        await self._apply_linkage_state(
+            env.linkage_id, LinkageState.CONFIRMED, decided_by=env.decided_by, notes=env.notes
+        )
 
         now = datetime.now(tz=UTC)
 
@@ -273,6 +308,10 @@ class Graph(ServiceBase):
         except Exception as exc:
             _log.error("graph.rejected_parse_error", error=str(exc))
             return
+
+        await self._apply_linkage_state(
+            env.linkage_id, LinkageState.REJECTED, decided_by=env.decided_by, notes=env.notes
+        )
 
         with _tracer.start_as_current_span(
             "graph.upsert",

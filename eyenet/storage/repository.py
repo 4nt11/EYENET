@@ -45,8 +45,6 @@ if TYPE_CHECKING:
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
     from eyenet.contracts.collector import CollectorFleetHealth, CollectorRow
     from eyenet.contracts.document import DocumentRow
-    from eyenet.contracts.event_log import EventLogRow
-    from eyenet.contracts.idempotency import IdempotencyRecordRow, ReserveResult
     from eyenet.contracts.enums import (
         ArtifactSubjectKind,
         ArtifactValidationState,
@@ -73,7 +71,9 @@ if TYPE_CHECKING:
         SystemLogLevel,
         SystemUserRole,
     )
+    from eyenet.contracts.event_log import EventLogRow
     from eyenet.contracts.feedback import FeedbackPairRow
+    from eyenet.contracts.idempotency import IdempotencyRecordRow, ReserveResult
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
@@ -2183,6 +2183,11 @@ class BaseRepository(ABC):
         bus_state: str,
     ) -> None:
         """Attach the produced response to a reserved record."""
+
+    @abstractmethod
+    async def delete_idempotency_record(self, key: str) -> None:
+        """Drop a reservation whose guarded handler returned non-2xx (no durable
+        write / bus emit happened, so a corrected retry must not replay it)."""
 
     @abstractmethod
     async def purge_expired_idempotency(self, *, now: datetime | None = None) -> int:

@@ -40,12 +40,12 @@ from .file_access import (
 )
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from .group import GroupSnapshotTable, GroupTable
+from .idempotency import IdempotencyRecordTable
 from .identity import (
     EngagementAuthorizationTable,
     IdentityLabelTable,
     IdentityTable,
 )
-from .idempotency import IdempotencyRecordTable
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable

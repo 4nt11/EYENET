@@ -71,6 +71,8 @@ SUBJECT_LINKAGE_SUSPECTED: str = "attribution.linkage.suspected"
 SUBJECT_LINKAGE_CONFIRMED: str = "attribution.linkage.confirmed"
 SUBJECT_LINKAGE_REJECTED: str = "attribution.linkage.rejected"
 SUBJECT_PERSONA_UPDATED: str = "attribution.persona.updated"
+SUBJECT_PERSONA_MERGE: str = "attribution.persona.merge"
+SUBJECT_PERSONA_SPLIT: str = "attribution.persona.split"
 
 
 # -- Profile ------------------------------------------------------------------
@@ -324,6 +326,33 @@ class PersonaUpdatedEnvelope(BusEnvelope):
     at: datetime
 
 
+# -- Persona operator-command envelopes (API_PLAN §4.10a, M9.G4) ---------------
+
+
+class PersonaMergeCommandEnvelope(BusEnvelope):
+    """`attribution.persona.merge` — operator override; Graph resolves a
+    representative actor from each persona and merges (no backing linkage)."""
+
+    persona_id: UUID
+    other_persona_id: UUID
+    decided_by: str = Field(description="system_user id")
+    decided_at: datetime
+    reason: str
+    case_refs: list[str] = Field(default_factory=list)
+
+
+class PersonaSplitCommandEnvelope(BusEnvelope):
+    """`attribution.persona.split` — operator override; Graph pulls one actor
+    out of the persona."""
+
+    persona_id: UUID
+    actor_id: UUID
+    decided_by: str = Field(description="system_user id")
+    decided_at: datetime
+    reason: str
+    case_refs: list[str] = Field(default_factory=list)
+
+
 # -- Persona / cluster --------------------------------------------------------
 
 
@@ -362,6 +391,8 @@ __all__ = [
     "SUBJECT_LINKAGE_PROPOSED",
     "SUBJECT_LINKAGE_REJECTED",
     "SUBJECT_LINKAGE_SUSPECTED",
+    "SUBJECT_PERSONA_MERGE",
+    "SUBJECT_PERSONA_SPLIT",
     "SUBJECT_PERSONA_UPDATED",
     "SUBJECT_PROFILE_CANDIDATE",
     "SUBJECT_PROFILE_CURRENT",
@@ -372,7 +403,9 @@ __all__ = [
     "LinkageSuspectedEnvelope",
     "PersonaChangeKind",
     "PersonaMembershipRow",
+    "PersonaMergeCommandEnvelope",
     "PersonaRow",
+    "PersonaSplitCommandEnvelope",
     "PersonaUpdatedEnvelope",
     "ProfileCandidateEnvelope",
     "ProfileCurrentEnvelope",

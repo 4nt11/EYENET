@@ -122,6 +122,17 @@ class IdempotencyMixin:
             session.add(row)
             await session.commit()
 
+    async def delete_idempotency_record(self, key: str) -> None:
+        """Drop a reservation — used when the guarded handler returned a
+        non-2xx (nothing durable/bus happened, so a corrected retry must not
+        replay the failure)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(IdempotencyRecordTable, key)
+            if row is None:
+                return
+            await session.delete(row)
+            await session.commit()
+
     async def purge_expired_idempotency(self, *, now: datetime | None = None) -> int:
         """Delete expired rows; returns count. Housekeeping, not on the hot path."""
         stamp = now or datetime.now(tz=UTC)

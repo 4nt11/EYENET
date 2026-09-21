@@ -30,10 +30,13 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "attribution.linkage.confirmed",
     "attribution.linkage.rejected",
     "attribution.persona.updated",
+    "attribution.persona.merge",
+    "attribution.persona.split",
     "classify.document.uploaded",
     "classify.attachment.stored",
     "eyenet.audit.",
     "eyenet.control.",
+    "eyenet.identity.",
 )
 
 

@@ -184,8 +184,8 @@ class EventLogsMixin:
     ) -> list[EventLogRow]:
         parent_col = getattr(table, parent_attr)
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            result = await session.exec(
-                select(table)  # type: ignore[call-overload]
+            result: Any = await session.exec(
+                select(table)
                 .where(col(parent_col) == parent_id)
                 .order_by(col(table.ts))  # type: ignore[attr-defined]
                 .order_by(col(table.event_seq))  # type: ignore[attr-defined]

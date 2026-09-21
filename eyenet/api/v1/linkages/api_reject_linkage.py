@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 
+from eyenet.api.deps import (
+    CurrentUser,
+    RequireScope,
+    get_audit,
+    get_publisher,
+    get_storage,
+)
+from eyenet.api.v1.linkages._decide import decide_linkage
 from eyenet.api.v1.schemas.linkages import LinkageDecisionRequest
 from eyenet.api.v1.schemas.writes import WriteAccepted
+from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.contracts.attribution import SUBJECT_LINKAGE_REJECTED, LinkageRejectedEnvelope
+from eyenet.storage.repository import BaseRepository
+from eyenet.telemetry.audit import AuditEmitter
 
 router = APIRouter(tags=["linkages"])
 
@@ -21,6 +34,22 @@ router = APIRouter(tags=["linkages"])
 async def linkages_reject(
     linkage_id: UUID,
     body: LinkageDecisionRequest,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
+    current_user: Annotated[CurrentUser, Depends(RequireScope("write:linkage_decision"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+    audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
+    idempotency_key: Annotated[  # noqa: ARG001 — read by IdempotencyMiddleware; declared for the OpenAPI surface
+        str | None, Header(alias="Idempotency-Key", max_length=128)
+    ] = None,
 ) -> WriteAccepted:
-    raise NotImplementedError("linkages_reject (M9.0 skeleton)")
+    return await decide_linkage(
+        linkage_id=linkage_id,
+        body=body,
+        decision="rejected",
+        subject=SUBJECT_LINKAGE_REJECTED,
+        envelope_cls=LinkageRejectedEnvelope,
+        storage=storage,
+        audit=audit,
+        publisher=publisher,
+        current_user=current_user,
+    )

@@ -31,6 +31,15 @@ from .enums import (
 SUBJECT_LABEL: str = "identity.label.applied"
 SUBJECT_ENGAGEMENT: str = "identity.engagement.authorized"
 
+# Operator identity-action subjects (API_PLAN §3.4, M9.G5). Distinct from the
+# `identity.*` label/engagement subjects above — these carry the `eyenet.`
+# control-plane prefix.
+SUBJECT_IDENTITY_CLAIMED: str = "eyenet.identity.claimed"
+SUBJECT_IDENTITY_RELEASED: str = "eyenet.identity.released"
+SUBJECT_IDENTITY_FROZEN: str = "eyenet.identity.frozen"
+SUBJECT_IDENTITY_BURNED: str = "eyenet.identity.burned"
+SUBJECT_IDENTITY_FREEZE_ALL: str = "eyenet.identity.freeze_all"
+
 
 # -- Operator persona ---------------------------------------------------------
 
@@ -116,6 +125,34 @@ class EngagementAuthorizationEnvelope(BusEnvelope):
         return self
 
 
+# -- Operator identity actions (API_PLAN §3.4, M9.G5) ------------------------
+
+
+class IdentityActionEnvelope(BusEnvelope):
+    """Per-identity operator action. The bus subject
+    (`eyenet.identity.{claimed,released,frozen,burned}`) names the action; the
+    resulting persisted `new_state` is carried for observers/SSE. The API
+    persists `new_state` durably before publishing (documented invariant-#2
+    exception — no live identity supervisor yet)."""
+
+    identity_id: UUID
+    new_state: IdentityState
+    decided_by: str = Field(description="system_user id")
+    decided_at: datetime
+    reason: str | None = None
+
+
+class IdentityFreezeAllEnvelope(BusEnvelope):
+    """`eyenet.identity.freeze_all` — fleet-wide soft freeze; carries the ids
+    actually flipped to FROZEN (terminal identities are left untouched)."""
+
+    frozen_identity_ids: list[UUID] = Field(default_factory=list)
+    source_id: UUID | None = None
+    decided_by: str = Field(description="system_user id")
+    decided_at: datetime
+    reason: str | None = None
+
+
 class EngagementAuthorizationRow(DbRowBase):
     """Persisted engagement authorization."""
 
@@ -142,9 +179,16 @@ class EngagementAuthorizationRow(DbRowBase):
 
 __all__ = [
     "SUBJECT_ENGAGEMENT",
+    "SUBJECT_IDENTITY_BURNED",
+    "SUBJECT_IDENTITY_CLAIMED",
+    "SUBJECT_IDENTITY_FREEZE_ALL",
+    "SUBJECT_IDENTITY_FROZEN",
+    "SUBJECT_IDENTITY_RELEASED",
     "SUBJECT_LABEL",
     "EngagementAuthorizationEnvelope",
     "EngagementAuthorizationRow",
+    "IdentityActionEnvelope",
+    "IdentityFreezeAllEnvelope",
     "IdentityLabelEnvelope",
     "IdentityLabelRow",
     "IdentityRow",
