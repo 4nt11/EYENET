@@ -21,9 +21,7 @@ def test_dashboard_is_valid_json_with_panels() -> None:
     dash = json.loads((_OPS / "dashboards" / "eyenet-api.json").read_text())
     assert dash["title"]
     assert dash["panels"]
-    exprs = " ".join(
-        t["expr"] for p in dash["panels"] for t in p.get("targets", []) if "expr" in t
-    )
+    exprs = " ".join(t["expr"] for p in dash["panels"] for t in p.get("targets", []) if "expr" in t)
     for metric in ("eyenet_api_requests_total", "eyenet_api_healthy", "eyenet_api_sse_connections"):
         assert metric in exprs
 

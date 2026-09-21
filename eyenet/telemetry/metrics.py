@@ -31,14 +31,16 @@ import os
 from typing import TYPE_CHECKING
 
 from opentelemetry import metrics as otel_metrics
+from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.view import View
 from opentelemetry.sdk.resources import Resource
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from opentelemetry.metrics import CallbackOptions, Observation
+    from opentelemetry.metrics import CallbackOptions
     from opentelemetry.sdk.metrics.export import MetricReader
 
 _METRICS_ENABLED_ENV = "EYENET_API_METRICS_ENABLED"
@@ -103,17 +105,18 @@ def init_metrics(
     readers: list[MetricReader] = list(extra_readers or [])
 
     if metrics_enabled():
-        # Imported lazily: prometheus_client is only needed when scrape is on.
-        from opentelemetry.exporter.prometheus import PrometheusMetricReader
+        # Lazy: only pull the Prometheus reader when scrape is actually on.
+        from opentelemetry.exporter.prometheus import PrometheusMetricReader  # noqa: PLC0415
 
         readers.append(PrometheusMetricReader())
 
     endpoint = os.environ.get(_OTEL_ENDPOINT_ENV, "").strip()
     if endpoint:
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+        # Lazy: avoid importing the heavy grpc stack unless OTLP push is configured.
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415
             OTLPMetricExporter,
         )
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader  # noqa: PLC0415
 
         readers.append(PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint)))
 
@@ -138,8 +141,6 @@ def prometheus_exposition() -> tuple[bytes, str]:
     ``prometheus_client``'s default registry, so ``generate_latest()`` emits every
     EYENET instrument in ``text/plain; version=0.0.4``.
     """
-    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-
     return generate_latest(), CONTENT_TYPE_LATEST
 
 
@@ -201,8 +202,6 @@ def set_health(key: str, value: bool) -> None:
 
 
 def _obs(key: str) -> Callable[[CallbackOptions], Iterable[Observation]]:
-    from opentelemetry.metrics import Observation
-
     def _cb(_options: CallbackOptions) -> Iterable[Observation]:
         return [Observation(_health.get(key, 0.0))]
 
@@ -210,8 +209,6 @@ def _obs(key: str) -> Callable[[CallbackOptions], Iterable[Observation]]:
 
 
 def _obs_ready(_options: CallbackOptions) -> Iterable[Observation]:
-    from opentelemetry.metrics import Observation
-
     return [
         Observation(value, {"component": key.split(":", 1)[1]})
         for key, value in _health.items()

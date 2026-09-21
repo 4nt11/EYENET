@@ -33,7 +33,8 @@ class _Spy:
 @pytest.fixture
 def spy(monkeypatch: pytest.MonkeyPatch) -> _Spy:
     s = _Spy()
-    monkeypatch.setattr("eyenet.telemetry.metrics.trace_propagation_missing_total", s)
+    # Patch where the name is bound and used (propagation imports it at module top).
+    monkeypatch.setattr("eyenet.telemetry.propagation.trace_propagation_missing_total", s)
     return s
 
 

@@ -13,6 +13,8 @@ from collections.abc import Iterator
 from opentelemetry import context as otel_context, trace as otel_trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from eyenet.telemetry.metrics import trace_propagation_missing_total
+
 _PROPAGATOR = TraceContextTextMapPropagator()
 
 # Canonical all-zero W3C traceparent (valid 55-char shape, all-zero ids). Emitted
@@ -30,9 +32,9 @@ def _count_trace_missing(source: str) -> None:
     # M9.6 §11.2 cutover, count-only (never drop): a received envelope/request with
     # no real upstream trace increments the SLI. Skipped when tracing is disabled
     # process-wide — every emit is a zero-sentinel then, so counting is pure noise
-    # and the >0 alert would false-fire. Lazy imports break the __init__ cycle.
-    from eyenet.telemetry import tracing_disabled
-    from eyenet.telemetry.metrics import trace_propagation_missing_total
+    # and the >0 alert would false-fire. Lazy import breaks the __init__ cycle
+    # (tracing_disabled lives in the package __init__, which imports this module).
+    from eyenet.telemetry import tracing_disabled  # noqa: PLC0415
 
     if tracing_disabled():
         return
