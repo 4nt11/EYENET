@@ -34,6 +34,7 @@ from eyenet.api.deps import (
     ResourceNotFound,
     ScopeForbidden,
     ServiceUnavailableError,
+    UnprocessableError,
 )
 from eyenet.api.middleware import IdempotencyMiddleware, evidence_access_dispatch
 from eyenet.api.v1 import v1_router
@@ -186,6 +187,18 @@ def create_app(
             request_id=_request_id(request),
         )
         return _problem_response(problem, 503)
+
+    @app.exception_handler(UnprocessableError)
+    async def _unprocessable(request: Request, exc: UnprocessableError) -> JSONResponse:
+        problem = ProblemDetail(
+            type="about:blank",
+            title="Unprocessable Entity",
+            status=422,
+            detail=exc.detail,
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, 422)
 
     @app.exception_handler(IntegrityError)
     async def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:  # noqa: ARG001 — handler signature; DB message withheld (no oracle / no internal leak)

@@ -95,6 +95,17 @@ class ServiceUnavailableError(Exception):
         self.detail = detail
 
 
+class UnprocessableError(Exception):
+    """422-class semantic failure: the request is well-formed but the operation
+    is not applicable to current state — e.g. merging a persona into itself, or
+    splitting out an actor that is not a member (API_PLAN §4.10a / §9.6).
+    ``detail`` is operator-facing."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class CurrentUser:
     """Per-request identity + resolved authority.

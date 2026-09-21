@@ -480,6 +480,50 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/personas/{persona_id}/merge:
+    post:
+      tags: [personas]
+      operationId: personas_merge
+      summary: Operator merge — fold another persona in. Publishes `attribution.persona.merge`.
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonaMergeRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/personas/{persona_id}/split:
+    post:
+      tags: [personas]
+      operationId: personas_split
+      summary: Operator split — pull one actor out. Publishes `attribution.persona.split`.
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonaSplitRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/linkages:
     get:
       tags: [linkages]
@@ -711,6 +755,50 @@ paths:
       tags: [identities]
       operationId: identities_release
       summary: Release a claimed identity back to the pool. Publishes `eyenet.identity.released`.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdentityActionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/identities/{identity_id}/freeze:
+    post:
+      tags: [identities]
+      operationId: identities_freeze
+      summary: Soft-freeze one identity (state=frozen). Publishes `eyenet.identity.frozen`.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdentityActionRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/identities/{identity_id}/burn:
+    post:
+      tags: [identities]
+      operationId: identities_burn
+      summary: Permanently retire a compromised identity (state=burned, role=quarantine). Publishes `eyenet.identity.burned`.
       parameters:
         - { $ref: '#/components/parameters/IdentityIdPath' }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -2912,6 +3000,30 @@ components:
           type: string
           enum: [I_UNDERSTAND]
           description: Mandatory blocking acknowledgment to prevent accidental fires.
+
+    PersonaMergeRequest:
+      type: object
+      additionalProperties: false
+      required: [other_persona_id, reason]
+      properties:
+        other_persona_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 1024 }
+        case_refs:
+          type: array
+          items: { type: string }
+          maxItems: 64
+
+    PersonaSplitRequest:
+      type: object
+      additionalProperties: false
+      required: [actor_id, reason]
+      properties:
+        actor_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 1024 }
+        case_refs:
+          type: array
+          items: { type: string }
+          maxItems: 64
 
     # ── Audit ─────────────────────────────────────────────────────────────
     AuditRow:

@@ -1,48 +1,43 @@
-"""POST /v1/identities/{identity_id}/claim — operator claims an identity (IN_USE)."""
+"""POST /v1/personas/{persona_id}/split — operator pulls one actor out."""
 
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Path
+from fastapi import APIRouter, Depends, Header
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_publisher, get_storage
-from eyenet.api.v1.identities._act import act_on_identity
-from eyenet.api.v1.schemas.identities import IdentityActionRequest
+from eyenet.api.v1.personas._persona_write import split_persona
+from eyenet.api.v1.schemas.personas import PersonaSplitRequest
 from eyenet.api.v1.schemas.writes import WriteAccepted
 from eyenet.bus.publisher import BusEnvelopePublisher
-from eyenet.contracts.enums import IdentityState
-from eyenet.contracts.identity import SUBJECT_IDENTITY_CLAIMED
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
-router = APIRouter(tags=["identities"])
+router = APIRouter(tags=["personas"])
 
 
 @router.post(
-    "/identities/{identity_id}/claim",
-    operation_id="identities_claim",
+    "/personas/{persona_id}/split",
+    operation_id="personas_split",
     response_model=WriteAccepted,
     status_code=202,
 )
-async def identities_claim(
-    body: IdentityActionRequest,
-    current_user: Annotated[CurrentUser, Depends(RequireScope("write:identity"))],
+async def personas_split(
+    persona_id: UUID,
+    body: PersonaSplitRequest,
+    current_user: Annotated[CurrentUser, Depends(RequireScope("write:persona_decision"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
     publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
-    identity_id: str = Path(..., min_length=1, max_length=128),
     idempotency_key: Annotated[  # noqa: ARG001 — read by IdempotencyMiddleware; declared for the OpenAPI surface
         str | None, Header(alias="Idempotency-Key", max_length=128)
     ] = None,
 ) -> WriteAccepted:
-    return await act_on_identity(
-        identity_id_raw=identity_id,
+    return await split_persona(
+        persona_id=persona_id,
         body=body,
-        action="claimed",
-        subject=SUBJECT_IDENTITY_CLAIMED,
-        new_state=IdentityState.IN_USE,
-        burn=False,
         storage=storage,
         audit=audit,
         publisher=publisher,

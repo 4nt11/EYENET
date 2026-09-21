@@ -110,8 +110,10 @@ from eyenet.api.v1.health.api_healthz import router as health_live_router
 from eyenet.api.v1.health.api_readyz import router as health_ready_router
 
 # === identities ===
+from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_freeze_all import router as identities_freeze_all_router
+from eyenet.api.v1.identities.api_freeze_identity import router as identities_freeze_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
 
 # === linkages ===
@@ -128,6 +130,8 @@ from eyenet.api.v1.panic.api_panic import router as control_panic_router
 # === personas ===
 from eyenet.api.v1.personas.api_get_persona import router as personas_get_router
 from eyenet.api.v1.personas.api_list_members import router as personas_members_router
+from eyenet.api.v1.personas.api_merge_persona import router as personas_merge_router
+from eyenet.api.v1.personas.api_split_persona import router as personas_split_router
 
 # === reclassify ===
 from eyenet.api.v1.reclassify.api_reclassify_attachment import (
@@ -198,6 +202,8 @@ v1_router.include_router(actors_timeline_router)
 # personas
 v1_router.include_router(personas_get_router)
 v1_router.include_router(personas_members_router)
+v1_router.include_router(personas_merge_router)
+v1_router.include_router(personas_split_router)
 
 # linkages
 v1_router.include_router(linkages_list_router)
@@ -289,6 +295,8 @@ v1_router.include_router(candidates_retry_router)
 # identities + panic
 v1_router.include_router(identities_claim_router)
 v1_router.include_router(identities_release_router)
+v1_router.include_router(identities_freeze_router)
+v1_router.include_router(identities_burn_router)
 v1_router.include_router(identities_freeze_all_router)
 v1_router.include_router(control_panic_router)
 
