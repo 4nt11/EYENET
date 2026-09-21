@@ -37,6 +37,7 @@ dependencies = [
   "opentelemetry-api>=1.27",
   "opentelemetry-sdk>=1.27",
   "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+  "opentelemetry-exporter-prometheus>=0.48b0",  # M9.6 /v1/metrics scrape (pulls prometheus_client)
   "structlog>=24.1",
 
   # crypto / opsec
