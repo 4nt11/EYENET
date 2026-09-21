@@ -5,7 +5,7 @@ EYENET. It distills the architectural decisions, conventions, and traps that
 showed up during the M9 storage cutover and earlier milestones. The global
 `~/.claude/CLAUDE.md` persona/style rules still apply on top of this.
 
-The auto-memory under `~/.claude/projects/-home-anti-Tools-EYENET/memory/` is
+The auto-memory under `~/.claude/projects/-home-anti-Projects-EYENET/memory/` is
 the day-to-day journal; this file is the durable codification of decisions
 that survive across sessions and don't decay.
 
@@ -343,7 +343,7 @@ some integration tests legitimately need more than that.
 
 ## 7. Memory system
 
-`~/.claude/projects/-home-anti-Tools-EYENET/memory/` is the persistent
+`~/.claude/projects/-home-anti-Projects-EYENET/memory/` is the persistent
 journal. Two memory rules saved during the storage cutover are
 load-bearing for every future storage change:
 
@@ -369,7 +369,7 @@ when a correction or non-obvious confirmation comes in.
 5. `eyenet/storage/repository.py` — the flat ABC; methods document themselves
 6. `eyenet/storage/sqlmodel_repo/__init__.py` — mixin composition order
 7. The active memory files in
-   `~/.claude/projects/-home-anti-Tools-EYENET/memory/MEMORY.md`
+   `~/.claude/projects/-home-anti-Projects-EYENET/memory/MEMORY.md`
 
 ---
 
