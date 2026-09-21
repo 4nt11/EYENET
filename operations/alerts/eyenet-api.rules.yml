@@ -1,0 +1,74 @@
+# EYENET API — Prometheus alerting rules (API_PLAN §11.7 / §11.10).
+#
+# Load via prometheus.yml:
+#   rule_files:
+#     - /etc/prometheus/rules/eyenet-api.rules.yml
+#
+# Metric names match the /v1/metrics exposition. Validate with:
+#   promtool check rules operations/alerts/eyenet-api.rules.yml
+groups:
+  - name: eyenet-api-integrity
+    rules:
+      # The audit chain is tamper-evidence; a publish failure means an operator
+      # action or evidence access may lack its non-repudiable bus record.
+      - alert: EyenetAuditPublishFailures
+        expr: increase(eyenet_api_audit_publish_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EYENET audit publish failures ({{ $value }} in 5m)"
+          description: >-
+            eyenet_api_audit_publish_failures_total increased — the audit bus
+            publish path is failing. Evidence integrity SLI. Investigate the bus
+            and storage immediately.
+
+      # M9.6 trace→REQUIRED cutover is count-only: this SLI must trend to zero
+      # once every producer stamps a real trace. >0 means a received envelope
+      # carried no upstream trace.
+      - alert: EyenetTracePropagationMissing
+        expr: increase(eyenet_api_trace_propagation_missing_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EYENET trace propagation missing ({{ $value }} in 15m)"
+          description: >-
+            A producer emitted an envelope without a real trace (zero sentinel).
+            The trace→REQUIRED cutover cannot harden until this is zero.
+
+  - name: eyenet-api-availability
+    rules:
+      - alert: EyenetApiUnhealthy
+        expr: eyenet_api_healthy == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EYENET API reporting unhealthy"
+          description: "eyenet_api_healthy == 0 for >1m."
+
+      - alert: EyenetApiHigh5xxRate
+        expr: >-
+          sum(rate(eyenet_api_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(eyenet_api_requests_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EYENET API 5xx rate above 5%"
+          description: "More than 5% of requests are 5xx over 5m."
+
+  - name: eyenet-api-sse
+    rules:
+      - alert: EyenetSseBackpressureTerminations
+        expr: increase(eyenet_api_sse_terminated_total{reason="audit_backpressure"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EYENET SSE connections terminated by backpressure"
+          description: >-
+            A slow consumer tripped the per-connection high-water mark. Clients
+            reconnect with Last-Event-ID and replay the gap, but sustained drops
+            indicate an undersized HWM or a stuck consumer.

@@ -1,0 +1,71 @@
+# EYENET — sample OpenTelemetry Collector config (API_PLAN §11.6).
+#
+# The API does HEAD sampling = ParentBased(ALWAYS_ON): it keeps every span it
+# sees. The real cost control is TAIL sampling here at the collector, which is
+# the only place that can decide "keep this trace because it LATER emitted
+# attribution.linkage.proposed or errored" — a head sampler cannot know the
+# future. Mirrors eyenet/telemetry/sampling.py:should_keep_trace.
+#
+# Point the API at this collector with EYENET_OTEL_ENDPOINT=http://<host>:4317.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # tail_sampling buffers each trace until decision_wait, then applies policies
+  # top-to-bottom; first match wins.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    policies:
+      # Always keep anything that errored.
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      # Always keep operator panic writes and auth failures (§11.6).
+      - name: panic-and-auth-failures
+        type: string_attribute
+        string_attribute:
+          key: eyenet.subject
+          values:
+            - "eyenet.control.panic"
+            - "eyenet.audit.auth.login.failure"
+          enabled_regex_matching: true
+      # Always keep the linkage-proposed lineage (the trace worth reading).
+      - name: linkage-proposed
+        type: string_attribute
+        string_attribute:
+          key: eyenet.subject
+          values: ["attribution\\.linkage\\.proposed"]
+          enabled_regex_matching: true
+      # Everything else: keep 10%.
+      - name: default-10pct
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+  batch: {}
+
+exporters:
+  # Traces → any OTLP backend (Jaeger, Tempo, Honeycomb, …).
+  otlp/traces:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  # Metrics → Prometheus (scraped by Prometheus at :8889). Operators running
+  # plain Prometheus can skip this and scrape the API's /v1/metrics directly.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [tail_sampling, batch]
+      exporters: [otlp/traces]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]

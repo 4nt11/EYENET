@@ -96,6 +96,7 @@ dev = [
   "freezegun>=1.5",
   "respx>=0.21",
   "testcontainers[nats]>=4.7",
+  "pyyaml>=6",  # M9.6: validate operations/ alert + collector YAML artifacts
 
   # load
   "locust>=2.31",
