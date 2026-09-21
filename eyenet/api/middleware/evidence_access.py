@@ -19,6 +19,7 @@ attribution would live in the handlers.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from uuid import UUID, uuid4
 
@@ -29,6 +30,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from eyenet.api.deps import CurrentUser
 from eyenet.api.v1.schemas.errors import ProblemDetail
+from eyenet.telemetry import metrics
 from eyenet.telemetry.audit import AuditEmitter
 
 _log = structlog.get_logger()
@@ -74,8 +76,24 @@ async def evidence_access_dispatch(
     request_id = request.headers.get("x-request-id") or uuid4().hex
     request.state.request_id = request_id
 
+    start = time.perf_counter()
     response = await call_next(request)
+    final = await _maybe_audit(request, response, request_id)
+    _record_request(request, final, time.perf_counter() - start)
+    return final
 
+
+def _record_request(request: Request, response: Response, elapsed: float) -> None:
+    # M9.6 request metrics (§11.7.2). Route TEMPLATE (not raw path) keeps
+    # cardinality bounded; unmatched requests bucket under "unmatched".
+    route = request.scope.get("route")
+    route_tmpl = getattr(route, "path", "unmatched")
+    attrs = {"method": request.method, "route": route_tmpl}
+    metrics.requests_total.add(1, {**attrs, "status": str(response.status_code)})
+    metrics.request_duration_seconds.record(elapsed, attrs)
+
+
+async def _maybe_audit(request: Request, response: Response, request_id: str) -> Response:
     kind = _evidence_kind(request.url.path)
     if request.method != "GET" or kind is None or response.status_code >= _NON_SUCCESS_STATUS:
         return response

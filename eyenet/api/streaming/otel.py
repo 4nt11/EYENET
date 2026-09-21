@@ -29,6 +29,8 @@ from uuid import UUID
 from opentelemetry import trace
 from opentelemetry.trace import Link
 
+from eyenet.telemetry import metrics
+
 if TYPE_CHECKING:
     from opentelemetry.trace import Span
 
@@ -69,6 +71,7 @@ class SseTracer:
     def accepted(self) -> None:
         """Close the short accept span — connection established, replay seeked."""
         self._accept.end()
+        metrics.sse_connections.add(1, {"stream": self._stream})
 
     def _ensure_segment(self) -> None:
         now = time.monotonic()
@@ -101,8 +104,13 @@ class SseTracer:
         span.end()
         self._events += 1
         self._bytes += nbytes
+        metrics.sse_events_delivered_total.add(1, {"stream": self._stream})
+        if lag_ms is not None:
+            metrics.sse_delivery_lag_seconds.record(lag_ms / 1000.0, {"stream": self._stream})
 
     def close(self, reason: str) -> None:
+        metrics.sse_connections.add(-1, {"stream": self._stream})
+        metrics.sse_terminated_total.add(1, {"stream": self._stream, "reason": reason})
         if self._segment is not None:
             self._segment.end()
         span = _tracer.start_span(

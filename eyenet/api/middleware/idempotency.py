@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from eyenet.api.v1.schemas.errors import ProblemDetail
+from eyenet.telemetry import metrics
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -114,6 +115,9 @@ class IdempotencyMiddleware:
                 send, 409, path, "a request with this Idempotency-Key is still in progress"
             )
         else:
+            # Finalized record → replay the stored response without re-invoking
+            # the handler (M9.6 SLI §11.7.2).
+            metrics.idempotency_replays_total.add(1)
             await _send_json(
                 send,
                 getattr(existing, "response_status", 202),

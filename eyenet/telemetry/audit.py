@@ -17,6 +17,7 @@ from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.audit import AuditEvent, subject_for
 from eyenet.storage.repository import BaseRepository
+from eyenet.telemetry.metrics import audit_publish_failures_total, auth_events_total
 
 from .propagation import ZERO_TRACEPARENT, current_traceparent
 
@@ -87,7 +88,13 @@ class AuditEmitter:
                 at=at,
                 trace_context=tc,
             )
-            await self._publisher.publish(subject_for(self._service), envelope)
+            try:
+                await self._publisher.publish(subject_for(self._service), envelope)
+            except Exception:
+                # M9.6 SLI (§11.7.2): audit publish failure is alert-on-`> 0`.
+                # Count then re-raise — never swallow (§4.2).
+                audit_publish_failures_total.add(1)
+                raise
             await self._store.append_audit(
                 {
                     "id": audit_id,
@@ -104,11 +111,20 @@ class AuditEmitter:
                     "at": at,
                 }
             )
+            if event.startswith(_AUTH_PREFIX):
+                _record_auth_event(event)
 
 
-
-
+_AUTH_PREFIX = "eyenet.audit.auth."
 _TP_FIELDS = 4  # traceparent: version-traceid-spanid-flags
+
+
+def _record_auth_event(event: str) -> None:
+    # M9.6 (§11.7.2): auth_events_total{event,outcome} — every auth handler already
+    # emits its outcome as an audit subject, so recording here covers them all in
+    # one place. "eyenet.audit.auth.login.success" → event=login, outcome=success.
+    name, _, outcome = event[len(_AUTH_PREFIX) :].partition(".")
+    auth_events_total.add(1, {"event": name, "outcome": outcome or "n/a"})
 
 
 def _trace_id_from_traceparent(tp: str) -> str | None:

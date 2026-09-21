@@ -51,6 +51,10 @@ async def test_metrics_enabled_serves_prometheus_text_no_user_label(
     # discipline (§11.7.3) holds — no per-user label leaks into exposition.
     assert "eyenet_api_healthy" in body
     assert "user_id" not in body
+    # Slice-2 recording flows to exposition: the login above recorded a request
+    # metric and an auth-event metric.
+    assert "eyenet_api_requests_total" in body
+    assert "eyenet_api_auth_events_total" in body
 
 
 async def test_metrics_viewer_forbidden(
