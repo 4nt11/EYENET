@@ -27,9 +27,11 @@ from .collectors import CollectorsMixin
 from .corpus import CorpusMixin
 from .cursors import CursorsMixin
 from .documents import DocumentsMixin
+from .event_logs import EventLogsMixin
 from .feedback import FeedbackMixin
 from .file_access import FileAccessMixin
 from .graph import GraphMixin
+from .idempotency import IdempotencyMixin
 from .identities import IdentitiesMixin
 from .linkages import LinkagesMixin
 from .memberships import MembershipsMixin
@@ -61,9 +63,11 @@ class SQLModelRepository(
     CorpusMixin,
     CursorsMixin,
     DocumentsMixin,
+    EventLogsMixin,
     FeedbackMixin,
     FileAccessMixin,
     GraphMixin,
+    IdempotencyMixin,
     IdentitiesMixin,
     LinkagesMixin,
     MembershipsMixin,

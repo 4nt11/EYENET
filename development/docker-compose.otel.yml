@@ -1,11 +1,15 @@
-# DECNET OpenTelemetry development stack.
+# DECNET/EYENET development + test stack (tracing backend + message bus).
 #
 # Start:  docker compose -f development/docker-compose.otel.yml up -d
-# UI:     http://localhost:16686  (Jaeger)
+# UIs:    http://localhost:16686  (Jaeger)   http://localhost:8222  (NATS monitor)
 # Stop:   docker compose -f development/docker-compose.otel.yml down
 #
-# Then run DECNET with tracing enabled:
+# Then run with tracing enabled:
 #   DECNET_DEVELOPER_TRACING=true decnet web
+#
+# NATS backs the bus for tests that exercise the real transport (e.g. the CLI
+# audit-publish path) and the EYENET_E2E suite. Unit tests default to the
+# in-memory bus; they only need this container when they hit NATSBus directly.
 
 services:
   jaeger:
@@ -18,3 +22,17 @@ services:
       - "16686:16686"  # Jaeger UI
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: eyenet-nats
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]  # JetStream on; HTTP monitoring on :8222
+    ports:
+      - "4222:4222"    # client connections (the bus connects here)
+      - "8222:8222"    # HTTP monitoring / healthz
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

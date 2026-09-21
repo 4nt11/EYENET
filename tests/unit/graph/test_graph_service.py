@@ -15,12 +15,16 @@ from eyenet.contracts.attribution import (
     SUBJECT_LINKAGE_PROPOSED,
     SUBJECT_LINKAGE_REJECTED,
     SUBJECT_LINKAGE_SUSPECTED,
+    SUBJECT_PERSONA_MERGE,
+    SUBJECT_PERSONA_SPLIT,
     SUBJECT_PERSONA_UPDATED,
     SUBJECT_PROFILE_CURRENT,
     LinkageConfirmedEnvelope,
     LinkageProposedEnvelope,
     LinkageRejectedEnvelope,
     LinkageSuspectedEnvelope,
+    PersonaMergeCommandEnvelope,
+    PersonaSplitCommandEnvelope,
     PersonaUpdatedEnvelope,
     ProfileCurrentEnvelope,
 )
@@ -251,3 +255,60 @@ async def test_linkage_confirmed_upserts_persona_node(
     assert stats["personas"] >= 1
     belongs_edges = await storage.graph_edges_by_type(GraphEdgeType.BELONGS_TO_PERSONA)
     assert len(belongs_edges) >= 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_persona_merge_command_merges_two_personas(
+    storage: BaseRepository, bus: MemoryBus
+) -> None:
+    await _start_graph(bus, storage)
+    a1, a2, b1, b2 = _new_uuid7(), _new_uuid7(), _new_uuid7(), _new_uuid7()
+    p1 = await storage.merge_actors_into_persona(*sorted([a1, a2]))
+    p2 = await storage.merge_actors_into_persona(*sorted([b1, b2]))
+    assert p1.id != p2.id
+
+    seen: list[str] = []
+
+    async def _rec(s: str, _p: bytes, _h: dict[str, str]) -> None:
+        seen.append(s)
+
+    await bus.subscribe(SUBJECT_PERSONA_UPDATED, _rec)
+
+    env = PersonaMergeCommandEnvelope(
+        persona_id=p1.id,
+        other_persona_id=p2.id,
+        decided_by="op",
+        decided_at=_NOW,
+        reason="same human",
+        trace_context=_TC,
+    )
+    await bus.publish(SUBJECT_PERSONA_MERGE, env.model_dump_json().encode())
+    await asyncio.sleep(0.05)
+
+    resolved = {(await storage.persona_for_actor(a)).id for a in (a1, a2, b1, b2)}
+    assert len(resolved) == 1, "merge command must union both personas"
+    assert SUBJECT_PERSONA_UPDATED in seen, "Graph must emit persona.updated after applying"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_persona_split_command_removes_actor(storage: BaseRepository, bus: MemoryBus) -> None:
+    await _start_graph(bus, storage)
+    a1, a2 = sorted([_new_uuid7(), _new_uuid7()])
+    persona = await storage.merge_actors_into_persona(a1, a2)
+
+    env = PersonaSplitCommandEnvelope(
+        persona_id=persona.id,
+        actor_id=a1,
+        decided_by="op",
+        decided_at=_NOW,
+        reason="over-linked",
+        trace_context=_TC,
+    )
+    await bus.publish(SUBJECT_PERSONA_SPLIT, env.model_dump_json().encode())
+    await asyncio.sleep(0.05)
+
+    assert await storage.persona_for_actor(a1) is None, "split actor must leave the persona"
+    remaining = await storage.persona_for_actor(a2)
+    assert remaining is not None and a2 in remaining.member_actor_ids

@@ -17,6 +17,27 @@ from ._base import ApiSchema
 from .pagination import CursorPage
 
 
+class PersonaMergeRequest(ApiSchema):
+    """Body for `POST /v1/personas/{id}/merge` (API_PLAN §4.10a).
+
+    Folds `other_persona_id` into the path persona. Operator override of the
+    automatic confirmed-linkage merge — hence the mandatory `reason`."""
+
+    other_persona_id: UUID
+    reason: str = Field(min_length=1, max_length=1024)
+    case_refs: list[str] = Field(default_factory=list, max_length=64)
+
+
+class PersonaSplitRequest(ApiSchema):
+    """Body for `POST /v1/personas/{id}/split` (API_PLAN §4.10a).
+
+    Pulls `actor_id` out of the path persona."""
+
+    actor_id: UUID
+    reason: str = Field(min_length=1, max_length=1024)
+    case_refs: list[str] = Field(default_factory=list, max_length=64)
+
+
 def _label_or_synthesized(persona: PersonaTable) -> str:
     """Domain stores `label: str | None`; the API contract requires non-null.
 
@@ -90,5 +111,7 @@ __all__ = [
     "CursorPagePersonaMember",
     "PersonaDetail",
     "PersonaMember",
+    "PersonaMergeRequest",
+    "PersonaSplitRequest",
     "PersonaSummary",
 ]

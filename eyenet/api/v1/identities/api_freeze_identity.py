@@ -1,4 +1,4 @@
-"""POST /v1/identities/{identity_id}/claim — operator claims an identity (IN_USE)."""
+"""POST /v1/identities/{identity_id}/freeze — soft-freeze one identity (FROZEN)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from eyenet.api.v1.schemas.identities import IdentityActionRequest
 from eyenet.api.v1.schemas.writes import WriteAccepted
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import IdentityState
-from eyenet.contracts.identity import SUBJECT_IDENTITY_CLAIMED
+from eyenet.contracts.identity import SUBJECT_IDENTITY_FROZEN
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -20,12 +20,12 @@ router = APIRouter(tags=["identities"])
 
 
 @router.post(
-    "/identities/{identity_id}/claim",
-    operation_id="identities_claim",
+    "/identities/{identity_id}/freeze",
+    operation_id="identities_freeze",
     response_model=WriteAccepted,
     status_code=202,
 )
-async def identities_claim(
+async def identities_freeze(
     body: IdentityActionRequest,
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:identity"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
@@ -39,9 +39,9 @@ async def identities_claim(
     return await act_on_identity(
         identity_id_raw=identity_id,
         body=body,
-        action="claimed",
-        subject=SUBJECT_IDENTITY_CLAIMED,
-        new_state=IdentityState.IN_USE,
+        action="frozen",
+        subject=SUBJECT_IDENTITY_FROZEN,
+        new_state=IdentityState.FROZEN,
         burn=False,
         storage=storage,
         audit=audit,

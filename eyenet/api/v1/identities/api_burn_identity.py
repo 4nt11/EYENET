@@ -1,4 +1,9 @@
-"""POST /v1/identities/{identity_id}/claim — operator claims an identity (IN_USE)."""
+"""POST /v1/identities/{identity_id}/burn — permanently retire a compromised identity.
+
+Sets state=BURNED + role=QUARANTINE (via ``burn_identity``): the identity never
+re-enters rotation. This is the under-attack action — an operator who believes an
+identity is blown torches it outright.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +17,7 @@ from eyenet.api.v1.schemas.identities import IdentityActionRequest
 from eyenet.api.v1.schemas.writes import WriteAccepted
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import IdentityState
-from eyenet.contracts.identity import SUBJECT_IDENTITY_CLAIMED
+from eyenet.contracts.identity import SUBJECT_IDENTITY_BURNED
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -20,12 +25,12 @@ router = APIRouter(tags=["identities"])
 
 
 @router.post(
-    "/identities/{identity_id}/claim",
-    operation_id="identities_claim",
+    "/identities/{identity_id}/burn",
+    operation_id="identities_burn",
     response_model=WriteAccepted,
     status_code=202,
 )
-async def identities_claim(
+async def identities_burn(
     body: IdentityActionRequest,
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:identity"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
@@ -39,10 +44,10 @@ async def identities_claim(
     return await act_on_identity(
         identity_id_raw=identity_id,
         body=body,
-        action="claimed",
-        subject=SUBJECT_IDENTITY_CLAIMED,
-        new_state=IdentityState.IN_USE,
-        burn=False,
+        action="burned",
+        subject=SUBJECT_IDENTITY_BURNED,
+        new_state=IdentityState.BURNED,
+        burn=True,
         storage=storage,
         audit=audit,
         publisher=publisher,

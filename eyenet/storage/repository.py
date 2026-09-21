@@ -71,7 +71,9 @@ if TYPE_CHECKING:
         SystemLogLevel,
         SystemUserRole,
     )
+    from eyenet.contracts.event_log import EventLogRow
     from eyenet.contracts.feedback import FeedbackPairRow
+    from eyenet.contracts.idempotency import IdempotencyRecordRow, ReserveResult
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
@@ -994,7 +996,7 @@ class BaseRepository(ABC):
         self,
         actor_a: UUID,
         actor_b: UUID,
-        via_linkage_id: UUID,
+        via_linkage_id: UUID | None = None,
     ) -> object: ...
 
     @abstractmethod
@@ -1668,6 +1670,16 @@ class BaseRepository(ABC):
         (§4.12.5, M9.E4)."""
 
     @abstractmethod
+    async def freeze_all_identities(
+        self,
+        *,
+        source_id: UUID | None = None,
+    ) -> list[UUID]:
+        """Fleet-wide soft freeze (API_PLAN §3.4). Flip every non-terminal
+        identity to ``FROZEN``; return the ids changed. Terminal
+        (BURNED/QUARANTINE) identities untouched; idempotent."""
+
+    @abstractmethod
     async def find_available_scout(self, source_id: UUID) -> IdentityRow | None:
         """Return an AVAILABLE SCOUT for ``source_id`` (§4.12.3), or None."""
 
@@ -2074,6 +2086,112 @@ class BaseRepository(ABC):
         can't be expressed as a single repo call (Matrix edit patching,
         reaction insertion).
         """
+
+    # =================================================================
+    # EVENT LOGS (MODELS §2.29, API_PLAN §11.5 — Group G / Group H replay)
+    # =================================================================
+
+    @abstractmethod
+    async def append_linkage_event(
+        self,
+        *,
+        linkage_id: UUID,
+        event_subject: str,
+        event_id: UUID,
+        traceparent: str,
+        tracestate: str | None = None,
+        actor: str | None = None,
+        payload_digest: str | None = None,
+        ts: datetime | None = None,
+    ) -> EventLogRow:
+        """Append one linkage state-transition event (monotonic ``event_seq``)."""
+
+    @abstractmethod
+    async def append_persona_event(
+        self,
+        *,
+        persona_id: UUID,
+        event_subject: str,
+        event_id: UUID,
+        traceparent: str,
+        tracestate: str | None = None,
+        actor: str | None = None,
+        payload_digest: str | None = None,
+        ts: datetime | None = None,
+    ) -> EventLogRow:
+        """Append one persona state-transition event (monotonic ``event_seq``)."""
+
+    @abstractmethod
+    async def append_identity_event(
+        self,
+        *,
+        identity_id: UUID,
+        event_subject: str,
+        event_id: UUID,
+        traceparent: str,
+        tracestate: str | None = None,
+        actor: str | None = None,
+        payload_digest: str | None = None,
+        ts: datetime | None = None,
+    ) -> EventLogRow:
+        """Append one identity state-transition event (monotonic ``event_seq``)."""
+
+    @abstractmethod
+    async def linkage_events(self, linkage_id: UUID) -> list[EventLogRow]:
+        """Replay-ordered ``(ts, event_seq)`` events for one linkage."""
+
+    @abstractmethod
+    async def persona_events(self, persona_id: UUID) -> list[EventLogRow]:
+        """Replay-ordered ``(ts, event_seq)`` events for one persona."""
+
+    @abstractmethod
+    async def identity_events(self, identity_id: UUID) -> list[EventLogRow]:
+        """Replay-ordered ``(ts, event_seq)`` events for one identity."""
+
+    # =================================================================
+    # IDEMPOTENCY (MODELS §2.28, API_PLAN §6/§10.3 — write replay guard)
+    # =================================================================
+
+    @abstractmethod
+    async def get_idempotency_record(
+        self, key: str, *, now: datetime | None = None
+    ) -> IdempotencyRecordRow | None:
+        """Return the live record for ``key`` (None if absent or expired)."""
+
+    @abstractmethod
+    async def reserve_idempotency_record(
+        self,
+        *,
+        key: str,
+        request_hash: str,
+        system_user_id: UUID | None,
+        ttl_seconds: int,
+        now: datetime | None = None,
+    ) -> ReserveResult:
+        """Reserve ``key`` as ``pending`` before the handler runs (reserve-first).
+
+        Winner → ``won=True``; a loser gets the existing (finalized or pending)
+        row. Expired rows are reclaimed."""
+
+    @abstractmethod
+    async def finalize_idempotency_record(
+        self,
+        *,
+        key: str,
+        response_status: int,
+        response_body: dict[str, Any],
+        bus_state: str,
+    ) -> None:
+        """Attach the produced response to a reserved record."""
+
+    @abstractmethod
+    async def delete_idempotency_record(self, key: str) -> None:
+        """Drop a reservation whose guarded handler returned non-2xx (no durable
+        write / bus emit happened, so a corrected retry must not replay it)."""
+
+    @abstractmethod
+    async def purge_expired_idempotency(self, *, now: datetime | None = None) -> int:
+        """Delete expired idempotency rows; return the count (housekeeping)."""
 
     # =================================================================
     # LIFECYCLE

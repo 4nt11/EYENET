@@ -892,6 +892,49 @@ Runs on every Message regardless of source. The cross-source intelligence log.
 |---|---|---|
 | `discovered_via_candidate_id` | UUID \| None FK GroupCandidate | populated when this Group was created from an approved-then-joined candidate; null for operator-seeded groups |
 
+### 2.28 `IdempotencyRecord`
+Added 2026-09-21 for M9.G1. Cross-worker replay guard for every `/v1/` write
+that carries an `Idempotency-Key`. Lives in `main` (not `audit`). Replays of a
+seen key return the stored response verbatim without re-emitting bus events
+(API_PLAN §6 invariant #6, §10.3).
+
+| Field | Type | Notes |
+|---|---|---|
+| `key` | str PK (≤128) | the client-supplied `Idempotency-Key` |
+| `request_hash` | str | sha256 of `method + path + raw body`; a live key with a different hash → 409 |
+| `response_status` | int | the stored HTTP status (202) — replayed verbatim |
+| `response_body` | dict (JSON) | the stored `WriteAccepted` body — replayed verbatim (a hash cannot reconstruct it) |
+| `bus_state` | str | `pending` \| `delivered` — bus-publish outcome; informational |
+| `system_user_id` | UUID \| None FK SystemUser | who first used the key |
+| `created_at` | datetime | |
+| `expires_at` | datetime | `created_at + 7d`; expired rows treated as absent (API_PLAN §15) |
+
+### 2.29 Event logs — `LinkageEventLog` / `PersonaEventLog` / `IdentityEventLog`
+Added 2026-09-21 for M9.G2 (API_PLAN §11.5). One row per state transition, so
+`StreamReplaySource` (Group H SSE) can replay with a per-event delivery span
+parented from the stored `traceparent`. Live in `main`. The `eyenet.audit.*`
+hash chain already serves this role for audit, so there is no audit event log.
+
+Three structurally identical tables; only the parent-id column name differs
+(`linkage_id` / `persona_id` / `identity_id`). Composite PK `(<parent>_id,
+event_seq)`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `<parent>_id` | UUID (PK part) | `linkage_id` / `persona_id` / `identity_id` |
+| `event_seq` | int (PK part) | monotonic per parent (`MAX(event_seq)+1` under the write lock) |
+| `event_subject` | str | e.g. `attribution.linkage.suspected`, `eyenet.identity.burned` |
+| `event_id` | UUID | the bus event's uuid7 — becomes the SSE event id |
+| `ts` | datetime | replay orders by `(ts, event_seq)` |
+| `traceparent` | str (not null) | W3C traceparent of the producing event; parents the replay delivery span |
+| `tracestate` | str \| None | |
+| `actor` | str \| None | `system_user_id` for operator actions, null for engine-driven transitions |
+| `payload_digest` | str \| None | sha256 of the compact event payload, for forensic cross-check |
+
+**Atomicity (M9.G2 DoD):** the event-log append happens in the **same
+transaction** as the state mutation it records, so a transition never exists
+without its log row and vice-versa.
+
 ---
 
 ## 3. Polymorphism call

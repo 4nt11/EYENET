@@ -16,22 +16,28 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import cast
+from uuid import UUID
 
 import structlog
 from opentelemetry import trace
 
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.attribution import (
+    SUBJECT_PERSONA_MERGE,
+    SUBJECT_PERSONA_SPLIT,
     SUBJECT_PERSONA_UPDATED,
     LinkageConfirmedEnvelope,
     LinkageProposedEnvelope,
     LinkageRejectedEnvelope,
     LinkageSuspectedEnvelope,
     PersonaChangeKind,
+    PersonaMergeCommandEnvelope,
     PersonaRow,
+    PersonaSplitCommandEnvelope,
     PersonaUpdatedEnvelope,
     ProfileCurrentEnvelope,
 )
+from eyenet.contracts.enums import LinkageState
 from eyenet.models.graph import GraphEdgeType, GraphNodeType
 from eyenet.service import ServiceBase
 from eyenet.telemetry.propagation import attach_from_headers, current_traceparent
@@ -59,9 +65,14 @@ class Graph(ServiceBase):
         async def _on_persona(_s: str, p: bytes, h: dict[str, str]) -> None:
             asyncio.create_task(self._on_persona_updated(p, h))  # noqa: RUF006
 
+        async def _on_persona_cmd(s: str, p: bytes, h: dict[str, str]) -> None:
+            asyncio.create_task(self._on_persona_command(s, p, h))  # noqa: RUF006
+
         await self._bus.subscribe("attribution.profile.current", _on_profile)
         await self._bus.subscribe("attribution.linkage.>", _on_linkage)
         await self._bus.subscribe("attribution.persona.updated", _on_persona)
+        await self._bus.subscribe(SUBJECT_PERSONA_MERGE, _on_persona_cmd)
+        await self._bus.subscribe(SUBJECT_PERSONA_SPLIT, _on_persona_cmd)
 
     # -- profile.current -------------------------------------------------------
 
@@ -117,6 +128,31 @@ class Graph(ServiceBase):
         else:
             _log.debug("graph.unknown_linkage_subject", subject=subject)
 
+    async def _apply_linkage_state(
+        self,
+        linkage_id: UUID,
+        target: LinkageState,
+        *,
+        decided_by: str,
+        notes: str | None,
+    ) -> None:
+        """Apply the operator's decision to the linkage row (Graph is the sole
+        applier — invariant #2). Tolerant of replay / already-terminal linkages:
+        ``transition_linkage`` raises ``ValueError`` on an illegal transition,
+        which on a redelivered event just means the state is already applied, so
+        we log and let the idempotent graph-edge/persona sync below proceed."""
+        try:
+            await self._storage.transition_linkage(
+                linkage_id, target.value, decided_by=decided_by, notes=notes
+            )
+        except ValueError as exc:
+            _log.info(
+                "graph.linkage_transition_skipped",
+                linkage_id=str(linkage_id),
+                target=target.value,
+                reason=str(exc),
+            )
+
     async def _handle_proposed(self, payload: bytes) -> None:
         try:
             env = LinkageProposedEnvelope.model_validate_json(payload)
@@ -152,6 +188,10 @@ class Graph(ServiceBase):
             _log.error("graph.suspected_parse_error", error=str(exc))
             return
 
+        await self._apply_linkage_state(
+            env.linkage_id, LinkageState.SUSPECTED, decided_by=env.decided_by, notes=env.notes
+        )
+
         with _tracer.start_as_current_span(
             "graph.upsert",
             attributes={
@@ -180,6 +220,10 @@ class Graph(ServiceBase):
         except Exception as exc:
             _log.error("graph.confirmed_parse_error", error=str(exc))
             return
+
+        await self._apply_linkage_state(
+            env.linkage_id, LinkageState.CONFIRMED, decided_by=env.decided_by, notes=env.notes
+        )
 
         now = datetime.now(tz=UTC)
 
@@ -274,6 +318,10 @@ class Graph(ServiceBase):
             _log.error("graph.rejected_parse_error", error=str(exc))
             return
 
+        await self._apply_linkage_state(
+            env.linkage_id, LinkageState.REJECTED, decided_by=env.decided_by, notes=env.notes
+        )
+
         with _tracer.start_as_current_span(
             "graph.upsert",
             attributes={
@@ -332,6 +380,99 @@ class Graph(ServiceBase):
                     env.persona_id,
                     {"joined_at": now.isoformat()},
                 )
+
+    # -- persona operator commands (M9.G4) -------------------------------------
+
+    async def _on_persona_command(
+        self, subject: str, payload: bytes, headers: dict[str, str]
+    ) -> None:
+        with attach_from_headers(headers):
+            if subject == SUBJECT_PERSONA_MERGE:
+                await self._handle_persona_merge(payload)
+            elif subject == SUBJECT_PERSONA_SPLIT:
+                await self._handle_persona_split(payload)
+            else:  # pragma: no cover — only the two subjects are subscribed
+                _log.debug("graph.unknown_persona_command", subject=subject)
+
+    async def _handle_persona_merge(self, payload: bytes) -> None:
+        try:
+            env = PersonaMergeCommandEnvelope.model_validate_json(payload)
+        except Exception as exc:
+            _log.error("graph.persona_merge_parse_error", error=str(exc))
+            return
+        a_members = await self._storage.persona_members(env.persona_id)
+        b_members = await self._storage.persona_members(env.other_persona_id)
+        if not a_members or not b_members:
+            _log.warning(
+                "graph.persona_merge_empty",
+                persona_id=str(env.persona_id),
+                other_persona_id=str(env.other_persona_id),
+            )
+            return
+        # A representative actor from each persona; union-find merges the two.
+        persona_row = cast(
+            "PersonaRow",
+            await self._storage.merge_actors_into_persona(
+                a_members[0], b_members[0], via_linkage_id=None
+            ),
+        )
+        await self._sync_and_emit_persona(persona_row, PersonaChangeKind.MERGED_WITH)
+
+    async def _handle_persona_split(self, payload: bytes) -> None:
+        try:
+            env = PersonaSplitCommandEnvelope.model_validate_json(payload)
+        except Exception as exc:
+            _log.error("graph.persona_split_parse_error", error=str(exc))
+            return
+        remaining = await self._storage.split_actor_from_persona(env.actor_id)
+        if remaining is None:
+            # The persona dissolved (the split actor was its last member).
+            _log.info("graph.persona_split_dissolved", persona_id=str(env.persona_id))
+            return
+        await self._sync_and_emit_persona(
+            cast("PersonaRow", remaining), PersonaChangeKind.MEMBERS_REMOVED
+        )
+
+    async def _sync_and_emit_persona(
+        self, persona_row: PersonaRow, change_kind: PersonaChangeKind
+    ) -> None:
+        """Sync the Persona node/edges and emit ``attribution.persona.updated``."""
+        now = datetime.now(tz=UTC)
+        member_ids = persona_row.member_actor_ids
+        await self._storage.upsert_graph_node(
+            GraphNodeType.PERSONA,
+            persona_row.id,
+            {"member_count": len(member_ids), "updated_at": now.isoformat()},
+        )
+        for actor_id in member_ids:
+            await self._storage.upsert_graph_edge(
+                GraphEdgeType.BELONGS_TO_PERSONA,
+                actor_id,
+                persona_row.id,
+                {"joined_at": now.isoformat()},
+            )
+        await self.publisher.publish(
+            SUBJECT_PERSONA_UPDATED,
+            PersonaUpdatedEnvelope(
+                trace_context=_make_trace_context(),
+                persona_id=persona_row.id,
+                member_actor_ids=member_ids,
+                change_kind=change_kind,
+                via_linkage_id=None,
+                at=now,
+            ),
+        )
+        await self.audit.emit(
+            event="persona.merged"
+            if change_kind is PersonaChangeKind.MERGED_WITH
+            else "persona.split",
+            subject_kind="persona",
+            subject_id=persona_row.id,
+            payload={
+                "member_actor_ids": [str(aid) for aid in member_ids],
+                "change_kind": change_kind.value,
+            },
+        )
 
 
 def _make_trace_context() -> TraceContext:

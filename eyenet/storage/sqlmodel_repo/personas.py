@@ -83,7 +83,7 @@ class PersonasMixin:
         self,
         actor_a: UUID,
         actor_b: UUID,
-        via_linkage_id: UUID,
+        via_linkage_id: UUID | None = None,
     ) -> PersonaRow:
         now = datetime.now(tz=UTC)
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
