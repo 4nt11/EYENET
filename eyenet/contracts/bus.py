@@ -69,6 +69,14 @@ class Bus(ABC):
     async def close(self) -> None:
         """Drain and close the underlying transport."""
 
+    def connected(self) -> bool:
+        """Whether the transport is currently connected (readiness probe).
+
+        Concrete default is ``True``: an in-process bus (MemoryBus) is always
+        up. Network transports (NATSBus) override with their live link state.
+        """
+        return True
+
     # Async-context-manager sugar so services can `async with bus:`.
 
     async def __aenter__(self) -> Bus:

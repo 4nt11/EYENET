@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from eyenet.api.v1.schemas.health import HealthStatus
+from eyenet.telemetry.metrics import set_health
 
 router = APIRouter(tags=["health"])
 
@@ -16,4 +17,6 @@ router = APIRouter(tags=["health"])
     status_code=200,
 )
 async def health_live() -> HealthStatus:
-    raise NotImplementedError("health_live (M9.0 skeleton)")
+    """Liveness: the process is reachable. Unauthenticated (k8s probe)."""
+    set_health("healthy", value=True)
+    return HealthStatus(status="ok")

@@ -31,6 +31,7 @@ from .event_logs import EventLogsMixin
 from .feedback import FeedbackMixin
 from .file_access import FileAccessMixin
 from .graph import GraphMixin
+from .health import HealthMixin
 from .idempotency import IdempotencyMixin
 from .identities import IdentitiesMixin
 from .linkages import LinkagesMixin
@@ -67,6 +68,7 @@ class SQLModelRepository(
     FeedbackMixin,
     FileAccessMixin,
     GraphMixin,
+    HealthMixin,
     IdempotencyMixin,
     IdentitiesMixin,
     LinkagesMixin,

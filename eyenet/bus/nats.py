@@ -107,5 +107,8 @@ class NATSBus(Bus):
         with contextlib.suppress(Exception):
             await self._client.close()
 
+    def connected(self) -> bool:
+        return bool(self._client.is_connected)
+
 
 __all__ = ["NATSBus"]

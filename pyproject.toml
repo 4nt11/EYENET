@@ -60,6 +60,11 @@ dependencies = [
   # ids
   "uuid7>=0.1",
 
+  # host self-report — CPU/RAM/disk for /v1/system + eyenet_sys_* gauges
+  # (already transitive; declared direct because eyenet imports it).
+  "psutil>=5.9",
+  "types-psutil>=5.9",  # type stubs for the above (mirrors types-cachetools)
+
   # behave (sibling specs — now published on PyPI; resolved like any other dep)
   "behave-core>=0.1.1",
   "behave-text>=0.1.3",

@@ -28,8 +28,11 @@ time; when metrics are disabled the global meter is the no-op proxy, so every
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import psutil
 from opentelemetry import metrics as otel_metrics
 from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
@@ -72,6 +75,12 @@ _ALLOWED_ATTRS: dict[str, frozenset[str]] = {
     "eyenet_api_ready": frozenset({"component"}),
     "eyenet_api_storage_open": frozenset(),
     "eyenet_api_bus_connected": frozenset(),
+    # self-reported host stats (§11.7.3 bounded labels; disk path ∈ {data,root})
+    "eyenet_sys_cpu_percent": frozenset(),
+    "eyenet_sys_mem_used_bytes": frozenset(),
+    "eyenet_sys_mem_used_percent": frozenset(),
+    "eyenet_sys_disk_used_bytes": frozenset({"path"}),
+    "eyenet_sys_load1": frozenset(),
 }
 
 
@@ -222,6 +231,53 @@ _meter.create_observable_gauge("eyenet_api_storage_open", callbacks=[_obs("stora
 _meter.create_observable_gauge("eyenet_api_bus_connected", callbacks=[_obs("bus_connected")])
 
 
+# --- self-reported host gauges (§11.7.3; psutil read at scrape time) ----------
+# Same forensic data the authenticated /v1/system endpoint serves, exposed as
+# metrics for Grafana. Disk needs the data volume, registered at API boot (dict
+# avoids a `global`, mirroring the _health snapshot pattern above).
+_sys_paths: dict[str, Path] = {}
+
+
+def set_system_paths(data_dir: Path) -> None:
+    """Register the data volume for the disk gauge (called at API boot)."""
+    _sys_paths["data"] = data_dir
+
+
+def _obs_cpu(_options: CallbackOptions) -> Iterable[Observation]:
+    return [Observation(psutil.cpu_percent(interval=None))]
+
+
+def _obs_mem_used(_options: CallbackOptions) -> Iterable[Observation]:
+    return [Observation(float(psutil.virtual_memory().used))]
+
+
+def _obs_mem_percent(_options: CallbackOptions) -> Iterable[Observation]:
+    return [Observation(psutil.virtual_memory().percent)]
+
+
+def _obs_load1(_options: CallbackOptions) -> Iterable[Observation]:
+    return [Observation(os.getloadavg()[0] if hasattr(os, "getloadavg") else 0.0)]
+
+
+def _obs_disk(_options: CallbackOptions) -> Iterable[Observation]:
+    paths = {"root": Path("/"), **_sys_paths}
+    out: list[Observation] = []
+    for label, path in paths.items():
+        try:
+            used = shutil.disk_usage(path).used
+        except OSError:
+            continue
+        out.append(Observation(float(used), {"path": label}))
+    return out
+
+
+_meter.create_observable_gauge("eyenet_sys_cpu_percent", callbacks=[_obs_cpu])
+_meter.create_observable_gauge("eyenet_sys_mem_used_bytes", callbacks=[_obs_mem_used])
+_meter.create_observable_gauge("eyenet_sys_mem_used_percent", callbacks=[_obs_mem_percent])
+_meter.create_observable_gauge("eyenet_sys_disk_used_bytes", callbacks=[_obs_disk])
+_meter.create_observable_gauge("eyenet_sys_load1", callbacks=[_obs_load1])
+
+
 __all__ = [
     "audit_publish_failures_total",
     "auth_events_total",
@@ -234,6 +290,7 @@ __all__ = [
     "scope_cache_hits_total",
     "scope_cache_misses_total",
     "set_health",
+    "set_system_paths",
     "sse_connections",
     "sse_delivery_lag_seconds",
     "sse_events_delivered_total",
