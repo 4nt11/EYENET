@@ -44,6 +44,7 @@ from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
+from eyenet.telemetry.metrics import init_metrics, set_health
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -94,6 +95,17 @@ def create_app(
     app.state.pat_pepper = load_pat_pepper(data_dir)
     app.state.data_dir = data_dir
     app.state.auth_cache = AuthCache.from_env()
+
+    # M9.6 metrics (§11.7): sets the MeterProvider when a scrape/OTLP surface is
+    # enabled via env; a no-op otherwise. Boot-time health gauges reflect "the
+    # deployment came up". ponytail: dynamic re-check lands with the /healthz and
+    # /readyz handlers (still M9.0 stubs); until then these are boot signals.
+    init_metrics(service="eyenet-api", instance_id=instance_id)
+    set_health("healthy", value=True)
+    set_health("storage_open", value=True)
+    set_health("bus_connected", value=True)
+    for _component in ("storage", "bus", "jwt_keys"):
+        set_health(f"ready:{_component}", value=True)
 
     @app.exception_handler(NotImplementedError)
     async def _not_implemented(request: Request, exc: NotImplementedError) -> JSONResponse:

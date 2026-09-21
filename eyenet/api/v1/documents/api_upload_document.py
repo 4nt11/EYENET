@@ -29,11 +29,9 @@ from eyenet.contracts._base import TraceContext
 from eyenet.contracts.classify_events import SUBJECT_DOCUMENT_UPLOADED, DocumentUploadedEnvelope
 from eyenet.contracts.enums import SensitivityTier
 from eyenet.storage.repository import BaseRepository
-from eyenet.telemetry.propagation import current_traceparent
+from eyenet.telemetry.propagation import ZERO_TRACEPARENT, current_traceparent
 
 router = APIRouter(tags=["documents"])
-
-_ZERO_TRACEPARENT = "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
 
 
 @router.post(
@@ -63,7 +61,7 @@ async def documents_upload(
         SUBJECT_DOCUMENT_UPLOADED,
         DocumentUploadedEnvelope(
             document_id=document_id,
-            trace_context=TraceContext(traceparent=current_traceparent() or _ZERO_TRACEPARENT),
+            trace_context=TraceContext(traceparent=current_traceparent() or ZERO_TRACEPARENT),
         ),
     )
     # Provisional: the row is born CLASSIFIED and the ClassifierService settles

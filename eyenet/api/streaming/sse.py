@@ -29,6 +29,7 @@ from fastapi.responses import StreamingResponse
 from eyenet.api.deps import AuthError
 from eyenet.api.streaming.otel import SseTracer
 from eyenet.api.streaming.replay import StreamReplaySource
+from eyenet.telemetry import metrics
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Collection
@@ -133,6 +134,11 @@ def _frame(
     return ("\n".join(lines) + "\n\n").encode("utf-8")
 
 
+def _topic_of(subject: str) -> str:
+    # "attribution.linkage.confirmed" → "attribution.linkage" (bounded label).
+    return ".".join(subject.split(".")[:2])
+
+
 def _event_name(subject: str) -> str:
     # "attribution.linkage.confirmed" → "linkage.confirmed"; "eyenet.identity.released"
     # → "identity.released". Drops the namespace segment.
@@ -200,6 +206,9 @@ async def sse_stream(
             # high-water mark and we drop the connection (client reconnects with
             # Last-Event-ID and replays the gap). Upgrade path: per-topic HWM
             # tuning if a real slow consumer shows up — unlikely at operator scale.
+            metrics.sse_events_dropped_total.add(
+                1, {"stream": stream_name, "topic": _topic_of(subject), "reason": "hwm"}
+            )
             overflow.set()
 
     tracer = SseTracer(

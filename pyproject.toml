@@ -37,6 +37,8 @@ dependencies = [
   "opentelemetry-api>=1.27",
   "opentelemetry-sdk>=1.27",
   "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+  "opentelemetry-exporter-prometheus>=0.48b0",  # M9.6 /v1/metrics scrape
+  "prometheus-client>=0.20",  # M9.6 /v1/metrics text exposition (generate_latest)
   "structlog>=24.1",
 
   # crypto / opsec
@@ -95,6 +97,7 @@ dev = [
   "freezegun>=1.5",
   "respx>=0.21",
   "testcontainers[nats]>=4.7",
+  "pyyaml>=6",  # M9.6: validate operations/ alert + collector YAML artifacts
 
   # load
   "locust>=2.31",
