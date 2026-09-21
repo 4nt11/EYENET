@@ -372,6 +372,15 @@ module = [
 ]
 ignore_missing_imports = true
 
+# The Group I middleware unit test drives the middlewares over a hand-built
+# pure-ASGI harness (fake scope/receive/send + a callable inner app). Matching
+# starlette's exact structural ASGIApp/Scope/Receive/Send signatures in the test
+# stand-ins buys nothing but annotation noise, so arg-type is disabled for this
+# one module. The middlewares themselves are fully typed against starlette.
+[[tool.mypy.overrides]]
+module = ["tests.unit.api.test_group_i_middleware"]
+disable_error_code = ["arg-type"]
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true

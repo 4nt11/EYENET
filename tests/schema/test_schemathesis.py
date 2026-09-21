@@ -23,10 +23,17 @@ import schemathesis
 from eyenet.api.app import create_app
 from eyenet.storage.factory import get_repository
 
-pytestmark = [
-    pytest.mark.schema,
-    pytest.mark.skip(reason="M9.0 skeleton: every endpoint is a 501 stub. Re-enable at M9.3."),
-]
+pytestmark = pytest.mark.schema
+
+# Module-level skip: the body below has import-time side effects (from_asgi
+# fetches the schema over ASGI), and since §12.5 gated /v1/openapi.json behind
+# read:graph, an anonymous fetch now 401s at *collection* time. Skip before that
+# runs. Re-enable in M9.3 by removing this skip AND giving from_asgi a read:graph
+# bearer (or pointing it at an in-process app.openapi() dump).
+pytest.skip(
+    "M9.0 skeleton: every endpoint is a 501 stub; §12.5 also gated the schema. Re-enable at M9.3.",
+    allow_module_level=True,
+)
 
 
 _storage = get_repository(in_memory=True)

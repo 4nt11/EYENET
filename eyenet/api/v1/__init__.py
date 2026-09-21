@@ -122,6 +122,9 @@ from eyenet.api.v1.linkages.api_get_linkage import router as linkages_get_router
 from eyenet.api.v1.linkages.api_list_linkages import router as linkages_list_router
 from eyenet.api.v1.linkages.api_reject_linkage import router as linkages_reject_router
 from eyenet.api.v1.linkages.api_suspect_linkage import router as linkages_suspect_router
+
+# === meta (gated OpenAPI schema, §12.5) ===
+from eyenet.api.v1.meta.api_openapi import router as meta_openapi_router
 from eyenet.api.v1.metrics.api_metrics import router as health_metrics_router
 
 # === panic ===
@@ -313,6 +316,9 @@ v1_router.include_router(health_live_router)
 v1_router.include_router(health_ready_router)
 v1_router.include_router(health_metrics_router)
 v1_router.include_router(system_stats_router)
+
+# meta — gated OpenAPI schema (replaces the anonymous built-in, §12.5)
+v1_router.include_router(meta_openapi_router)
 
 
 __all__ = ["v1_router"]

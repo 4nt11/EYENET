@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 import yaml  # type: ignore[import-untyped]
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from eyenet.api.app import PROBLEM_JSON, create_app
@@ -27,10 +28,16 @@ pytestmark = pytest.mark.contract
 
 
 @pytest.fixture(scope="module")
-def client() -> Iterator[TestClient]:
+def app() -> Iterator[FastAPI]:
     storage = get_repository(in_memory=True)
     with tempfile.TemporaryDirectory() as td:
-        yield TestClient(create_app(storage=storage, data_dir=Path(td)))
+        yield create_app(storage=storage, data_dir=Path(td))
+
+
+@pytest.fixture(scope="module")
+def client(app: FastAPI) -> Iterator[TestClient]:
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture(scope="module")
@@ -39,19 +46,25 @@ def hand_drafted_spec() -> dict[str, Any]:
         return cast("dict[str, Any]", yaml.safe_load(fh))
 
 
-def test_app_serves_openapi(client: TestClient) -> None:
+def test_openapi_schema_is_gated(client: TestClient) -> None:
+    # §12.5 — the schema is no longer served anonymously; it is read:graph-gated.
+    # Unauthenticated fetch is a 401 ProblemDetail. The 200-with-token happy path
+    # is proven in tests/integration/api/test_openapi_gate.py (needs a seeded user).
     resp = client.get("/v1/openapi.json")
-    assert resp.status_code == 200
-    spec = resp.json()
+    assert resp.status_code == 401
+    assert resp.headers["content-type"].startswith(PROBLEM_JSON)
+
+
+def test_openapi_generates_in_process(app: FastAPI) -> None:
+    spec = app.openapi()
     assert spec["openapi"].startswith("3.")
     assert "/v1/auth/login" in spec["paths"]
 
 
 def test_every_documented_path_is_registered(
-    client: TestClient, hand_drafted_spec: dict[str, Any]
+    app: FastAPI, hand_drafted_spec: dict[str, Any]
 ) -> None:
-    resp = client.get("/v1/openapi.json")
-    generated = resp.json()
+    generated = app.openapi()
 
     def _surface(spec: dict[str, Any]) -> set[tuple[str, str]]:
         return {
@@ -69,9 +82,8 @@ def test_every_documented_path_is_registered(
     assert not extra, f"endpoints registered but not in YAML: {sorted(extra)}"
 
 
-def test_every_operation_id_present(client: TestClient, hand_drafted_spec: dict[str, Any]) -> None:
-    resp = client.get("/v1/openapi.json")
-    generated = resp.json()
+def test_every_operation_id_present(app: FastAPI, hand_drafted_spec: dict[str, Any]) -> None:
+    generated = app.openapi()
 
     def _op_ids(spec: dict[str, Any]) -> set[str]:
         return {

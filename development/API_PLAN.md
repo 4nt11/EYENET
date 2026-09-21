@@ -2322,13 +2322,40 @@ Per-token sliding window. Defaults:
 
 Storage-backed (SQLite table `rate_limit_bucket`). 429 with `Retry-After`.
 
+> **Implemented (M9.I1, `eyenet/api/middleware/rate_limit.py`) — partial.** A
+> pure-ASGI sliding-window limiter meets the DoD (429 + `Retry-After` +
+> `X-RateLimit-Remaining`; `time.monotonic` so clock skew can't shift the
+> window). Simplifications vs the spec above, deferred until a real operator
+> needs them:
+> - **Single global limit**, not the per-surface table — env `EYENET_API_RATE_LIMIT`
+>   (default 300) / `EYENET_API_RATE_WINDOW_SECONDS` (default 60), `=0` disables.
+> - **In-memory per-process**, not the `rate_limit_bucket` SQLite table — fine at
+>   the small-operator default cardinality 1; horizontal scale needs a shared
+>   store (Redis). Keyed per credential (`sha256(bearer)[:16]`) or client IP.
+> The per-surface floors and storage backing are the upgrade path, not shipped.
+
 ### 12.4 CORS
 
-For the operator UI's origin only. Configurable list in `config.toml`. No `*`. `Access-Control-Allow-Credentials: true`. `Access-Control-Expose-Headers: X-Request-Id, X-RateLimit-Remaining`.
+For the operator UI's origin only. Configurable list. No `*`. `Access-Control-Allow-Credentials: true`. `Access-Control-Expose-Headers: X-Request-Id, X-RateLimit-Remaining`.
+
+> **Implemented (M9.I2, `eyenet/api/middleware/cors.py` + `create_app`).** Origins
+> come from env `EYENET_API_CORS_ORIGINS` (comma-separated), **not `config.toml`**
+> — this codebase has no config.toml loader; every API knob is `EYENET_API_*`.
+> Empty default → the CORS middleware is not added at all (never `*`). The
+> `X-Forwarded-For` half lives in `eyenet/api/middleware/xff.py`, gated by
+> `EYENET_API_TRUST_PROXY_HEADERS`.
 
 ### 12.5 OpenAPI
 
 `/v1/openapi.json` and `/v1/docs`. Both require `read:graph` (any authenticated user gets them); no anonymous schema disclosure when `ALLOW_PUBLIC=1`.
+
+> **Implemented (M9.I2, `eyenet/api/v1/meta/api_openapi.py`).** The built-in
+> anonymous schema route is disabled (`openapi_url=None` in `create_app`); a
+> custom `read:graph`-gated `/v1/openapi.json` serves the schema instead
+> (`app.openapi()` still generates it in-process for tests/codegen dumps). The
+> gate is **unconditional**, not tied to `ALLOW_PUBLIC` — simpler and always
+> safe. `/v1/docs` (Swagger UI) remains OFF (`docs_url=None`); enabling it is a
+> deferred nice-to-have.
 
 Codegen target: TypeScript client for the future UI, generated from `/v1/openapi.json` via `openapi-typescript-codegen`. Lives in a sibling repo when the UI starts; the API only owns the spec.
 
@@ -3255,15 +3282,18 @@ Depends on G (event logs). Parallel to F.
 
 Depends on F + G + H. Sequence within group is not strict — each milestone touches a different file family.
 
-#### M9.I1 — Sliding-window rate limit
+#### M9.I1 — Sliding-window rate limit ✅ (partial — see §12.3)
 - Per-token sliding-window rate limit middleware. Configurable per-scope.
 - **Depends on:** M9.A2
 - **Files touched:** `eyenet/api/middleware/rate_limit.py`
-- **DoD:** quota exhaustion → 429; window slides correctly across clock skew.
+- **DoD:** quota exhaustion → 429; window slides correctly across clock skew. ✅
+- **Shipped:** global in-memory limiter (meets DoD). **Deferred:** per-surface
+  floors + `rate_limit_bucket` storage backing (§12.3 upgrade path).
 
-#### M9.I2 — CORS + X-Forwarded-For
-- CORS for configured operator-UI origins.
-- `X-Forwarded-For` middleware gated by `EYENET_API_TRUST_PROXY_HEADERS=1`.
+#### M9.I2 — CORS + X-Forwarded-For ✅
+- CORS for configured operator-UI origins. ✅ (`cors.py`; env `EYENET_API_CORS_ORIGINS`)
+- `X-Forwarded-For` middleware gated by `EYENET_API_TRUST_PROXY_HEADERS=1`. ✅ (`xff.py`)
+- **Also (§12.5):** `/v1/openapi.json` gated behind `read:graph` (`meta/api_openapi.py`).
 - **Depends on:** M9.0
 - **Files touched:** `eyenet/api/middleware/{cors.py,xff.py}`
 - **DoD:** preflight passes for allowed origin; XFF parsed only when env flag set.

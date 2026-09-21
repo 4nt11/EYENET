@@ -27,7 +27,6 @@ from typing import Any, cast
 
 import pytest
 import yaml  # type: ignore[import-untyped]
-from fastapi.testclient import TestClient
 
 from eyenet.api.app import create_app
 
@@ -86,10 +85,10 @@ def gen() -> dict[str, Any]:
 
     storage = get_repository(in_memory=True)
     with tempfile.TemporaryDirectory() as td:
-        client = TestClient(create_app(storage=storage, data_dir=Path(td)))
-        resp = client.get("/v1/openapi.json")
-    assert resp.status_code == 200
-    return cast("dict[str, Any]", resp.json())
+        # /v1/openapi.json is now read:graph-gated (§12.5); generate the schema
+        # in-process rather than fetching it unauthenticated.
+        app = create_app(storage=storage, data_dir=Path(td))
+    return app.openapi()
 
 
 def _operations(spec: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
