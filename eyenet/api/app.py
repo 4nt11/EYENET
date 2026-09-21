@@ -44,7 +44,7 @@ from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
-from eyenet.telemetry.metrics import init_metrics, set_health
+from eyenet.telemetry.metrics import init_metrics, set_health, set_system_paths
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -97,10 +97,11 @@ def create_app(
     app.state.auth_cache = AuthCache.from_env()
 
     # M9.6 metrics (§11.7): sets the MeterProvider when a scrape/OTLP surface is
-    # enabled via env; a no-op otherwise. Boot-time health gauges reflect "the
-    # deployment came up". ponytail: dynamic re-check lands with the /healthz and
-    # /readyz handlers (still M9.0 stubs); until then these are boot signals.
+    # enabled via env; a no-op otherwise. These are boot-time optimism — the
+    # /healthz and /readyz handlers refresh the health gauges with live probes on
+    # each hit. set_system_paths registers the data volume for the disk gauge.
     init_metrics(service="eyenet-api", instance_id=instance_id)
+    set_system_paths(data_dir)
     set_health("healthy", value=True)
     set_health("storage_open", value=True)
     set_health("bus_connected", value=True)

@@ -71,8 +71,9 @@ def test_cardinality_view_strips_unbounded_attr() -> None:
 
 def test_every_instrument_has_an_allowlist() -> None:
     # Guard: a new metric cannot ship without a bounded-label decision (§11.7.3).
+    # eyenet_api_* = request/SSE/auth instruments; eyenet_sys_* = host self-report.
     for name in m._ALLOWED_ATTRS:
-        assert name.startswith("eyenet_api_")
+        assert name.startswith(("eyenet_api_", "eyenet_sys_"))
     # The catalog covers every metric named in API_PLAN §11.7.2.
     expected = {
         "eyenet_api_requests_total",

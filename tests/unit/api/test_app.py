@@ -84,20 +84,25 @@ def test_every_operation_id_present(client: TestClient, hand_drafted_spec: dict[
     assert _op_ids(hand_drafted_spec) == _op_ids(generated)
 
 
+# A still-stubbed, unauthenticated endpoint to exercise the 501 + request-id
+# handlers (healthz/readyz are now implemented). Repoint if this one lands.
+_STILL_STUB = "/v1/audit/anchors"
+
+
 def test_not_implemented_returns_problem_json(client: TestClient) -> None:
-    resp = client.get("/v1/healthz")
+    resp = client.get(_STILL_STUB)
     assert resp.status_code == 501
     assert resp.headers["content-type"].startswith(PROBLEM_JSON)
     body = resp.json()
     assert body["status"] == 501
     assert body["title"] == "Not Implemented"
-    assert body["instance"] == "/v1/healthz"
+    assert body["instance"] == _STILL_STUB
     assert "request_id" in body
 
 
 def test_request_id_header_is_propagated(client: TestClient) -> None:
     rid = "test-request-id-7777"
-    resp = client.get("/v1/healthz", headers={"X-Request-Id": rid})
+    resp = client.get(_STILL_STUB, headers={"X-Request-Id": rid})
     body = resp.json()
     assert body["request_id"] == rid
 

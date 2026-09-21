@@ -1017,10 +1017,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ReadyStatus' }
         "503":
-          description: A required component is degraded.
+          description: A required component is degraded (same ReadyStatus body, per-component flags).
           content:
-            application/problem+json:
-              schema: { $ref: '#/components/schemas/ProblemDetail' }
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyStatus' }
 
   /v1/metrics:
     get:
@@ -1040,6 +1040,20 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+
+  /v1/system:
+    get:
+      tags: [health]
+      operationId: system_stats
+      summary: Authenticated host self-report (CPU / RAM / disk / load). Requires `read:metrics`.
+      responses:
+        "200":
+          description: Host stats snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemStats' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
 
   # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
   /v1/attachments/{blob_id}/manifest:
@@ -3154,6 +3168,40 @@ components:
       properties:
         status:     { type: string, enum: [ready, degraded] }
         components: { $ref: '#/components/schemas/ReadyComponents' }
+    MemStats:
+      type: object
+      additionalProperties: false
+      required: [used, total, percent]
+      properties:
+        used:    { type: integer }
+        total:   { type: integer }
+        percent: { type: number }
+    DiskUsage:
+      type: object
+      additionalProperties: false
+      required: [used, free, total]
+      properties:
+        used:  { type: integer }
+        free:  { type: integer }
+        total: { type: integer }
+    DiskStats:
+      type: object
+      additionalProperties: false
+      required: [data, root]
+      properties:
+        data: { $ref: '#/components/schemas/DiskUsage' }
+        root: { $ref: '#/components/schemas/DiskUsage' }
+    SystemStats:
+      description: Self-reported host stats (CPU / RAM / disk / load) from `/v1/system`.
+      type: object
+      additionalProperties: false
+      required: [cpu_percent, mem, disk, load1, version]
+      properties:
+        cpu_percent: { type: number }
+        mem:         { $ref: '#/components/schemas/MemStats' }
+        disk:        { $ref: '#/components/schemas/DiskStats' }
+        load1:       { type: number }
+        version:     { type: string }
 
     # ── Sensitivity / redaction (API_PLAN §4.7) ───────────────────────────
     SensitivityTier:

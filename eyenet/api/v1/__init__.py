@@ -159,6 +159,7 @@ from eyenet.api.v1.stream.api_stream_audit import router as stream_audit_router
 from eyenet.api.v1.stream.api_stream_control import router as stream_control_router
 from eyenet.api.v1.stream.api_stream_linkages import router as stream_linkages_router
 from eyenet.api.v1.stream.api_stream_personas import router as stream_personas_router
+from eyenet.api.v1.system.api_get_system import router as system_stats_router
 
 # Shared error envelopes — propagate into every operation's OpenAPI.
 # Per §7, every 4xx/5xx returns application/problem+json → ProblemDetail.
@@ -311,6 +312,7 @@ v1_router.include_router(stream_all_router)
 v1_router.include_router(health_live_router)
 v1_router.include_router(health_ready_router)
 v1_router.include_router(health_metrics_router)
+v1_router.include_router(system_stats_router)
 
 
 __all__ = ["v1_router"]

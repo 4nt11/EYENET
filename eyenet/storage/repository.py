@@ -89,6 +89,17 @@ class BaseRepository(ABC):
     domain-prefixed."""
 
     # =================================================================
+    # HEALTH
+    # =================================================================
+
+    @abstractmethod
+    async def ping(self) -> None:
+        """Cheap liveness read; raises if the backend is unreachable.
+
+        Backs the /v1/readyz storage probe. Generic ANSI SQL — no
+        dialect-specific override."""
+
+    # =================================================================
     # AUDIT (PLAN §9.3, MODELS §2.14)
     # =================================================================
 
