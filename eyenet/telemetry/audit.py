@@ -18,7 +18,7 @@ from eyenet.contracts._base import TraceContext
 from eyenet.contracts.audit import AuditEvent, subject_for
 from eyenet.storage.repository import BaseRepository
 
-from .propagation import current_traceparent
+from .propagation import ZERO_TRACEPARENT, current_traceparent
 
 _tracer = trace.get_tracer("eyenet.telemetry.audit")
 
@@ -72,7 +72,7 @@ class AuditEmitter:
                 "audit.service": self._service,
             },
         ):
-            traceparent = current_traceparent() or _zero_traceparent()
+            traceparent = current_traceparent() or ZERO_TRACEPARENT
             tc = TraceContext(traceparent=traceparent)
             envelope = AuditEvent(
                 audit_id=audit_id,
@@ -106,9 +106,6 @@ class AuditEmitter:
             )
 
 
-def _zero_traceparent() -> str:
-    # Valid 55-char W3C traceparent with all-zero ids — used when no active span.
-    return "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
 
 
 _TP_FIELDS = 4  # traceparent: version-traceid-spanid-flags

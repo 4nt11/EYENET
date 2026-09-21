@@ -30,7 +30,7 @@ from uuid_extensions import uuid7
 
 from eyenet.api.deps import ServiceUnavailableError
 from eyenet.api.v1.schemas.writes import WriteAccepted
-from eyenet.telemetry.propagation import current_traceparent
+from eyenet.telemetry.propagation import ZERO_TRACEPARENT, current_traceparent
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 _log = structlog.get_logger()
 
 AUDIT_OPERATOR_ACTION = "eyenet.audit.operator_action"
-_ZERO_TRACEPARENT = "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
 
 
 async def operator_write(
@@ -62,7 +61,7 @@ async def operator_write(
     storage append (``append_*_event``) and the typed envelope publish.
     """
     event_id = UUID(str(uuid7()))
-    traceparent = current_traceparent() or _ZERO_TRACEPARENT
+    traceparent = current_traceparent() or ZERO_TRACEPARENT
 
     # 1. Durable audit operator_action — the gate.
     try:

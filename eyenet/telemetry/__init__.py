@@ -25,6 +25,7 @@ import os
 from opentelemetry import trace as otel_trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON, ParentBased
 from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
     ConsoleSpanExporter,
@@ -79,7 +80,13 @@ def init_telemetry(
         return _initialized[key]
 
     resource = Resource.create({"service.name": service, "service.instance.id": instance_id})
-    provider = TracerProvider(resource=resource)
+    # M9.6: head sampling is ParentBased(ALWAYS_ON) — keep every span the SDK sees
+    # and honour an upstream sampling decision. The real cost control is tail-based
+    # sampling at the OTel collector (API_PLAN §11.6; see operations/otel-collector.
+    # sample.yaml), which alone can decide "keep the trace because it later emitted
+    # attribution.linkage.proposed or errored". `should_keep_trace` is that
+    # collector policy's Python source of truth.
+    provider = TracerProvider(resource=resource, sampler=ParentBased(ALWAYS_ON))
     if exporter is not None:
         # Real exporter (e.g. OTLP): batch for throughput.
         provider.add_span_processor(BatchSpanProcessor(exporter))

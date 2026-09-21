@@ -15,6 +15,29 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 _PROPAGATOR = TraceContextTextMapPropagator()
 
+# Canonical all-zero W3C traceparent (valid 55-char shape, all-zero ids). Emitted
+# by producers when there is no active span; the single source of truth so the
+# ~9 former per-module copies can import instead of redefining.
+ZERO_TRACEPARENT = "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
+
+
+def is_zero_traceparent(traceparent: str | None) -> bool:
+    """True if ``traceparent`` is absent or the all-zero sentinel (no real trace)."""
+    return traceparent is None or traceparent == ZERO_TRACEPARENT
+
+
+def _count_trace_missing(source: str) -> None:
+    # M9.6 §11.2 cutover, count-only (never drop): a received envelope/request with
+    # no real upstream trace increments the SLI. Skipped when tracing is disabled
+    # process-wide — every emit is a zero-sentinel then, so counting is pure noise
+    # and the >0 alert would false-fire. Lazy imports break the __init__ cycle.
+    from eyenet.telemetry import tracing_disabled
+    from eyenet.telemetry.metrics import trace_propagation_missing_total
+
+    if tracing_disabled():
+        return
+    trace_propagation_missing_total.add(1, {"source": source})
+
 
 def extract(headers: dict[str, str]) -> otel_context.Context:
     """Extract a W3C trace context from headers."""
@@ -56,6 +79,10 @@ def attach_from_headers(headers: dict[str, str]) -> Iterator[None]:
     """
 
     ctx = extract(headers)
+    if not otel_trace.get_current_span(ctx).get_span_context().is_valid:
+        # No valid upstream trace (absent headers or the zero sentinel) — count
+        # the SLI, then proceed: child spans start a fresh trace as before.
+        _count_trace_missing("bus")
     token = otel_context.attach(ctx)
     try:
         yield
@@ -63,4 +90,11 @@ def attach_from_headers(headers: dict[str, str]) -> Iterator[None]:
         otel_context.detach(token)
 
 
-__all__ = ["attach_from_headers", "current_traceparent", "extract", "inject"]
+__all__ = [
+    "ZERO_TRACEPARENT",
+    "attach_from_headers",
+    "current_traceparent",
+    "extract",
+    "inject",
+    "is_zero_traceparent",
+]
