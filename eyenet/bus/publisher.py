@@ -7,6 +7,8 @@ the W3C `traceparent` / `tracestate` headers automatically.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from behave_text.spec import Observation, event_topic_for
 from opentelemetry import trace
 
@@ -50,7 +52,14 @@ class BusEnvelopePublisher:
     def __init__(self, bus: Bus) -> None:
         self._bus = bus
 
-    async def publish(self, subject: str, envelope: BusEnvelope) -> None:
+    @property
+    def bus(self) -> Bus:
+        """The wrapped bus — the SSE delivery path (Group H) subscribes on it."""
+        return self._bus
+
+    async def publish(
+        self, subject: str, envelope: BusEnvelope, *, event_id: UUID | None = None
+    ) -> None:
         if not _is_known_subject(subject):
             raise ValueError(
                 f"refusing to publish on unknown subject {subject!r}; "
@@ -64,6 +73,11 @@ class BusEnvelopePublisher:
         }
         if envelope.trace_context.tracestate:
             headers["tracestate"] = envelope.trace_context.tracestate
+        # The durable event_id (event-log PK, §11.5) rides as a header so the
+        # Group H SSE stream can dedup a live event against the same event
+        # replayed from storage (exact-once across the replay→live boundary).
+        if event_id is not None:
+            headers["eyenet-event-id"] = str(event_id)
         payload = envelope.model_dump_json().encode("utf-8")
         with _tracer.start_as_current_span(
             "bus.publish",

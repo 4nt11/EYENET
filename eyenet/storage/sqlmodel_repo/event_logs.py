@@ -179,6 +179,21 @@ class EventLogsMixin:
     async def identity_events(self, identity_id: UUID) -> list[EventLogRow]:
         return await self._events_for(IdentityEventLogTable, "identity_id", identity_id)
 
+    async def linkage_events_since(
+        self, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        return await self._events_since(LinkageEventLogTable, "linkage_id", after_event_id, limit)
+
+    async def persona_events_since(
+        self, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        return await self._events_since(PersonaEventLogTable, "persona_id", after_event_id, limit)
+
+    async def identity_events_since(
+        self, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        return await self._events_since(IdentityEventLogTable, "identity_id", after_event_id, limit)
+
     async def _events_for(
         self, table: type, parent_attr: str, parent_id: UUID
     ) -> list[EventLogRow]:
@@ -191,20 +206,35 @@ class EventLogsMixin:
                 .order_by(col(table.event_seq))  # type: ignore[attr-defined]
             )
             rows = list(result)
-        return [
-            EventLogRow(
-                parent_id=getattr(r, parent_attr),
-                event_seq=r.event_seq,
-                event_subject=r.event_subject,
-                event_id=r.event_id,
-                ts=r.ts.replace(tzinfo=UTC) if r.ts.tzinfo is None else r.ts,
-                traceparent=r.traceparent,
-                tracestate=r.tracestate,
-                actor=r.actor,
-                payload_digest=r.payload_digest,
-            )
-            for r in rows
-        ]
+        return [_to_row(r, parent_attr) for r in rows]
+
+    async def _events_since(
+        self, table: type, parent_attr: str, after_event_id: UUID | None, limit: int
+    ) -> list[EventLogRow]:
+        # Global event_id cursor (uuid7 = time-ordered, fixed-width): ``> after``
+        # is a chronological cross-parent scan. Generic ANSI — no dialect leak.
+        stmt: Any = select(table).order_by(col(table.event_id))  # type: ignore[attr-defined]
+        if after_event_id is not None:
+            stmt = stmt.where(col(table.event_id) > after_event_id)  # type: ignore[attr-defined]
+        stmt = stmt.limit(limit)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result: Any = await session.exec(stmt)
+            rows = list(result)
+        return [_to_row(r, parent_attr) for r in rows]
+
+
+def _to_row(r: Any, parent_attr: str) -> EventLogRow:
+    return EventLogRow(
+        parent_id=getattr(r, parent_attr),
+        event_seq=r.event_seq,
+        event_subject=r.event_subject,
+        event_id=r.event_id,
+        ts=r.ts.replace(tzinfo=UTC) if r.ts.tzinfo is None else r.ts,
+        traceparent=r.traceparent,
+        tracestate=r.tracestate,
+        actor=r.actor,
+        payload_digest=r.payload_digest,
+    )
 
 
 __all__ = ["EventLogsMixin"]

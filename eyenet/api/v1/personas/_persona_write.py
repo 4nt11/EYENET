@@ -60,7 +60,7 @@ async def merge_personas(
             actor=str(current_user.user_id),
         )
 
-    async def _publish(event_id: UUID, traceparent: str) -> None:  # noqa: ARG001 — event_id in the event log; envelope carries the trace
+    async def _publish(event_id: UUID, traceparent: str) -> None:
         await publisher.publish(
             SUBJECT_PERSONA_MERGE,
             PersonaMergeCommandEnvelope(
@@ -72,6 +72,7 @@ async def merge_personas(
                 case_refs=body.case_refs,
                 trace_context=TraceContext(traceparent=traceparent),
             ),
+            event_id=event_id,
         )
 
     return await operator_write(
@@ -118,7 +119,7 @@ async def split_persona(
             actor=str(current_user.user_id),
         )
 
-    async def _publish(event_id: UUID, traceparent: str) -> None:  # noqa: ARG001 — event_id in the event log; envelope carries the trace
+    async def _publish(event_id: UUID, traceparent: str) -> None:
         await publisher.publish(
             SUBJECT_PERSONA_SPLIT,
             PersonaSplitCommandEnvelope(
@@ -130,6 +131,7 @@ async def split_persona(
                 case_refs=body.case_refs,
                 trace_context=TraceContext(traceparent=traceparent),
             ),
+            event_id=event_id,
         )
 
     return await operator_write(

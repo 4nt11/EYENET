@@ -64,10 +64,12 @@ async def test_mint_then_use_on_stream_endpoint(client: TestClient, seed_user) -
     expires_at = datetime.fromisoformat(body["expires_at"])
     assert expires_at <= datetime.now(tz=UTC) + timedelta(minutes=15, seconds=5)
 
-    # The token authenticates the SSE endpoint: auth passes, so we get the
-    # delivery-not-yet-built 501 (NOT a 401). Proves the gate lets it through.
-    used = client.get("/v1/stream/all", params={"token": token})
-    assert used.status_code == 501, used.text
+    # NB: we do NOT open the live stream here. The sync starlette TestClient runs
+    # the ASGI app to completion before client.stream() returns, so an infinite
+    # SSE generator hangs the client and buffers heartbeat frames until OOM. The
+    # authorized happy path (token accepted → StreamingResponse + text/event-stream)
+    # is proven without a socket in tests/unit/api/streaming/test_handlers.py; the
+    # 401 rejection directions are proven by the client.get() tests below.
 
 
 # --- token-type isolation (both directions) ---------------------------------

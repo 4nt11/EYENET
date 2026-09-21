@@ -86,9 +86,24 @@ class StreamGapEvent(ApiSchema):
 
     Emitted once before the handler resumes from the oldest available
     event. Clients decide whether to backfill via REST (API_PLAN §6.2).
+    Reserved: unreachable while the pre-public build retains every event.
     """
 
     oldest_available: str = Field(max_length=64)
+
+
+class StreamBackpressureEvent(ApiSchema):
+    """`event: stream.backpressure` — the per-connection queue hit its high-water
+    mark; the stream is closing. Reconnect with `Last-Event-ID` to replay the gap.
+    """
+
+    hwm: int
+
+
+class StreamExpiredEvent(ApiSchema):
+    """`event: stream.expired` — the connection is being closed by the server."""
+
+    reason: Literal["token_expired", "audit_backpressure"]
 
 
 __all__ = [
@@ -97,5 +112,7 @@ __all__ = [
     "LinkageProposedEvent",
     "LinkageStateChangedEvent",
     "PersonaUpdatedEvent",
+    "StreamBackpressureEvent",
+    "StreamExpiredEvent",
     "StreamGapEvent",
 ]

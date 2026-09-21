@@ -73,7 +73,7 @@ async def act_on_identity(
             actor=str(current_user.user_id),
         )
 
-    async def _publish(event_id: UUID, traceparent: str) -> None:  # noqa: ARG001 — event_id in the event log; envelope carries the trace
+    async def _publish(event_id: UUID, traceparent: str) -> None:
         await publisher.publish(
             subject,
             IdentityActionEnvelope(
@@ -84,6 +84,7 @@ async def act_on_identity(
                 reason=body.reason,
                 trace_context=TraceContext(traceparent=traceparent),
             ),
+            event_id=event_id,
         )
 
     return await operator_write(

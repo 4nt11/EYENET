@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from cryptography.fernet import Fernet
 
     from eyenet.bus.publisher import BusEnvelopePublisher
+    from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import SystemUserRole
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -174,6 +175,14 @@ def get_publisher(request: Request) -> BusEnvelopePublisher:
     if publisher is None:
         raise RuntimeError("app.state.publisher is not configured")
     return cast("BusEnvelopePublisher", publisher)
+
+
+def get_bus(request: Request) -> Bus:
+    """The raw bus behind the publisher — the SSE delivery path subscribes on it."""
+    publisher = getattr(request.app.state, "publisher", None)
+    if publisher is None:
+        raise RuntimeError("app.state.publisher is not configured")
+    return cast("BusEnvelopePublisher", publisher).bus
 
 
 def get_auth_cache(request: Request) -> AuthCache:
@@ -364,6 +373,7 @@ __all__ = [
     "bearer_token",
     "get_audit",
     "get_auth_cache",
+    "get_bus",
     "get_current_user",
     "get_data_dir",
     "get_mfa_key",
