@@ -94,6 +94,12 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "mfa_challenge",
         # M9.A4 — personal access tokens
         "personal_access_token",
+        # M9.G1 — write idempotency replay guard
+        "idempotency_record",
+        # M9.G2 — per-transition event logs (§11.5 SSE replay source)
+        "linkage_event_log",
+        "persona_event_log",
+        "identity_event_log",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset(

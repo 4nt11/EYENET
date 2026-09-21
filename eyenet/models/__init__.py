@@ -26,6 +26,11 @@ from .clearance import SystemUserClearanceGrantTable
 from .collector import CollectorTable
 from .corpus import CorpusCursorTable
 from .document import DocumentTable
+from .event_logs import (
+    IdentityEventLogTable,
+    LinkageEventLogTable,
+    PersonaEventLogTable,
+)
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
 from .file_access import (
     FileAccessAcknowledgmentTable,
@@ -40,6 +45,7 @@ from .identity import (
     IdentityLabelTable,
     IdentityTable,
 )
+from .idempotency import IdempotencyRecordTable
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
@@ -82,16 +88,20 @@ __all__ = [
     "GroupCandidateTable",
     "GroupSnapshotTable",
     "GroupTable",
+    "IdempotencyRecordTable",
+    "IdentityEventLogTable",
     "IdentityLabelTable",
     "IdentityTable",
     "InfrastructureArtifactTable",
     "JwtDenylistTable",
+    "LinkageEventLogTable",
     "LinkageTable",
     "MembershipTable",
     "MessageObservationTable",
     "MessageTable",
     "MfaChallengeTable",
     "ObservationTable",
+    "PersonaEventLogTable",
     "PersonaMembershipTable",
     "PersonaTable",
     "PersonalAccessTokenTable",

@@ -174,6 +174,36 @@ class IdentitiesMixin:
             await session.refresh(table)
             return _identity_row(table)
 
+    async def freeze_all_identities(
+        self,
+        *,
+        source_id: UUID | None = None,
+    ) -> list[UUID]:
+        """Fleet-wide soft freeze (API_PLAN §3.4 ``/identities/freeze_all``).
+
+        Flips every non-terminal identity to ``FROZEN`` in one transaction and
+        returns the ids that changed. BURNED/QUARANTINE identities are terminal
+        and never re-enter rotation, so they are left untouched; already-FROZEN
+        identities are skipped (idempotent). Optionally scoped to one source.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(IdentityTable).where(
+                col(IdentityTable.state).not_in(
+                    [IdentityState.FROZEN, IdentityState.BURNED]
+                ),
+                col(IdentityTable.role) != IdentityRole.QUARANTINE,
+            )
+            if source_id is not None:
+                stmt = stmt.where(IdentityTable.source_id == source_id)
+            result = await session.exec(stmt)
+            changed: list[UUID] = []
+            for table in list(result):
+                table.state = IdentityState.FROZEN
+                session.add(table)
+                changed.append(table.id)
+            await session.commit()
+            return changed
+
     async def find_available_scout(self, source_id: UUID) -> IdentityRow | None:
         """Return an AVAILABLE SCOUT for ``source_id`` (API_PLAN §4.12.3), or None.
 

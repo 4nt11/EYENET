@@ -104,8 +104,25 @@ All writes accept `Idempotency-Key` header; all writes publish to the bus, retur
 | POST | `/linkages/{linkage_id}/suspect` | `write:linkage_decision` | `attribution.linkage.suspected` |
 | POST | `/identities/{identity_id}/claim` | `write:identity` | `eyenet.identity.claimed` |
 | POST | `/identities/{identity_id}/release` | `write:identity` | `eyenet.identity.released` |
+| POST | `/identities/{identity_id}/freeze` | `write:identity` | `eyenet.identity.frozen` |
+| POST | `/identities/{identity_id}/burn` | `write:identity` | `eyenet.identity.burned` |
 | POST | `/identities/freeze_all` | `write:identity` | `eyenet.identity.freeze_all` |
+| POST | `/personas/{persona_id}/merge` | `write:persona_decision` | `attribution.persona.merge` |
+| POST | `/personas/{persona_id}/split` | `write:persona_decision` | `attribution.persona.split` |
 | POST | `/panic` | `write:panic` | `eyenet.control.panic` (global) |
+
+**Identity verb set (reconciliation).** This table is authoritative:
+`claim / release / freeze / burn / freeze_all`. The M9.G5 milestone text below
+(§ Group G) originally read "freeze | burn | release" while §3.4 read
+"claim / release / freeze_all" — a contradiction resolved 2026-09-21 toward the
+operational superset. `freeze` (per-identity soft freeze) and `burn` (permanent
+retirement of a compromised identity) are first-class operator actions;
+`freeze_all` is the fleet-wide soft freeze. All are gated by `write:identity`.
+
+**Persona merge/split** are operator overrides of the automatic persona merge
+Graph performs on a confirmed linkage. Their action model — request bodies,
+lifecycle, applier — is §4.10a below. Gated by the new `write:persona_decision`
+scope (admin + analyst baseline, mirrors `write:linkage_decision`).
 
 ### 3.5 Realtime (`/v1/stream/`)
 
@@ -736,6 +753,60 @@ Audit subjects' payloads gain `case_refs` everywhere a reason is recorded. Court
 > "Who accessed passport-blob-X on 2026-05-24 12:14:33?" → file_access_journal row → audit_event → `case_refs: [APT-29]` → case_collaborator on APT-29 at that time → SystemUser → granted_by chain → bootstrap.
 
 The chain is now structural, not textual.
+
+---
+
+### 4.10a Persona action model — operator merge / split
+
+Added 2026-09-21 for M9.G4. A `Persona` (MODELS.md) is the union-find grouping of
+actors the system believes are one human. Normally personas form **automatically**:
+when an operator confirms a linkage, the Graph service calls
+`merge_actors_into_persona(actor_a, actor_b, via_linkage_id=...)`. §4.10a defines
+the two **manual overrides** an operator needs when the automatic path is wrong.
+
+**Why manual overrides exist.** The classifier/linker propose; the operator
+adjudicates. Two failure modes need a human: the graph *failed to link* two
+actors that are obviously one person (merge), or it *over-linked* — folded a
+distinct human into a persona (split). Both are operator-grade forensic
+decisions and are audited as `operator_action`.
+
+| Method | Path | Body | Bus subject | Applier |
+|---|---|---|---|---|
+| POST | `/v1/personas/{persona_id}/merge` | `PersonaMergeRequest` | `attribution.persona.merge` | Graph |
+| POST | `/v1/personas/{persona_id}/split` | `PersonaSplitRequest` | `attribution.persona.split` | Graph |
+
+```python
+class PersonaMergeRequest(ApiSchema):
+    other_persona_id: UUID          # the persona to fold INTO {persona_id}
+    reason: str                     # mandatory operator justification (audited)
+    case_refs: list[str] = []       # §4.10.7 cross-references
+
+class PersonaSplitRequest(ApiSchema):
+    actor_id: UUID                  # the member actor to pull OUT of {persona_id}
+    reason: str
+    case_refs: list[str] = []
+```
+
+**Semantics.**
+- *Merge* folds `other_persona_id` into `{persona_id}`. Because the storage
+  primitive operates on actors (`merge_actors_into_persona(a, b, via_linkage_id)`),
+  the applier resolves a representative member actor from each persona and merges
+  with `via_linkage_id=None` (an operator merge has no backing linkage — the
+  `reason` + audit row carry the justification). `422` if `other_persona_id ==
+  persona_id` or is not a distinct persona.
+- *Split* pulls `actor_id` out of `{persona_id}` via
+  `split_actor_from_persona(actor_id)`. `422` if `actor_id` is not a current
+  member.
+
+**Lifecycle (async, mirrors §10.3).** The API persists the audit + a
+`persona_event_log` row and publishes the command; it does **not** mutate the
+persona graph directly (invariant #2). Graph consumes the command, applies the
+merge/split, and emits the existing `attribution.persona.updated` so the read
+side and any SSE subscribers converge. The `202` body is
+`WriteAccepted{applied:false, poll:"/v1/personas/{persona_id}"}`.
+
+**Scope.** `write:persona_decision` — admin + analyst baseline, mirroring
+`write:linkage_decision`. It is a decision scope, not `admin:*`.
 
 ---
 
@@ -1850,7 +1921,11 @@ Every endpoint declares an explicit `response_model=` on its FastAPI decorator. 
 | `POST /v1/linkages/{id}/suspect` | 202 | `WriteAccepted` | 409 |
 | `POST /v1/identities/{id}/claim` | 202 | `WriteAccepted` | 409 |
 | `POST /v1/identities/{id}/release` | 202 | `WriteAccepted` | 409 |
+| `POST /v1/identities/{id}/freeze` | 202 | `WriteAccepted` | 409 |
+| `POST /v1/identities/{id}/burn` | 202 | `WriteAccepted` | 409 |
 | `POST /v1/identities/freeze_all` | 202 | `WriteAccepted` | 409 |
+| `POST /v1/personas/{id}/merge` | 202 | `WriteAccepted` | 409, 422 (target not a distinct persona) |
+| `POST /v1/personas/{id}/split` | 202 | `WriteAccepted` | 409, 422 (actor not a member) |
 | `POST /v1/panic` | 202 | `WriteAccepted` | 409 |
 | `GET /v1/stream/*` | 200 | SSE — `text/event-stream`, no `response_model` (event shape declared via OpenAPI extensions, see §9.7) | — |
 | `GET /v1/metrics` | 200 | Prometheus text — `text/plain; version=0.0.4`, no `response_model` | — |
@@ -2570,7 +2645,9 @@ Coverage gate: the current floor inherited from M8 is **0.845** (calibration-sui
 3. **Bulk-read audit cost.** `/v1/actors/{id}/observations?limit=500` emits 500 audit rows. That's the contract — operator-grade evidence is the whole point, and bulk-export inherits the same row-per-evidence cost. **Implementation:** the audit append for a bulk read is a **single `BEGIN IMMEDIATE` transaction containing all N rows**, not N separate transactions. The hash chain links each row to its predecessor inside the txn; commit is atomic. P99 stays in the tens-of-ms range instead of seconds because we pay one fsync per request, not N. The audit-store API gains a `append_many(rows: list[AuditRow]) -> list[AuditRowId]` method to express this; route handlers MUST use it for bulk endpoints.
 4. **WebSocket later?** Holding the line on SSE for v1. Revisit when a real use case appears.
 5. **`MODELS.md` §2.17 SystemUser scope storage.** Is scope-per-user already modeled, or do we add it here? Action: confirm before M9.1 starts; if missing, add as a MODELS amendment in the same PR.
-6. **Idempotency key TTL.** 24h? 7d? Storage cost is low. Provisional: 7d.
+6. **Idempotency key TTL.** ~~24h? 7d?~~ **RESOLVED 2026-09-21: 7d.** Storage
+   cost is low; longer retention is more forensically defensible (operator-grade
+   evidence posture). The M9.G1 middleware enforces a 7-day window.
 7. **JWT key rotation cadence.** Manual via `eyenet api rotate-keys` CLI for v1. Automated rotation deferred.
 8. **Scope cache TTL.** §4.4.1 sets 60s. Revisit after first load test: if scope lookup is genuinely free on indexed SQLite reads, drop to 0 (no cache) and remove the carve-out list. Caching exists only to make the design defensible under load; if there's no load problem, it's surface area we don't need.
 9. **PAT scope semantics.** PATs today inherit live `system_user_scope` like JWTs do. Alternative: PATs carry a frozen scope subset at mint time (typical OAuth2 PAT pattern), so revoking a user's scope doesn't silently broaden every PAT's effective grant inversely. Provisional: live lookup (matches JWT path), but worth a second think before M9.2.
@@ -3079,8 +3156,13 @@ Depends on M9.1a only. Fully parallel to A, B, C, D, E, G, H. Surface §3.2, §3
 Depends on M9.1a only. Parallel to F. Surface §3.4.
 
 #### M9.G1 — Idempotency-Key middleware + idempotency_record table
-- New table `idempotency_record` (key, request_hash, response_hash, status, expires_at).
-- Middleware enforces 24h idempotency window. Mismatched request body → 409.
+- New table `idempotency_record` (`key`, `request_hash`, `response_status`,
+  `response_body`, `bus_state`, `system_user_id`, `created_at`, `expires_at`).
+  **`response_hash` alone (original sketch) cannot replay the stored response —
+  §10.3 requires returning the original body verbatim, so we persist
+  `response_status` + `response_body`** (revised 2026-09-21).
+- Middleware enforces a **7d** idempotency window (per §15 resolution).
+  Mismatched request body under a live key → 409.
 - **Depends on:** M9.1a.5
 - **Files touched:** `eyenet/models/idempotency.py`, `eyenet/storage/sqlmodel_repo/idempotency.py`, `eyenet/api/middleware/idempotency.py`
 - **DoD:** duplicate POST returns first response; tampered POST returns 409.
@@ -3101,16 +3183,27 @@ Depends on M9.1a only. Parallel to F. Surface §3.4.
 - **DoD:** API and CLI emit byte-identical audit rows; bus publish failure does NOT roll back storage.
 
 #### M9.G4 — Persona write handlers
-- `POST /v1/personas/{id}/merge|split` per the §4 persona action model.
+- `POST /v1/personas/{id}/merge|split` per the **§4.10a persona action model**.
+  Net-new surface (not in the M9.0 skeleton) — new `personas/` write dir + YAML
+  paths + `expected_routes.json` entries. `write:persona_decision` scope.
 - **Depends on:** M9.G1, M9.G2, M9.A2
-- **Files touched:** `eyenet/api/v1/personas_write.py`
-- **DoD:** merge/split round-trip; persona_event_log row materialized.
+- **Files touched:** `eyenet/api/v1/personas/api_{merge,split}_persona.py`,
+  `eyenet/api/v1/schemas/personas.py`, Graph consumer in `eyenet/graph/graph.py`.
+- **DoD:** merge/split round-trip; persona_event_log row materialized; Graph
+  applies and emits `attribution.persona.updated`.
 
 #### M9.G5 — Identity write handlers
-- `POST /v1/identities/{id}/freeze|burn|release` per `IdentityActionRequest`.
+- `POST /v1/identities/{id}/{claim,release,freeze,burn}` + `/freeze_all` per
+  `IdentityActionRequest` — the authoritative §3.4 verb set
+  (claim/release/freeze/burn/freeze_all), reconciled 2026-09-21. `freeze` and
+  `burn` are net-new skeletons; claim/release/freeze_all fill existing ones.
 - **Depends on:** M9.G1, M9.G2, M9.A2
-- **Files touched:** `eyenet/api/v1/identities_write.py`
-- **DoD:** state transitions guarded; supervisor (M9.E3, when present) sees `desired_state` change via storage.
+- **Files touched:** `eyenet/api/v1/identities/api_*.py`.
+- **DoD:** state transitions guarded; supervisor (M9.E3, when present) sees
+  `desired_state` change via storage. Identity writes persist `desired_state`
+  durably **in the handler** (documented invariant-#2 exception — no live
+  applier yet; an operator must be able to freeze/burn a compromised identity
+  immediately).
 
 #### M9.G6 — /v1/audit/verify as CI gate for write Schemathesis runs
 - Schemathesis stateful runs include the full write cycle and END every run with `GET /v1/audit/verify`. Chain must verify clean.
