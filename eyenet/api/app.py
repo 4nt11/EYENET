@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
@@ -36,7 +37,15 @@ from eyenet.api.deps import (
     ServiceUnavailableError,
     UnprocessableError,
 )
-from eyenet.api.middleware import IdempotencyMiddleware, evidence_access_dispatch
+from eyenet.api.middleware import (
+    IdempotencyMiddleware,
+    RateLimitMiddleware,
+    XForwardedForMiddleware,
+    cors_origins,
+    evidence_access_dispatch,
+    rate_limit_config,
+    trust_proxy_headers,
+)
 from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
 from eyenet.bus.memory import MemoryBus
@@ -76,7 +85,11 @@ def create_app(
     app = FastAPI(
         title="EYENET API",
         version="0.0.0",
-        openapi_url="/v1/openapi.json",
+        # Built-in schema route disabled: the anonymous schema is a recon gift
+        # for a forensic API (§12.5). A read:graph-gated /v1/openapi.json route
+        # (eyenet/api/v1/meta/api_openapi.py) serves it instead; app.openapi()
+        # still generates the schema in-process.
+        openapi_url=None,
         docs_url=None,
         redoc_url=None,
     )
@@ -277,6 +290,35 @@ def create_app(
     # Pure ASGI so it can read the request body and capture the response.
     # Guards only writes (POST) with the header; reads flow through untouched.
     app.add_middleware(IdempotencyMiddleware)
+
+    # Group I bring-up hardening (§12.4, M9.I1/I2). Starlette applies
+    # last-added-first, so appending in this order yields inbound flow:
+    #   CORS → XFF → rate-limit → idempotency → evidence-access → route.
+    # Each is added only when its env knob opts in (secure defaults).
+
+    # M9.I1 — per-token sliding-window rate limit. Added before XFF so its IP
+    # fallback keys on the proxy-corrected client.
+    _rl_limit, _rl_window = rate_limit_config()
+    if _rl_limit > 0:
+        app.add_middleware(RateLimitMiddleware, limit=_rl_limit, window=_rl_window)
+
+    # M9.I2 — X-Forwarded-For (opt-in; the header is spoofable when untrusted).
+    if trust_proxy_headers():
+        app.add_middleware(XForwardedForMiddleware)
+
+    # M9.I2 — CORS for the operator UI (different origin). Outermost so preflight
+    # OPTIONS short-circuits before any inner middleware. No origins → not added
+    # → no CORS at all; never "*".
+    _origins = cors_origins()
+    if _origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-Id"],
+            expose_headers=["X-Request-Id", "X-RateLimit-Remaining"],
+        )
 
     app.include_router(v1_router)
     return app
