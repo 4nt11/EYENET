@@ -46,7 +46,9 @@
     font-family: var(--font-mono);
     font-size: var(--fs-12);
     letter-spacing: var(--tracking-data);
-    word-break: break-all;
+    /* Break long unbreakable values (UUIDs) at overflow only — never chop a
+       readable token like `demo-monitor-01` mid-word the way break-all did. */
+    overflow-wrap: anywhere;
   }
   dd.sans { font-family: var(--font-sans); font-size: var(--fs-13); letter-spacing: normal; }
 </style>
