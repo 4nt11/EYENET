@@ -112,14 +112,26 @@ export const logsView = $state({
   error: null
 });
 
+// Monotonic token so switching the active case can't let a slow response land
+// after a newer one and show another case's trail.
+let logsSeq = 0;
+
 export async function loadCaseLogs(caseId) {
+  const mine = ++logsSeq;
   logsView.loading = true;
+  // Clear stale trail immediately so a case switch never shows the prior
+  // case's events/anchors while the new fetch is in flight.
+  logsView.audit = [];
+  logsView.anchors = [];
+  logsView.verify = null;
+  logsView.error = null;
   try {
     const [audit, verify, anchors] = await Promise.all([
       apiGet(`/v1/audit?subject_id=${caseId}&limit=200`, { auth: true }),
       apiGet('/v1/audit/verify', { auth: true }),
       apiGet('/v1/audit/anchors?limit=50', { auth: true })
     ]);
+    if (mine !== logsSeq) return; // a newer case selection superseded this one
     const brokenId = verify.first_break?.event_id ?? null;
     logsView.audit = audit.items.map((r) => ({
       time: shortTs(r.ts),
@@ -141,11 +153,12 @@ export async function loadCaseLogs(caseId) {
     }));
     logsView.error = null;
   } catch (e) {
+    if (mine !== logsSeq) return;
     logsView.error = e.message ?? String(e);
     logsView.audit = [];
     logsView.verify = null;
     logsView.anchors = [];
   } finally {
-    logsView.loading = false;
+    if (mine === logsSeq) logsView.loading = false;
   }
 }
