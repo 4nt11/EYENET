@@ -57,6 +57,27 @@ export async function apiPost(path, body, { auth = false, accept = [], headers: 
   return res.json();
 }
 
+// DELETE. Surfaces the problem+json `detail` on error (e.g. a 409 when a
+// collector isn't stopped). Returns null on 204.
+export async function apiDelete(path, { auth = false, accept = [] } = {}) {
+  const headers = { accept: 'application/json' };
+  if (auth) {
+    const t = authToken();
+    if (t) headers.authorization = `Bearer ${t}`;
+  }
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers });
+  if (!res.ok && !accept.includes(res.status)) {
+    let detail = `${res.status} ${res.statusText}`;
+    const problem = await res.json().catch(() => null);
+    if (problem?.detail) detail = problem.detail;
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json().catch(() => null);
+}
+
 // Format a byte count as GiB with one decimal, for host-stats tiles.
 export function fmtGiB(bytes) {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;

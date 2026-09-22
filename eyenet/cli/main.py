@@ -36,6 +36,7 @@ from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
 from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
+from eyenet.services.collector_supervisor import CollectorSupervisor
 from eyenet.identity_pool import FileIdentityPool
 from eyenet.identity_pool.loader import load as load_identities
 from eyenet.linker.linker import Linker
@@ -522,6 +523,19 @@ def graph_run(  # pragma: no cover
 
     cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
     _run(lambda bus, storage: Graph(bus=bus, storage=storage), cfg)
+
+
+@app.command("supervisor")
+def supervisor_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    tick: float = typer.Option(5.0, "--tick", help="reconcile interval in seconds"),
+) -> None:
+    """Run the collector supervisor (reconciles observed_state → desired; M9.E3)."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(lambda bus, storage: CollectorSupervisor(bus=bus, storage=storage), cfg, tick=tick)
 
 
 @app.command("panic")
