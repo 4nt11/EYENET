@@ -36,7 +36,11 @@
     return 'active';
   }
 
-  const statusTone = (s) => (s === 'revoked' ? 'critical' : s === 'expired' ? 'neutral' : 'high');
+  // Function declaration (hoisted) so COLUMNS above can reference it — a const
+  // arrow here would be in the temporal dead zone at COLUMNS init time.
+  function statusTone(s) {
+    return s === 'revoked' ? 'critical' : s === 'expired' ? 'neutral' : 'high';
+  }
 
   // ISO date-time -> "YYYY-MM-DD HH:mmZ" (UTC), matching the console's data style.
   const fmtTs = (iso) => {
