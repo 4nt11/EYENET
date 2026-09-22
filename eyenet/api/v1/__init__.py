@@ -99,6 +99,10 @@ from eyenet.api.v1.collectors.api_stop_collector import router as collectors_sto
 from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
 
 # === documents (M10 classifier) ===
+from eyenet.api.v1.documents.api_access_document import router as documents_access_router
+from eyenet.api.v1.documents.api_get_document_manifest import (
+    router as documents_manifest_router,
+)
 from eyenet.api.v1.documents.api_upload_document import router as documents_upload_router
 
 # === graph ===
@@ -139,6 +143,9 @@ from eyenet.api.v1.personas.api_split_persona import router as personas_split_ro
 # === reclassify ===
 from eyenet.api.v1.reclassify.api_reclassify_attachment import (
     router as reclassify_attachment_router,
+)
+from eyenet.api.v1.reclassify.api_reclassify_document import (
+    router as reclassify_document_router,
 )
 from eyenet.api.v1.reclassify.api_reclassify_observation import (
     router as reclassify_observation_router,
@@ -218,6 +225,8 @@ v1_router.include_router(linkages_suspect_router)
 
 # documents (M10 classifier)
 v1_router.include_router(documents_upload_router)
+v1_router.include_router(documents_manifest_router)
+v1_router.include_router(documents_access_router)
 
 # graph
 v1_router.include_router(graph_stats_router)
@@ -237,6 +246,7 @@ v1_router.include_router(attachments_access_router)
 # reclassify (§4.9 — sensitivity-tier promotion)
 v1_router.include_router(reclassify_observation_router)
 v1_router.include_router(reclassify_attachment_router)
+v1_router.include_router(reclassify_document_router)
 
 # cases (§4.10 — investigation primitives)
 v1_router.include_router(cases_list_router)

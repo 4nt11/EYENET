@@ -50,6 +50,7 @@ from eyenet.api.v1 import v1_router
 from eyenet.api.v1.schemas.errors import ProblemDetail, ValidationError
 from eyenet.bus.memory import MemoryBus
 from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.crypto import load_exoneration_key
 from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -75,7 +76,7 @@ def _problem_response(problem: ProblemDetail, status_code: int) -> JSONResponse:
     )
 
 
-def create_app(
+def create_app(  # noqa: PLR0915 - boot wiring plus every §7 exception handler lives here
     *,
     storage: BaseRepository,
     data_dir: Path,
@@ -106,6 +107,7 @@ def create_app(
     app.state.verifying_keys = load_verifying_keys(data_dir)
     app.state.mfa_key = load_mfa_key(data_dir)
     app.state.pat_pepper = load_pat_pepper(data_dir)
+    app.state.exoneration_signer = load_exoneration_key(data_dir)
     app.state.data_dir = data_dir
     app.state.auth_cache = AuthCache.from_env()
 

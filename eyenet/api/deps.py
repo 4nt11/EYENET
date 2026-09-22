@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
     from eyenet.bus.publisher import BusEnvelopePublisher
     from eyenet.contracts.bus import Bus
+    from eyenet.crypto import ExonerationSigner
 from eyenet.contracts.enums import SystemUserRole
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -206,6 +207,13 @@ def get_verifying_keys(request: Request) -> dict[str, VerifyingKey]:
     if keys is None:
         raise RuntimeError("app.state.verifying_keys is not configured")
     return cast("dict[str, VerifyingKey]", keys)
+
+
+def get_exoneration_signer(request: Request) -> ExonerationSigner:
+    signer = getattr(request.app.state, "exoneration_signer", None)
+    if signer is None:
+        raise RuntimeError("app.state.exoneration_signer is not configured")
+    return cast("ExonerationSigner", signer)
 
 
 def get_pat_pepper(request: Request) -> bytes:
@@ -376,6 +384,7 @@ __all__ = [
     "get_bus",
     "get_current_user",
     "get_data_dir",
+    "get_exoneration_signer",
     "get_mfa_key",
     "get_pat_pepper",
     "get_publisher",

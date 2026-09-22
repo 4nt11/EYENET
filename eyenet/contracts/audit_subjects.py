@@ -28,6 +28,7 @@ class AuditSubject(StrEnum):
     # --- §4.9 reclassification ---------------------------------------------
     RECLASSIFY_OBSERVATION = "eyenet.audit.reclassify.observation"
     RECLASSIFY_ATTACHMENT = "eyenet.audit.reclassify.attachment"
+    RECLASSIFY_DOCUMENT = "eyenet.audit.reclassify.document"
     RECLASSIFY_REJECTED = "eyenet.audit.reclassify.rejected"
 
     # --- §4.10 cases -------------------------------------------------------

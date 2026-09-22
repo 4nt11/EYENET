@@ -22,10 +22,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlmodel import col, select
 
 from eyenet.contracts.enums import FileServedVia, SensitivityTier
+from eyenet.contracts.file_access import FileAccessJournalRow
 from eyenet.crypto import build_journal_row_canonical
 from eyenet.models._base import new_uuid7
 from eyenet.models.file_access import (
@@ -118,6 +119,27 @@ class _PreparedJournalRow:
     def self_hash(self, prev_journal_hash: bytes) -> bytes:
         """``sha256(canonical || prev_journal_hash)`` — the chain link."""
         return hashlib.sha256(self.canonical() + prev_journal_hash).digest()
+
+
+def _journal_row(row: FileAccessJournalTable) -> FileAccessJournalRow:
+    """Map an ORM journal row to the read-side contract (tz-normalized)."""
+    served_at = row.served_at
+    if served_at.tzinfo is None:
+        # SQLite drops tzinfo on the way out; the chain stamps UTC on the way in.
+        served_at = served_at.replace(tzinfo=UTC)
+    return FileAccessJournalRow(
+        access_id=row.access_id,
+        audit_event_id=row.audit_event_id,
+        user_id=row.user_id,
+        grant_id=row.grant_id,
+        content_hash=bytes(row.content_hash),
+        content_size=row.content_size,
+        content_mime=row.content_mime,
+        tier=row.tier,
+        served_at=served_at,
+        served_via=row.served_via,
+        signing_pubkey_fingerprint=row.signing_pubkey_fingerprint,
+    )
 
 
 def _fingerprint_of(verifying_key_bytes: bytes) -> str:
@@ -577,3 +599,55 @@ class FileAccessMixin:
                 return False
             expected_prev = bytes(row.self_hash)
         return True
+
+    async def list_file_access_by_content_hash(
+        self,
+        content_hash: bytes,
+    ) -> list[FileAccessJournalRow]:
+        """All journal rows served under ``content_hash``, insertion order (§5.8).
+
+        Insertion order is ``rowid ASC`` — the SAME order the chain is walked and
+        appended in, so the returned sequence matches the signed access-id order.
+        """
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(FileAccessJournalTable)
+                .where(col(FileAccessJournalTable.content_hash) == content_hash)
+                .order_by(text("rowid ASC"))
+            )
+            result = await session.exec(stmt)
+            return [_journal_row(row) for row in result.all()]
+
+    async def list_file_access_by_user(
+        self,
+        user_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[FileAccessJournalRow]:
+        """A user's journal rows within ``[since, until]``, insertion order (§5.8)."""
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(FileAccessJournalTable).where(
+                col(FileAccessJournalTable.user_id) == user_id
+            )
+            if since is not None:
+                stmt = stmt.where(col(FileAccessJournalTable.served_at) >= since)
+            if until is not None:
+                stmt = stmt.where(col(FileAccessJournalTable.served_at) <= until)
+            stmt = stmt.order_by(text("rowid ASC"))
+            result = await session.exec(stmt)
+            return [_journal_row(row) for row in result.all()]
+
+    async def file_access_journal_head(self) -> bytes:
+        """``self_hash`` of the head row, or the genesis seed if the journal is empty.
+
+        Head = the max-``rowid`` row's ``self_hash`` — the EXACT value the SQLite
+        append override reads as ``prev_journal_hash`` for the next row
+        (``SELECT self_hash FROM file_access_journal ORDER BY rowid DESC LIMIT 1``),
+        so the signed ``journal_head_at_query`` names the real chain head.
+        """
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(FileAccessJournalTable).order_by(text("rowid DESC"))
+            result = await session.exec(stmt)
+            row = result.first()
+            return GENESIS_JOURNAL_HASH if row is None else bytes(row.self_hash)

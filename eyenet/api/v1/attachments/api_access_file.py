@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """POST /v1/attachments/{blob_id}/access — acknowledged binary fetch (§5.6 step 2).
 
-PHASE-5: NORMAL-tier only, client-side Ed25519 signing, evidence-first serving.
+Clearance-gated, client-side Ed25519 signing, evidence-first serving.
 
 Flow:
   1. Resolve the blob row (404 if missing); compute the effective tier.
-  2. FAIL CLOSED: non-NORMAL → 403, no journal row, no bytes (PHASE-6 gating).
+  2. Clearance gate (§4.6-4.8): enforce the tier's read:* scope and resolve the
+     active grant id the journal requires on non-NORMAL rows. 403, no journal
+     row, no bytes if the caller lacks clearance.
   3. ``expected_content_hash`` MUST equal the row's sha256 (serve-what-signed);
      mismatch → 409.
   4. Resolve the operator's active signing key (401 if none registered) and
@@ -39,13 +41,13 @@ from eyenet.api.deps import (
     ConflictError,
     CurrentUser,
     ResourceNotFound,
-    ScopeForbidden,
     get_current_user,
     get_storage,
 )
+from eyenet.api.v1._clearance import resolve_tier_grant
 from eyenet.api.v1.attachments._access_canonical import compute_access_body_hash
 from eyenet.api.v1.schemas.attachments import FileAccessAcknowledgment
-from eyenet.contracts.enums import FileServedVia, SensitivityTier
+from eyenet.contracts.enums import FileServedVia
 from eyenet.crypto import fingerprint, load_ed25519_public_key
 from eyenet.storage.repository import BaseRepository
 from eyenet.storage.sqlmodel_repo.file_access import FileAccessJournalError
@@ -93,9 +95,9 @@ async def attachments_access(
         raise ResourceNotFound(f"attachment:{blob_id}")
 
     effective_tier = row.operator_tier_override or row.classifier_tier
-    if effective_tier is not SensitivityTier.NORMAL:
-        # FAIL CLOSED: never serve classified bytes ungated (PHASE-6).
-        raise ScopeForbidden("clearance gating not yet implemented")
+    # Clearance gate (§4.6-4.8): enforce read:* for the tier AND resolve the active
+    # grant id the journal REQUIRES on every non-NORMAL row. 403 before any bytes.
+    grant_id = await resolve_tier_grant(current_user, storage, effective_tier)
 
     # (b) Serve-what-signed: the client must be asking for THIS blob's content.
     if body.expected_content_hash != row.sha256:
@@ -121,16 +123,18 @@ async def attachments_access(
         await storage.record_access(
             user_id=current_user.user_id,
             audit_event_id=None,
-            grant_id=None,
+            # Resolved active grant (None for NORMAL). The journal CHECK requires a
+            # grant_id on every non-NORMAL row; the gate above guarantees it is set.
+            grant_id=grant_id,
             # FIX 2: pass the manifest-minted single-use nonce so record_access
-            # CONSUMES it atomically with the journal append (closing the NORMAL
-            # replay hole). The nonce is also signed into the body_hash, so a
-            # replay of this exact POST is rejected — the nonce is already burned.
+            # CONSUMES it atomically with the journal append (closing the replay
+            # hole). The nonce is also signed into the body_hash, so a replay of
+            # this exact POST is rejected — the nonce is already burned.
             acknowledgment_id=body.access_nonce,
             content_hash=content_hash_bytes,
             content_size=row.size_bytes,
             content_mime=row.mime,
-            tier=SensitivityTier.NORMAL,
+            tier=effective_tier,
             served_via=FileServedVia.ATTACHMENT_STREAM,
             signing_pubkey_fingerprint=active_fingerprint,
             operator_signature=operator_signature,
