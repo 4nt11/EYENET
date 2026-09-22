@@ -34,8 +34,8 @@ export async function apiGet(path, { auth = false, accept = [] } = {}) {
 
 // POST JSON. `accept` lists non-2xx statuses to return rather than throw.
 // On error, surfaces the problem+json `detail` when present.
-export async function apiPost(path, body, { auth = false, accept = [] } = {}) {
-  const headers = { accept: 'application/json', 'content-type': 'application/json' };
+export async function apiPost(path, body, { auth = false, accept = [], headers: extra = {} } = {}) {
+  const headers = { accept: 'application/json', 'content-type': 'application/json', ...extra };
   if (auth) {
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;

@@ -1,16 +1,44 @@
 <script>
+  import { onMount } from 'svelte';
   import SectionHeader from '$lib/components/SectionHeader.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { LINKAGES, LINKAGE_COLUMNS, linkageTone } from '$lib/data.js';
+  import { linkageTone } from '$lib/data.js';
+  import { linkageCtx, linkageView, loadLinkages, loadLinkageDetail, decideLinkage } from '$lib/linkage.svelte.js';
 
-  let selectedId = $state(LINKAGES[0].linkage_id);
-  let l = $derived(LINKAGES.find((x) => x.linkage_id === selectedId) ?? LINKAGES[0]);
-  const open = $derived(l.state === 'proposed' || l.state === 'suspected');
-  const pending = LINKAGES.filter((x) => x.state === 'proposed' || x.state === 'suspected').length;
-  const tierDot = (t) => (t === 'critical' ? 'var(--red)' : t === 'high' ? 'var(--accent)' : 'var(--border-strong)');
+  // Columns are the fields /v1/linkages returns. No `tier` (severity) — the API
+  // carries no such field; the pair is UUID-short (handles resolve in detail).
+  const COLUMNS = [
+    { key: 'idShort', header: 'Linkage', mono: true, width: '96px' },
+    { key: 'pair', header: 'Pair', mono: true },
+    { key: 'state', header: 'State', badge: true, tone: linkageTone, width: '110px' },
+    { key: 'method', header: 'Method', mono: true, width: '120px' },
+    { key: 'scoreText', header: 'Score', mono: true, align: 'right', width: '80px' }
+  ];
+
+  let selectedId = $state(null);
+  let sel = $derived(linkageCtx.list.find((x) => x.id === selectedId) ?? linkageCtx.list[0] ?? null);
+  let open = $derived(sel && (sel.state === 'proposed' || sel.state === 'suspected'));
+  let pending = $derived(linkageCtx.list.filter((x) => x.state === 'proposed' || x.state === 'suspected').length);
+
+  let reason = $state('');
+  let note = $state('');
+
+  // Fetch the selected linkage's evidence + actor handles whenever selection moves.
+  $effect(() => {
+    if (sel) loadLinkageDetail(sel.id, sel.actorAId, sel.actorBId);
+  });
+
+  onMount(loadLinkages);
+
+  async function decide(kind) {
+    if (!reason.trim() || !sel) return;
+    await decideLinkage(sel.id, kind, reason.trim(), note.trim());
+    reason = '';
+    note = '';
+  }
 </script>
 
 <main>
@@ -20,66 +48,74 @@
 
   <div class="body">
     <div class="table-col">
-      <DataTable rowKey="linkage_id" columns={LINKAGE_COLUMNS} rows={LINKAGES}
-        selectedId={selectedId} onRowClick={(r) => (selectedId = r.linkage_id)} />
+      {#if linkageCtx.list.length}
+        <DataTable rowKey="id" columns={COLUMNS} rows={linkageCtx.list}
+          selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
+      {:else}
+        <p class="pnote">
+          {#if !linkageCtx.loaded}Loading…{:else if linkageCtx.error}Could not load linkages: {linkageCtx.error}{:else}No linkages proposed yet.{/if}
+        </p>
+      {/if}
     </div>
 
-    <div class="detail-col">
-      <!-- Pair -->
-      <div class="pair-card">
-        <div class="pair-head">
-          <span class="lid">{l.linkage_id}</span>
-          <Badge tone={linkageTone(l.state)} dot>{l.state}</Badge>
-        </div>
-        <div class="pair">
-          <a class="chip" href="/actors" title={l.actor_a.id}>
-            <span class="dot" style="background:{tierDot(l.actor_a.tier)}"></span>
-            <span class="chandle">{l.actor_a.handle}</span>
-            <span class="cid">{l.actor_a.id}</span>
-          </a>
-          <span class="link-glyph">↔</span>
-          <a class="chip" href="/actors" title={l.actor_b.id}>
-            <span class="dot" style="background:{tierDot(l.actor_b.tier)}"></span>
-            <span class="chandle">{l.actor_b.handle}</span>
-            <span class="cid">{l.actor_b.id}</span>
-          </a>
-        </div>
-        <div class="meta">
-          <span class="m"><span class="k">Method</span> {l.method}</span>
-          <span class="m"><span class="k">Score</span> {l.score.toFixed(2)}</span>
-          <span class="m"><span class="k">Proposed</span> {l.proposed_at}</span>
-          {#if l.decided_at}<span class="m"><span class="k">Decided</span> {l.decided_at} · {l.decided_by}</span>{/if}
-        </div>
-      </div>
-
-      <Panel title="Evidence (comparators)">
-        {#each l.evidence as e}
-          <div class="erow">
-            <span class="ecmp">{e.comparator}</span>
-            <span class="escore">{e.score.toFixed(2)}</span>
-            <span class="edetail">{e.detail}</span>
+    {#if sel}
+      <div class="detail-col">
+        <div class="pair-card">
+          <div class="pair-head">
+            <span class="lid">{sel.id}</span>
+            <Badge tone={linkageTone(sel.state)} dot>{sel.state}</Badge>
           </div>
-        {/each}
-      </Panel>
-
-      <div class="decision">
-        <div class="decision-label">Operator decision</div>
-        {#if open}
-          <input class="field" type="text" placeholder="Reason (required)" />
-          <textarea class="field area" rows="2" placeholder="Note (optional)"></textarea>
-          <div class="actions">
-            <Button variant="primary" size="sm">Confirm</Button>
-            {#if l.state === 'proposed'}<Button variant="ghost" size="sm">Suspect</Button>{/if}
-            <Button variant="destructive" size="sm">Reject</Button>
+          <div class="pair">
+            <a class="chip" href="/actors" title={sel.actorAId}>
+              <span class="chandle">{linkageView.handleA ?? sel.actorAId.slice(0, 8)}</span>
+              <span class="cid">{sel.actorAId}</span>
+            </a>
+            <span class="link-glyph">↔</span>
+            <a class="chip" href="/actors" title={sel.actorBId}>
+              <span class="chandle">{linkageView.handleB ?? sel.actorBId.slice(0, 8)}</span>
+              <span class="cid">{sel.actorBId}</span>
+            </a>
           </div>
-          {#if l.state === 'suspected'}
-            <p class="hint">Suspected by the Verifier. Confirming triggers persona aggregation.</p>
+          <div class="meta">
+            <span class="m"><span class="k">Method</span> {sel.method || '—'}</span>
+            <span class="m"><span class="k">Score</span> {sel.scoreText}</span>
+            <span class="m"><span class="k">Proposed</span> {sel.proposedAt}</span>
+            {#if sel.decidedAt}<span class="m"><span class="k">Decided</span> {sel.decidedAt} · {sel.decidedBy}</span>{/if}
+          </div>
+        </div>
+
+        <Panel title="Evidence (comparators)">
+          {#each linkageView.evidence as e}
+            <div class="erow">
+              <span class="ecmp">{e.comparator}</span>
+              <span class="escore">{e.score}</span>
+              <span class="edetail">{e.detail}</span>
+            </div>
+          {:else}
+            <p class="pnote">{linkageView.loading ? 'Loading…' : 'No comparator evidence recorded.'}</p>
+          {/each}
+        </Panel>
+
+        <div class="decision">
+          <div class="decision-label">Operator decision</div>
+          {#if open}
+            <input class="field" type="text" bind:value={reason} placeholder="Reason (required)" disabled={linkageView.submitting} />
+            <textarea class="field area" rows="2" bind:value={note} placeholder="Note (optional)" disabled={linkageView.submitting}></textarea>
+            <div class="actions">
+              <Button variant="primary" size="sm" disabled={linkageView.submitting || !reason.trim()} onclick={() => decide('confirm')}>Confirm</Button>
+              {#if sel.state === 'proposed'}<Button variant="ghost" size="sm" disabled={linkageView.submitting || !reason.trim()} onclick={() => decide('suspect')}>Suspect</Button>{/if}
+              <Button variant="destructive" size="sm" disabled={linkageView.submitting || !reason.trim()} onclick={() => decide('reject')}>Reject</Button>
+            </div>
+            {#if sel.state === 'suspected'}
+              <p class="hint">Suspected by the Verifier. Confirming triggers persona aggregation.</p>
+            {/if}
+          {:else}
+            <p class="settled">{sel.state} {sel.decidedBy ? `by ${sel.decidedBy} ` : ''}{sel.decidedAt ? `at ${sel.decidedAt}` : ''}. Terminal state.</p>
           {/if}
-        {:else}
-          <p class="settled">{l.state === 'confirmed' ? 'Confirmed' : l.state === 'rejected' ? 'Rejected' : l.state} by {l.decided_by} at {l.decided_at}. Terminal state.</p>
-        {/if}
+          {#if linkageView.submitMsg}<p class="submitmsg">{linkageView.submitMsg}</p>{/if}
+        </div>
       </div>
-    </div>
+    {/if}
   </div>
 </main>
 
@@ -90,14 +126,14 @@
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .table-col { min-height: 0; overflow: auto; }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
+  .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 
   .pair-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
   .pair-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .lid { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--accent-text); }
+  .lid { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--accent-text); overflow: hidden; text-overflow: ellipsis; }
   .pair { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); text-decoration: none; transition: border-color 120ms ease; }
   .chip:hover { border-color: var(--accent); }
-  .dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
   .chandle { font-family: var(--font-mono); font-size: var(--fs-13); letter-spacing: var(--tracking-data); color: var(--text-body); }
   .cid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .link-glyph { font-family: var(--font-mono); font-size: var(--fs-16); color: var(--accent-text); }
@@ -116,10 +152,12 @@
   .field { width: 100%; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; }
   .field:focus { outline: none; border-color: var(--accent); }
   .field::placeholder { color: var(--text-faint); }
+  .field:disabled { opacity: 0.6; }
   .area { resize: vertical; font-family: var(--font-sans); }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .hint { margin: 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); line-height: var(--lh-normal); }
   .settled { margin: 0; font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-muted); }
+  .submitmsg { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
 
   @media (max-width: 900px) { .body { grid-template-columns: 1fr; overflow: auto; } }
 </style>
