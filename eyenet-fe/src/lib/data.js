@@ -158,30 +158,7 @@ export const GRAPH_COLUMNS = [
   { key: 'degree', header: 'Degree', mono: true, align: 'right', width: '90px' }
 ];
 
-// ── Sources (discovery storage surface) ──────────────────────────────────────
-// state: active | paused
-const SOURCE_TONE = { active: 'neutral', paused: 'low' };
-export const sourceTone = (s) => SOURCE_TONE[s] ?? 'neutral';
-
-export const SOURCES = [
-  { id: 'SRC-0007', platform: 'telegram', name: 'loader-ops',       state: 'active', domainCount: 3, lastIngest: '2026-09-20 12:04Z',
-    domains: ['loader-ops', 'loader-ops-2', 'svc-cdn[.]net'] },
-  { id: 'SRC-0012', platform: 'matrix',   name: '#staging:svc-cdn', state: 'active', domainCount: 1, lastIngest: '2026-09-20 11:58Z',
-    domains: ['svc-cdn.net'] },
-  { id: 'SRC-0005', platform: 'telegram', name: 'fin-sector-chat',  state: 'active', domainCount: 2, lastIngest: '2026-09-20 09:12Z',
-    domains: ['fin-sector-chat', 'supplier-portal'] },
-  { id: 'SRC-0003', platform: 'telegram', name: 'phishing-infra',   state: 'paused', domainCount: 0, lastIngest: '2026-09-15 17:40Z',
-    domains: [] }
-];
-
-export const SOURCE_COLUMNS = [
-  { key: 'id', header: 'Source', mono: true, width: '96px' },
-  { key: 'platform', header: 'Platform', mono: true, width: '90px' },
-  { key: 'name', header: 'Name', mono: true },
-  { key: 'state', header: 'State', badge: true, tone: sourceTone, width: '96px' },
-  { key: 'domainCount', header: 'Domains', mono: true, align: 'right', width: '90px' },
-  { key: 'lastIngest', header: 'Last ingest', mono: true, align: 'right', width: '160px' }
-];
+// Sources mocks removed — /sources is wired to GET /v1/sources (+ /{id}).
 
 // ── Collectors (fleet) ───────────────────────────────────────────────────────
 // state: running | degraded | stopped

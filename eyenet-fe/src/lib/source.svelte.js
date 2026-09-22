@@ -44,21 +44,33 @@ export const sourceView = $state({
   error: null
 });
 
+// Monotonic token so a slow detail fetch can't land after a newer selection
+// and show the wrong source's domains.
+let detailSeq = 0;
+
 export async function loadSourceDetail(sourceId) {
+  const mine = ++detailSeq;
   sourceView.loading = true;
   sourceView.sourceId = sourceId;
+  // Clear stale detail immediately so a row switch never shows the prior
+  // source's domains/count while the new fetch is in flight.
+  sourceView.domains = [];
+  sourceView.resolvedCount = 0;
+  sourceView.error = null;
   try {
     const detail = await apiGet(`/v1/sources/${sourceId}`, { auth: true });
+    if (mine !== detailSeq) return; // a newer selection superseded this one
     sourceView.domains = (detail.domains ?? [])
       .filter((d) => d.removed_at == null)
       .map((d) => d.pattern);
     sourceView.resolvedCount = detail.resolved_artifact_count ?? 0;
     sourceView.error = null;
   } catch (e) {
+    if (mine !== detailSeq) return;
     sourceView.error = e.message ?? String(e);
     sourceView.domains = [];
     sourceView.resolvedCount = 0;
   } finally {
-    sourceView.loading = false;
+    if (mine === detailSeq) sourceView.loading = false;
   }
 }
