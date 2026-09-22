@@ -471,6 +471,26 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/personas:
+    get:
+      tags: [personas]
+      operationId: personas_list
+      summary: List all personas, newest-first (browse surface).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of persona summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPagePersonaSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/personas/{persona_id}:
     get:
       tags: [personas]
@@ -2814,6 +2834,14 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/PersonaMember' }
+    CursorPagePersonaSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PersonaSummary' }
     CursorPageLinkageSummary:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }

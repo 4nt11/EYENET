@@ -145,6 +145,7 @@ from eyenet.api.v1.panic.api_panic import router as control_panic_router
 # === personas ===
 from eyenet.api.v1.personas.api_get_persona import router as personas_get_router
 from eyenet.api.v1.personas.api_list_members import router as personas_members_router
+from eyenet.api.v1.personas.api_list_personas import router as personas_list_router
 from eyenet.api.v1.personas.api_merge_persona import router as personas_merge_router
 from eyenet.api.v1.personas.api_split_persona import router as personas_split_router
 
@@ -220,6 +221,7 @@ v1_router.include_router(actors_observations_router)
 v1_router.include_router(actors_timeline_router)
 
 # personas
+v1_router.include_router(personas_list_router)  # /personas (literal) before /personas/{id}
 v1_router.include_router(personas_get_router)
 v1_router.include_router(personas_members_router)
 v1_router.include_router(personas_merge_router)

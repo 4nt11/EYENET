@@ -1170,6 +1170,11 @@ class BaseRepository(ABC):
     @abstractmethod
     async def all_personas(self) -> list[object]: ...
 
+    @abstractmethod
+    async def list_personas(self, *, limit: int, offset: int = 0) -> list[object]:
+        """Paginated persona list, newest-first; PersonaTable rows type-erased.
+        Pairs with :meth:`count_personas` for the browse surface."""
+
     # =================================================================
     # FEEDBACK (M8 verifier)
     # =================================================================
