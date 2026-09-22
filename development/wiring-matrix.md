@@ -61,3 +61,21 @@ Result of the read-only discovery pass over `eyenet-fe` mockup pages vs
 `development/demo_seed.py` seeds a source/group/actors/messages + collector +
 linkage + a visible case (owner-collaborator) with members + a candidate. Run
 with the API stopped: `.venv/bin/python development/demo_seed.py --data-dir data`.
+
+## Review loop (MANDATORY before merging a wired page)
+`bun run build` only prerenders the fallback shell (`ssr=false`), so it does NOT
+execute page `<script>`s — a runtime fault (TDZ, undefined access) compiles
+clean and only crashes in a browser. This bit PR #3 (a `statusTone` TDZ that
+white-screened `/clearance`, invisible to the build). So every review runs the
+headless smoke:
+
+```
+bun run dev            # (or any server) then, in another shell:
+bun run smoke          # eyenet-fe/smoke.mjs — Playwright, mocks the API + seeds
+                       # a token, loads every discovered route, FAILS on any
+                       # uncaught pageerror/console error. Exit 1 = a route throws.
+```
+
+It auto-discovers routes from `src/routes`, so new pages are covered for free.
+`EYENET_SMOKE_URL` overrides the target (default `http://localhost:5173`).
+Build-passes is necessary but NOT sufficient — smoke-passes is the gate.
