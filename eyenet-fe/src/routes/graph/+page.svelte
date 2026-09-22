@@ -88,7 +88,7 @@
       {/if}
     </Panel>
 
-    <p class="note">Topology view (node-link canvas) needs a graph-traversal endpoint that
+    <p class="footnote">Topology view (node-link canvas) needs a graph-traversal endpoint that
       doesn't exist yet · this category only exposes <code>stats</code> and <code>search</code>.</p>
   </div>
 </main>
@@ -123,9 +123,11 @@
   :global(.panel.grow) { min-height: 160px; }
   .count { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .empty { padding: 20px; font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-muted); }
+  /* Boxed inline notice (stats unavailable / needs read:graph). */
   .note { margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
-  .note:last-child { margin: 12px 0 0; }
-  .note code { color: var(--accent-text); }
+  .note code { color: var(--accent-text); background: none; padding: 0; }
+  /* Quiet unboxed footnote (no-topology-endpoint note). */
+  .footnote { margin: 12px 0 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); line-height: var(--lh-normal); }
+  .footnote code { color: var(--accent-text); }
   code { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-body); background: var(--surface); padding: 1px 5px; border-radius: var(--radius-sm); }
-  .note code { background: none; padding: 0; }
 </style>
