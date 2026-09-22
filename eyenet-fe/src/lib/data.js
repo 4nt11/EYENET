@@ -56,23 +56,8 @@ export const NEW_EVENTS = [
 ];
 
 // ── Clearance ──────────────────────────────────────────────────────────────
-export const CLEARANCE_GRANTS = [
-  { id: 'GRANT-0042', user: 'op.krieg',  scope: 'read:restricted', tier: 'critical', status: 'active',  grantedBy: 'op.admin', expires: '2026-10-04 00:00Z' },
-  { id: 'GRANT-0041', user: 'op.vega',   scope: 'read:restricted', tier: 'high',     status: 'active',  grantedBy: 'op.admin', expires: '2026-09-28 00:00Z' },
-  { id: 'GRANT-0039', user: 'op.krieg',  scope: 'admin:reclassify', tier: 'critical', status: 'active', grantedBy: 'op.admin', expires: '2026-09-24 12:00Z' },
-  { id: 'GRANT-0037', user: 'op.reyes',  scope: 'read:restricted', tier: 'medium',   status: 'expired', grantedBy: 'op.admin', expires: '2026-09-19 00:00Z' },
-  { id: 'GRANT-0033', user: 'svc.export', scope: 'read:restricted', tier: 'high',    status: 'revoked', grantedBy: 'op.admin', expires: '2026-09-30 00:00Z' }
-];
-
-export const CLEARANCE_COLUMNS = [
-  { key: 'id', header: 'Grant', mono: true, width: '110px' },
-  { key: 'user', header: 'User', mono: true, width: '110px' },
-  { key: 'scope', header: 'Scope', mono: true },
-  { key: 'tier', header: 'Sensitivity', width: '110px', badge: true },
-  { key: 'grantedBy', header: 'Granted by', mono: true, width: '110px' },
-  { key: 'expires', header: 'Expires', mono: true, width: '170px' },
-  { key: 'status', header: 'Status', align: 'right', width: '90px' }
-];
+// /clearance is wired to the live API (/v1/clearance/grants); the former
+// CLEARANCE_GRANTS / CLEARANCE_COLUMNS mocks were retired with that cutover.
 
 // ── Audit ──────────────────────────────────────────────────────────────────
 export const AUDIT_VERIFY = { verified: true, entries: 18432, lastAnchor: 'sha256:9f2c…4e1a', anchoredAt: '2026-09-20 00:00:00Z' };
