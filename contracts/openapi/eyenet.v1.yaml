@@ -1119,6 +1119,61 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/documents/{document_id}/manifest:
+    get:
+      tags: [documents]
+      operationId: documents_manifest
+      summary: Manifest envelope (metadata only — NO content bytes).
+      description: |
+        Step 1 of the document access flow. Returns content hash, size, mime,
+        tier, the redacted classification record, and a single-use
+        `access_nonce` (60s TTL) required to POST the matching
+        `FileAccessAcknowledgment`. Clearance-gated: a caller who cannot read
+        the effective tier gets 403 before any metadata leaks. Calling this
+        endpoint is not access — no journal row is appended.
+      parameters:
+        - { $ref: '#/components/parameters/DocumentIdPath' }
+      responses:
+        "200":
+          description: Manifest envelope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentManifest' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/documents/{document_id}/access:
+    post:
+      tags: [documents]
+      operationId: documents_access
+      summary: Acknowledged binary fetch (signed; journaled).
+      description: |
+        Step 2 of the document access flow. Body is the signed acknowledgment.
+        Server verifies operator signature, validates clearance scope against
+        the row's tier, appends a `file_access_journal` row, then streams bytes.
+        Failure at any step yields a 4xx and NO bytes flow.
+      parameters:
+        - { $ref: '#/components/parameters/DocumentIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileAccessAcknowledgment' }
+      responses:
+        "200":
+          description: Binary content stream. Content-Type matches the manifest's `content_mime`.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   # ── Reclassification (API_PLAN §4.9) ────────────────────────────────────
   /v1/observations/{observation_id}/reclassify:
     post:
@@ -1168,6 +1223,39 @@ paths:
         receive a `RedactionMarker` envelope on manifest, and 403 on access.
       parameters:
         - { $ref: '#/components/parameters/BlobIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReclassificationRequest' }
+      responses:
+        "200":
+          description: Promotion applied. Row's `operator_tier_override` updated; audit event written.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReclassificationResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/documents/{document_id}/reclassify:
+    post:
+      tags: [reclassify]
+      operationId: documents_reclassify
+      summary: Promote a document's sensitivity tier (signed; audited).
+      description: |
+        §4.9 reclassification for document rows. Same contract as
+        `observations_reclassify` — monotone promotion only, mandatory signed
+        body, `admin:reclassify` required. Emits
+        `eyenet.audit.reclassify.document` or `eyenet.audit.reclassify.rejected`.
+        Affects subsequent calls to `/v1/documents/{document_id}/manifest` and
+        `/v1/documents/{document_id}/access` — readers below the new tier
+        receive a `RedactionMarker` envelope on manifest, and 403 on access.
+      parameters:
+        - { $ref: '#/components/parameters/DocumentIdPath' }
       requestBody:
         required: true
         content:
@@ -2411,6 +2499,12 @@ components:
       required: true
       description: Attachment blob identifier (uuid7).
       schema: { type: string, format: uuid }
+    DocumentIdPath:
+      name: document_id
+      in: path
+      required: true
+      description: Document row identifier (uuid7).
+      schema: { type: string, format: uuid }
     GrantIdPath:
       name: grant_id
       in: path
@@ -3272,6 +3366,35 @@ components:
         collected_at:        { type: string, format: date-time }
         access_nonce:        { type: string, format: uuid }
         nonce_expires_at:    { type: string, format: date-time }
+    DocumentManifest:
+      description: |
+        Metadata + provenance envelope returned by
+        `GET /v1/documents/{document_id}/manifest` (step 1 of the document
+        access flow). Contains no content bytes. `classification` is the
+        already-redacted classification record persisted on the row (masked
+        spans, no raw evidence text) so returning it leaks no content. The
+        `access_nonce` is single-use, 60s TTL, and required to POST the matching
+        `FileAccessAcknowledgment`. Calling the manifest appends no
+        file-access-journal row: it is not an access.
+      type: object
+      additionalProperties: false
+      required:
+        [document_id, content_hash, content_size, content_mime, tier,
+         review_required, uploaded_at, ingested_at, access_nonce, nonce_expires_at]
+      properties:
+        document_id:      { type: string, format: uuid }
+        content_hash:     { type: string, pattern: '^[0-9a-f]{64}$' }
+        content_size:     { type: integer, minimum: 0 }
+        content_mime:     { type: string, maxLength: 128 }
+        tier:             { $ref: '#/components/schemas/SensitivityTier' }
+        filename:         { type: string, nullable: true }
+        doc_kind:         { type: string, nullable: true }
+        review_required:  { type: boolean }
+        classification:   { type: object, additionalProperties: true }
+        uploaded_at:      { type: string, format: date-time }
+        ingested_at:      { type: string, format: date-time }
+        access_nonce:     { type: string, format: uuid }
+        nonce_expires_at: { type: string, format: date-time }
     # FileAccessAcknowledgment: case_refs is REQUIRED when the row is classified
     # (§4.10.4 hybrid rule). Optional otherwise. Server enforces.
     FileAccessAcknowledgment:

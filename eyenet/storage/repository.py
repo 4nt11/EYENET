@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     )
     from eyenet.contracts.event_log import EventLogRow
     from eyenet.contracts.feedback import FeedbackPairRow
+    from eyenet.contracts.file_access import FileAccessJournalRow
     from eyenet.contracts.idempotency import IdempotencyRecordRow, ReserveResult
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
@@ -82,6 +83,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.source import SourceBridgeSummary, SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
     from eyenet.contracts.system_user import SystemUserRow
+    from eyenet.storage.reclassify import ReclassifyOutcome
 
 
 class BaseRepository(ABC):
@@ -568,6 +570,36 @@ class BaseRepository(ABC):
         """Walk the file-access journal; recompute every ``self_hash`` and
         confirm linkage. False on the first broken/tampered/reordered link."""
 
+    @abstractmethod
+    async def list_file_access_by_content_hash(
+        self,
+        content_hash: bytes,
+    ) -> list[FileAccessJournalRow]:
+        """All journal rows served under ``content_hash`` (§5.8 by-hash exoneration).
+
+        Insertion/chain order ascending. An empty list is a POSITIVE assertion
+        of non-access for that content hash."""
+
+    @abstractmethod
+    async def list_file_access_by_user(
+        self,
+        user_id: UUID,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[FileAccessJournalRow]:
+        """A user's journal rows within ``[since, until]`` (§5.8 by-user query).
+
+        Insertion/chain order ascending. Bounds are inclusive when supplied."""
+
+    @abstractmethod
+    async def file_access_journal_head(self) -> bytes:
+        """``self_hash`` of the current journal head, or 32 zero bytes if empty.
+
+        Reads the head the SAME way the append path chains a new row (the
+        max-rowid row's ``self_hash``) so a signed ``journal_head_at_query``
+        pins the exact chain state the exoneration was computed against."""
+
     # =================================================================
     # OBSERVATIONS (MODELS §2.3, API_PLAN §4.9)
     # =================================================================
@@ -629,15 +661,23 @@ class BaseRepository(ABC):
         new_tier: SensitivityTier,
         operator_user_id: UUID,
         reason: str,
+        grant_id: UUID,
+        operator_signature_pubkey_fingerprint: str,
+        viewing_context: str | None = None,
+        case_refs: list[UUID] | None = None,
         now: datetime | None = None,
         service: str,
         instance_id: str,
         trace_id: str | None = None,
         span_id: str | None = None,
-    ) -> object:
-        """Monotone-up only; demotion raises
-        :class:`ReclassifyDemotionError` and emits
-        ``reclassify.rejected``."""
+    ) -> ReclassifyOutcome:
+        """Operator monotone-up tier promotion (§4.9).
+
+        Writes ``operator_tier_override`` and emits ``reclassify.observation``
+        with the full §4.9 audit payload (user_id, grant_id, prior/new/classifier
+        tier, reason, viewing_context, key fingerprint, case_refs). Demotion
+        raises :class:`ReclassifyDemotionError` and emits ``reclassify.rejected``.
+        A same-tier call is a no-op (``audit_event_id is None``)."""
 
     # =================================================================
     # ATTACHMENTS (MODELS §2.9, API_PLAN §4.9)
@@ -669,12 +709,20 @@ class BaseRepository(ABC):
         new_tier: SensitivityTier,
         operator_user_id: UUID,
         reason: str,
+        grant_id: UUID,
+        operator_signature_pubkey_fingerprint: str,
+        viewing_context: str | None = None,
+        case_refs: list[UUID] | None = None,
         now: datetime | None = None,
         service: str,
         instance_id: str,
         trace_id: str | None = None,
         span_id: str | None = None,
-    ) -> object: ...
+    ) -> ReclassifyOutcome:
+        """Operator monotone-up tier promotion for an attachment (§4.9).
+
+        Same contract as :meth:`reclassify_observation`; the audit payload also
+        carries the blob ``content_hash``. Emits ``reclassify.attachment``."""
 
     # =================================================================
     # DOCUMENTS (MODELS §2.10, M10 classifier)
@@ -703,6 +751,29 @@ class BaseRepository(ABC):
 
         Overwrites the staged row's classification fields once the async
         pipeline finishes. Idempotent on replay (deterministic verdict)."""
+
+    @abstractmethod
+    async def reclassify_document(
+        self,
+        *,
+        document_id: UUID,
+        new_tier: SensitivityTier,
+        operator_user_id: UUID,
+        reason: str,
+        grant_id: UUID,
+        operator_signature_pubkey_fingerprint: str,
+        viewing_context: str | None = None,
+        case_refs: list[UUID] | None = None,
+        now: datetime | None = None,
+        service: str,
+        instance_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> ReclassifyOutcome:
+        """Operator monotone-up tier promotion for a document (§4.9).
+
+        Same contract as :meth:`reclassify_attachment`; emits
+        ``reclassify.document`` with the document ``content_hash``."""
 
     # =================================================================
     # MESSAGES (PLAN §4.3, MODELS §1.4)

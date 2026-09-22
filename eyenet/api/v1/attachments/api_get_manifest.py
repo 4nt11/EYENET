@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """GET /v1/attachments/{blob_id}/manifest — metadata only, no bytes (§5.6 step 1).
 
-PHASE-5: NORMAL-tier only. A non-NORMAL effective tier fails CLOSED with 403
-("clearance gating not yet implemented" — PHASE-6) and leaks NO metadata. For
-NORMAL rows the handler mints a fresh single-use acknowledgment nonce (a new
-one each call) and returns the safe :class:`FileManifest` envelope. Calling
-this endpoint appends NO file-access-journal row — it is not access.
+Clearance-gated (§4.6-4.8): NORMAL is open to any authenticated caller;
+RESTRICTED/CLASSIFIED require the matching ``read:*`` scope or the request 403s
+BEFORE leaking any metadata (hash/size/mime). For readable rows the handler
+mints a fresh single-use acknowledgment nonce (a new one each call) and returns
+the safe :class:`FileManifest` envelope. Calling this endpoint appends NO
+file-access-journal row — it is not access.
 """
 
 from __future__ import annotations
@@ -19,12 +20,11 @@ from fastapi import APIRouter, Depends
 from eyenet.api.deps import (
     CurrentUser,
     ResourceNotFound,
-    ScopeForbidden,
     get_current_user,
     get_storage,
 )
+from eyenet.api.v1._clearance import enforce_tier_clearance
 from eyenet.api.v1.schemas.attachments import FileManifest
-from eyenet.contracts.enums import SensitivityTier
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["attachments"])
@@ -49,10 +49,9 @@ async def attachments_manifest(
         raise ResourceNotFound(f"attachment:{blob_id}")
 
     effective_tier = row.operator_tier_override or row.classifier_tier
-    if effective_tier is not SensitivityTier.NORMAL:
-        # FAIL CLOSED: clearance gating for non-NORMAL tiers is PHASE-6. Do not
-        # leak classified metadata (hash/size/mime) through the manifest.
-        raise ScopeForbidden("clearance gating not yet implemented")
+    # Clearance gate (§4.6-4.8): 403 before any metadata leaks if the caller lacks
+    # the read:* scope for this tier. NORMAL passes for any authenticated caller.
+    enforce_tier_clearance(current_user, effective_tier)
 
     now = datetime.now(tz=UTC)
     access_nonce = await storage.record_acknowledgment(

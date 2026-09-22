@@ -73,6 +73,8 @@ async def test_reclassify_promote_succeeds_and_audits(storage: BaseRepository) -
         new_tier=SensitivityTier.RESTRICTED,
         operator_user_id=uuid4(),
         reason="promoting after manual operator review",
+        grant_id=uuid4(),
+        operator_signature_pubkey_fingerprint="fp0",
         service="test",
         instance_id="t0",
     )
@@ -87,6 +89,8 @@ async def test_reclassify_demotion_is_rejected(storage: BaseRepository) -> None:
             new_tier=SensitivityTier.NORMAL,
             operator_user_id=uuid4(),
             reason="attempting to demote which is monotone-forbidden",
+            grant_id=uuid4(),
+            operator_signature_pubkey_fingerprint="fp0",
             service="test",
             instance_id="t0",
         )
@@ -99,6 +103,8 @@ async def test_reclassify_same_tier_is_noop(storage: BaseRepository) -> None:
         new_tier=SensitivityTier.NORMAL,
         operator_user_id=uuid4(),
         reason="same-tier reclassify should be a no-op",
+        grant_id=uuid4(),
+        operator_signature_pubkey_fingerprint="fp0",
         service="test",
         instance_id="t0",
     )
@@ -113,6 +119,8 @@ async def test_reclassify_short_reason_raises(storage: BaseRepository) -> None:
             new_tier=SensitivityTier.RESTRICTED,
             operator_user_id=uuid4(),
             reason="too short",
+            grant_id=uuid4(),
+            operator_signature_pubkey_fingerprint="fp0",
             service="test",
             instance_id="t0",
         )
@@ -125,6 +133,8 @@ async def test_reclassify_missing_attachment_raises(storage: BaseRepository) -> 
             new_tier=SensitivityTier.RESTRICTED,
             operator_user_id=uuid4(),
             reason="reclassify a missing attachment row",
+            grant_id=uuid4(),
+            operator_signature_pubkey_fingerprint="fp0",
             service="test",
             instance_id="t0",
         )

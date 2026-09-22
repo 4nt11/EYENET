@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""POST /v1/attachments/{blob_id}/reclassify — §4.9 promotion.
+"""POST /v1/documents/{document_id}/reclassify — §4.9 promotion.
 
-Promote-only. Requires an active ``admin:reclassify`` grant AND a valid operator
-Ed25519 signature over the §5.7 canonical; a JWT alone never authorises. The
-signature binds ``content_hash = row.sha256`` so a captured signature cannot be
-replayed onto a different blob or different bytes. Storage is the monotone
-authority and self-audits; every refusal lands a ``reclassify.rejected`` row.
+Promote-only, mirroring the attachment surface. Requires an active
+``admin:reclassify`` grant AND a valid operator Ed25519 signature over the §5.7
+canonical; a JWT alone never authorises. The signature binds
+``content_hash = row.sha256`` (the host-side hash of the raw uploaded bytes).
+Storage is the monotone authority and self-audits; every refusal lands a
+``reclassify.rejected`` row.
 """
 
 from __future__ import annotations
@@ -27,13 +28,13 @@ router = APIRouter(tags=["reclassify"])
 
 
 @router.post(
-    "/attachments/{blob_id}/reclassify",
-    operation_id="attachments_reclassify",
+    "/documents/{document_id}/reclassify",
+    operation_id="documents_reclassify",
     response_model=ReclassificationResult,
     status_code=200,
 )
-async def attachments_reclassify(
-    blob_id: UUID,
+async def documents_reclassify(
+    document_id: UUID,
     body: ReclassificationRequest,
     request: Request,
     current_user: Annotated[
@@ -42,15 +43,15 @@ async def attachments_reclassify(
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
 ) -> ReclassificationResult:
-    row = await storage.get_attachment(blob_id)
+    row = await storage.get_document(document_id)
     if row is None:
-        raise ResourceNotFound(f"attachment:{blob_id}")
+        raise ResourceNotFound(f"document:{document_id}")
 
     async def _do(
         *, grant_id: UUID, operator_signature_pubkey_fingerprint: str
     ) -> ReclassifyOutcome:
-        return await storage.reclassify_attachment(
-            attachment_id=blob_id,
+        return await storage.reclassify_document(
+            document_id=document_id,
             new_tier=body.new_tier,
             operator_user_id=current_user.user_id,
             reason=body.reason,
@@ -63,8 +64,8 @@ async def attachments_reclassify(
         )
 
     return await perform_reclassify(
-        subject_kind=ReclassificationSubjectKind.ATTACHMENT,
-        subject_id=blob_id,
+        subject_kind=ReclassificationSubjectKind.DOCUMENT,
+        subject_id=document_id,
         content_hash=row.sha256,
         body=body,
         request=request,

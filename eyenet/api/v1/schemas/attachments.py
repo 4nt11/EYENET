@@ -103,7 +103,10 @@ class FileAccessJournalEntry(ApiSchema):
     """One row of `file_access_journal` (§5.6)."""
 
     access_id: UUID
-    audit_event_id: UUID = Field(description="FK → audit_log_event.id (§5.5 hash chain).")
+    audit_event_id: UUID | None = Field(
+        default=None,
+        description="FK to audit_log_event.id (§5.5 hash chain); null when unlinked.",
+    )
     user_id: UUID
     grant_id: UUID | None = Field(
         default=None,

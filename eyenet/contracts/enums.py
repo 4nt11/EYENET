@@ -208,6 +208,7 @@ class ReclassificationSubjectKind(StrEnum):
 
     OBSERVATION = "observation"
     ATTACHMENT = "attachment"
+    DOCUMENT = "document"
 
 
 class FileServedVia(StrEnum):
