@@ -366,6 +366,26 @@ paths:
   # ────────────────────────────────────────────────────────────────────────
   # 3.2 Reads
   # ────────────────────────────────────────────────────────────────────────
+  /v1/actors:
+    get:
+      tags: [actors]
+      operationId: actors_list
+      summary: List all actors, newest-activity first (browse surface).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of actor summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageActorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors/{actor_id}:
     get:
       tags: [actors]

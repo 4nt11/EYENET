@@ -1262,6 +1262,11 @@ class BaseRepository(ABC):
     @abstractmethod
     async def count_search_actors(self, q: str) -> int: ...
 
+    @abstractmethod
+    async def list_actors(self, *, limit: int, offset: int = 0) -> list[object]:
+        """All actors, newest-activity first; ActorTable rows type-erased.
+        Pairs with :meth:`count_actors` for the unfiltered list surface."""
+
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
     # =================================================================

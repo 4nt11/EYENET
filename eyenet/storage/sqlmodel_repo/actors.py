@@ -125,6 +125,24 @@ class ActorsMixin:
             result = await session.exec(stmt)
             return int(result.one())
 
+    async def list_actors(self, *, limit: int, offset: int = 0) -> list[object]:
+        """All actors, newest-activity first (the unfiltered list surface).
+
+        Same projection/ordering as :meth:`search_actors` without the substring
+        clause; pairs with the existing :meth:`count_actors` for paging.
+        Returns ``ActorTable`` rows (type-erased).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(ActorTable)
+                .order_by(col(ActorTable.last_seen_at_ingest).desc())
+                .order_by(col(ActorTable.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
     async def upsert_source(
         self,
         *,
