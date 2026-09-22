@@ -743,6 +743,53 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/identities:
+    get:
+      tags: [identities]
+      operationId: identities_list
+      summary: List the identity pool (read:collectors). OPSEC fields omitted.
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - name: source_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: role
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/IdentityRole' }
+        - name: state
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/IdentityState' }
+      responses:
+        "200":
+          description: Page of pool identities.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageIdentitySummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/identities/{identity_id}:
+    get:
+      tags: [identities]
+      operationId: identities_get
+      summary: One pool identity (read:collectors). OPSEC fields omitted.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+      responses:
+        "200":
+          description: Identity detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /v1/identities/{identity_id}/claim:
     post:
       tags: [identities]
@@ -3106,6 +3153,51 @@ components:
         computed_at:  { type: string, format: date-time }
 
     # ── Identities / control ──────────────────────────────────────────────
+    IdentityRole:
+      type: string
+      enum: [monitor, scout, quarantine]
+    IdentityState:
+      type: string
+      enum: [available, in_use, cooling, frozen, burned]
+    IdentitySummary:
+      description: |
+        List view of a pool identity. OPSEC fields (session_path, proxy_uri)
+        are intentionally omitted from the read surface.
+      type: object
+      additionalProperties: false
+      required: [identity_id, name, source_id, role, state]
+      properties:
+        identity_id:  { type: string, format: uuid }
+        name:         { type: string }
+        source_id:    { type: string, format: uuid }
+        role:         { $ref: '#/components/schemas/IdentityRole' }
+        state:        { $ref: '#/components/schemas/IdentityState' }
+        last_used_at: { type: string, format: date-time, nullable: true }
+    IdentityDetail:
+      description: Detail view of a pool identity. Same OPSEC omissions.
+      type: object
+      additionalProperties: false
+      required: [identity_id, name, source_id, role, state, cooldown_seconds]
+      properties:
+        identity_id:      { type: string, format: uuid }
+        name:             { type: string }
+        source_id:        { type: string, format: uuid }
+        role:             { $ref: '#/components/schemas/IdentityRole' }
+        state:            { $ref: '#/components/schemas/IdentityState' }
+        last_used_at:     { type: string, format: date-time, nullable: true }
+        cooldown_seconds: { type: integer }
+        graduated_at:     { type: string, format: date-time, nullable: true }
+        notes:            { type: string, nullable: true }
+    CursorPageIdentitySummary:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/IdentitySummary' }
+        next_cursor:     { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true, minimum: 0 }
     IdentityActionRequest:
       type: object
       additionalProperties: false
