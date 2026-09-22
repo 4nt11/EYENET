@@ -11,6 +11,7 @@ from sqlmodel import col, select
 
 from eyenet.contracts.feedback import FeedbackGroundTruth, FeedbackPairRow
 from eyenet.models.feedback import FeedbackPairTable
+from eyenet.models.linkage_verifier_result import LinkageVerifierResultTable
 
 from ._helpers import safe_session
 
@@ -95,6 +96,56 @@ class FeedbackMixin:
             result = await session.exec(select(FeedbackPairTable))
             rows = list(result)
         return [(r.actor_a_id, r.actor_b_id, r.ground_truth) for r in rows]
+
+    async def record_verifier_result(
+        self,
+        *,
+        linkage_id: UUID,
+        composite: float,
+        floor: float,
+        state: str,
+        results: list[dict[str, object]],
+        computed_at: datetime,
+    ) -> None:
+        """Persist the Verifier's settled composite + per-verifier scores for a
+        linkage. Idempotent on re-delivery (upserts on linkage_id)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            existing_result = await session.exec(
+                select(LinkageVerifierResultTable).where(
+                    col(LinkageVerifierResultTable.linkage_id) == linkage_id
+                )
+            )
+            existing = existing_result.first()
+            if existing is not None:
+                existing.composite = composite
+                existing.floor = floor
+                existing.state = state
+                existing.results = results
+                existing.computed_at = computed_at
+                session.add(existing)
+            else:
+                session.add(
+                    LinkageVerifierResultTable(
+                        linkage_id=linkage_id,
+                        composite=composite,
+                        floor=floor,
+                        state=state,
+                        results=results,
+                        computed_at=computed_at,
+                    )
+                )
+            await session.commit()
+
+    async def get_verifier_result(self, linkage_id: UUID) -> object | None:
+        """The settled Verifier result for a linkage, or None if never scored.
+        Returns a LinkageVerifierResultTable row (type-erased)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(LinkageVerifierResultTable).where(
+                    col(LinkageVerifierResultTable.linkage_id) == linkage_id
+                )
+            )
+            return result.first()
 
 
 __all__ = ["FeedbackMixin"]

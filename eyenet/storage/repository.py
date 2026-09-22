@@ -1201,6 +1201,25 @@ class BaseRepository(ABC):
     @abstractmethod
     async def all_feedback_pairs(self) -> list[tuple[UUID, UUID, str]]: ...
 
+    @abstractmethod
+    async def record_verifier_result(
+        self,
+        *,
+        linkage_id: UUID,
+        composite: float,
+        floor: float,
+        state: str,
+        results: list[dict[str, object]],
+        computed_at: datetime,
+    ) -> None:
+        """Persist the Verifier's settled composite + per-verifier scores;
+        idempotent on linkage_id."""
+
+    @abstractmethod
+    async def get_verifier_result(self, linkage_id: UUID) -> object | None:
+        """Settled Verifier result for a linkage (LinkageVerifierResultTable
+        row, type-erased), or None if never scored."""
+
     # =================================================================
     # ACTORS / SOURCES / GROUPS (ingest helpers, MODELS §1.x)
     # =================================================================

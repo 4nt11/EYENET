@@ -3334,6 +3334,32 @@ components:
             evidence:
               type: array
               items: { $ref: '#/components/schemas/LinkageEvidence' }
+            verifier:
+              oneOf:
+                - { $ref: '#/components/schemas/VerifierResultView' }
+                - { type: 'null' }
+    VerifierScore:
+      type: object
+      additionalProperties: false
+      required: [method, score, confidence]
+      properties:
+        method:     { type: string, maxLength: 64 }
+        score:      { type: number, format: float }
+        confidence: { type: number, format: float }
+        skipped:    { type: boolean }
+        detail:     { type: string }
+    VerifierResultView:
+      type: object
+      additionalProperties: false
+      required: [composite, floor, state, computed_at]
+      properties:
+        composite:   { type: number, format: float }
+        floor:       { type: number, format: float }
+        state:       { type: string, maxLength: 32 }
+        computed_at: { type: string, format: date-time }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/VerifierScore' }
     LinkageEvidence:
       type: object
       additionalProperties: false
