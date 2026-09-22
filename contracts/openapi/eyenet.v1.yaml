@@ -48,6 +48,16 @@ tags:
     description: Collector fleet management (M9.D2).
   - name: candidates
     description: GroupCandidate triage queue (M9.D3).
+  - name: cases
+    description: Case lifecycle, membership, collaborators and seed-roots (M9 Case API).
+  - name: documents
+    description: Document upload into the classifier ingest pipeline (M10).
+  - name: attachments
+    description: Byte-level evidence — manifest and signed, audited file access.
+  - name: reclassify
+    description: Operator-promote-only reclassification of observations and attachments.
+  - name: clearance
+    description: Sensitivity-clearance grants — list, grant, detail and revoke.
   - name: stream
     description: Server-Sent Events. Storage-backed replay via `Last-Event-ID`.
   - name: health
