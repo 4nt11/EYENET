@@ -56,23 +56,8 @@ export const NEW_EVENTS = [
 ];
 
 // ── Clearance ──────────────────────────────────────────────────────────────
-export const CLEARANCE_GRANTS = [
-  { id: 'GRANT-0042', user: 'op.krieg',  scope: 'read:restricted', tier: 'critical', status: 'active',  grantedBy: 'op.admin', expires: '2026-10-04 00:00Z' },
-  { id: 'GRANT-0041', user: 'op.vega',   scope: 'read:restricted', tier: 'high',     status: 'active',  grantedBy: 'op.admin', expires: '2026-09-28 00:00Z' },
-  { id: 'GRANT-0039', user: 'op.krieg',  scope: 'admin:reclassify', tier: 'critical', status: 'active', grantedBy: 'op.admin', expires: '2026-09-24 12:00Z' },
-  { id: 'GRANT-0037', user: 'op.reyes',  scope: 'read:restricted', tier: 'medium',   status: 'expired', grantedBy: 'op.admin', expires: '2026-09-19 00:00Z' },
-  { id: 'GRANT-0033', user: 'svc.export', scope: 'read:restricted', tier: 'high',    status: 'revoked', grantedBy: 'op.admin', expires: '2026-09-30 00:00Z' }
-];
-
-export const CLEARANCE_COLUMNS = [
-  { key: 'id', header: 'Grant', mono: true, width: '110px' },
-  { key: 'user', header: 'User', mono: true, width: '110px' },
-  { key: 'scope', header: 'Scope', mono: true },
-  { key: 'tier', header: 'Sensitivity', width: '110px', badge: true },
-  { key: 'grantedBy', header: 'Granted by', mono: true, width: '110px' },
-  { key: 'expires', header: 'Expires', mono: true, width: '170px' },
-  { key: 'status', header: 'Status', align: 'right', width: '90px' }
-];
+// /clearance is wired to the live API (/v1/clearance/grants); the former
+// CLEARANCE_GRANTS / CLEARANCE_COLUMNS mocks were retired with that cutover.
 
 // ── Audit ──────────────────────────────────────────────────────────────────
 export const AUDIT_VERIFY = { verified: true, entries: 18432, lastAnchor: 'sha256:9f2c…4e1a', anchoredAt: '2026-09-20 00:00:00Z' };
@@ -129,59 +114,9 @@ export const SYS_STATS = [
   { label: 'Active alerts', value: '1',        tone: 'critical', sub: 'beacon · CASE-0417' }
 ];
 
-// ── Graph (stats + node search · NO topology endpoint exists) ────────────────
-export const GRAPH_STATS = [
-  { label: 'Nodes',    value: '14,208' },
-  { label: 'Edges',    value: '38,914' },
-  { label: 'Actors',   value: '9,120' },
-  { label: 'Personas', value: '412', tone: 'accent' },
-  { label: 'Sources',  value: '27' },
-  { label: 'Linkages', value: '1,884' }
-];
+// Graph mocks removed — /graph is wired to GET /v1/graph/stats + /v1/graph/search.
 
-export const GRAPH_NODES = [
-  { id: 'ACT-3312', kind: 'actor',   label: 'krieg_wolf (UNC-3312)', degree: 214, tier: 'critical' },
-  { id: 'PER-0044', kind: 'persona', label: 'UNC-3312 (attributed persona)', degree: 96, tier: 'high' },
-  { id: 'ACT-2980', kind: 'actor',   label: 'silent_relay (UNC-2980)', degree: 141, tier: 'high' },
-  { id: 'SRC-0007', kind: 'source',  label: 'tg://loader-ops', degree: 58, tier: 'medium' },
-  { id: 'GRP-9981', kind: 'group',   label: 'loader-ops (telegram)', degree: 77, tier: 'medium' },
-  { id: 'ACT-1774', kind: 'actor',   label: 'ghostpost', degree: 33, tier: 'low' },
-  { id: 'PER-0031', kind: 'persona', label: 'UNC-2980 (attributed persona)', degree: 61, tier: 'high' },
-  { id: 'SRC-0012', kind: 'source',  label: 'matrix://#staging:svc-cdn.net', degree: 24, tier: 'low' }
-];
-
-export const GRAPH_COLUMNS = [
-  { key: 'id', header: 'Node', mono: true, width: '110px' },
-  { key: 'kind', header: 'Kind', mono: true, width: '90px' },
-  { key: 'label', header: 'Label', mono: true },
-  { key: 'tier', header: 'Tier', width: '96px', badge: true },
-  { key: 'degree', header: 'Degree', mono: true, align: 'right', width: '90px' }
-];
-
-// ── Sources (discovery storage surface) ──────────────────────────────────────
-// state: active | paused
-const SOURCE_TONE = { active: 'neutral', paused: 'low' };
-export const sourceTone = (s) => SOURCE_TONE[s] ?? 'neutral';
-
-export const SOURCES = [
-  { id: 'SRC-0007', platform: 'telegram', name: 'loader-ops',       state: 'active', domainCount: 3, lastIngest: '2026-09-20 12:04Z',
-    domains: ['loader-ops', 'loader-ops-2', 'svc-cdn[.]net'] },
-  { id: 'SRC-0012', platform: 'matrix',   name: '#staging:svc-cdn', state: 'active', domainCount: 1, lastIngest: '2026-09-20 11:58Z',
-    domains: ['svc-cdn.net'] },
-  { id: 'SRC-0005', platform: 'telegram', name: 'fin-sector-chat',  state: 'active', domainCount: 2, lastIngest: '2026-09-20 09:12Z',
-    domains: ['fin-sector-chat', 'supplier-portal'] },
-  { id: 'SRC-0003', platform: 'telegram', name: 'phishing-infra',   state: 'paused', domainCount: 0, lastIngest: '2026-09-15 17:40Z',
-    domains: [] }
-];
-
-export const SOURCE_COLUMNS = [
-  { key: 'id', header: 'Source', mono: true, width: '96px' },
-  { key: 'platform', header: 'Platform', mono: true, width: '90px' },
-  { key: 'name', header: 'Name', mono: true },
-  { key: 'state', header: 'State', badge: true, tone: sourceTone, width: '96px' },
-  { key: 'domainCount', header: 'Domains', mono: true, align: 'right', width: '90px' },
-  { key: 'lastIngest', header: 'Last ingest', mono: true, align: 'right', width: '160px' }
-];
+// Sources mocks removed — /sources is wired to GET /v1/sources (+ /{id}).
 
 // ── Collectors (fleet) ───────────────────────────────────────────────────────
 // state: running | degraded | stopped
