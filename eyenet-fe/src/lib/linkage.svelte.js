@@ -109,20 +109,37 @@ export async function loadLinkageDetail(id, actorAId, actorBId) {
   }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // decision ∈ {confirm, suspect, reject}. The POST is 202-accepted: the graph
-// applies the state transition asynchronously off the bus, so the row may not
-// flip immediately — we refresh and let it settle.
+// service applies the state transition asynchronously off the bus, so the row
+// doesn't flip on the response. We poll the linkage briefly for the applied
+// state, then refresh — and say so honestly if it hasn't landed (e.g. no graph
+// worker running).
 export async function decideLinkage(id, decision, reason, note) {
   linkageView.submitting = true;
   linkageView.submitMsg = null;
+  const before = linkageCtx.list.find((l) => l.id === id)?.state;
   try {
     await apiPost(
       `/v1/linkages/${id}/${decision}`,
       { reason, note: note || null },
       { auth: true, headers: { 'Idempotency-Key': crypto.randomUUID() } }
     );
-    linkageView.submitMsg = `${decision} submitted — the graph applies it asynchronously.`;
+    linkageView.submitMsg = `${decision} submitted — applying…`;
+    let applied = false;
+    for (let i = 0; i < 10; i++) {
+      await sleep(500);
+      const cur = await apiGet(`/v1/linkages/${id}`, { auth: true });
+      if (cur.state !== before) {
+        applied = true;
+        break;
+      }
+    }
     await loadLinkages();
+    linkageView.submitMsg = applied
+      ? `${decision} applied.`
+      : `${decision} submitted — pending apply (graph worker not caught up).`;
   } catch (e) {
     linkageView.submitMsg = `Failed: ${e.message ?? e}`;
   } finally {
