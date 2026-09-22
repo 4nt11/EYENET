@@ -141,10 +141,10 @@ export async function loadCandidateDetail(id, sourceId) {
   }
 }
 
-// Post an approve/reject/park. All three are 202 with the transition applied
+// Post an approve/reject/park/retry. All are 202 with the transition applied
 // synchronously in-handler, so the response body already carries the new state —
 // no poll loop needed. `body` differs per action: approve → {assigned_collector_id},
-// reject/park → {reason}.
+// reject/park → {reason}, retry → {} (no body).
 async function decide(id, sourceId, action, body, label) {
   candidateView.submitting = true;
   candidateView.submitMsg = null;
@@ -166,3 +166,7 @@ export const rejectCandidate = (id, sourceId, reason) =>
   decide(id, sourceId, 'reject', { reason }, 'Reject');
 export const parkCandidate = (id, sourceId, reason) =>
   decide(id, sourceId, 'park', { reason }, 'Park');
+// retry: failed → queued. Gated on admin:candidates (grant-only) server-side —
+// retrying a rejected join can burn identities — so a caller without the grant
+// gets a surfaced 403 in submitMsg.
+export const retryCandidate = (id, sourceId) => decide(id, sourceId, 'retry', {}, 'Retry');
