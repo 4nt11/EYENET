@@ -428,6 +428,21 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/calibration:
+    get:
+      tags: [calibration]
+      operationId: calibration_get
+      summary: The shipped linker/verifier calibration baseline (comparator + verifier tuning).
+      responses:
+        "200":
+          description: Calibration posture.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalibrationView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors/{actor_id}/neighbors:
     get:
       tags: [actors]
@@ -3143,6 +3158,38 @@ components:
       properties:
         actor_id:   { type: string, format: uuid }
         assessment: { type: string }
+    ComparatorCalibration:
+      type: object
+      additionalProperties: false
+      required: [name, language_blind_threshold]
+      properties:
+        name:                     { type: string, maxLength: 64 }
+        language_blind_threshold: { type: integer, minimum: 0, maximum: 64 }
+        per_lang:
+          type: object
+          additionalProperties: { type: integer, nullable: true }
+    VerifierCalibration:
+      type: object
+      additionalProperties: false
+      required: [name, language_blind_floor]
+      properties:
+        name:                 { type: string, maxLength: 64 }
+        language_blind_floor: { type: number, format: float, minimum: 0, maximum: 1 }
+        per_lang:
+          type: object
+          additionalProperties: { type: number, format: float, nullable: true }
+    CalibrationView:
+      type: object
+      additionalProperties: false
+      required: [composite_floor]
+      properties:
+        composite_floor: { type: number, format: float, minimum: 0, maximum: 1 }
+        comparators:
+          type: array
+          items: { $ref: '#/components/schemas/ComparatorCalibration' }
+        verifiers:
+          type: array
+          items: { $ref: '#/components/schemas/VerifierCalibration' }
     ActorAliasKind:
       description: Alias history kind (MODELS §2.10).
       type: string
