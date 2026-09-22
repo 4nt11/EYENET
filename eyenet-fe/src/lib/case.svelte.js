@@ -1,0 +1,96 @@
+// Active-case context. Cases behave like tenants: entering a case scopes the
+// whole Cases workspace to it. Universal reactive state (Svelte 5 runes in a
+// module). The caseload is fetched from GET /v1/cases (read:cases).
+import { apiGet } from './api.js';
+import { auth } from './auth.svelte.js';
+
+// CaseSummary → the flat shape the cards/switcher/header consume. Keeping the
+// `caseId`/`tier` names the mock used means the components barely change; `tier`
+// here is the sensitivity tier (normal|restricted|classified), which TierBadge
+// already renders.
+function mapCase(c) {
+  return {
+    caseId: c.case_id,
+    title: c.title,
+    tier: c.effective_tier,
+    status: c.status,
+    created: c.created_at,
+    memberCount: c.member_count ?? 0
+  };
+}
+
+export const caseCtx = $state({ list: [], active: null, loaded: false, error: null });
+
+export async function loadCases() {
+  try {
+    const page = await apiGet('/v1/cases', { auth: true });
+    caseCtx.list = page.items.map(mapCase);
+    caseCtx.error = null;
+  } catch (e) {
+    caseCtx.error = e.message ?? String(e);
+    caseCtx.list = [];
+  } finally {
+    caseCtx.loaded = true;
+  }
+}
+
+export function enterCase(caseId) {
+  caseCtx.active = caseCtx.list.find((c) => c.caseId === caseId) ?? null;
+}
+export function exitCase() {
+  caseCtx.active = null;
+}
+
+// ── Inside-a-case content ──────────────────────────────────────────────────
+// Audit trail: /v1/audit?subject_id={caseId} — the per-case hash-chained trail
+// (subject_id is the audited row's identity). Members: /v1/cases/{id}/members.
+export const caseView = $state({ audit: [], members: [], loading: false, error: null });
+
+// Best-effort human label for an audit row's target, from whatever the payload
+// carries for that event kind.
+function auditTarget(p) {
+  return p.title ?? p.username ?? p.role ?? shortId(p.collaborator_id ?? p.linkage_id) ?? '';
+}
+
+const shortId = (id) => (id ? id.slice(0, 8) : '');
+const shortTs = (ts) => ts.replace('T', ' ').replace(/\..*$/, 'Z');
+const stripSubject = (s) => s.replace(/^eyenet\.(audit\.)?/, '');
+
+function resolveUser(uid) {
+  if (!uid) return 'system';
+  if (auth.user && uid === auth.user.user_id) return auth.user.username;
+  return shortId(uid);
+}
+
+export async function loadCaseView(caseId) {
+  caseView.loading = true;
+  try {
+    const [audit, members] = await Promise.all([
+      apiGet(`/v1/audit?subject_id=${caseId}&limit=50`, { auth: true }),
+      apiGet(`/v1/cases/${caseId}/members`, { auth: true })
+    ]);
+    caseView.audit = audit.items.map((r) => ({
+      time: shortTs(r.ts),
+      actor: resolveUser(r.user_id),
+      verb: stripSubject(r.subject),
+      target: auditTarget(r.payload ?? {}),
+      tamper: false
+    }));
+    caseView.members = members.items.map((m) => ({
+      id: shortId(m.subject_id),
+      subjectId: m.subject_id,
+      ts: shortTs(m.added_at),
+      type: m.subject_kind,
+      reason: m.add_reason,
+      addedBy: resolveUser(m.added_by_user_id),
+      active: m.active
+    }));
+    caseView.error = null;
+  } catch (e) {
+    caseView.error = e.message ?? String(e);
+    caseView.audit = [];
+    caseView.members = [];
+  } finally {
+    caseView.loading = false;
+  }
+}

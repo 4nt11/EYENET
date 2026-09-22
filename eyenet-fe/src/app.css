@@ -1,0 +1,41 @@
+@import './lib/styles/fonts.css';
+@import './lib/styles/colors.css';
+@import './lib/styles/typography.css';
+@import './lib/styles/spacing.css';
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg-app);
+  color: var(--text-body);
+  font-family: var(--font-sans);
+  font-size: var(--text-body-size);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+::selection { background: var(--accent-fill-strong); }
+
+/* Dense scrollbars to match the console aesthetic */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Shared dialog shell (Bits UI Dialog.* elements are portaled + unscoped, so global). */
+.dlg-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 80; }
+.dlg-content {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--panel);
+  padding: 18px; z-index: 81; display: flex; flex-direction: column; gap: 12px;
+}
+.dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dlg-title { margin: 0; font-family: var(--font-sans); font-size: var(--fs-16); font-weight: var(--fw-semibold); color: var(--text); }
+.dlg-desc { margin: 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); line-height: var(--lh-normal); }
+.dlg-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.dlg-cancel { appearance: none; cursor: pointer; height: 32px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-13); }
+.dlg-cancel:hover { background: var(--panel-2); }

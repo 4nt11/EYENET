@@ -1,0 +1,60 @@
+/* EYENET color system · three colors on black. Dark-first, never light. */
+:root{
+  /* Base · pure black + near-black layering surfaces */
+  --black:#000000;
+  --surface:#0c0d10;
+  --panel:#141519;
+  --panel-2:#1a1c21;
+  --border:#24262b;
+  --border-strong:#33363d;
+
+  /* Brand accent · purple */
+  --accent:#743093;
+  --accent-text:#a259c4;
+  --accent-hover:#8a3fae;
+  --accent-weak:#743093;      /* used with low alpha for fills */
+  --accent-fill:rgba(116,48,147,.16);
+  --accent-fill-strong:rgba(116,48,147,.30);
+
+  /* Signal · one muted red that sits calmly on black */
+  --red:#c2453f;
+  --red-text:#e07b76;
+  --red-hover:#d1524b;
+  --red-fill:rgba(194,69,63,.14);
+  --red-fill-strong:rgba(194,69,63,.28);
+
+  /* Warn · muted amber for degraded states (tuned to match the red's calm) */
+  --warn:#c29a3f;
+  --warn-text:#d9b45c;
+  --warn-fill:rgba(194,154,63,.14);
+
+  /* Text */
+  --text:#dfe5e5;
+  --text-muted:#9aa0aa;
+  --text-faint:#7a7d8c;
+
+  /* Semantic aliases */
+  --bg-app:var(--black);
+  --bg-surface:var(--surface);
+  --bg-panel:var(--panel);
+  --bg-elevated:var(--panel-2);
+  --hairline:var(--border);
+  --hairline-strong:var(--border-strong);
+
+  --text-body:var(--text);
+  --text-secondary:var(--text-muted);
+  --text-tertiary:var(--text-faint);
+
+  --link:var(--accent-text);
+  --link-hover:#b877d3;
+
+  --focus-ring:rgba(162,89,196,.55);
+
+  /* Severity / classification tiers (red reserved for the top tier only) */
+  --tier-critical:var(--red-text);
+  --tier-critical-fill:var(--red-fill);
+  --tier-high:var(--accent-text);
+  --tier-high-fill:var(--accent-fill);
+  --tier-medium:var(--text-muted);
+  --tier-low:var(--text-faint);
+}
