@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from pydantic import Field
@@ -12,8 +12,50 @@ from pydantic import Field
 from eyenet.contracts.enums import SensitivityTier
 
 from ._base import ApiSchema
+from .pagination import CursorPage
+
+if TYPE_CHECKING:
+    from eyenet.contracts.document import DocumentRow
 
 _HEX_64 = r"^[0-9a-f]{64}$"
+
+
+class DocumentSummary(ApiSchema):
+    """Projection of a DocumentRow for the triage list (``GET /v1/documents``).
+
+    Metadata only — no ``extracted_text`` and no ``classification`` (those are
+    detail-surface concerns served by the clearance-gated manifest). ``tier`` is
+    the effective sensitivity (``operator_tier_override`` over ``classifier_tier``);
+    ``classifier_tier`` is surfaced too so the UI can show a promotion badge.
+    """
+
+    document_id: UUID
+    sha256: str = Field(pattern=_HEX_64, description="SHA-256 of the stored bytes, hex.")
+    mime: str = Field(max_length=128)
+    size_bytes: int = Field(ge=0)
+    doc_kind: str | None = None
+    filename: str | None = None
+    review_required: bool
+    classifier_tier: SensitivityTier
+    tier: SensitivityTier = Field(description="Effective tier = override or classifier.")
+    uploaded_at: datetime
+    ingested_at: datetime
+
+    @classmethod
+    def from_domain(cls, row: DocumentRow) -> DocumentSummary:
+        return cls(
+            document_id=row.id,
+            sha256=row.sha256,
+            mime=row.mime,
+            size_bytes=row.size_bytes,
+            doc_kind=row.doc_kind,
+            filename=row.filename,
+            review_required=row.review_required,
+            classifier_tier=row.classifier_tier,
+            tier=row.operator_tier_override or row.classifier_tier,
+            uploaded_at=row.uploaded_at,
+            ingested_at=row.ingested_at,
+        )
 
 
 class DocumentUploadResult(ApiSchema):
@@ -62,4 +104,13 @@ class DocumentManifest(ApiSchema):
     nonce_expires_at: datetime
 
 
-__all__ = ["DocumentManifest", "DocumentUploadResult"]
+class CursorPageDocumentSummary(CursorPage[DocumentSummary]):
+    """200 page response for ``GET /v1/documents``."""
+
+
+__all__ = [
+    "CursorPageDocumentSummary",
+    "DocumentManifest",
+    "DocumentSummary",
+    "DocumentUploadResult",
+]

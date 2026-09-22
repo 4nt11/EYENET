@@ -23,6 +23,7 @@ from eyenet.api.v1.actors.api_list_observations import router as actors_observat
 # === attachments ===
 from eyenet.api.v1.attachments.api_access_file import router as attachments_access_router
 from eyenet.api.v1.attachments.api_get_manifest import router as attachments_manifest_router
+from eyenet.api.v1.attachments.api_list_attachments import router as attachments_list_router
 
 # === audit ===
 from eyenet.api.v1.audit.api_list_anchors import router as audit_list_anchors_router
@@ -69,6 +70,9 @@ from eyenet.api.v1.cases.api_close_case import router as cases_close_router
 from eyenet.api.v1.cases.api_create_case import router as cases_create_router
 from eyenet.api.v1.cases.api_get_case import router as cases_get_router
 from eyenet.api.v1.cases.api_get_seed_roots import router as cases_get_seed_roots_router
+from eyenet.api.v1.cases.api_list_case_observations import (
+    router as cases_list_observations_router,
+)
 from eyenet.api.v1.cases.api_list_cases import router as cases_list_router
 from eyenet.api.v1.cases.api_list_collaborators import router as cases_list_collaborators_router
 from eyenet.api.v1.cases.api_list_members import router as cases_list_members_router
@@ -103,6 +107,7 @@ from eyenet.api.v1.documents.api_access_document import router as documents_acce
 from eyenet.api.v1.documents.api_get_document_manifest import (
     router as documents_manifest_router,
 )
+from eyenet.api.v1.documents.api_list_documents import router as documents_list_router
 from eyenet.api.v1.documents.api_upload_document import router as documents_upload_router
 
 # === graph ===
@@ -226,6 +231,7 @@ v1_router.include_router(linkages_reject_router)
 v1_router.include_router(linkages_suspect_router)
 
 # documents (M10 classifier)
+v1_router.include_router(documents_list_router)
 v1_router.include_router(documents_upload_router)
 v1_router.include_router(documents_manifest_router)
 v1_router.include_router(documents_access_router)
@@ -242,6 +248,7 @@ v1_router.include_router(audit_file_access_by_user_router)
 v1_router.include_router(audit_list_anchors_router)
 
 # attachments
+v1_router.include_router(attachments_list_router)
 v1_router.include_router(attachments_manifest_router)
 v1_router.include_router(attachments_access_router)
 
@@ -259,6 +266,7 @@ v1_router.include_router(cases_close_router)
 v1_router.include_router(cases_reopen_router)
 v1_router.include_router(cases_archive_router)
 v1_router.include_router(cases_list_members_router)
+v1_router.include_router(cases_list_observations_router)
 v1_router.include_router(cases_add_member_router)
 v1_router.include_router(cases_bulk_add_members_router)
 v1_router.include_router(cases_bulk_remove_members_router)
