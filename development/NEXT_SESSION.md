@@ -1,135 +1,145 @@
-# EYENET — session handoff (2026-09-21)
+# EYENET — session handoff (2026-09-22)
 
 Start-here note. Read this, then
-`~/.claude/projects/-home-anti-Projects-EYENET/memory/MEMORY.md` and
-`development/API_PLAN.md`.
+`~/.claude/projects/-home-anti-Projects-EYENET/memory/MEMORY.md` (esp.
+`project_frontend_wiring_session` — the master note) and
+`development/wiring-matrix.md`.
 
 ---
 
 ## Where we are
 
-**M9 is feature-complete except the frontend.** The HTTP API now has a full
-read + write + stream surface plus observability. Recent merges on `main`:
+**M9 API is feature-complete. This session = bringing the operator FRONTEND
+live against the real API**, plus two backend gaps that the frontend forced open.
 
-- **Group G — write surface** — `6be368b`
-- **Group H — SSE stream surface** — `25fe22c` (rescued from an OOM'd worktree)
-- **M9.6 — observability** (metrics, trace SLI, alerts, Grafana) — `baaf135`
+The SvelteKit mockups were copied `development/ui/` → **`eyenet-fe/`** (the live
+tree now; `development/ui` kept only for side-by-side compare). Pages are wired
+one-per-PR through a review loop: **branch → `bun run build` → `bun run smoke`
+→ PR → review → merge**.
 
-Current `main` HEAD: `baaf135`.
+### Pages WIRED to the live API (honest empty states, no fabrication)
+`health`, `cases` (caseload + case-scoped audit + members), `auth`/login (gate),
+`graph`, `sources`, `clearance`, `cases/logs`, `linkages` (+ decisions),
+`collectors` (+ fleet control), `identities` (+ lifecycle).
 
-Gate at last merge: ruff format+check / mypy --strict (442 files) / bandit /
-deptry / detect-secrets all clean. `unit or contract` = **89.30%** cov
-(`.coverage-baseline` 0.8906, no-drop satisfied — baseline NOT bumped).
-`integration` = **184 passed / 16 skipped / 0 failed** (16 skips = the
-`eyenet-extract` venv classifier tests). Run memory-capped (see gotchas).
+### PRs
+MERGED to main: **#1** graph · **#2** sources · **#3** clearance · **#4**
+cases-logs · **#5** linkages · **#6** collectors (+ `eyenet supervisor`
+launcher) · **#7** identities-read (backend).
+**OPEN at handoff: #8 `wire/identities`** (frontend) — built, smoked (21/21),
+verified live. Just needs review + merge.
 
-### What M9.6 shipped
-- `eyenet/telemetry/metrics.py` — OTel MeterProvider, dual exposition (Prometheus
-  scrape `EYENET_API_METRICS_ENABLED` + OTLP push `EYENET_OTEL_ENDPOINT`), the
-  §11.7.2 instrument catalog, per-instrument cardinality View allow-lists (§11.7.3).
-- Real `GET /v1/metrics` (was a 501 stub): `read:metrics` scope + enabled-gate,
-  404 when off. Recording wired at request/auth/audit/SSE/idempotency chokepoints
-  + boot-time health gauges.
-- trace→REQUIRED cutover is **count-only** (never drop evidence):
-  `eyenet_api_trace_propagation_missing_total` SLI + canonical `ZERO_TRACEPARENT`.
-- `operations/` — Prometheus alert rules, Grafana dashboard, tail-sampling
-  collector config, least-privilege PAT scrape recipe.
-- Details + gotchas: `[[project_m9_6_done]]`, `[[feedback_otel_global_provider_testing]]`.
+Merge with `gh pr merge N --squash --delete-branch --admin` — GitHub's
+mergeability check lags/sticks on this fresh repo; `--admin` bypasses it and the
+branch is genuinely mergeable. Branches behind main: they merge fine via
+`--admin` (or `gh pr update-branch`, which also lags).
+
+### Backend gaps closed this session
+- **`eyenet supervisor` CLI** (#6) — the `CollectorSupervisor` (sole writer of
+  collector `observed_state`) had no launcher, so fleet state was frozen. Now
+  `eyenet supervisor --nats-url … --tick 3` reconciles observed→desired. Makes
+  collectors Start/Stop real end-to-end.
+- **`GET /v1/identities` + `/{id}`** (#7) — identities were action-only, no read
+  surface (dead-ended /identities + collector-create). Storage already had
+  `list_identities`/`get_identity`; exposed them, gated `read:collectors`.
+  **OPSEC: `session_path`/`proxy_uri` NEVER on the read surface.**
 
 ---
 
-## What's left to do (general)
+## What's left (frontend)
 
-### The big track
-- **Frontend — not started.** The operator UI. The API is ready for it: complete
-  read/write/stream surface, stream tokens + EventSource fallback, OpenAPI at
-  `/v1/openapi.json` (TS codegen target, §12.5). This is the main remaining M9 work.
+- **`/candidates`** — last of the judgment-heavy trio. State-vocab mismatch
+  (mock `pending` → real `queued`/`discovered`/`requested`); `platform` needs a
+  source join; `mentions` count is detail-only. See wiring-matrix. Its
+  approve/join flow leans on the supervisor (already running).
+- **Backend-BLOCKED pages** (need new endpoints or honest empty states):
+  `cases/documents` + `cases/attachments` (no list endpoint; two-step signed
+  Ed25519 access flow), `cases/evidence` (no case-scoped observation list).
+- **`/lab`** — component sandbox, never wire.
+- **Collector-create form** — now UNBLOCKED by the identity list (#7). Needs a
+  `source_id` (sources list ✓) + `identity_id` (identities list ✓).
+- **`POST /v1/identities` session-file upload** — deferred, captured in
+  `development/TODO.md` (sensitive: session file = account-takeover credential;
+  build with write:identity + audit + encrypt-at-rest).
 
-### Loose ends carried in code (small → medium)
-- **`/healthz` + `/readyz` are still M9.0 501 stubs.** Because of this the M9.6
-  health gauges (`eyenet_api_healthy`, `eyenet_api_ready{component}`,
-  `storage_open`, `bus_connected`) are **boot-time only** — no dynamic re-check.
-  Implementing the two probe handlers makes the gauges live.
-- **Trace hard-error cutover** deferred until the trace-missing SLI is proven zero
-  in the field (currently count-only per operator decision).
-- **Collector-side `_zero_traceparent` consolidation** — telegram/matrix real+stub
-  still keep local copies; API+telemetry use the canonical `propagation.ZERO_TRACEPARENT`.
-- **QR_CODE join dispatch** — needs decode-at-discovery to populate a usable t.me
-  link before `select_join_action` can add QR_CODE (E5.5 was invite-link-only).
-- **`_KIND_PREFERENCE` ↔ `select_join_action` coupling** — supervisor + collector
-  supported-kind sets must grow in lockstep; a shared source is cleaner at platform #3.
-- **Live ban-on-the-wire → `joined→parked`** — 403s on an already-joined group
-  should close membership; `quarantine_on_ban` only covers the join path.
-- **`joining`/`requested` redelivery rescan** — a supervisor crash between the
-  transition and the publish strands a candidate; a rescan is the fix.
-- **Storage `repository.py` ABC refactor** — ~1700-line flat ABC; split into
-  per-domain fragments (keep the flat call surface). Own worktree, not blocking.
-  See `[[project_refactor_fat_storage_repository]]`.
+## Deferred / decisions parked
+- **SSR** — the UI is a client-only SPA (`ssr=false`). ANTI parked adopting real
+  SSR (adapter-node) "after the PRs close". Until then `bun run smoke` is the
+  runtime safety net (build can't catch runtime crashes — see below).
+- **Severity `tier`** — a pervasive mock concept with NO API model. Dropped
+  everywhere for now; ANTI wants to "add severity later" (a real threat-severity
+  field on actors/linkages/cases).
+- **PAT-mint / signing-key UI**, token auto-refresh on 401 — still stubbed.
 
-### Done since the old handoff (do not re-chase)
-- `REQUESTED → JOINED` resolution detector — **DONE** (`546e710`): event-driven
-  (`_maybe_confirm_requested`) + periodic probe (`_probe_requested_memberships`)
-  → `confirm_requested_membership`, per-collector scoped.
-- Group G write surface, Group H SSE, M9.6 observability — all merged (above).
+---
+
+## RUNNING DEV STACK (bring all up for a live demo)
+- **API** `:8443` — `eyenet api` (Hypercorn h2/TLS): `--data-dir data --nats-url
+  nats://127.0.0.1:4223 --certfile data/dev-tls/cert.pem --keyfile
+  data/dev-tls/key.pem`; env `EYENET_API_CORS_ORIGINS='http://localhost:4173,http://localhost:5173,http://localhost:5180'`
+  `EYENET_API_METRICS_ENABLED=1`.
+- **NATS** — docker container `eyenet-demo-nats` on `:4223` (`docker start eyenet-demo-nats`).
+- `eyenet graph` worker (applies linkage decisions).
+- `eyenet supervisor --nats-url nats://127.0.0.1:4223 --tick 3` (reconciles collectors).
+- **dev server**: `cd eyenet-fe && VITE_EYENET_API='https://localhost:8443' bun run dev --port 5180`.
+
+**Creds:** admin **`anti`** / `nNj3E&Izar=jeyFHjk=KC-5y`. Browser must accept the
+self-signed cert once at `https://localhost:8443/v1/healthz`. Adding a new
+frontend port = add it to `EYENET_API_CORS_ORIGINS` + restart API.
+**Demo data:** `.venv/bin/python development/demo_seed.py --data-dir data` (API
+stopped). Seeds source/actors/messages + collector + linkage + case+members +
+candidate + identities.
+
+---
+
+## Gotchas (this session's, on top of the perennial ones below)
+- **`bun run build` CANNOT catch runtime errors** — `ssr=false` means it only
+  prerenders the shell, never runs page scripts. A TDZ/undefined crashes only
+  in-browser (bit /clearance PR #3). **`bun run smoke` is the review gate.**
+- **`.gitignore` swallows route dirs** — broad `identities/` (OPSEC) + `logs/`
+  (runtime) rules also match `eyenet-fe/src/routes/{identities,cases/logs}/` →
+  silently untracked. Add scoped `!eyenet-fe/src/routes/<n>/` + `/**`.
+  `git add` errors "paths ignored" is the tell.
+- **Detail loaders need a seq-guard + stale-clear** (monotonic token) — a fast
+  row-switch otherwise shows the prior entity's data (fixed in sources/linkages/
+  collectors/identities).
+- **Identity writes are SYNC in the handler** (freeze/burn immediately);
+  **linkage/collector decisions are ASYNC** (need the graph/supervisor worker;
+  poll for the flip).
+- Merging: the collectors/identities route work put backend + frontend in one
+  PR intentionally ("frontend work is backend work").
+- **CLI teardown** prints a harmless `MissingGreenlet` on connection reset (seed
+  script, `eyenet user create`) — the write succeeds; ignore it.
+
+---
+
+## Perennial gotchas (still true)
+- **Worktree venv:** `.venv` lives in the MAIN tree. From a worktree run
+  `/home/anti/Projects/EYENET/.venv/bin/python -m pytest …` with cwd = worktree.
+  `core.hooksPath` + venv shebangs point at a stale `/home/anti/Tools/EYENET`
+  path (cwd-shadowing) — use `python -m <tool>`.
+- **Machine OOM under full suite** = a runaway test; run heavy sweeps memory-capped
+  (`systemd-run --user --scope -p MemoryMax=20G …`).
+- **Never `client.stream()` a live SSE endpoint in a test** (buffers infinite body → OOM).
+- ASGI shared in-memory aiosqlite: seed all `await storage` state BEFORE the first
+  TestClient call (MissingGreenlet).
+- Stray untracked artifacts in main tree — NEVER commit: `DSR-2026-NH-00417-FICTIONAL.docx`,
+  `classifier_corpus.py`, `docs-1.jsonl`, `ruleset-additive.toml`,
+  `development/.$eyenet-erd.drawio.dtmp`.
 
 ---
 
 ## NEXT task (recommended)
-
-**Implement the real `/healthz` + `/readyz` handlers** (`eyenet/api/v1/health/
-api_healthz.py`, `api_readyz.py` — currently 501 stubs). Small, self-contained,
-and it lights up the M9.6 health gauges with live signal:
-- `/healthz` — liveness: process up → 200.
-- `/readyz` — per-component readiness (storage open, bus connected, jwt keys
-  loaded); reuse `app.state` deps; call `metrics.set_health(...)` so the gauges
-  reflect live probes instead of boot-time optimism.
-
-Then the big one: **start the frontend** (separate repo per §12.5; generate the TS
-client from `/v1/openapi.json`).
-
----
-
-## Environment gotchas
-- **Machine OOM under the full suite** = a hung/ballooning test, not ambient
-  pressure. Run heavy sweeps memory-capped so a runaway is scoped, not fatal:
-  `systemd-run --user --scope -p MemoryMax=20G -p MemorySwapMax=0 -- <pytest>`.
-- **Never `client.stream()` a live SSE endpoint in a test** — the sync starlette
-  TestClient buffers the whole infinite body → hang + OOM. Prove SSE at the
-  handler/generator unit level. See `[[feedback_sync_testclient_infinite_sse_oom]]`.
-- **OTel global provider is set-once** — test Views on a local MeterProvider; spy
-  on module instruments where bound. See `[[feedback_otel_global_provider_testing]]`.
-- **Worktree venv:** the `.venv` lives in the MAIN tree
-  (`/home/anti/Projects/EYENET/.venv`). From a worktree run
-  `/home/anti/Projects/EYENET/.venv/bin/python -m pytest …` with **cwd = the
-  worktree**. Never the bare `.venv/bin/pytest`. NOTE: the venv console-script
-  shebangs point at a stale `/home/anti/Tools/EYENET/.venv` path — `bandit`/`deptry`
-  etc. must be run as `python -m bandit` / `python -m deptry`. A `uv sync` /
-  venv recreate fixes it.
-- **Worktree edit trap:** in a worktree, Edit/Read with a MAIN-tree path silently
-  edits the wrong tree. Always use the worktree absolute path.
-- ASGI / shared in-memory aiosqlite: seed all `await storage` state BEFORE the
-  first TestClient call (MissingGreenlet).
-- §3.3 flakes: `test_impostor_pool_loader`, `test_service_branches`,
-  `test_stylometric_kernel_memo` jitter under random order — confirm under
-  `-p no:randomly` + in isolation before treating as a regression.
-- Stray untracked artifacts in the main tree — NEVER commit:
-  `DSR-2026-NH-00417-FICTIONAL.docx`, `classifier_corpus.py`, `docs-1.jsonl`,
-  `ruleset-additive.toml`, `development/.$eyenet-erd.drawio.dtmp`.
-- Worktrees left on disk (both merged, safe to reap): `phaseH-sse`,
-  `phase-m9.6-observability` — `git worktree remove` + `git branch -d`.
-
----
+1. **Merge #8** (`wire/identities`, `--admin`).
+2. **Wire `/candidates`** — last of the trio; follow the loop (branch → build →
+   smoke → PR). Or build the **collector-create form** (now unblocked).
+3. The blocked pages (documents/attachments/evidence) need backend endpoints
+   first — decide honest-empty-state vs new endpoints.
 
 ## How to resume
-
 ```bash
-cd /home/anti/Projects/EYENET
-git log --oneline -8
-.venv/bin/python -m pytest -m "unit or contract" -q --no-cov         # fast inner loop
-# full battery, memory-capped (heavy: spaCy/nsjail):
-systemd-run --user --scope -p MemoryMax=20G -p MemorySwapMax=0 -- \
-  .venv/bin/python -m pytest -m "unit or contract or integration" -q
+cd /home/anti/Projects/EYENET && git log --oneline -10
+docker start eyenet-demo-nats                       # NATS
+# then start: eyenet api / graph / supervisor / bun dev  (see RUNNING DEV STACK)
+cd eyenet-fe && bun run build && bun run smoke       # frontend gate
 ```
-
-Deep refactor / new milestone → worktree branch + atomic `--no-ff` merge
-(CLAUDE.md §6). Heed the worktree traps above.
