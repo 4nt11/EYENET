@@ -10,11 +10,13 @@ from uuid import UUID
 from opentelemetry import trace
 from sqlalchemy import func
 from sqlmodel import col, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from eyenet.contracts.audit_subjects import AuditSubject
-from eyenet.contracts.enums import SensitivityTier
+from eyenet.contracts.enums import CaseSubjectKind, SensitivityTier
 from eyenet.contracts.observation import ObservationRow
 from eyenet.models import ObservationTable
+from eyenet.models.case import CaseMemberTable
 from eyenet.storage.errors import ReclassifyDemotionError
 from eyenet.storage.reclassify import ReclassifyOutcome
 
@@ -116,6 +118,54 @@ class ObservationsMixin:
         """Total number of observations across all actors (M9.F3 graph stats)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(select(func.count()).select_from(ObservationTable))
+            return int(result.one())
+
+    def _case_observations_stmt(self, case_id: UUID) -> SelectOfScalar[ObservationTable]:
+        """Observations that are ACTIVE direct members of ``case_id``.
+
+        Direct-membership semantics (API_PLAN §4.10.1): a row is case evidence
+        only when explicitly added via ``case_member`` (``subject_kind=observation``,
+        not removed). Same filter the effective-tier recompute already uses in
+        CasesMixin. Generic ORM JOIN — no dialect leak."""
+        return (
+            select(ObservationTable)
+            .join(CaseMemberTable, col(CaseMemberTable.subject_id) == col(ObservationTable.id))
+            .where(
+                col(CaseMemberTable.case_id) == case_id,
+                col(CaseMemberTable.subject_kind) == CaseSubjectKind.OBSERVATION,
+                col(CaseMemberTable.removed_at).is_(None),
+            )
+        )
+
+    async def list_observations_for_case(
+        self,
+        case_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Observations that are direct members of a case, newest-first.
+
+        Returns ``ObservationTable`` rows for the API projector; type-erased to
+        ``object`` to keep ORM types off the ABC (mirrors
+        :meth:`observations_for_actor`)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                self._case_observations_stmt(case_id)
+                .order_by(col(ObservationTable.observed_at).desc())
+                .order_by(col(ObservationTable.id).desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def count_observations_for_case(self, case_id: UUID) -> int:
+        """Count active observation members of a case (same filter as
+        :meth:`list_observations_for_case`)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            inner = self._case_observations_stmt(case_id).subquery()
+            result = await session.exec(select(func.count()).select_from(inner))
             return int(result.one())
 
     async def observation_by_evidence_and_primitive(

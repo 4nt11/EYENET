@@ -20,13 +20,17 @@ the standard 88-char Ed25519 signature plus optional padding edge cases.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
 from pydantic import Field
 
 from ._base import ApiSchema
 from .enums import FileServedVia, SensitivityTier
+from .pagination import CursorPage
+
+if TYPE_CHECKING:
+    from eyenet.contracts.message import AttachmentRow
 
 _HEX_64 = r"^[0-9a-f]{64}$"
 _HEX_16 = r"^[0-9a-f]{16}$"
@@ -46,6 +50,40 @@ class FileManifest(ApiSchema):
     collected_at: datetime
     access_nonce: UUID = Field(description="Single-use, 60s TTL, required for step 2.")
     nonce_expires_at: datetime
+
+
+class AttachmentSummary(ApiSchema):
+    """Projection of an AttachmentRow for the list surface (``GET /v1/attachments``).
+
+    Metadata only. ``tier`` is the effective sensitivity (``operator_tier_override``
+    over ``classifier_tier``); ``classifier_tier`` is surfaced too for a promotion
+    badge. ``source_subject_*``/``collected_at`` are manifest-only (they need the
+    parent-message join), so they are not on the list row.
+    """
+
+    blob_id: UUID
+    message_id: UUID
+    kind: str = Field(max_length=64)
+    mime: str = Field(max_length=128)
+    size_bytes: int = Field(ge=0)
+    sha256: str = Field(pattern=_HEX_64, description="SHA-256 of the stored bytes, hex.")
+    filename: str | None = None
+    classifier_tier: SensitivityTier
+    tier: SensitivityTier = Field(description="Effective tier = override or classifier.")
+
+    @classmethod
+    def from_domain(cls, row: AttachmentRow) -> AttachmentSummary:
+        return cls(
+            blob_id=row.id,
+            message_id=row.message_id,
+            kind=str(row.kind),
+            mime=row.mime,
+            size_bytes=row.size_bytes,
+            sha256=row.sha256,
+            filename=row.filename,
+            classifier_tier=row.classifier_tier,
+            tier=row.operator_tier_override or row.classifier_tier,
+        )
 
 
 class FileAccessAcknowledgment(ApiSchema):
@@ -152,7 +190,13 @@ class FileAccessExoneration(ApiSchema):
     )
 
 
+class CursorPageAttachmentSummary(CursorPage[AttachmentSummary]):
+    """200 page response for ``GET /v1/attachments``."""
+
+
 __all__ = [
+    "AttachmentSummary",
+    "CursorPageAttachmentSummary",
     "FileAccessAcknowledgment",
     "FileAccessExoneration",
     "FileAccessJournalEntry",
