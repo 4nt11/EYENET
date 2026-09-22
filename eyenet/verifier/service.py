@@ -243,7 +243,30 @@ class VerifierService(ServiceBase):
             qualified=len(scored),
         )
 
-        if composite < floor:
+        # Persist the settled result for EVERY scored linkage (promoted or
+        # below-floor) so the dossier can surface the composite + per-verifier
+        # scores. This is the durable, queryable record — not just the notes
+        # string + audit payload the promotion path writes.
+        promoted = composite >= floor
+        await self._storage.record_verifier_result(
+            linkage_id=envelope.linkage_id,
+            composite=composite,
+            floor=floor,
+            state="suspected" if promoted else "below_floor",
+            results=[
+                {
+                    "method": r.method,
+                    "score": r.score,
+                    "confidence": r.confidence,
+                    "skipped": r.skipped,
+                    "detail": r.skip_reason or "",
+                }
+                for r in results
+            ],
+            computed_at=datetime.now(tz=UTC),
+        )
+
+        if not promoted:
             return
 
         await self._promote_to_suspected(envelope, composite, scored)

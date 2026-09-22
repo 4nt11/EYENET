@@ -366,6 +366,26 @@ paths:
   # ────────────────────────────────────────────────────────────────────────
   # 3.2 Reads
   # ────────────────────────────────────────────────────────────────────────
+  /v1/actors:
+    get:
+      tags: [actors]
+      operationId: actors_list
+      summary: List all actors, newest-activity first (browse surface).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of actor summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageActorSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors/{actor_id}:
     get:
       tags: [actors]
@@ -382,6 +402,45 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/actors/{actor_id}/assessment:
+    put:
+      tags: [actors]
+      operationId: actors_set_assessment
+      summary: Set the operator free-text assessment (write:actors).
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetActorAssessmentRequest' }
+      responses:
+        "200":
+          description: Assessment set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActorAssessment' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/calibration:
+    get:
+      tags: [calibration]
+      operationId: calibration_get
+      summary: The shipped linker/verifier calibration baseline (comparator + verifier tuning).
+      responses:
+        "200":
+          description: Calibration posture.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalibrationView' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/actors/{actor_id}/neighbors:
@@ -449,6 +508,26 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/personas:
+    get:
+      tags: [personas]
+      operationId: personas_list
+      summary: List all personas, newest-first (browse surface).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of persona summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPagePersonaSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/personas/{persona_id}:
@@ -2794,6 +2873,14 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/PersonaMember' }
+    CursorPagePersonaSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PersonaSummary' }
     CursorPageLinkageSummary:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }
@@ -3051,8 +3138,71 @@ components:
             first_seen:        { type: string, format: date-time }
             last_seen:         { type: string, format: date-time }
             alias_count:       { type: integer, minimum: 0 }
+            aliases:
+              type: array
+              items: { $ref: '#/components/schemas/AliasEntry' }
             observation_count: { type: integer, minimum: 0 }
             persona_id:        { type: string, format: uuid, nullable: true }
+            assessment:        { type: string, nullable: true }
+    SetActorAssessmentRequest:
+      type: object
+      additionalProperties: false
+      required: [assessment, reason]
+      properties:
+        assessment: { type: string, minLength: 1, maxLength: 4096 }
+        reason:     { type: string, minLength: 1, maxLength: 1024 }
+    ActorAssessment:
+      type: object
+      additionalProperties: false
+      required: [actor_id, assessment]
+      properties:
+        actor_id:   { type: string, format: uuid }
+        assessment: { type: string }
+    ComparatorCalibration:
+      type: object
+      additionalProperties: false
+      required: [name, language_blind_threshold]
+      properties:
+        name:                     { type: string, maxLength: 64 }
+        language_blind_threshold: { type: integer, minimum: 0, maximum: 64 }
+        per_lang:
+          type: object
+          additionalProperties: { type: integer, nullable: true }
+    VerifierCalibration:
+      type: object
+      additionalProperties: false
+      required: [name, language_blind_floor]
+      properties:
+        name:                 { type: string, maxLength: 64 }
+        language_blind_floor: { type: number, format: float, minimum: 0, maximum: 1 }
+        per_lang:
+          type: object
+          additionalProperties: { type: number, format: float, nullable: true }
+    CalibrationView:
+      type: object
+      additionalProperties: false
+      required: [composite_floor]
+      properties:
+        composite_floor: { type: number, format: float, minimum: 0, maximum: 1 }
+        comparators:
+          type: array
+          items: { $ref: '#/components/schemas/ComparatorCalibration' }
+        verifiers:
+          type: array
+          items: { $ref: '#/components/schemas/VerifierCalibration' }
+    ActorAliasKind:
+      description: Alias history kind (MODELS §2.10).
+      type: string
+      enum: [handle, display_name, username]
+    AliasEntry:
+      type: object
+      additionalProperties: false
+      required: [kind, value, observed_from]
+      properties:
+        kind:           { $ref: '#/components/schemas/ActorAliasKind' }
+        value:          { type: string }
+        observed_from:  { type: string, format: date-time }
+        observed_until: { type: string, format: date-time, nullable: true }
     NeighborList:
       type: object
       additionalProperties: false
@@ -3114,6 +3264,13 @@ components:
         ts:             { type: string, format: date-time }
         score:          { type: number, format: float, nullable: true }
         primitive:      { type: string, maxLength: 64, nullable: true }
+        primitive_namespace: { type: string, maxLength: 64, nullable: true }
+        primitive_version:   { type: string, maxLength: 32, nullable: true }
+        value_kind:     { $ref: '#/components/schemas/ValueKind', nullable: true }
+        value_hash:     { type: string, nullable: true }
+        value_enum:     { type: string, nullable: true }
+        value_array:    { type: array, items: { type: string }, nullable: true }
+        value_array_numeric: { type: array, items: { type: number, format: float }, nullable: true }
         sensitivity:    { $ref: '#/components/schemas/SensitivityTier' }
         attachment_blob_id:
           description: Present when this observation has a binary attachment. Use `/v1/attachments/{blob_id}/manifest` to inspect before fetching.
@@ -3177,6 +3334,32 @@ components:
             evidence:
               type: array
               items: { $ref: '#/components/schemas/LinkageEvidence' }
+            verifier:
+              oneOf:
+                - { $ref: '#/components/schemas/VerifierResultView' }
+                - { type: 'null' }
+    VerifierScore:
+      type: object
+      additionalProperties: false
+      required: [method, score, confidence]
+      properties:
+        method:     { type: string, maxLength: 64 }
+        score:      { type: number, format: float }
+        confidence: { type: number, format: float }
+        skipped:    { type: boolean }
+        detail:     { type: string }
+    VerifierResultView:
+      type: object
+      additionalProperties: false
+      required: [composite, floor, state, computed_at]
+      properties:
+        composite:   { type: number, format: float }
+        floor:       { type: number, format: float }
+        state:       { type: string, maxLength: 32 }
+        computed_at: { type: string, format: date-time }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/VerifierScore' }
     LinkageEvidence:
       type: object
       additionalProperties: false
@@ -3489,6 +3672,10 @@ components:
         Promotable but never demotable (API_PLAN §4.7).
       type: string
       enum: [normal, restricted, classified]
+    ValueKind:
+      description: Observation value discriminator — which value_* field carries the payload (MODELS §2.3).
+      type: string
+      enum: [hash, numeric, enum_str, array_str, array_numeric]
     DocumentUploadResult:
       description: |
         Result of `POST /v1/documents` — the settled classification for one

@@ -63,6 +63,28 @@ async def test_linkages_get_with_evidence(
     assert comps == {"cosine"}
 
 
+async def test_linkages_get_surfaces_verifier(
+    storage: BaseRepository, mkuser: Callable[..., CurrentUser]
+) -> None:
+    from datetime import UTC, datetime
+
+    linkage = await storage.insert_proposed_linkage(uuid4(), uuid4(), "sty", 0.9, {})
+    # No verifier result yet → None.
+    detail = await linkages_get(linkage.id, mkuser("read:linkages"), storage)
+    assert detail.verifier is None
+    # After the Verifier scores it, the composite surfaces.
+    await storage.record_verifier_result(
+        linkage_id=linkage.id, composite=0.83, floor=0.6, state="suspected",
+        results=[{"method": "general_impostors", "score": 0.86, "confidence": 1.0,
+                  "skipped": False, "detail": "wins 43/50"}],
+        computed_at=datetime.now(tz=UTC),
+    )
+    detail2 = await linkages_get(linkage.id, mkuser("read:linkages"), storage)
+    assert detail2.verifier is not None
+    assert detail2.verifier.composite == 0.83
+    assert detail2.verifier.results[0].method == "general_impostors"
+
+
 async def test_linkages_get_unknown_raises(
     storage: BaseRepository, mkuser: Callable[..., CurrentUser]
 ) -> None:

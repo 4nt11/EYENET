@@ -107,8 +107,13 @@ class CursorPagePersonaMember(CursorPage[PersonaMember]):
     """200 page response for `GET /v1/personas/{id}/members`."""
 
 
+class CursorPagePersonaSummary(CursorPage[PersonaSummary]):
+    """200 page response for `GET /v1/personas`."""
+
+
 __all__ = [
     "CursorPagePersonaMember",
+    "CursorPagePersonaSummary",
     "PersonaDetail",
     "PersonaMember",
     "PersonaMergeRequest",

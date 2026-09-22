@@ -165,6 +165,29 @@ def test_observation_summary_minimal(uid: UUID, now: datetime) -> None:
     assert obs.attachment_blob_id is None
 
 
+def test_observation_summary_from_domain_carries_typed_value(now: datetime) -> None:
+    """A hash-valued observation surfaces value_hash + namespace/version (BEHAVE)."""
+    from eyenet.contracts.enums import ValueKind
+    from eyenet.models.observation import ObservationTable
+
+    row = ObservationTable(
+        actor_id=UUID("01906f00-0000-7000-8000-000000000009"),
+        primitive_namespace="stylometric",
+        primitive_name="function_word_distribution_top50",
+        primitive_version="0.2",
+        value_kind=ValueKind.HASH,
+        value_hash="a91f00ff",
+        observed_at=now,
+        sensor_instance="test",
+    )
+    obs = ObservationSummary.from_domain(row)
+    assert obs.value_kind is ValueKind.HASH
+    assert obs.value_hash == "a91f00ff"
+    assert obs.primitive_namespace == "stylometric"
+    assert obs.primitive_version == "0.2"
+    assert obs.score is None  # not numeric
+
+
 def test_observation_summary_requires_sensitivity(uid: UUID, now: datetime) -> None:
     with pytest.raises(PydanticValidationError):
         ObservationSummary.model_validate(

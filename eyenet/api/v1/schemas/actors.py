@@ -16,7 +16,8 @@ from uuid import UUID
 
 from pydantic import Field
 
-from eyenet.contracts.enums import ValueKind
+from eyenet.contracts.enums import ActorAliasKind, ValueKind
+from eyenet.models.actor import ActorAliasHistoryTable
 from eyenet.models.graph import GraphEdgeTable, GraphEdgeType
 from eyenet.models.message import MessageTable
 from eyenet.models.observation import ObservationTable
@@ -48,18 +49,54 @@ class ActorSummary(ApiSchema):
     score: float | None = None
 
 
+class SetActorAssessmentRequest(ApiSchema):
+    """Body for PUT /v1/actors/{id}/assessment — operator dossier note."""
+
+    assessment: str = Field(min_length=1, max_length=4096)
+    reason: str = Field(min_length=1, max_length=1024, description="Recorded to the audit chain.")
+
+
+class ActorAssessment(ApiSchema):
+    """200 response for the assessment write — the settled value."""
+
+    actor_id: UUID
+    assessment: str
+
+
+class AliasEntry(ApiSchema):
+    """One row of an actor's alias history (MODELS §2.10)."""
+
+    kind: ActorAliasKind
+    value: str
+    observed_from: datetime
+    observed_until: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, row: ActorAliasHistoryTable) -> AliasEntry:
+        return cls(
+            kind=row.kind,
+            value=row.value,
+            observed_from=row.observed_from,
+            observed_until=row.observed_until,
+        )
+
+
 class ActorDetail(ActorSummary):
     """Projection of MODELS.md §2.1 Actor for `GET /v1/actors/{id}`.
 
-    TODO(M9.3): `from_domain(ActorTable, aliases, observation_count, persona_id)`.
-    Same alias-policy and cross-store concerns as ActorSummary.
+    Same alias-policy and cross-store concerns as ActorSummary; the route layer
+    resolves aliases (newest-first) and `alias_count = len(aliases)`.
     """
 
     first_seen: datetime
     last_seen: datetime
     alias_count: int = Field(ge=0)
+    aliases: list[AliasEntry] = Field(default_factory=list)
     observation_count: int = Field(ge=0)
     persona_id: UUID | None = None
+    assessment: str | None = Field(
+        default=None, description="Operator free-text assessment (write:actors)."
+    )
 
 
 class LinkedToAttrs(ApiSchema):
@@ -146,6 +183,16 @@ class ObservationSummary(ApiSchema):
     ts: datetime
     score: float | None = None
     primitive: str | None = Field(default=None, max_length=64)
+    # Provenance + the full typed value, so the BEHAVE readout renders the real
+    # primitive output (hash/enum/array), not just the numeric score. `value_kind`
+    # tells the client which value field carries the payload.
+    primitive_namespace: str | None = Field(default=None, max_length=64)
+    primitive_version: str | None = Field(default=None, max_length=32)
+    value_kind: ValueKind | None = None
+    value_hash: str | None = None
+    value_enum: str | None = None
+    value_array: list[str] | None = None
+    value_array_numeric: list[float] | None = None
     sensitivity: SensitivityTier = Field(
         description="Required scopes are derived from this — see API_PLAN §4.7.",
     )
@@ -166,6 +213,13 @@ class ObservationSummary(ApiSchema):
             ts=obs.observed_at,
             score=obs.value_numeric if obs.value_kind is ValueKind.NUMERIC else None,
             primitive=obs.primitive_name,
+            primitive_namespace=obs.primitive_namespace,
+            primitive_version=obs.primitive_version,
+            value_kind=obs.value_kind,
+            value_hash=obs.value_hash,
+            value_enum=obs.value_enum,
+            value_array=obs.value_array,
+            value_array_numeric=obs.value_array_numeric,
             sensitivity=SensitivityTier.NORMAL,
             attachment_blob_id=None,
         )

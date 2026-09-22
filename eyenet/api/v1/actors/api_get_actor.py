@@ -9,10 +9,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
-from eyenet.api.v1.schemas.actors import ActorDetail
+from eyenet.api.v1.schemas.actors import ActorDetail, AliasEntry
 from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.attribution import PersonaRow
 from eyenet.contracts.source import SourceRow
+from eyenet.models.actor import ActorAliasHistoryTable
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["actors"])
@@ -35,6 +36,8 @@ async def actors_get(
     persona = cast("PersonaRow | None", await storage.persona_for_actor(actor_id))
     observation_count = await storage.count_observations_for_actor(actor_id)
     source = cast("SourceRow | None", await storage.get_source(actor.source_id))
+    alias_rows = cast("list[ActorAliasHistoryTable]", await storage.actor_aliases(actor_id))
+    aliases = [AliasEntry.from_domain(r) for r in alias_rows]
     # An Actor belongs to exactly one Source; cross-platform identity is the
     # Persona's job. So `platforms` is the single source kind (or empty if the
     # source row is somehow absent).
@@ -46,8 +49,9 @@ async def actors_get(
         score=None,
         first_seen=actor.first_seen_at_source or actor.first_seen_at_ingest,
         last_seen=actor.last_seen_at_source or actor.last_seen_at_ingest,
-        # TODO(M9.3): alias_count needs an ActorAliasHistory read, not yet wired.
-        alias_count=0,
+        alias_count=len(aliases),
+        aliases=aliases,
         observation_count=observation_count,
         persona_id=persona.id if persona is not None else None,
+        assessment=actor.operator_assessment,
     )

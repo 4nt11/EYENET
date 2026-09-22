@@ -44,7 +44,6 @@ ALLOWED_GENERATED_EXTRAS = {
 #   on stream operations; FastAPI cannot model SSE event shapes natively.
 # - CursorPageBase is a composition base (allOf source); FastAPI inlines.
 # - NeighborEdge is a discriminated union; FastAPI exposes the variants directly.
-# - PersonaSummary is a composition base for PersonaDetail; FastAPI inlines.
 YAML_ONLY_SCHEMAS = {
     "AuditEvent",
     "ControlEvent",
@@ -59,7 +58,6 @@ YAML_ONLY_SCHEMAS = {
     # operation references the inline oneOf to match the generated spec.
     "LoginResponse",
     "NeighborEdge",
-    "PersonaSummary",
     # RedactionMarker is the §4.7 polymorphic-content replacement shape.
     # Defined in YAML and exists as a Pydantic class, but no operation's
     # response_model references it yet — the content-field retrofit

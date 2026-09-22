@@ -12,6 +12,7 @@ from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_sto
 from eyenet.api.v1.linkages._shared import resolve_decider
 from eyenet.api.v1.schemas.linkages import LinkageDetail
 from eyenet.models.linkage import LinkageTable
+from eyenet.models.linkage_verifier_result import LinkageVerifierResultTable
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["linkages"])
@@ -32,4 +33,7 @@ async def linkages_get(
     if row is None:
         raise ResourceNotFound("linkage")
     decided_by = await resolve_decider(storage, row.decided_by, {})
-    return LinkageDetail.from_domain(cast("LinkageTable", row), decided_by)
+    verifier = cast(
+        "LinkageVerifierResultTable | None", await storage.get_verifier_result(linkage_id)
+    )
+    return LinkageDetail.from_domain(cast("LinkageTable", row), decided_by, verifier)

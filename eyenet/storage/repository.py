@@ -1170,6 +1170,11 @@ class BaseRepository(ABC):
     @abstractmethod
     async def all_personas(self) -> list[object]: ...
 
+    @abstractmethod
+    async def list_personas(self, *, limit: int, offset: int = 0) -> list[object]:
+        """Paginated persona list, newest-first; PersonaTable rows type-erased.
+        Pairs with :meth:`count_personas` for the browse surface."""
+
     # =================================================================
     # FEEDBACK (M8 verifier)
     # =================================================================
@@ -1195,6 +1200,25 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def all_feedback_pairs(self) -> list[tuple[UUID, UUID, str]]: ...
+
+    @abstractmethod
+    async def record_verifier_result(
+        self,
+        *,
+        linkage_id: UUID,
+        composite: float,
+        floor: float,
+        state: str,
+        results: list[dict[str, object]],
+        computed_at: datetime,
+    ) -> None:
+        """Persist the Verifier's settled composite + per-verifier scores;
+        idempotent on linkage_id."""
+
+    @abstractmethod
+    async def get_verifier_result(self, linkage_id: UUID) -> object | None:
+        """Settled Verifier result for a linkage (LinkageVerifierResultTable
+        row, type-erased), or None if never scored."""
 
     # =================================================================
     # ACTORS / SOURCES / GROUPS (ingest helpers, MODELS §1.x)
@@ -1261,6 +1285,20 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def count_search_actors(self, q: str) -> int: ...
+
+    @abstractmethod
+    async def list_actors(self, *, limit: int, offset: int = 0) -> list[object]:
+        """All actors, newest-activity first; ActorTable rows type-erased.
+        Pairs with :meth:`count_actors` for the unfiltered list surface."""
+
+    @abstractmethod
+    async def actor_aliases(self, actor_id: UUID) -> list[object]:
+        """Alias history for an actor, newest-first; ActorAliasHistoryTable rows
+        type-erased. Backs ActorDetail.aliases + alias_count."""
+
+    @abstractmethod
+    async def set_actor_assessment(self, actor_id: UUID, assessment: str | None) -> bool:
+        """Set the operator free-text assessment; False if no such actor."""
 
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
