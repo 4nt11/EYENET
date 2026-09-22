@@ -1272,6 +1272,11 @@ class BaseRepository(ABC):
         """All actors, newest-activity first; ActorTable rows type-erased.
         Pairs with :meth:`count_actors` for the unfiltered list surface."""
 
+    @abstractmethod
+    async def actor_aliases(self, actor_id: UUID) -> list[object]:
+        """Alias history for an actor, newest-first; ActorAliasHistoryTable rows
+        type-erased. Backs ActorDetail.aliases + alias_count."""
+
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
     # =================================================================

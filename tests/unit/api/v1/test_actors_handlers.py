@@ -52,6 +52,27 @@ async def test_actors_get_detail(
     assert detail.persona_id is None
 
 
+async def test_actors_get_surfaces_aliases(
+    storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
+) -> None:
+    from eyenet.contracts.enums import ActorAliasKind
+    from eyenet.models.actor import ActorAliasHistoryTable
+
+    actor_id = await _seed_actor(storage, now)
+    async with storage.session() as session:
+        session.add(
+            ActorAliasHistoryTable(
+                actor_id=actor_id, kind=ActorAliasKind.HANDLE, value="alice_old",
+                observed_from=now - timedelta(days=3), observed_until=now,
+            )
+        )
+        await session.commit()
+    detail = await actors_get(actor_id, mkuser("read:actors"), storage)
+    assert detail.alias_count == 1
+    assert detail.aliases[0].value == "alice_old"
+    assert detail.aliases[0].kind is ActorAliasKind.HANDLE
+
+
 async def test_actors_get_handle_fallback(
     storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
 ) -> None:

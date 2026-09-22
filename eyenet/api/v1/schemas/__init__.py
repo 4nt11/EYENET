@@ -13,6 +13,7 @@ from __future__ import annotations
 from .actors import (
     ActorDetail,
     ActorSummary,
+    AliasEntry,
     BelongsToPersonaAttrs,
     BelongsToPersonaEdge,
     CursorPageActorSummary,
@@ -128,6 +129,7 @@ from .writes import WriteAccepted
 __all__ = [
     "ActorDetail",
     "ActorSummary",
+    "AliasEntry",
     "Anchor",
     "AuditChainBreak",
     "AuditEvent",

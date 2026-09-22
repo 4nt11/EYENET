@@ -13,6 +13,7 @@ from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.enums import GroupKind, SourceKind
 from eyenet.contracts.source import SourceRow
 from eyenet.models import ActorTable, GroupTable, SourceTable
+from eyenet.models.actor import ActorAliasHistoryTable
 
 from ._helpers import safe_session
 
@@ -139,6 +140,19 @@ class ActorsMixin:
                 .order_by(col(ActorTable.id))
                 .limit(limit)
                 .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def actor_aliases(self, actor_id: UUID) -> list[object]:
+        """Alias history for an actor, newest-first; ActorAliasHistoryTable
+        rows type-erased. Backs ActorDetail.aliases + the real alias_count."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(ActorAliasHistoryTable)
+                .where(col(ActorAliasHistoryTable.actor_id) == actor_id)
+                .order_by(col(ActorAliasHistoryTable.observed_from).desc())
+                .order_by(col(ActorAliasHistoryTable.id))
             )
             result = await session.exec(stmt)
             return list(result)

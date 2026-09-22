@@ -3099,8 +3099,24 @@ components:
             first_seen:        { type: string, format: date-time }
             last_seen:         { type: string, format: date-time }
             alias_count:       { type: integer, minimum: 0 }
+            aliases:
+              type: array
+              items: { $ref: '#/components/schemas/AliasEntry' }
             observation_count: { type: integer, minimum: 0 }
             persona_id:        { type: string, format: uuid, nullable: true }
+    ActorAliasKind:
+      description: Alias history kind (MODELS §2.10).
+      type: string
+      enum: [handle, display_name, username]
+    AliasEntry:
+      type: object
+      additionalProperties: false
+      required: [kind, value, observed_from]
+      properties:
+        kind:           { $ref: '#/components/schemas/ActorAliasKind' }
+        value:          { type: string }
+        observed_from:  { type: string, format: date-time }
+        observed_until: { type: string, format: date-time, nullable: true }
     NeighborList:
       type: object
       additionalProperties: false

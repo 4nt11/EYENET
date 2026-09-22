@@ -16,7 +16,8 @@ from uuid import UUID
 
 from pydantic import Field
 
-from eyenet.contracts.enums import ValueKind
+from eyenet.contracts.enums import ActorAliasKind, ValueKind
+from eyenet.models.actor import ActorAliasHistoryTable
 from eyenet.models.graph import GraphEdgeTable, GraphEdgeType
 from eyenet.models.message import MessageTable
 from eyenet.models.observation import ObservationTable
@@ -48,16 +49,35 @@ class ActorSummary(ApiSchema):
     score: float | None = None
 
 
+class AliasEntry(ApiSchema):
+    """One row of an actor's alias history (MODELS §2.10)."""
+
+    kind: ActorAliasKind
+    value: str
+    observed_from: datetime
+    observed_until: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, row: ActorAliasHistoryTable) -> AliasEntry:
+        return cls(
+            kind=row.kind,
+            value=row.value,
+            observed_from=row.observed_from,
+            observed_until=row.observed_until,
+        )
+
+
 class ActorDetail(ActorSummary):
     """Projection of MODELS.md §2.1 Actor for `GET /v1/actors/{id}`.
 
-    TODO(M9.3): `from_domain(ActorTable, aliases, observation_count, persona_id)`.
-    Same alias-policy and cross-store concerns as ActorSummary.
+    Same alias-policy and cross-store concerns as ActorSummary; the route layer
+    resolves aliases (newest-first) and `alias_count = len(aliases)`.
     """
 
     first_seen: datetime
     last_seen: datetime
     alias_count: int = Field(ge=0)
+    aliases: list[AliasEntry] = Field(default_factory=list)
     observation_count: int = Field(ge=0)
     persona_id: UUID | None = None
 
