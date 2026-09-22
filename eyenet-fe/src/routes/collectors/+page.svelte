@@ -4,7 +4,10 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { collectorCtx, collectorView, observedTone, loadCollectors, loadCollectorDetail, collectorAction } from '$lib/collector.svelte.js';
+  import CollectorCreateDialog from '$lib/components/CollectorCreateDialog.svelte';
+  import { collectorCtx, collectorView, observedTone, loadCollectors, loadCollectorDetail, collectorAction, createCollector } from '$lib/collector.svelte.js';
+  import { loadSources } from '$lib/source.svelte.js';
+  import { loadIdentities } from '$lib/identity.svelte.js';
 
   // Columns are the fields /v1/collectors returns. Single mock `state` is split
   // into observed (the badge) + desired; `degraded` isn't a real enum value.
@@ -43,12 +46,20 @@
     if (sel) loadCollectorDetail(sel.id);
   });
 
-  onMount(loadCollectors);
+  let createOpen = $state(false);
+
+  // The create dialog needs the source + identity pools for its selects.
+  onMount(() => {
+    loadCollectors();
+    loadSources();
+    loadIdentities();
+  });
 </script>
 
 <main>
   <SectionHeader group="Discovery" slug="collectors" title="Collector fleet">
     <span class="fleet">{running}/{total} running</span>
+    <Button variant="primary" size="sm" onclick={() => (createOpen = true)}>New collector</Button>
   </SectionHeader>
 
   <div class="body">
@@ -86,6 +97,8 @@
       </div>
     {/if}
   </div>
+
+  <CollectorCreateDialog bind:open={createOpen} onconfirm={createCollector} />
 </main>
 
 <style>
