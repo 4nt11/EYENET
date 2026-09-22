@@ -146,6 +146,16 @@ class ObservationSummary(ApiSchema):
     ts: datetime
     score: float | None = None
     primitive: str | None = Field(default=None, max_length=64)
+    # Provenance + the full typed value, so the BEHAVE readout renders the real
+    # primitive output (hash/enum/array), not just the numeric score. `value_kind`
+    # tells the client which value field carries the payload.
+    primitive_namespace: str | None = Field(default=None, max_length=64)
+    primitive_version: str | None = Field(default=None, max_length=32)
+    value_kind: ValueKind | None = None
+    value_hash: str | None = None
+    value_enum: str | None = None
+    value_array: list[str] | None = None
+    value_array_numeric: list[float] | None = None
     sensitivity: SensitivityTier = Field(
         description="Required scopes are derived from this — see API_PLAN §4.7.",
     )
@@ -166,6 +176,13 @@ class ObservationSummary(ApiSchema):
             ts=obs.observed_at,
             score=obs.value_numeric if obs.value_kind is ValueKind.NUMERIC else None,
             primitive=obs.primitive_name,
+            primitive_namespace=obs.primitive_namespace,
+            primitive_version=obs.primitive_version,
+            value_kind=obs.value_kind,
+            value_hash=obs.value_hash,
+            value_enum=obs.value_enum,
+            value_array=obs.value_array,
+            value_array_numeric=obs.value_array_numeric,
             sensitivity=SensitivityTier.NORMAL,
             attachment_blob_id=None,
         )
