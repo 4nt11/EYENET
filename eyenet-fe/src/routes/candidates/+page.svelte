@@ -8,7 +8,7 @@
   import {
     candidateCtx, candidateView, candidateTone,
     loadCandidates, loadCandidateDetail,
-    approveCandidate, rejectCandidate, parkCandidate
+    approveCandidate, rejectCandidate, parkCandidate, retryCandidate
   } from '$lib/candidate.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
 
@@ -27,6 +27,10 @@
   // Only `queued` (approve/reject) and `joined` (park) carry an operator action.
   let canDecide = $derived(sel?.state === 'queued');
   let canPark = $derived(sel?.state === 'joined');
+  // `failed` (a rejected/errored join) can be retried: failed → queued. The
+  // endpoint is admin:candidates-gated (grant-only) — a caller without the grant
+  // gets a surfaced 403 rather than a hidden button.
+  let canRetry = $derived(sel?.state === 'failed');
   // Awaiting an operator OR an automatic flip (requested → joined).
   let pending = $derived(candidateCtx.list.filter((x) => x.state === 'queued' || x.state === 'requested').length);
 
@@ -56,6 +60,10 @@
     if (!sel || !reason.trim()) return;
     await parkCandidate(sel.id, sel.sourceId, reason.trim());
     reason = '';
+  }
+  async function retry() {
+    if (!sel) return;
+    await retryCandidate(sel.id, sel.sourceId);
   }
 </script>
 
@@ -143,6 +151,11 @@
               <Button variant="ghost" size="sm" disabled={candidateView.submitting || !reason.trim()} onclick={park}>Park</Button>
             </div>
             <p class="hint">Joined group · parking stops further collection on it.</p>
+          {:else if canRetry}
+            <div class="actions">
+              <Button variant="ghost" size="sm" disabled={candidateView.submitting} onclick={retry}>Retry</Button>
+            </div>
+            <p class="hint">Failed join · retry re-queues it (failed → queued). Needs admin:candidates — retrying can burn identities.</p>
           {:else if sel.state === 'requested'}
             <p class="settled">Approval-gated join (invite-link). Flips REQUESTED → JOINED automatically once membership is confirmed — no operator action.</p>
           {:else if sel.state === 'discovered'}
