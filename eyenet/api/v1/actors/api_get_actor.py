@@ -53,4 +53,5 @@ async def actors_get(
         aliases=aliases,
         observation_count=observation_count,
         persona_id=persona.id if persona is not None else None,
+        assessment=actor.operator_assessment,
     )

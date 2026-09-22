@@ -11,9 +11,11 @@ API_PLAN §9.1.
 from __future__ import annotations
 
 from .actors import (
+    ActorAssessment,
     ActorDetail,
     ActorSummary,
     AliasEntry,
+    SetActorAssessmentRequest,
     BelongsToPersonaAttrs,
     BelongsToPersonaEdge,
     CursorPageActorSummary,
@@ -127,9 +129,11 @@ from .stream import (
 from .writes import WriteAccepted
 
 __all__ = [
+    "ActorAssessment",
     "ActorDetail",
     "ActorSummary",
     "AliasEntry",
+    "SetActorAssessmentRequest",
     "Anchor",
     "AuditChainBreak",
     "AuditEvent",

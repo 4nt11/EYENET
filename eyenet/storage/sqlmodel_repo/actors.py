@@ -41,6 +41,7 @@ def _row_to_actor(row: ActorTable) -> ActorRow:
         last_seen_at_ingest=_aware(row.last_seen_at_ingest),
         is_bot_self_declared=row.is_bot_self_declared,
         notes=row.notes,
+        operator_assessment=row.operator_assessment,
     )
 
 
@@ -143,6 +144,19 @@ class ActorsMixin:
             )
             result = await session.exec(stmt)
             return list(result)
+
+    async def set_actor_assessment(self, actor_id: UUID, assessment: str | None) -> bool:
+        """Set the operator free-text assessment. Returns False if no such actor.
+
+        SELECT-then-update (generic ORM, no dialect leak)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(ActorTable, actor_id)
+            if row is None:
+                return False
+            row.operator_assessment = assessment
+            session.add(row)
+            await session.commit()
+            return True
 
     async def actor_aliases(self, actor_id: UUID) -> list[object]:
         """Alias history for an actor, newest-first; ActorAliasHistoryTable

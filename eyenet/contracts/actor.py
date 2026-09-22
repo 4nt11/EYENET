@@ -44,6 +44,7 @@ class ActorRow(DbRowBase):
     last_seen_at_ingest: datetime
     is_bot_self_declared: bool = False
     notes: str | None = None
+    operator_assessment: str | None = None
 
 
 class ActorAliasHistoryRow(DbRowBase):

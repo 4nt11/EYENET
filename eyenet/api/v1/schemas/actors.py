@@ -49,6 +49,20 @@ class ActorSummary(ApiSchema):
     score: float | None = None
 
 
+class SetActorAssessmentRequest(ApiSchema):
+    """Body for PUT /v1/actors/{id}/assessment — operator dossier note."""
+
+    assessment: str = Field(min_length=1, max_length=4096)
+    reason: str = Field(min_length=1, max_length=1024, description="Recorded to the audit chain.")
+
+
+class ActorAssessment(ApiSchema):
+    """200 response for the assessment write — the settled value."""
+
+    actor_id: UUID
+    assessment: str
+
+
 class AliasEntry(ApiSchema):
     """One row of an actor's alias history (MODELS §2.10)."""
 
@@ -80,6 +94,9 @@ class ActorDetail(ActorSummary):
     aliases: list[AliasEntry] = Field(default_factory=list)
     observation_count: int = Field(ge=0)
     persona_id: UUID | None = None
+    assessment: str | None = Field(
+        default=None, description="Operator free-text assessment (write:actors)."
+    )
 
 
 class LinkedToAttrs(ApiSchema):

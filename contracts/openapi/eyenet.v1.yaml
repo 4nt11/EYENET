@@ -404,6 +404,30 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/actors/{actor_id}/assessment:
+    put:
+      tags: [actors]
+      operationId: actors_set_assessment
+      summary: Set the operator free-text assessment (write:actors).
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetActorAssessmentRequest' }
+      responses:
+        "200":
+          description: Assessment set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActorAssessment' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors/{actor_id}/neighbors:
     get:
       tags: [actors]
@@ -3104,6 +3128,21 @@ components:
               items: { $ref: '#/components/schemas/AliasEntry' }
             observation_count: { type: integer, minimum: 0 }
             persona_id:        { type: string, format: uuid, nullable: true }
+            assessment:        { type: string, nullable: true }
+    SetActorAssessmentRequest:
+      type: object
+      additionalProperties: false
+      required: [assessment, reason]
+      properties:
+        assessment: { type: string, minLength: 1, maxLength: 4096 }
+        reason:     { type: string, minLength: 1, maxLength: 1024 }
+    ActorAssessment:
+      type: object
+      additionalProperties: false
+      required: [actor_id, assessment]
+      properties:
+        actor_id:   { type: string, format: uuid }
+        assessment: { type: string }
     ActorAliasKind:
       description: Alias history kind (MODELS §2.10).
       type: string

@@ -1277,6 +1277,10 @@ class BaseRepository(ABC):
         """Alias history for an actor, newest-first; ActorAliasHistoryTable rows
         type-erased. Backs ActorDetail.aliases + alias_count."""
 
+    @abstractmethod
+    async def set_actor_assessment(self, actor_id: UUID, assessment: str | None) -> bool:
+        """Set the operator free-text assessment; False if no such actor."""
+
     # =================================================================
     # SOURCE DOMAINS (MODELS §2.26, API_PLAN §4.13)
     # =================================================================
