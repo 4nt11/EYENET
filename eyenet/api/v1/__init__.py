@@ -118,6 +118,8 @@ from eyenet.api.v1.identities.api_burn_identity import router as identities_burn
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_freeze_all import router as identities_freeze_all_router
 from eyenet.api.v1.identities.api_freeze_identity import router as identities_freeze_router
+from eyenet.api.v1.identities.api_get_identity import router as identities_get_router
+from eyenet.api.v1.identities.api_list_identities import router as identities_list_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
 
 # === linkages ===
@@ -307,6 +309,8 @@ v1_router.include_router(candidates_park_router)
 v1_router.include_router(candidates_retry_router)
 
 # identities + panic
+v1_router.include_router(identities_list_router)
+v1_router.include_router(identities_get_router)
 v1_router.include_router(identities_claim_router)
 v1_router.include_router(identities_release_router)
 v1_router.include_router(identities_freeze_router)
