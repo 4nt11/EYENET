@@ -129,34 +129,7 @@ export const SYS_STATS = [
   { label: 'Active alerts', value: '1',        tone: 'critical', sub: 'beacon · CASE-0417' }
 ];
 
-// ── Graph (stats + node search · NO topology endpoint exists) ────────────────
-export const GRAPH_STATS = [
-  { label: 'Nodes',    value: '14,208' },
-  { label: 'Edges',    value: '38,914' },
-  { label: 'Actors',   value: '9,120' },
-  { label: 'Personas', value: '412', tone: 'accent' },
-  { label: 'Sources',  value: '27' },
-  { label: 'Linkages', value: '1,884' }
-];
-
-export const GRAPH_NODES = [
-  { id: 'ACT-3312', kind: 'actor',   label: 'krieg_wolf (UNC-3312)', degree: 214, tier: 'critical' },
-  { id: 'PER-0044', kind: 'persona', label: 'UNC-3312 (attributed persona)', degree: 96, tier: 'high' },
-  { id: 'ACT-2980', kind: 'actor',   label: 'silent_relay (UNC-2980)', degree: 141, tier: 'high' },
-  { id: 'SRC-0007', kind: 'source',  label: 'tg://loader-ops', degree: 58, tier: 'medium' },
-  { id: 'GRP-9981', kind: 'group',   label: 'loader-ops (telegram)', degree: 77, tier: 'medium' },
-  { id: 'ACT-1774', kind: 'actor',   label: 'ghostpost', degree: 33, tier: 'low' },
-  { id: 'PER-0031', kind: 'persona', label: 'UNC-2980 (attributed persona)', degree: 61, tier: 'high' },
-  { id: 'SRC-0012', kind: 'source',  label: 'matrix://#staging:svc-cdn.net', degree: 24, tier: 'low' }
-];
-
-export const GRAPH_COLUMNS = [
-  { key: 'id', header: 'Node', mono: true, width: '110px' },
-  { key: 'kind', header: 'Kind', mono: true, width: '90px' },
-  { key: 'label', header: 'Label', mono: true },
-  { key: 'tier', header: 'Tier', width: '96px', badge: true },
-  { key: 'degree', header: 'Degree', mono: true, align: 'right', width: '90px' }
-];
+// Graph mocks removed — /graph is wired to GET /v1/graph/stats + /v1/graph/search.
 
 // ── Sources (discovery storage surface) ──────────────────────────────────────
 // state: active | paused

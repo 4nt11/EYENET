@@ -2,15 +2,49 @@
   import StatTile from '$lib/components/StatTile.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
-  import { GRAPH_STATS, GRAPH_NODES, GRAPH_COLUMNS } from '$lib/data.js';
+  import { graphSearch, searchActors } from '$lib/graph.svelte.js';
+
+  let { data } = $props();
+
+  const fmt = (n) => Number(n).toLocaleString('en-US');
+
+  // Only backable tiles. Linkages is the TOTAL — the sum of the per-state
+  // LinkageStateCounts. No Nodes / Edges / Sources tile: the API has no such
+  // field. `tier` (row severity) is likewise dropped — not in the contract.
+  let tiles = $derived(
+    data.stats
+      ? [
+          { label: 'Actors', value: fmt(data.stats.actors) },
+          { label: 'Personas', value: fmt(data.stats.personas), tone: 'accent' },
+          {
+            label: 'Linkages',
+            value: fmt(Object.values(data.stats.linkages).reduce((a, b) => a + b, 0))
+          },
+          { label: 'Observations', value: fmt(data.stats.observations) }
+        ]
+      : []
+  );
+
+  // /v1/graph/stats + /v1/graph/search need read:graph. 401/403 = no token yet.
+  const NOAUTH = new Set([401, 403]);
+
+  // Search is actors-only and q is REQUIRED. Empty box → idle (fetch nothing).
+  const ACTOR_COLUMNS = [
+    { key: 'id', header: 'Actor', mono: true, width: '300px' },
+    { key: 'handle', header: 'Handle', mono: true },
+    { key: 'platforms', header: 'Platforms', mono: true, width: '160px' },
+    { key: 'score', header: 'Score', mono: true, align: 'right', width: '90px' }
+  ];
 
   let q = $state('');
-  // Client-side filter over the mock nodes (stands in for GET /v1/graph/search).
-  let results = $derived(
-    q.trim() === ''
-      ? GRAPH_NODES
-      : GRAPH_NODES.filter((n) => (n.label + ' ' + n.id + ' ' + n.kind).toLowerCase().includes(q.trim().toLowerCase()))
-  );
+  // Debounce keystrokes into the search store.
+  let timer;
+  $effect(() => {
+    const term = q;
+    clearTimeout(timer);
+    timer = setTimeout(() => searchActors(term), 200);
+    return () => clearTimeout(timer);
+  });
 </script>
 
 <main>
@@ -19,22 +53,38 @@
       <div class="crumb"><span class="group">Investigate</span><span class="sep">/</span><span class="slug">graph</span></div>
       <h1>Graph</h1>
     </div>
-    <input class="search" type="search" bind:value={q} placeholder="Search nodes · actor, persona, source…" spellcheck="false" />
+    <input class="search" type="search" bind:value={q} placeholder="Search actors · handle, alias, identifier…" spellcheck="false" />
   </div>
 
   <div class="body">
-    <div class="tiles">
-      {#each GRAPH_STATS as s}
-        <StatTile {...s} />
-      {/each}
-    </div>
+    {#if data.stats}
+      <div class="tiles">
+        {#each tiles as s}
+          <StatTile {...s} />
+        {/each}
+      </div>
+    {:else if NOAUTH.has(data.statsStatus)}
+      <p class="note">Graph stats need a token with <code>read:graph</code>. Sign in to view actors · personas · linkages · observations.</p>
+    {:else}
+      <p class="note">Graph stats unavailable (<code>/v1/graph/stats</code> did not respond).</p>
+    {/if}
 
-    <Panel title="Node search" class="grow">
-      {#snippet action()}<span class="count">{results.length} / {GRAPH_NODES.length}</span>{/snippet}
-      {#if results.length}
-        <DataTable rowKey="id" columns={GRAPH_COLUMNS} rows={results} />
+    <Panel title="Actor search" class="grow">
+      {#snippet action()}
+        {#if !graphSearch.idle && !graphSearch.loading && !graphSearch.error}
+          <span class="count">{graphSearch.results.length} match{graphSearch.results.length === 1 ? '' : 'es'}</span>
+        {/if}
+      {/snippet}
+      {#if graphSearch.idle}
+        <div class="empty">Type a handle, alias, or identifier to search actors.</div>
+      {:else if graphSearch.loading}
+        <div class="empty">Searching…</div>
+      {:else if graphSearch.error}
+        <div class="empty">Search failed: <code>{graphSearch.error}</code></div>
+      {:else if graphSearch.results.length}
+        <DataTable rowKey="id" columns={ACTOR_COLUMNS} rows={graphSearch.results} />
       {:else}
-        <div class="empty">No nodes match <code>{q}</code>.</div>
+        <div class="empty">No actors match <code>{q.trim()}</code>.</div>
       {/if}
     </Panel>
 
@@ -73,6 +123,9 @@
   :global(.panel.grow) { min-height: 160px; }
   .count { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .empty { padding: 20px; font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-muted); }
-  .note { margin: 12px 0 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); line-height: var(--lh-normal); }
+  .note { margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
+  .note:last-child { margin: 12px 0 0; }
+  .note code { color: var(--accent-text); }
   code { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-body); background: var(--surface); padding: 1px 5px; border-radius: var(--radius-sm); }
+  .note code { background: none; padding: 0; }
 </style>
