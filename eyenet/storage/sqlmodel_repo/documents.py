@@ -11,6 +11,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from sqlalchemy import func
+from sqlmodel import col, select
+from sqlmodel.sql.expression import SelectOfScalar
+
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.document import DocumentRow
 from eyenet.models.document import DocumentTable
@@ -41,6 +45,54 @@ class DocumentsMixin:
             if table is None:
                 return None
             return DocumentRow.model_validate(table.model_dump())
+
+    def _documents_filtered_stmt(
+        self,
+        *,
+        doc_kind: str | None,
+        review_required: bool | None,
+    ) -> SelectOfScalar[DocumentTable]:
+        stmt = select(DocumentTable)
+        if doc_kind is not None:
+            stmt = stmt.where(DocumentTable.doc_kind == doc_kind)
+        if review_required is not None:
+            stmt = stmt.where(DocumentTable.review_required == review_required)
+        return stmt
+
+    async def list_documents(
+        self,
+        *,
+        doc_kind: str | None = None,
+        review_required: bool | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[DocumentRow]:
+        """Documents newest-first (``uploaded_at DESC, id DESC``) for the M10
+        viewer triage table. Generic ORM SELECT — no dialect leak, so
+        MySQL/Postgres inherit it unchanged ([[feedback_no_dialect_leak_in_mixins]])."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                self._documents_filtered_stmt(doc_kind=doc_kind, review_required=review_required)
+                .order_by(col(DocumentTable.uploaded_at).desc(), col(DocumentTable.id).desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [DocumentRow.model_validate(r.model_dump()) for r in list(result)]
+
+    async def count_documents(
+        self,
+        *,
+        doc_kind: str | None = None,
+        review_required: bool | None = None,
+    ) -> int:
+        """Count documents matching the same filters as :meth:`list_documents`."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            inner = self._documents_filtered_stmt(
+                doc_kind=doc_kind, review_required=review_required
+            ).subquery()
+            result = await session.exec(select(func.count()).select_from(inner))
+            return int(result.one())
 
     async def settle_document_classification(
         self,

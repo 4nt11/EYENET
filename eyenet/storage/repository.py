@@ -656,6 +656,25 @@ class BaseRepository(ABC):
     async def count_observations(self) -> int: ...
 
     @abstractmethod
+    async def list_observations_for_case(
+        self,
+        case_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Observations that are ACTIVE direct members of a case, newest-first.
+
+        Direct-membership semantics (§4.10.1): only observations explicitly
+        added via ``case_member`` (``subject_kind=observation``, not removed).
+        Returns ObservationTable rows (type-erased) for the API projector."""
+
+    @abstractmethod
+    async def count_observations_for_case(self, case_id: UUID) -> int:
+        """Count active observation members of a case (same filter as
+        :meth:`list_observations_for_case`)."""
+
+    @abstractmethod
     async def reclassify_observation(
         self,
         *,
@@ -690,6 +709,21 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def get_attachment(self, attachment_id: UUID) -> AttachmentRow | None: ...
+
+    @abstractmethod
+    async def list_attachments(
+        self,
+        *,
+        mime: str | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AttachmentRow]:
+        """Attachments newest-first (``id DESC``; uuid7 is time-ordered) for the
+        M10 viewer table."""
+
+    @abstractmethod
+    async def count_attachments(self, *, mime: str | None = None) -> int:
+        """Count attachments matching the same filter as :meth:`list_attachments`."""
 
     @abstractmethod
     async def set_attachment_classification(
@@ -735,6 +769,27 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def get_document(self, document_id: UUID) -> DocumentRow | None: ...
+
+    @abstractmethod
+    async def list_documents(
+        self,
+        *,
+        doc_kind: str | None = None,
+        review_required: bool | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[DocumentRow]:
+        """Documents newest-first (``uploaded_at DESC, id DESC``) for the M10
+        viewer triage table."""
+
+    @abstractmethod
+    async def count_documents(
+        self,
+        *,
+        doc_kind: str | None = None,
+        review_required: bool | None = None,
+    ) -> int:
+        """Count documents matching the same filters as :meth:`list_documents`."""
 
     @abstractmethod
     async def settle_document_classification(

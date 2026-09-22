@@ -7,6 +7,10 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
+from sqlalchemy import func
+from sqlmodel import col, select
+from sqlmodel.sql.expression import SelectOfScalar
+
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.enums import SensitivityTier
 from eyenet.contracts.message import AttachmentRow
@@ -35,6 +39,40 @@ class AttachmentsMixin:
             if table is None:
                 return None
             return AttachmentRow.model_validate(table.model_dump())
+
+    def _attachments_filtered_stmt(self, *, mime: str | None) -> SelectOfScalar[AttachmentTable]:
+        stmt = select(AttachmentTable)
+        if mime is not None:
+            stmt = stmt.where(AttachmentTable.mime == mime)
+        return stmt
+
+    async def list_attachments(
+        self,
+        *,
+        mime: str | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AttachmentRow]:
+        """Attachments newest-first for the M10 viewer table. Attachments carry
+        no own timestamp (the parent message does), and ``id`` is uuid7 =
+        time-ordered, so ``id DESC`` is the newest-first sort. Generic ORM
+        SELECT — no dialect leak ([[feedback_no_dialect_leak_in_mixins]])."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                self._attachments_filtered_stmt(mime=mime)
+                .order_by(col(AttachmentTable.id).desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
+
+    async def count_attachments(self, *, mime: str | None = None) -> int:
+        """Count attachments matching the same filter as :meth:`list_attachments`."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            inner = self._attachments_filtered_stmt(mime=mime).subquery()
+            result = await session.exec(select(func.count()).select_from(inner))
+            return int(result.one())
 
     async def set_attachment_classification(
         self,

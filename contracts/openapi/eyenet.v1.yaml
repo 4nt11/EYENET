@@ -1118,6 +1118,25 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
 
   # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
+  /v1/attachments:
+    get:
+      tags: [attachments]
+      operationId: attachments_list
+      summary: |
+        The attachment list (metadata only; no bytes). Authenticated; the raw
+        blob stays behind the clearance-gated manifest + signed /access flow.
+      parameters:
+        - { name: mime, in: query, required: false, schema: { type: string, nullable: true } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of attachments.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageAttachmentSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
   /v1/attachments/{blob_id}/manifest:
     get:
       tags: [attachments]
@@ -1641,6 +1660,28 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/cases/{case_id}/observations:
+    get:
+      tags: [cases]
+      operationId: cases_list_observations
+      summary: |
+        Case-scoped evidence observations — direct members only (observations
+        explicitly added to the case via case_member, not every observation of
+        the case's actors). Requires read:observations AND case visibility.
+      parameters:
+        - { name: case_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of case-member observations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageObservationSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
   /v1/cases/{case_id}/members/bulk:
     post:
       tags: [cases]
@@ -1971,6 +2012,26 @@ paths:
 
   # ── Documents (M10 classifier) ────────────────────────────────────────────
   /v1/documents:
+    get:
+      tags: [documents]
+      operationId: documents_list
+      summary: |
+        The document triage list (metadata only; no bytes or extracted text).
+        Authenticated; rows carry filename/hash/tier. Reading content stays
+        behind the clearance-gated manifest + signed /access flow.
+      parameters:
+        - { name: doc_kind, in: query, required: false, schema: { type: string, nullable: true } }
+        - { name: review_required, in: query, required: false, schema: { type: boolean, nullable: true } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of documents.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageDocumentSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [documents]
       operationId: documents_upload
@@ -4331,3 +4392,49 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/CandidateSummary' }
+    DocumentSummary:
+      type: object
+      additionalProperties: false
+      description: Document metadata for the triage list (no bytes / extracted text).
+      properties:
+        document_id: { type: string, format: uuid }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        mime: { type: string, maxLength: 128 }
+        size_bytes: { type: integer, minimum: 0 }
+        doc_kind: { type: string, nullable: true }
+        filename: { type: string, nullable: true }
+        review_required: { type: boolean }
+        classifier_tier: { $ref: '#/components/schemas/SensitivityTier' }
+        tier: { $ref: '#/components/schemas/SensitivityTier' }
+        uploaded_at: { type: string, format: date-time }
+        ingested_at: { type: string, format: date-time }
+    AttachmentSummary:
+      type: object
+      additionalProperties: false
+      description: Attachment metadata for the list surface (no bytes).
+      properties:
+        blob_id: { type: string, format: uuid }
+        message_id: { type: string, format: uuid }
+        kind: { type: string, maxLength: 64 }
+        mime: { type: string, maxLength: 128 }
+        size_bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        filename: { type: string, nullable: true }
+        classifier_tier: { $ref: '#/components/schemas/SensitivityTier' }
+        tier: { $ref: '#/components/schemas/SensitivityTier' }
+    CursorPageDocumentSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentSummary' }
+    CursorPageAttachmentSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/AttachmentSummary' }
