@@ -9,7 +9,9 @@ idempotent; cases/linkages/candidates simply accumulate on repeat runs.
 
 Seeds: a Telegram source + group + actors + messages, a collector identity +
 collector, a proposed linkage between two actors, a case with those actors as
-members, and one group candidate.
+members, one group candidate, a document, an attachment, and an observation
+added to the case as evidence (so /cases/{documents,attachments,evidence}
+show live rows).
 """
 
 from __future__ import annotations
@@ -24,12 +26,20 @@ from pathlib import Path
 # root so we can reuse the canonical test seed helper.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from eyenet.contracts.document import DocumentRow  # noqa: E402
 from eyenet.contracts.enums import (  # noqa: E402
+    AttachmentKind,
     CaseRoleOnCase,
     CaseSubjectKind,
     MentionKind,
+    SensitivityTier,
     SourceKind,
+    ValueKind,
 )
+from eyenet.contracts.message import AttachmentRow  # noqa: E402
+from eyenet.contracts.observation import ObservationRow  # noqa: E402
+from eyenet.storage.attachments import store_attachment  # noqa: E402
+from eyenet.storage.documents import store_document  # noqa: E402
 from eyenet.storage.factory import get_repository  # noqa: E402
 from eyenet.storage.repository import BaseRepository  # noqa: E402
 from tests._seed import seed_telegram_fixture  # noqa: E402
@@ -45,7 +55,7 @@ _RECORDS = [
 ]
 
 
-async def _seed(storage: BaseRepository, username: str) -> None:
+async def _seed(storage: BaseRepository, username: str, data_dir: Path) -> None:
     now = datetime.now(UTC)
     tag = now.strftime("%H%M%S")  # keep per-run names unique so re-runs don't collide
 
@@ -122,6 +132,74 @@ async def _seed(storage: BaseRepository, username: str) -> None:
     )
     print(f"seeded candidate {cand.id}")
 
+    # 6. A document (NORMAL tier so it's visible without a clearance grant).
+    # Built directly — a seed script has no business booting the nsjail
+    # classifier pipeline; the tier is stamped, not derived here.
+    doc_body = b"loader-ops running notes\nstaging window 22:00 UTC\nno secrets here"
+    doc_sha, doc_uri = store_document(data_dir, doc_body)
+    document_id = await storage.put_document(
+        DocumentRow(
+            sha256=doc_sha,
+            mime="text/plain",
+            size_bytes=len(doc_body),
+            doc_kind="text",
+            filename="loader-ops-notes.txt",
+            storage_uri=doc_uri,
+            extracted_text=doc_body.decode(),
+            embedded_meta={},
+            classification={},
+            review_required=False,
+            uploaded_by_user_id=uid,
+            uploaded_at=now,
+            ingested_at=now,
+            classifier_tier=SensitivityTier.NORMAL,
+        )
+    )
+    print(f"seeded document {document_id}")
+
+    # 7. An attachment hung off the first seeded message.
+    msg_id = await storage.get_message_id_by_evidence_ref("telegram:-100:1001")
+    if msg_id is None:
+        raise SystemExit("seeded message telegram:-100:1001 not found — seed order changed?")
+    att_body = b"target-manifest v1\nfinance-list.csv\ndomains.txt"
+    att_sha, att_uri = store_attachment(
+        data_dir, att_body, source=SourceKind.TELEGRAM, instance_id=f"demo-{tag}"
+    )
+    attachment_id = await storage.put_attachment(
+        AttachmentRow(
+            message_id=msg_id,
+            kind=AttachmentKind.DOCUMENT,
+            mime="text/plain",
+            size_bytes=len(att_body),
+            sha256=att_sha,
+            filename="staging-manifest.txt",
+            storage_uri=att_uri,
+            classifier_tier=SensitivityTier.NORMAL,
+        )
+    )
+    print(f"seeded attachment {attachment_id}")
+
+    # 8. An observation added to the case as evidence (subject_kind=OBSERVATION),
+    # so /cases/{id}/evidence shows a live row.
+    obs = ObservationRow(
+        actor_id=actors[0],
+        evidence_ref="telegram:-100:1001",
+        primitive_namespace="stylometric",
+        primitive_name="chatty_member",
+        primitive_version="1.0.0",
+        value_kind=ValueKind.NUMERIC,
+        value_numeric=0.73,
+        observed_at=now,
+        sensor_instance="demo-seed",
+    )
+    await storage.put_observation(obs)
+    await storage.add_case_member(
+        case_id=case.id, subject_kind=CaseSubjectKind.OBSERVATION, subject_id=obs.id,
+        added_by_user_id=uid, reason="seeded demo observation-as-evidence membership",
+        now=now, **_SVC,
+    )
+    print(f"seeded observation {obs.id} as case evidence")
+
     await storage.close()
     print("done.")
 
@@ -131,8 +209,9 @@ async def _main() -> None:
     ap.add_argument("--data-dir", default="data")
     ap.add_argument("--user", default="anti", help="username to attribute seeded writes to")
     args = ap.parse_args()
-    storage = get_repository(data_dir=Path(args.data_dir))
-    await _seed(storage, args.user)
+    data_dir = Path(args.data_dir)
+    storage = get_repository(data_dir=data_dir)
+    await _seed(storage, args.user, data_dir)
 
 
 if __name__ == "__main__":
