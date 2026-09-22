@@ -86,6 +86,30 @@ export async function loadCollectorDetail(id) {
   }
 }
 
+// Create-collector form state. Sources/identities feed the two selects; the
+// create leases the chosen identity (one collector per identity), so a reused
+// identity or a duplicate instance_name comes back 409 and is surfaced.
+export const collectorCreate = $state({ submitting: false, error: null, ok: null });
+
+// payload: {instance_name, kind, source_id, identity_id, config, notes}.
+// Returns true on success (so the caller can close the dialog).
+export async function createCollector(payload) {
+  collectorCreate.submitting = true;
+  collectorCreate.error = null;
+  collectorCreate.ok = null;
+  try {
+    const row = await apiPost('/v1/collectors', payload, { auth: true });
+    collectorCreate.ok = `created ${row.instance_name}.`;
+    await loadCollectors();
+    return true;
+  } catch (e) {
+    collectorCreate.error = e.message ?? String(e);
+    return false;
+  } finally {
+    collectorCreate.submitting = false;
+  }
+}
+
 // action ∈ 'start' | 'stop' | 'delete'. start/stop are 202 — the supervisor
 // reconciles observed_state → desired asynchronously, so we poll for the flip
 // and message honestly if no supervisor is running. delete needs observed
