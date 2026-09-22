@@ -31,6 +31,8 @@ class AuditRow(ApiSchema):
 
     event_id: UUID
     subject: str = Field(max_length=128)
+    subject_kind: str = Field(max_length=64)
+    subject_id: UUID | None = None
     user_id: UUID | None = None
     ts: datetime
     request_id: str | None = Field(default=None, max_length=64)
@@ -47,6 +49,8 @@ class AuditRow(ApiSchema):
         return cls(
             event_id=row.id,
             subject=row.event,
+            subject_kind=row.subject_kind,
+            subject_id=row.subject_id,
             user_id=row.system_user_id,
             ts=row.at,
             request_id=request_id if isinstance(request_id, str) else None,

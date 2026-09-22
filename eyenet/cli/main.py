@@ -460,6 +460,58 @@ def classifier_run(  # pragma: no cover
     _run(_factory, cfg)
 
 
+@app.command("api")
+def api_run(  # pragma: no cover
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    workers: int = typer.Option(1, "--workers"),
+    certfile: str | None = typer.Option(None, "--certfile"),
+    keyfile: str | None = typer.Option(None, "--keyfile"),
+    enable_h3: bool = typer.Option(
+        False, "--h3/--no-h3", help="offer HTTP/3 (QUIC); requires TLS (§12.1.1)"
+    ),
+    allow_insecure_bind: bool = typer.Option(
+        False, "--allow-insecure-bind", help="non-loopback bind with TLS terminated upstream"
+    ),
+) -> None:
+    """Serve the operator HTTP API over Hypercorn (h2, optional h3; never h1)."""
+
+    from hypercorn.asyncio import serve
+
+    from eyenet.api._serve import build_config
+    from eyenet.api.app import create_app
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    hcfg = build_config(
+        host,
+        port,
+        enable_h3=enable_h3,
+        certfile=certfile,
+        keyfile=keyfile,
+        workers=workers,
+        allow_insecure_bind=allow_insecure_bind,
+    )
+
+    async def _main() -> None:
+        bus = await _connect_bus(cfg)
+        storage = get_repository(data_dir=cfg.data_dir)
+        try:
+            fastapi_app = create_app(
+                storage=storage,
+                data_dir=cfg.data_dir,
+                publisher=BusEnvelopePublisher(bus),
+            )
+            await serve(fastapi_app, hcfg)
+        finally:
+            await bus.close()
+            await storage.close()
+
+    asyncio.run(_main())
+
+
 @app.command("graph")
 def graph_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),

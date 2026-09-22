@@ -33,11 +33,13 @@ def test_audit_row_minimal(uid: UUID, now: datetime) -> None:
     row = AuditRow(
         event_id=uid,
         subject="evidence_access",
+        subject_kind="case",
         ts=now,
         prev_hash="0" * 64,
         hash="1" * 64,
     )
     assert row.user_id is None
+    assert row.subject_id is None
     assert row.payload == {}
 
 
@@ -46,6 +48,7 @@ def test_audit_row_trace_id_pattern(uid: UUID, now: datetime) -> None:
         AuditRow(
             event_id=uid,
             subject="x",
+            subject_kind="case",
             ts=now,
             prev_hash="p",
             hash="h",
@@ -58,6 +61,7 @@ def test_audit_row_span_id_pattern(uid: UUID, now: datetime) -> None:
         AuditRow(
             event_id=uid,
             subject="x",
+            subject_kind="case",
             ts=now,
             prev_hash="p",
             hash="h",

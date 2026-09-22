@@ -9,10 +9,19 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
 import psutil
+
+# This process, resolved once; create_time() is the service start instant.
+_PROC = psutil.Process()
+
+
+def uptime_seconds() -> float:
+    """Seconds since this API process started (service uptime)."""
+    return max(0.0, time.time() - _PROC.create_time())
 
 
 def disk(path: Path) -> dict[str, int]:
@@ -37,7 +46,8 @@ def snapshot(data_dir: Path) -> dict[str, Any]:
         "mem": {"used": vm.used, "total": vm.total, "percent": vm.percent},
         "disk": {"data": disk(data_dir), "root": disk(Path("/"))},
         "load1": load1(),
+        "uptime_seconds": uptime_seconds(),
     }
 
 
-__all__ = ["disk", "load1", "snapshot"]
+__all__ = ["disk", "load1", "snapshot", "uptime_seconds"]

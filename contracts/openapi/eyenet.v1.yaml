@@ -643,6 +643,11 @@ paths:
           in: query
           required: false
           schema: { type: string, maxLength: 256 }
+        - name: subject_id
+          in: query
+          required: false
+          description: Filter to audit rows about one subject (e.g. a case_id) — the per-subject trail.
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Cursor page of audit rows.
@@ -3147,10 +3152,12 @@ components:
     AuditRow:
       type: object
       additionalProperties: false
-      required: [event_id, subject, user_id, ts, prev_hash, hash]
+      required: [event_id, subject, subject_kind, user_id, ts, prev_hash, hash]
       properties:
         event_id:    { type: string, format: uuid }
         subject:     { type: string, maxLength: 128 }
+        subject_kind: { type: string, maxLength: 64 }
+        subject_id:  { type: string, format: uuid, nullable: true }
         user_id:     { type: string, format: uuid, nullable: true }
         ts:          { type: string, format: date-time }
         request_id:  { type: string, nullable: true, maxLength: 64 }
@@ -3295,17 +3302,32 @@ components:
       properties:
         data: { $ref: '#/components/schemas/DiskUsage' }
         root: { $ref: '#/components/schemas/DiskUsage' }
+    ComponentDetail:
+      description: |
+        Operator-facing readiness prose per subsystem, authenticated only. The
+        machine up/down flags are on the public `/readyz`; this carries the
+        fingerprint-ish detail (backend, db sizes, key count) that stays off an
+        unauthenticated surface.
+      type: object
+      additionalProperties: false
+      required: [storage, bus, auth_keys]
+      properties:
+        storage:   { type: string, maxLength: 256 }
+        bus:       { type: string, maxLength: 256 }
+        auth_keys: { type: string, maxLength: 256 }
     SystemStats:
       description: Self-reported host stats (CPU / RAM / disk / load) from `/v1/system`.
       type: object
       additionalProperties: false
-      required: [cpu_percent, mem, disk, load1, version]
+      required: [cpu_percent, mem, disk, load1, uptime_seconds, version, components]
       properties:
-        cpu_percent: { type: number }
-        mem:         { $ref: '#/components/schemas/MemStats' }
-        disk:        { $ref: '#/components/schemas/DiskStats' }
-        load1:       { type: number }
-        version:     { type: string }
+        cpu_percent:    { type: number }
+        mem:            { $ref: '#/components/schemas/MemStats' }
+        disk:           { $ref: '#/components/schemas/DiskStats' }
+        load1:          { type: number }
+        uptime_seconds: { type: number }
+        version:        { type: string }
+        components:     { $ref: '#/components/schemas/ComponentDetail' }
 
     # ── Sensitivity / redaction (API_PLAN §4.7) ───────────────────────────
     SensitivityTier:

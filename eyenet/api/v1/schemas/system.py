@@ -26,6 +26,19 @@ class DiskStats(ApiSchema):
     root: DiskUsage
 
 
+class ComponentDetail(ApiSchema):
+    """Operator-facing readiness detail per subsystem (authenticated only).
+
+    Prose, not machine flags — the up/down booleans live on the public
+    ``/readyz``. This carries the fingerprint-ish detail (backend, db sizes,
+    key count) that must stay off an unauthenticated surface.
+    """
+
+    storage: str
+    bus: str
+    auth_keys: str
+
+
 class SystemStats(ApiSchema):
     """Point-in-time host self-report."""
 
@@ -33,7 +46,9 @@ class SystemStats(ApiSchema):
     mem: MemStats
     disk: DiskStats
     load1: float
+    uptime_seconds: float
     version: str
+    components: ComponentDetail
 
 
-__all__ = ["DiskStats", "DiskUsage", "MemStats", "SystemStats"]
+__all__ = ["ComponentDetail", "DiskStats", "DiskUsage", "MemStats", "SystemStats"]

@@ -30,12 +30,15 @@ def _audit_filters(
     until: datetime | None,
     user: UUID | None,
     subject: str | None,
+    subject_id: UUID | None,
 ) -> Any:
     """Shared WHERE clauses for the audit list/count (M9.F4).
 
     ``subject`` filters the domain ``event`` column — the API renames
-    ``event`` -> ``subject`` (see AuditRow). ``user`` filters
-    ``system_user_id``; ``since``/``until`` bound ``at`` (half-open).
+    ``event`` -> ``subject`` (see AuditRow). ``subject_id`` filters the audited
+    row's identity (e.g. a case_id), giving a per-subject trail off the
+    ``ix_audit_subject`` index. ``user`` filters ``system_user_id``;
+    ``since``/``until`` bound ``at`` (half-open).
     """
     if since is not None:
         stmt = stmt.where(col(AuditLogTable.at) >= since)
@@ -48,6 +51,8 @@ def _audit_filters(
         stmt = stmt.where(cast(col(AuditLogTable.system_user_id), String) == str(user))
     if subject is not None:
         stmt = stmt.where(col(AuditLogTable.event) == subject)
+    if subject_id is not None:
+        stmt = stmt.where(cast(col(AuditLogTable.subject_id), String) == str(subject_id))
     return stmt
 
 
@@ -78,6 +83,7 @@ class AuditMixin:
         until: datetime | None = None,
         user: UUID | None = None,
         subject: str | None = None,
+        subject_id: UUID | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[object]:
@@ -88,7 +94,12 @@ class AuditMixin:
         """
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
             stmt = _audit_filters(
-                select(AuditLogTable), since=since, until=until, user=user, subject=subject
+                select(AuditLogTable),
+                since=since,
+                until=until,
+                user=user,
+                subject=subject,
+                subject_id=subject_id,
             )
             stmt = (
                 stmt.order_by(col(AuditLogTable.at).desc())
@@ -112,6 +123,7 @@ class AuditMixin:
         until: datetime | None = None,
         user: UUID | None = None,
         subject: str | None = None,
+        subject_id: UUID | None = None,
     ) -> int:
         """Count audit rows matching the same filters as list_audit (M9.F4)."""
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
@@ -121,6 +133,7 @@ class AuditMixin:
                 until=until,
                 user=user,
                 subject=subject,
+                subject_id=subject_id,
             )
             result = await session.exec(stmt)
             return int(result.one())

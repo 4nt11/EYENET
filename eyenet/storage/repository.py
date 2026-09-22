@@ -123,6 +123,7 @@ class BaseRepository(ABC):
         until: datetime | None = None,
         user: UUID | None = None,
         subject: str | None = None,
+        subject_id: UUID | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[object]:
@@ -136,6 +137,7 @@ class BaseRepository(ABC):
         until: datetime | None = None,
         user: UUID | None = None,
         subject: str | None = None,
+        subject_id: UUID | None = None,
     ) -> int: ...
 
     # =================================================================

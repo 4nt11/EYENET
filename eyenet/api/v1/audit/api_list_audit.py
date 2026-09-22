@@ -31,6 +31,7 @@ async def audit_list(
     page: Annotated[CursorParams, Depends(cursor_params)],
     user: Annotated[UUID | None, Query()] = None,
     subject: Annotated[str | None, Query(max_length=256)] = None,
+    subject_id: Annotated[UUID | None, Query()] = None,
     since: Annotated[datetime | None, Query()] = None,
     until: Annotated[datetime | None, Query()] = None,
 ) -> CursorPageAuditRow:
@@ -41,12 +42,15 @@ async def audit_list(
             until=until,
             user=user,
             subject=subject,
+            subject_id=subject_id,
             limit=page.fetch_limit,
             offset=page.offset,
         ),
     )
     estimated_total = (
-        await storage.count_audit(since=since, until=until, user=user, subject=subject)
+        await storage.count_audit(
+            since=since, until=until, user=user, subject=subject, subject_id=subject_id
+        )
         if page.include_total
         else None
     )

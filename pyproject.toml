@@ -30,7 +30,10 @@ dependencies = [
 
   # http api (graph query + operator surface)
   "fastapi>=0.115",
-  "uvicorn[standard]>=0.32",
+  # ASGI server: Hypercorn, not uvicorn (API_PLAN §12.1). uvicorn is h11-only
+  # and we forbid HTTP/1.1; Hypercorn speaks h2 natively and h3 via aioquic
+  # (the [h3] extra). See eyenet/api/_serve.py.
+  "hypercorn[h3]>=0.17",
   "httpx>=0.27",            # used by fastapi TestClient and any outbound http
 
   # telemetry
