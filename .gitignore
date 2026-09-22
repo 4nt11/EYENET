@@ -76,6 +76,9 @@ storage/*.db-*
 *.sqlite-wal
 .eyenet-init.lock
 logs/
+# The Cases "Logs" route is source, not runtime log output — keep it tracked.
+!eyenet-fe/src/routes/cases/logs/
+!eyenet-fe/src/routes/cases/logs/**
 traces/
 spans.ndjson*
 
