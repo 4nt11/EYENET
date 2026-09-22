@@ -1,4 +1,5 @@
 <script>
+  import { goto } from '$app/navigation';
   import StatTile from '$lib/components/StatTile.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
@@ -82,7 +83,8 @@
       {:else if graphSearch.error}
         <div class="empty">Search failed: <code>{graphSearch.error}</code></div>
       {:else if graphSearch.results.length}
-        <DataTable rowKey="id" columns={ACTOR_COLUMNS} rows={graphSearch.results} />
+        <DataTable rowKey="id" columns={ACTOR_COLUMNS} rows={graphSearch.results}
+          onRowClick={(r) => goto(`/actors?id=${r.id}`)} />
       {:else}
         <div class="empty">No actors match <code>{q.trim()}</code>.</div>
       {/if}

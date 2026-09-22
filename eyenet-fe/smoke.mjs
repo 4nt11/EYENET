@@ -45,6 +45,43 @@ function mockBody(path) {
   if (path.endsWith('/v1/audit/verify')) return { verified: true, rows_checked: 0, first_break: null };
   if (path.includes('/v1/sources/') && !path.endsWith('/v1/sources'))
     return { source_id: 'x', kind: 'telegram', display_name: 'x', active_domain_count: 0, created_at: '2026-01-01T00:00:00Z', domains: [], resolved_artifact_count: 0 };
+
+  const AID = '00000000-0000-7000-8000-0000000000aa';
+  const PID = '00000000-0000-7000-8000-0000000000bb';
+  if (path.endsWith('/v1/calibration'))
+    return { composite_floor: 0.6,
+      comparators: [{ name: 'function_word_simhash_hamming', language_blind_threshold: 8, per_lang: { es: null } }],
+      verifiers: [{ name: 'general_impostors', language_blind_floor: 0.6, per_lang: {} }] };
+  // actor sub-paths (before the actor-detail catch-all)
+  if (path.endsWith('/observations') && path.includes('/v1/actors/'))
+    return { items: [{ observation_id: 'o1', kind: 'stylometric:function_word_distribution_top50',
+      ts: '2026-01-01T00:00:00Z', score: null, primitive: 'function_word_distribution_top50',
+      primitive_namespace: 'stylometric', primitive_version: '0.2', value_kind: 'hash',
+      value_hash: 'a91f00ff', value_enum: null, value_array: null, value_array_numeric: null,
+      sensitivity: 'normal', attachment_blob_id: null }], next_cursor: null, estimated_total: 1 };
+  if (path.endsWith('/timeline') && path.includes('/v1/actors/'))
+    return { items: [{ ts: '2026-01-01T00:00:00Z', kind: 'observation', id: 'x', summary: 'obs' }], next_cursor: null, estimated_total: 1 };
+  if (path.endsWith('/neighbors') && path.includes('/v1/actors/'))
+    return { items: [], next_cursor: null, estimated_total: 0 };
+  if (path.endsWith('/v1/actors'))
+    return { items: [{ actor_id: AID, primary_handle: 'alpha', platforms: ['telegram'], score: null }], next_cursor: null, estimated_total: 1 };
+  if (path.includes('/v1/actors/'))
+    return { actor_id: AID, primary_handle: 'alpha', platforms: ['telegram'], score: null,
+      first_seen: '2026-01-01T00:00:00Z', last_seen: '2026-01-02T00:00:00Z', alias_count: 1,
+      aliases: [{ kind: 'handle', value: 'old_alpha', observed_from: '2026-01-01T00:00:00Z', observed_until: null }],
+      observation_count: 1, persona_id: null, assessment: null };
+  if (path.includes('/v1/linkages/') && !path.endsWith('/v1/linkages'))
+    return { linkage_id: 'l1', actor_a_id: AID, actor_b_id: PID, state: 'suspected', score: 0.8,
+      method: 'sty', proposed_at: '2026-01-01T00:00:00Z', decided_at: null, decided_by: null, evidence: [],
+      verifier: { composite: 0.83, floor: 0.6, state: 'suspected', computed_at: '2026-01-01T00:00:00Z',
+        results: [{ method: 'general_impostors', score: 0.86, confidence: 1.0, skipped: false, detail: 'wins 43/50' }] } };
+  if (path.endsWith('/members') && path.includes('/v1/personas/'))
+    return { items: [{ actor_id: AID, since: '2026-01-01T00:00:00Z', via_linkage_id: null }], next_cursor: null, estimated_total: 1 };
+  if (path.endsWith('/v1/personas'))
+    return { items: [{ persona_id: PID, label: 'persona-1', member_count: 2 }], next_cursor: null, estimated_total: 1 };
+  if (path.includes('/v1/personas/'))
+    return { persona_id: PID, label: 'persona-1', member_count: 2, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' };
+
   return page; // every list endpoint
 }
 
