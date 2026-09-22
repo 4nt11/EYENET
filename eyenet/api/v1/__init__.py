@@ -17,6 +17,9 @@ from fastapi import APIRouter
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
 from eyenet.api.v1.actors.api_get_neighbors import router as actors_neighbors_router
+from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
+from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
+from eyenet.api.v1.calibration.api_get_calibration import router as calibration_get_router
 from eyenet.api.v1.actors.api_get_timeline import router as actors_timeline_router
 from eyenet.api.v1.actors.api_list_observations import router as actors_observations_router
 
@@ -144,6 +147,7 @@ from eyenet.api.v1.panic.api_panic import router as control_panic_router
 # === personas ===
 from eyenet.api.v1.personas.api_get_persona import router as personas_get_router
 from eyenet.api.v1.personas.api_list_members import router as personas_members_router
+from eyenet.api.v1.personas.api_list_personas import router as personas_list_router
 from eyenet.api.v1.personas.api_merge_persona import router as personas_merge_router
 from eyenet.api.v1.personas.api_split_persona import router as personas_split_router
 
@@ -212,12 +216,16 @@ v1_router.include_router(auth_signing_key_challenge_router)
 v1_router.include_router(auth_register_signing_key_router)
 
 # actors
+v1_router.include_router(actors_list_router)  # /actors (literal) before /actors/{id}
 v1_router.include_router(actors_get_router)
+v1_router.include_router(actors_set_assessment_router)
+v1_router.include_router(calibration_get_router)
 v1_router.include_router(actors_neighbors_router)
 v1_router.include_router(actors_observations_router)
 v1_router.include_router(actors_timeline_router)
 
 # personas
+v1_router.include_router(personas_list_router)  # /personas (literal) before /personas/{id}
 v1_router.include_router(personas_get_router)
 v1_router.include_router(personas_members_router)
 v1_router.include_router(personas_merge_router)

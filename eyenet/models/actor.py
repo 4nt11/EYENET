@@ -27,6 +27,9 @@ class ActorTable(SQLModel, table=True):
     last_seen_at_ingest: datetime = Field(index=True)
     is_bot_self_declared: bool = False
     notes: str | None = None
+    # Operator free-text assessment (write:actors). Analyst-authored dossier
+    # note; distinct from `notes` (system/collector provenance).
+    operator_assessment: str | None = None
 
 
 class ActorAliasHistoryTable(SQLModel, table=True):

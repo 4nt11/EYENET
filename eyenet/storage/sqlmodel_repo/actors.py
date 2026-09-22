@@ -13,6 +13,7 @@ from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.enums import GroupKind, SourceKind
 from eyenet.contracts.source import SourceRow
 from eyenet.models import ActorTable, GroupTable, SourceTable
+from eyenet.models.actor import ActorAliasHistoryTable
 
 from ._helpers import safe_session
 
@@ -40,6 +41,7 @@ def _row_to_actor(row: ActorTable) -> ActorRow:
         last_seen_at_ingest=_aware(row.last_seen_at_ingest),
         is_bot_self_declared=row.is_bot_self_declared,
         notes=row.notes,
+        operator_assessment=row.operator_assessment,
     )
 
 
@@ -124,6 +126,50 @@ class ActorsMixin:
             stmt = select(func.count()).select_from(ActorTable).where(self._actor_search_clause(q))
             result = await session.exec(stmt)
             return int(result.one())
+
+    async def list_actors(self, *, limit: int, offset: int = 0) -> list[object]:
+        """All actors, newest-activity first (the unfiltered list surface).
+
+        Same projection/ordering as :meth:`search_actors` without the substring
+        clause; pairs with the existing :meth:`count_actors` for paging.
+        Returns ``ActorTable`` rows (type-erased).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(ActorTable)
+                .order_by(col(ActorTable.last_seen_at_ingest).desc())
+                .order_by(col(ActorTable.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def set_actor_assessment(self, actor_id: UUID, assessment: str | None) -> bool:
+        """Set the operator free-text assessment. Returns False if no such actor.
+
+        SELECT-then-update (generic ORM, no dialect leak)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(ActorTable, actor_id)
+            if row is None:
+                return False
+            row.operator_assessment = assessment
+            session.add(row)
+            await session.commit()
+            return True
+
+    async def actor_aliases(self, actor_id: UUID) -> list[object]:
+        """Alias history for an actor, newest-first; ActorAliasHistoryTable
+        rows type-erased. Backs ActorDetail.aliases + the real alias_count."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(ActorAliasHistoryTable)
+                .where(col(ActorAliasHistoryTable.actor_id) == actor_id)
+                .order_by(col(ActorAliasHistoryTable.observed_from).desc())
+                .order_by(col(ActorAliasHistoryTable.id))
+            )
+            result = await session.exec(stmt)
+            return list(result)
 
     async def upsert_source(
         self,

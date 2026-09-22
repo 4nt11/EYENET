@@ -255,5 +255,22 @@ class PersonasMixin:
             rows = list(result)
         return [_row_to_persona(r) for r in rows]
 
+    async def list_personas(self, *, limit: int, offset: int = 0) -> list[object]:
+        """Paginated persona list, newest-first (the browse surface).
+
+        Returns ``PersonaTable`` rows (type-erased) so the route layer can call
+        ``PersonaSummary.from_domain(row, len(row.member_actor_ids))`` without a
+        per-row membership query. Pairs with :meth:`count_personas`.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(PersonaTable)
+                .order_by(col(PersonaTable.id).desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
 
 __all__ = ["PersonaIntegrityError", "PersonasMixin"]

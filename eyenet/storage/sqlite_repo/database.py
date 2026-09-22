@@ -74,6 +74,7 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "persona",
         "persona_membership",
         "feedback_pair",
+        "linkage_verifier_result",
         # graph (typed relations)
         "graph_node",
         "graph_edge",

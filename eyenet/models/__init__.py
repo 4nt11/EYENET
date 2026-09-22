@@ -32,6 +32,7 @@ from .event_logs import (
     PersonaEventLogTable,
 )
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
+from .linkage_verifier_result import LinkageVerifierResultTable
 from .file_access import (
     FileAccessAcknowledgmentTable,
     FileAccessJournalTable,
@@ -77,6 +78,7 @@ __all__ = [
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",
     "FeedbackPairTable",
+    "LinkageVerifierResultTable",
     "FileAccessAcknowledgmentTable",
     "FileAccessJournalTable",
     "GraphEdgeTable",
