@@ -12,6 +12,7 @@ from sqlmodel import SQLModel
 
 from .access_artifact import GroupAccessArtifactTable
 from .actor import ActorAliasHistoryTable, ActorTable
+from .anchor import AuditAnchorTable
 from .audit import AuditLogTable
 from .auth import (
     JwtDenylistTable,
@@ -32,7 +33,6 @@ from .event_logs import (
     PersonaEventLogTable,
 )
 from .feedback import FeedbackGroundTruth, FeedbackPairTable
-from .linkage_verifier_result import LinkageVerifierResultTable
 from .file_access import (
     FileAccessAcknowledgmentTable,
     FileAccessJournalTable,
@@ -49,6 +49,7 @@ from .identity import (
 )
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
+from .linkage_verifier_result import LinkageVerifierResultTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .message import AttachmentTable, MessageTable
 from .mfa import MfaChallengeTable
@@ -67,6 +68,7 @@ __all__ = [
     "ActorArtifactTable",
     "ActorTable",
     "AttachmentTable",
+    "AuditAnchorTable",
     "AuditLogTable",
     "CaseCollaboratorTable",
     "CaseMemberTable",
@@ -78,7 +80,6 @@ __all__ = [
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",
     "FeedbackPairTable",
-    "LinkageVerifierResultTable",
     "FileAccessAcknowledgmentTable",
     "FileAccessJournalTable",
     "GraphEdgeTable",
@@ -98,6 +99,7 @@ __all__ = [
     "JwtDenylistTable",
     "LinkageEventLogTable",
     "LinkageTable",
+    "LinkageVerifierResultTable",
     "MembershipTable",
     "MessageObservationTable",
     "MessageTable",

@@ -36,7 +36,6 @@ from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
 from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
-from eyenet.services.collector_supervisor import CollectorSupervisor
 from eyenet.identity_pool import FileIdentityPool
 from eyenet.identity_pool.loader import load as load_identities
 from eyenet.linker.linker import Linker
@@ -46,6 +45,8 @@ from eyenet.models.profile import ProfileTable
 from eyenet.sensor.skeleton import SensorSkeleton
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import ServiceBase, run_service
+from eyenet.services.anchor_emitter import AnchorEmitter
+from eyenet.services.collector_supervisor import CollectorSupervisor
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 from eyenet.verifier.service import VerifierService
@@ -536,6 +537,23 @@ def supervisor_run(  # pragma: no cover
 
     cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
     _run(lambda bus, storage: CollectorSupervisor(bus=bus, storage=storage), cfg, tick=tick)
+
+
+@app.command("anchor")
+def anchor_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    tick: float = typer.Option(300.0, "--tick", help="anchor interval in seconds"),
+) -> None:
+    """Run the external-witness anchor emitter (signs audit+journal heads; §5.9)."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(
+        lambda bus, storage: AnchorEmitter(bus=bus, storage=storage, data_dir=cfg.data_dir),
+        cfg,
+        tick=tick,
+    )
 
 
 @app.command("panic")
