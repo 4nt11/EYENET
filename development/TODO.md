@@ -26,3 +26,33 @@ attack-surface expansion. Requirements when we build it:
 
 Pairs with the read surface (`GET /v1/identities` + `/{id}`) already shipped,
 and fully unblocks a "provision identity from the UI" flow.
+
+## Audit-anchor external sinks (§5.9) — dispatch to external witnesses
+
+**Shipped:** the anchor subsystem records signed `(audit_head, journal_head)`
+heartbeats (`AnchorEmitter` + `eyenet anchor`), stores them, publishes each on
+`eyenet.audit.anchor`, and serves them via `GET /v1/audit/anchors`.
+
+**Deferred:** the operator-configured *external sinks* that actually deliver
+anchors to third parties — file drop, webhook POST, email. §5.9's whole point is
+that an outside party holds a copy, so a rolled-back or forked chain is
+detectable. The bus subject is the machine-readable feed a sink consumes; the
+sink deliverer itself is a separate config + delivery subsystem.
+
+**Shape when we build it:** a small dispatcher subscribing `eyenet.audit.anchor`
+(or reading the table) with per-sink config (`[audit.anchor.sinks.*]` TOML:
+kind=file|webhook|email, destination, retry/backoff). Delivery is best-effort +
+durable-retry; a sink failure must never block the emitter. Consider a
+delivery-receipt log so the operator can prove an anchor reached witness X.
+
+## Clearance bootstrap — admin must self-grant `admin:clearance`
+
+**Not a bug, a §4.8 design consequence worth surfacing:** `admin:clearance` is a
+grant-only scope, in NO role baseline. So the clearance page (and the 4 grant
+handlers) return **403** until an operator explicitly grants themselves the
+scope via `eyenet user scopes`. First-run UX gap: a fresh admin sees "forbidden"
+with no in-product hint.
+
+**Options when we polish:** document the `eyenet user scopes ... admin:clearance`
+bootstrap step in the operator guide; and/or have the FE render a clear "you need
+an admin:clearance grant" affordance on 403 instead of a generic error.
