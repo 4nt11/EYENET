@@ -56,3 +56,42 @@ with no in-product hint.
 **Options when we polish:** document the `eyenet user scopes ... admin:clearance`
 bootstrap step in the operator guide; and/or have the FE render a clear "you need
 an admin:clearance grant" affordance on 403 instead of a generic error.
+
+## Classifier Docker image — finish the REQUIRES-TUNING scaffold
+
+`deploy/docker/Dockerfile.classifier` builds but is not turnkey. nsjail needs
+`CLONE_NEWUSER` + its own seccomp, so the compose `classifier` profile runs with
+`security_opt: seccomp=unconfined` + `cap_add: SYS_ADMIN` (least-bad on a single
+host). Before it classifies for real:
+- **Vendor `nsjail`** — not in Debian repos. Drop a prebuilt static binary at
+  `deploy/docker/nsjail` (the Dockerfile COPYs it) or add a build stage.
+- **Pin the extract-venv deps** from the real extraction requirement set — the
+  current list (`pymupdf`/`python-docx`/`presidio-analyzer`/`pytesseract`/`pillow`)
+  is the expected shape, not a verified pin.
+- Then tighten the container privileges back down once a real classify runs
+  end-to-end. Kept an opt-in profile so the core stack ships without it.
+
+## `eyenet deploy` installer CLI — build it
+
+Spec'd in `deploy/DEPLOY.md §5`, not implemented. One-shot root bootstrap
+mirroring `decnet init` (`../../DECNET/decnet/cli/init.py`): Jinja2-render the
+`deploy/*.j2` set + `eyenet.target` into `/etc/systemd/system`, install
+polkit/tmpfiles/logrotate, seed user/group/dirs, `systemctl enable --now
+eyenet.target`. Flags: `--dry-run/--no-start/--force/--deinit/--purge/
+--user/--group/--install-dir/--venv-dir/--data-dir/--prefix`. Name it
+`eyenet deploy` (NOT `eyenet init` — that's DB init; don't overload it).
+
+## Matrix collector E2EE (libolm) — decision pending
+
+`libolm3` is now in the Docker runtime image so `matrix-nio[e2e]` imports, but
+E2EE stays OFF by design (M7 shipped no-E2EE; see `project_m7_done`). If/when we
+want Megolm decryption + a persistent device store, wire it deliberately (and
+add `libolm-dev` to the builder stage if python-olm ever needs to compile).
+
+## `MissingGreenlet` teardown noise in the bus workers
+
+Benign but noisy: SQLAlchemy+aiosqlite logs "Exception during reset" /
+`MissingGreenlet` when a pooled connection is finalized outside the event-loop
+greenlet on worker shutdown. Harmless (operations already committed) but pollutes
+logs. Fix by disposing the async engine / sessions cleanly on `ServiceBase`
+shutdown before the loop closes.
