@@ -17,11 +17,10 @@ from fastapi import APIRouter
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
 from eyenet.api.v1.actors.api_get_neighbors import router as actors_neighbors_router
-from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
-from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
-from eyenet.api.v1.calibration.api_get_calibration import router as calibration_get_router
 from eyenet.api.v1.actors.api_get_timeline import router as actors_timeline_router
+from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
 from eyenet.api.v1.actors.api_list_observations import router as actors_observations_router
+from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
 
 # === attachments ===
 from eyenet.api.v1.attachments.api_access_file import router as attachments_access_router
@@ -54,6 +53,7 @@ from eyenet.api.v1.auth.api_signing_key_challenge import (
     router as auth_signing_key_challenge_router,
 )
 from eyenet.api.v1.auth.api_stream_token import router as auth_stream_token_router
+from eyenet.api.v1.calibration.api_get_calibration import router as calibration_get_router
 
 # === candidates (M9.D3 discovery triage) ===
 from eyenet.api.v1.candidates.api_approve_candidate import router as candidates_approve_router
@@ -124,6 +124,7 @@ from eyenet.api.v1.health.api_readyz import router as health_ready_router
 # === identities ===
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
+from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
 from eyenet.api.v1.identities.api_freeze_all import router as identities_freeze_all_router
 from eyenet.api.v1.identities.api_freeze_identity import router as identities_freeze_router
 from eyenet.api.v1.identities.api_get_identity import router as identities_get_router
@@ -326,6 +327,7 @@ v1_router.include_router(candidates_retry_router)
 
 # identities + panic
 v1_router.include_router(identities_list_router)
+v1_router.include_router(identities_create_router)
 v1_router.include_router(identities_get_router)
 v1_router.include_router(identities_claim_router)
 v1_router.include_router(identities_release_router)

@@ -7,9 +7,10 @@ Per MODELS §2.13, EngagementAuthorization enforces exactly-one-of
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint
+from sqlalchemy import JSON, CheckConstraint, Column
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import (
@@ -50,6 +51,13 @@ class IdentityTable(SQLModel, table=True):
     # (M9.E4 scout graduation). NULL for identities that never scouted.
     graduated_at: datetime | None = None
     notes: str | None = None
+    # Non-secret, source-specific config the collector needs to open a client
+    # (telegram: telegram_api_id / telegram_api_hash / monitor_groups; matrix:
+    # matrix_homeserver_url / matrix_user_id / matrix_device_id /
+    # matrix_monitor_rooms). The SECRET (session string / access token) is the
+    # Fernet blob at session_path, never here. One generic column so a new
+    # source is a new key set, not a schema change.
+    source_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
 class IdentityLabelTable(SQLModel, table=True):
