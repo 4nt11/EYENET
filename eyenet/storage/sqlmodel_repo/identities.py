@@ -53,6 +53,7 @@ class IdentitiesMixin:
         proxy_uri: str | None = None,
         cooldown_seconds: int = 21_600,
         notes: str | None = None,
+        source_config: dict[str, object] | None = None,
     ) -> IdentityRow:
         """Insert a new identity row. Raises on duplicate ``name`` (UNIQUE)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
@@ -65,6 +66,7 @@ class IdentitiesMixin:
                 proxy_uri=proxy_uri,
                 cooldown_seconds=cooldown_seconds,
                 notes=notes,
+                source_config=source_config or {},
             )
             session.add(table)
             await session.commit()
@@ -74,6 +76,14 @@ class IdentitiesMixin:
     async def get_identity(self, identity_id: UUID) -> IdentityRow | None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(IdentityTable, identity_id)
+            return _identity_row(table) if table is not None else None
+
+    async def get_identity_by_name(self, name: str) -> IdentityRow | None:
+        """Look up an identity by its unique ``name`` (the pool claim key)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(IdentityTable).where(IdentityTable.name == name)
+            result = await session.exec(stmt)
+            table = result.first()
             return _identity_row(table) if table is not None else None
 
     async def list_identities(
@@ -118,13 +128,20 @@ class IdentitiesMixin:
         *,
         identity_id: UUID,
         state: IdentityState,
+        last_used_at: datetime | None = None,
     ) -> IdentityRow:
-        """Set an identity's lifecycle state. Raises if it does not exist."""
+        """Set an identity's lifecycle state. Raises if it does not exist.
+
+        When ``last_used_at`` is given it is also stamped (the pool uses this on
+        claim/release for cooldown accounting); ``None`` leaves it untouched.
+        """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(IdentityTable, identity_id)
             if table is None:
                 raise ValueError(f"identity {identity_id} not found")
             table.state = state
+            if last_used_at is not None:
+                table.last_used_at = last_used_at
             session.add(table)
             await session.commit()
             await session.refresh(table)

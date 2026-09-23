@@ -14,7 +14,7 @@ Subjects: `identity.label.applied`, `identity.engagement.authorized`
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 from uuid import UUID
 
 from pydantic import Field, model_validator
@@ -60,6 +60,10 @@ class IdentityRow(DbRowBase):
     role: IdentityRole = IdentityRole.MONITOR
     graduated_at: datetime | None = None
     notes: str | None = None
+    # Non-secret, source-specific collector config (telegram api_id/hash/
+    # monitor_groups, matrix homeserver/user/device/rooms, ...). The secret
+    # stays in the Fernet blob at session_path. Never rides the bus.
+    source_config: dict[str, Any] = Field(default_factory=dict)
 
 
 # -- Identity labels (ground truth) ------------------------------------------

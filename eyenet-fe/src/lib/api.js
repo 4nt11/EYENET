@@ -57,6 +57,29 @@ export async function apiPost(path, body, { auth = false, accept = [], headers: 
   return res.json();
 }
 
+// POST multipart/form-data. Same auth + problem+json error contract as apiPost,
+// but the body is a FormData and we DO NOT set content-type: the browser must
+// set it (with the multipart boundary) itself. For file uploads (e.g. the
+// identity .session upload at POST /v1/identities).
+export async function apiPostForm(path, formData, { auth = false, accept = [], headers: extra = {} } = {}) {
+  const headers = { accept: 'application/json', ...extra };
+  if (auth) {
+    const t = authToken();
+    if (t) headers.authorization = `Bearer ${t}`;
+  }
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers, body: formData });
+  if (!res.ok && !accept.includes(res.status)) {
+    let detail = `${res.status} ${res.statusText}`;
+    const problem = await res.json().catch(() => null);
+    if (problem?.detail) detail = problem.detail;
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
 // PUT JSON. Same contract as apiPost (surfaces problem+json `detail`), for
 // idempotent replace endpoints (e.g. PUT /v1/actors/{id}/assessment).
 export async function apiPut(path, body, { auth = false, accept = [], headers: extra = {} } = {}) {

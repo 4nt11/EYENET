@@ -3,7 +3,7 @@
 // (claim/release/freeze/burn + freeze_all) persist synchronously in the handler
 // (the operator-under-attack invariant), so a reload shows the new state — no
 // polling. Every action requires a reason (IdentityActionRequest).
-import { apiGet, apiPost } from './api.js';
+import { apiGet, apiPost, apiPostForm } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
 
@@ -100,5 +100,30 @@ export async function identityAction(id, action, reason, note) {
 export async function freezeAll(reason) {
   if (await _post('/v1/identities/freeze_all', reason)) {
     identityView.submitMsg = 'freeze-all applied.';
+  }
+}
+
+// Provision-a-new-identity form state (POST /v1/identities, admin-only).
+export const provisionCtx = $state({ submitting: false, error: null, ok: null });
+
+// `formData` is a FormData carrying the .session file + metadata fields.
+// Returns the created identity_id on success, null on failure.
+export async function provisionIdentity(formData) {
+  provisionCtx.submitting = true;
+  provisionCtx.error = null;
+  provisionCtx.ok = null;
+  try {
+    const created = await apiPostForm('/v1/identities', formData, {
+      auth: true,
+      headers: { 'Idempotency-Key': crypto.randomUUID() }
+    });
+    provisionCtx.ok = `Provisioned ${created.name}.`;
+    await loadIdentities();
+    return created.identity_id;
+  } catch (e) {
+    provisionCtx.error = e.message ?? String(e);
+    return null;
+  } finally {
+    provisionCtx.submitting = false;
   }
 }

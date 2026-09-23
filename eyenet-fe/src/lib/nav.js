@@ -42,7 +42,11 @@ export const NAV = [
     group: 'System',
     items: [
       { slug: 'auth',       label: 'Auth & tokens', href: '/auth', built: true, desc: 'Login, refresh, PAT and stream-token minting' },
-      { slug: 'identities', label: 'Identities',    href: '/identities', built: true, desc: 'Identity-pool actions · claim/release/freeze/burn' },
+      { slug: 'identities', label: 'Identities',    href: '/identities', built: true, desc: 'Identity-pool actions · claim/release/freeze/burn',
+        children: [
+          { slug: 'identities-overview', label: 'Pool', href: '/identities', built: true, desc: 'Identity pool and lifecycle actions' },
+          { slug: 'identities-provision', label: 'Provision', href: '/identities/provision', built: true, desc: 'Upload a session file to provision an identity' }
+        ] },
       { slug: 'clearance',  label: 'Clearance',     href: '/clearance', built: true, desc: 'Sensitivity-clearance grants' },
       { slug: 'control',    label: 'Control',       href: '/control', built: true, desc: 'System-wide operator actions (panic)' },
       { slug: 'health',     label: 'Health',        href: '/health', built: true, desc: 'Liveness, readiness, and Prometheus metrics' }

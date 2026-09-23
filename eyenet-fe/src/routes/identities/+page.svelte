@@ -59,7 +59,10 @@
       <div class="crumb"><span class="group">System</span><span class="sep">/</span><span class="slug">identities</span></div>
       <h1>Identity pool</h1>
     </div>
-    <Button variant="destructive" size="sm" disabled={identityView.submitting || !identityCtx.list.length} onclick={doFreezeAll}>Freeze all</Button>
+    <div class="head-actions">
+      <a class="provision-link" href="/identities/provision">Provision identity</a>
+      <Button variant="destructive" size="sm" disabled={identityView.submitting || !identityCtx.list.length} onclick={doFreezeAll}>Freeze all</Button>
+    </div>
   </div>
 
   <div class="body">
@@ -99,6 +102,9 @@
 <style>
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .head { flex: 0 0 auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .head-actions { display: flex; align-items: center; gap: 10px; }
+  .provision-link { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-secondary); text-decoration: none; padding: 0 4px; }
+  .provision-link:hover { color: var(--accent); }
   .crumb { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); }
   .group, .sep { color: var(--text-faint); }
   .group { text-transform: uppercase; letter-spacing: var(--tracking-label); }
