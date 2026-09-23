@@ -1,13 +1,22 @@
-"""GET /v1/clearance/grants — list clearance grants (§4.8)."""
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""GET /v1/clearance/grants — list clearance grants (§4.8). Requires admin:clearance."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from eyenet.api.v1.schemas.clearance import CursorPageClearanceGrantSummary
+from eyenet.api.deps import CurrentUser, RequireScope, get_storage
+from eyenet.api.deps_paging import CursorParams, cursor_params
+from eyenet.api.v1.schemas.clearance import (
+    ClearanceGrantSummary,
+    CursorPageClearanceGrantSummary,
+)
 from eyenet.api.v1.schemas.enums import ClearanceScope
+from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["clearance"])
 
@@ -19,11 +28,31 @@ router = APIRouter(tags=["clearance"])
     status_code=200,
 )
 async def clearance_list_grants(
-    cursor: str | None = Query(default=None, max_length=4096),
-    limit: int = Query(default=50, ge=1, le=500),
-    include_total: int = Query(default=0, ge=0, le=1),
-    active_only: int = Query(default=0, ge=0, le=1),
-    user_id: UUID | None = Query(default=None),
-    scope: ClearanceScope | None = Query(default=None),
+    _: Annotated[CurrentUser, Depends(RequireScope("admin:clearance"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+    page: Annotated[CursorParams, Depends(cursor_params)],
+    active_only: Annotated[int, Query(ge=0, le=1)] = 0,
+    user_id: Annotated[UUID | None, Query()] = None,
+    scope: Annotated[ClearanceScope | None, Query()] = None,
 ) -> CursorPageClearanceGrantSummary:
-    raise NotImplementedError("clearance_list_grants (M9.0 skeleton)")
+    now = datetime.now(tz=UTC)
+    rows = await storage.list_clearance_grants(
+        user_id=user_id,
+        scope=scope,
+        active_only=bool(active_only),
+        now=now,
+        limit=page.fetch_limit,
+        offset=page.offset,
+    )
+    estimated_total = (
+        await storage.count_clearance_grants(
+            user_id=user_id, scope=scope, active_only=bool(active_only), now=now
+        )
+        if page.include_total
+        else None
+    )
+    return CursorPageClearanceGrantSummary(
+        items=[ClearanceGrantSummary.from_domain(r, now=now) for r in rows[: page.limit]],
+        next_cursor=page.next_cursor(fetched=len(rows)),
+        estimated_total=estimated_total,
+    )

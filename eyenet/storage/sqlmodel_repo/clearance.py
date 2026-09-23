@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from eyenet.contracts.audit_subjects import AuditSubject
@@ -246,6 +247,84 @@ class ClearanceMixin:
     ) -> frozenset[ClearanceScope]:
         grants = await self.active_clearance_grants_for(user_id, now=now)
         return frozenset(g.scope for g in grants)
+
+    async def get_clearance_grant(
+        self, grant_id: UUID
+    ) -> SystemUserClearanceGrantRow | None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(SystemUserClearanceGrantTable, grant_id)
+            return None if table is None else _row_from_table(table)
+
+    def _grant_filters(
+        self,
+        stmt: Any,
+        *,
+        user_id: UUID | None,
+        scope: ClearanceScope | None,
+        active_only: bool,
+        at: datetime,
+    ) -> Any:
+        if user_id is not None:
+            stmt = stmt.where(col(SystemUserClearanceGrantTable.user_id) == user_id)
+        if scope is not None:
+            stmt = stmt.where(col(SystemUserClearanceGrantTable.scope) == scope)
+        if active_only:
+            stmt = (
+                stmt.where(col(SystemUserClearanceGrantTable.revoked_at).is_(None))
+                .where(col(SystemUserClearanceGrantTable.expires_at) > at)
+                .where(col(SystemUserClearanceGrantTable.granted_at) <= at)
+            )
+        return stmt
+
+    async def list_clearance_grants(
+        self,
+        *,
+        user_id: UUID | None = None,
+        scope: ClearanceScope | None = None,
+        active_only: bool = False,
+        now: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[SystemUserClearanceGrantRow]:
+        at = now or datetime.now(tz=UTC)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._grant_filters(
+                select(SystemUserClearanceGrantTable),
+                user_id=user_id,
+                scope=scope,
+                active_only=active_only,
+                at=at,
+            )
+            stmt = (
+                stmt.order_by(
+                    col(SystemUserClearanceGrantTable.granted_at).desc(),
+                    col(SystemUserClearanceGrantTable.id).desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [_row_from_table(r) for r in result]
+
+    async def count_clearance_grants(
+        self,
+        *,
+        user_id: UUID | None = None,
+        scope: ClearanceScope | None = None,
+        active_only: bool = False,
+        now: datetime | None = None,
+    ) -> int:
+        at = now or datetime.now(tz=UTC)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._grant_filters(
+                select(func.count()).select_from(SystemUserClearanceGrantTable),
+                user_id=user_id,
+                scope=scope,
+                active_only=active_only,
+                at=at,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
 
 __all__ = ["ClearanceMixin"]
