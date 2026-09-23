@@ -12,11 +12,15 @@ Wire-shape mirror of `Anchor` / `CursorPageAnchor` in
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import Field
 
 from ._base import ApiSchema
+
+if TYPE_CHECKING:
+    from eyenet.contracts.anchor import AnchorRow
 
 _HEX_64 = r"^[0-9a-f]{64}$"
 _ED25519_SIG = r"^ed25519:[A-Za-z0-9_\-]{86,90}={0,2}$"
@@ -40,6 +44,17 @@ class Anchor(ApiSchema):
         pattern=_ED25519_SIG,
         description="Ed25519 server signature over the canonical anchor form.",
     )
+
+    @classmethod
+    def from_domain(cls, row: AnchorRow) -> Anchor:
+        return cls(
+            deployment_id=row.deployment_id,
+            anchor_seq=row.anchor_seq,
+            anchored_at=row.anchored_at,
+            audit_head=row.audit_head,
+            journal_head=row.journal_head,
+            signature=row.signature,
+        )
 
 
 class CursorPageAnchor(ApiSchema):

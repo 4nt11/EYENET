@@ -27,6 +27,7 @@ from eyenet.contracts.enums import IdentityRole as _IdentityRole, IdentityState 
 
 if TYPE_CHECKING:
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
+    from eyenet.contracts.anchor import AnchorRow
     from eyenet.contracts.attribution import LinkageRow
     from eyenet.contracts.audit import AuditLogRow
     from eyenet.contracts.auth import (
@@ -437,6 +438,31 @@ class BaseRepository(ABC):
     ) -> SystemUserClearanceGrantRow: ...
 
     @abstractmethod
+    async def get_clearance_grant(self, grant_id: UUID) -> SystemUserClearanceGrantRow | None: ...
+
+    @abstractmethod
+    async def list_clearance_grants(
+        self,
+        *,
+        user_id: UUID | None = None,
+        scope: ClearanceScope | None = None,
+        active_only: bool = False,
+        now: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[SystemUserClearanceGrantRow]: ...
+
+    @abstractmethod
+    async def count_clearance_grants(
+        self,
+        *,
+        user_id: UUID | None = None,
+        scope: ClearanceScope | None = None,
+        active_only: bool = False,
+        now: datetime | None = None,
+    ) -> int: ...
+
+    @abstractmethod
     async def expire_due_clearances(
         self,
         *,
@@ -461,6 +487,48 @@ class BaseRepository(ABC):
         *,
         now: datetime | None = None,
     ) -> frozenset[ClearanceScope]: ...
+
+    # =================================================================
+    # EXTERNAL-WITNESS ANCHORS (API_PLAN §5.9)
+    # Signed (audit_head, journal_head) heartbeats. Anchor rows live in
+    # main.db; the audit head is read from audit.db.
+    # =================================================================
+
+    @abstractmethod
+    async def audit_head(self) -> str: ...
+
+    @abstractmethod
+    async def latest_anchor_seq(self, deployment_id: UUID) -> int: ...
+
+    @abstractmethod
+    async def record_anchor(
+        self,
+        *,
+        deployment_id: UUID,
+        anchor_seq: int,
+        anchored_at: datetime,
+        audit_head: str,
+        journal_head: str,
+        signature: str,
+    ) -> AnchorRow: ...
+
+    @abstractmethod
+    async def list_anchors(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AnchorRow]: ...
+
+    @abstractmethod
+    async def count_anchors(
+        self,
+        *,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> int: ...
 
     # =================================================================
     # FILE-ACCESS CRYPTO FOUNDATION (API_PLAN §5.6-5.7, M9.B1)

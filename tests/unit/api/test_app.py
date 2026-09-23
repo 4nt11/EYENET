@@ -96,13 +96,28 @@ def test_every_operation_id_present(app: FastAPI, hand_drafted_spec: dict[str, A
     assert _op_ids(hand_drafted_spec) == _op_ids(generated)
 
 
-# A still-stubbed, unauthenticated endpoint to exercise the 501 + request-id
-# handlers (healthz/readyz are now implemented). Repoint if this one lands.
-_STILL_STUB = "/v1/audit/anchors"
+# No live 501 stubs remain (all M9.0 skeletons landed), so the NotImplementedError
+# → 501 handler is exercised via a throwaway probe route on a SEPARATE app (mounting
+# it on the shared app would add an op_id and break the OpenAPI surface comparison).
+_STILL_STUB = "/v1/_probe/notimpl"
 
 
-def test_not_implemented_returns_problem_json(client: TestClient) -> None:
-    resp = client.get(_STILL_STUB)
+@pytest.fixture(scope="module")
+def stub_client() -> Iterator[TestClient]:
+    storage = get_repository(in_memory=True)
+    with tempfile.TemporaryDirectory() as td:
+        probe_app = create_app(storage=storage, data_dir=Path(td))
+
+        @probe_app.get(_STILL_STUB)
+        async def _probe() -> None:
+            raise NotImplementedError("probe")
+
+        with TestClient(probe_app) as c:
+            yield c
+
+
+def test_not_implemented_returns_problem_json(stub_client: TestClient) -> None:
+    resp = stub_client.get(_STILL_STUB)
     assert resp.status_code == 501
     assert resp.headers["content-type"].startswith(PROBLEM_JSON)
     body = resp.json()
@@ -112,9 +127,9 @@ def test_not_implemented_returns_problem_json(client: TestClient) -> None:
     assert "request_id" in body
 
 
-def test_request_id_header_is_propagated(client: TestClient) -> None:
+def test_request_id_header_is_propagated(stub_client: TestClient) -> None:
     rid = "test-request-id-7777"
-    resp = client.get(_STILL_STUB, headers={"X-Request-Id": rid})
+    resp = stub_client.get(_STILL_STUB, headers={"X-Request-Id": rid})
     body = resp.json()
     assert body["request_id"] == rid
 
