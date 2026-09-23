@@ -95,3 +95,33 @@ Benign but noisy: SQLAlchemy+aiosqlite logs "Exception during reset" /
 greenlet on worker shutdown. Harmless (operations already committed) but pollutes
 logs. Fix by disposing the async engine / sessions cleanly on `ServiceBase`
 shutdown before the loop closes.
+
+## Collector control-plane vs data-plane are decoupled
+
+The `CollectorTable` row (created via `POST /v1/collectors`, managed in the UI)
+and the actual collector *process* are not linked. A collector process is
+launched as `eyenet collector --identity <name>` (the compose `collector`
+service) and claims an **identity by name** via the DB pool — it never references
+a `collector_id`. So a UI-managed collector row and a running process are two
+separate things: starting/stopping a row does not start/stop a process, and a
+running process does not surface on its "matching" row (no heartbeat, groups=0).
+
+**Shape when we fix it:** bind the process to its `collector_id` (pass
+`--collector-id`, or have the process claim/register against the row), so the
+row reflects the real process — heartbeat, resolved groups, restarts. This is
+the prerequisite for the observed-state fix below.
+
+## `observed_state` is bookkeeping, not liveness (UI shows a false "running")
+
+`CollectorSupervisor.reconcile_collectors()` (`eyenet/services/collector_supervisor.py`)
+just mirrors `observed_state` onto `desired_state` — clicking "start" in the UI
+sets `desired=running` and the supervisor rubber-stamps `observed=running` **with
+no process actually running**. The real liveness signal is the heartbeat, which
+stays empty. Operators see "running" for a collector that ingests nothing.
+
+**Shape when we fix it:** derive `observed_state`/liveness from a real heartbeat
+(process → `record_collector_observed_state` + a heartbeat timestamp on its own
+`collector_id`), and have the UI trust the heartbeat, not the mirrored state.
+Depends on the control/data-plane binding above. Consider whether the supervisor
+should actually *launch* the data plane (spawn the collector) rather than only
+reconcile a flag.
