@@ -137,14 +137,15 @@ services:
     cap_add:
       - SYS_ADMIN
 
-  # ---- opt-in: per-identity collector. ---------------------------------------
-  # One collector per pool identity. Enable + scale by identity, e.g.:
-  #   EYENET_IDENTITY=scout01 EYENET_COLLECTOR_TYPE=telegram \
-  #     docker compose --profile collectors up -d collector
-  # For multiple identities, copy this service (collector-scout02, ...) or drive
-  # it with `docker compose run`.
+  # ---- per-identity collector (the data plane) -------------------------------
+  # Part of the default stack: claims ONE provisioned identity BY NAME (via the
+  # DB-backed pool), decrypts its session, connects, and ingests. Set
+  # EYENET_IDENTITY to an identity you have provisioned (UI upload or
+  # `eyenet identity sync`) — set it in `.env` (see .env.example). Until a
+  # matching identity exists this ONE service crash-loops in isolation; the core
+  # pipeline is unaffected. For a second identity, copy this service
+  # (collector-<name>) or drive an extra with `docker compose run`.
   collector:
-    profiles: ["collectors"]
     image: eyenet:base
     restart: unless-stopped
     command:
@@ -153,6 +154,8 @@ services:
       - --type=${EYENET_COLLECTOR_TYPE:-telegram}
     environment:
       <<: *eyenet-env
+      # Only the file-pool collectors (matrix/stub) read this; the telegram
+      # data plane resolves credentials from the DB pool.
       EYENET_IDENTITIES: /var/lib/eyenet/identities
     volumes:
       - eyenet-data:/var/lib/eyenet
