@@ -13,9 +13,9 @@
   let sourceId = $state('');
   let identityId = $state('');
   let notes = $state('');
-  // ponytail: raw JSON config textarea, not a per-source dynamic field matrix.
-  // Upgrade to typed per-kind fields (telegram_api_id, matrix_*) if operators fumble it.
-  let configText = $state('{}');
+  // max_auto_join_depth is the only operator-tunable config key (discovery
+  // recursion for scouts); blank = backend default. No hand-written JSON.
+  let maxDepth = $state('');
 
   const selSource = $derived(sourceCtx.list.find((s) => s.id === sourceId) ?? null);
   // Only identities on the chosen source can back its collector; available ones
@@ -28,17 +28,12 @@
       : []
   );
 
-  let configErr = $derived.by(() => {
-    try { JSON.parse(configText || '{}'); return null; }
-    catch (e) { return e.message; }
-  });
-
   const ready = $derived(
-    instanceName.trim().length >= 3 && !!sourceId && !!identityId && !configErr && !collectorCreate.submitting
+    instanceName.trim().length >= 3 && !!sourceId && !!identityId && !collectorCreate.submitting
   );
 
   // Reset on open; clear identity when the source changes (it may no longer match).
-  $effect(() => { if (open) { instanceName = ''; sourceId = ''; identityId = ''; notes = ''; configText = '{}'; } });
+  $effect(() => { if (open) { instanceName = ''; sourceId = ''; identityId = ''; notes = ''; maxDepth = ''; } });
   $effect(() => { if (identityId && !identities.some((i) => i.id === identityId)) identityId = ''; });
 
   async function confirm() {
@@ -47,7 +42,7 @@
       kind: selSource.platform,
       source_id: sourceId,
       identity_id: identityId,
-      config: JSON.parse(configText || '{}'),
+      config: maxDepth.trim() ? { max_auto_join_depth: Number(maxDepth) } : {},
       notes: notes.trim() || null
     };
     const done = await onconfirm?.(payload);
@@ -85,9 +80,9 @@
         {#if sourceId && !identities.length}<span class="hint">No identities on this source — create one first.</span>{/if}
       </label>
 
-      <label class="fld"><span class="flabel">Config (JSON)</span>
-        <textarea class="fin area" rows="3" bind:value={configText} placeholder={'{"telegram_api_id": 0}'}></textarea>
-        {#if configErr}<span class="hint err">Invalid JSON: {configErr}</span>{/if}
+      <label class="fld"><span class="flabel">Max auto-join depth (optional)</span>
+        <input class="fin" type="text" inputmode="numeric" bind:value={maxDepth} placeholder="2 (default)" />
+        <span class="hint">Discovery recursion depth for scouts. Blank uses the default.</span>
       </label>
 
       <label class="fld"><span class="flabel">Notes (optional)</span>
@@ -110,7 +105,6 @@
   .fin:focus { outline: none; border-color: var(--accent); }
   .fin::placeholder { color: var(--text-faint); }
   .fin:disabled { opacity: 0.5; }
-  .area { resize: vertical; font-family: var(--font-mono); font-size: var(--fs-12); }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .hint.err { color: var(--red-text); }
   .dlg-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; }
