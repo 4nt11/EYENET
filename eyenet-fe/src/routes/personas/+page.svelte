@@ -66,12 +66,13 @@
       <Panel title="Attributed actors">
         {#if personaView.members.length}
           {#each personaView.members as m}
-            <div class="mrow">
+            <a class="mrow" href={`/actors?id=${m.actorId}`} title="Open actor dossier">
               <span class="mhandle">{m.handle}</span>
               <span class="mid">{m.actorId}</span>
               <span class="msince">since {m.since}</span>
               <span class="mvia">{m.viaLinkageId}</span>
-            </div>
+              <span class="marrow">→</span>
+            </a>
           {/each}
         {:else}
           <div class="empty">
@@ -106,8 +107,11 @@
   .body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; margin-bottom: 16px; }
 
-  .mrow { display: grid; grid-template-columns: 150px 1fr 130px 110px; gap: 10px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+  .mrow { display: grid; grid-template-columns: 150px 1fr 130px 110px 16px; gap: 10px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--border); text-decoration: none; transition: background 120ms ease; }
   .mrow:last-child { border-bottom: none; }
+  .mrow:hover { background: var(--panel-2); }
+  .mrow:hover .mhandle, .mrow:hover .marrow { color: var(--accent-text); }
+  .marrow { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); text-align: right; }
   .mhandle { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); }
   .mid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .msince { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
