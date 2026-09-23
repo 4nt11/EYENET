@@ -437,6 +437,33 @@ class BaseRepository(ABC):
     ) -> SystemUserClearanceGrantRow: ...
 
     @abstractmethod
+    async def get_clearance_grant(
+        self, grant_id: UUID
+    ) -> SystemUserClearanceGrantRow | None: ...
+
+    @abstractmethod
+    async def list_clearance_grants(
+        self,
+        *,
+        user_id: UUID | None = None,
+        scope: ClearanceScope | None = None,
+        active_only: bool = False,
+        now: datetime | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[SystemUserClearanceGrantRow]: ...
+
+    @abstractmethod
+    async def count_clearance_grants(
+        self,
+        *,
+        user_id: UUID | None = None,
+        scope: ClearanceScope | None = None,
+        active_only: bool = False,
+        now: datetime | None = None,
+    ) -> int: ...
+
+    @abstractmethod
     async def expire_due_clearances(
         self,
         *,

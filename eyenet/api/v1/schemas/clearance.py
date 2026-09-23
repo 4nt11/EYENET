@@ -8,20 +8,26 @@ Schemas mirror `contracts/openapi/eyenet.v1.yaml`:
 - `ClearanceGrantSummary` / `ClearanceGrantDetail` — read shapes. Detail adds
   the justification text and the full revocation/parent-chain fields.
 - `ClearanceRevokeRequest` — POST body for `/revoke`.
-
-`from_domain()` deferred to M9.1 storage work — the
-`system_user_clearance_grant` table doesn't exist yet.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import Field
 
 from ._base import ApiSchema
 from .enums import ClearanceScope
+
+if TYPE_CHECKING:
+    from eyenet.contracts.clearance import SystemUserClearanceGrantRow
+
+
+def _is_active(row: SystemUserClearanceGrantRow, *, now: datetime) -> bool:
+    """§4.8 ACTIVE(now): granted, not yet expired, not revoked."""
+    return row.revoked_at is None and row.granted_at <= now < row.expires_at
 
 
 class ClearanceGrantRequest(ApiSchema):
@@ -60,6 +66,21 @@ class ClearanceGrantSummary(ApiSchema):
     revoked_at: datetime | None = None
     active: bool = Field(description="Server-evaluated ACTIVE(now) predicate from §4.8.")
 
+    @classmethod
+    def from_domain(
+        cls, row: SystemUserClearanceGrantRow, *, now: datetime
+    ) -> ClearanceGrantSummary:
+        return cls(
+            grant_id=row.id,
+            user_id=row.user_id,
+            scope=row.scope,
+            granted_by_user_id=row.granted_by_user_id,
+            granted_at=row.granted_at,
+            expires_at=row.expires_at,
+            revoked_at=row.revoked_at,
+            active=_is_active(row, now=now),
+        )
+
 
 class ClearanceGrantDetail(ClearanceGrantSummary):
     """Full grant detail incl. justification and revocation/parent chain."""
@@ -71,6 +92,25 @@ class ClearanceGrantDetail(ClearanceGrantSummary):
         default=None,
         description="If this row is a renewal, the prior `grant_id` it succeeds.",
     )
+
+    @classmethod
+    def from_domain(
+        cls, row: SystemUserClearanceGrantRow, *, now: datetime
+    ) -> ClearanceGrantDetail:
+        return cls(
+            grant_id=row.id,
+            user_id=row.user_id,
+            scope=row.scope,
+            granted_by_user_id=row.granted_by_user_id,
+            granted_at=row.granted_at,
+            expires_at=row.expires_at,
+            revoked_at=row.revoked_at,
+            active=_is_active(row, now=now),
+            reason=row.reason,
+            revoked_by_user_id=row.revoked_by_user_id,
+            revocation_reason=row.revocation_reason,
+            parent_grant_id=row.parent_grant_id,
+        )
 
 
 class CursorPageClearanceGrantSummary(ApiSchema):
