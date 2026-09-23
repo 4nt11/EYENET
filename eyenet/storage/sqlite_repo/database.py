@@ -82,6 +82,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "system_log",
         # §4.8 clearance grants
         "system_user_clearance_grant",
+        # §5.9 external-witness anchors
+        "audit_anchor",
         # §4.10 case tables
         "case_v2",
         "case_member",

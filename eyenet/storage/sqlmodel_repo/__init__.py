@@ -16,6 +16,7 @@ from eyenet.storage.repository import BaseRepository
 
 from ._helpers import safe_session
 from .actors import ActorsMixin
+from .anchors import AnchorsMixin
 from .artifacts import ArtifactsMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
 
 class SQLModelRepository(
     ActorsMixin,
+    AnchorsMixin,
     ArtifactsMixin,
     AttachmentsMixin,
     AuditMixin,
