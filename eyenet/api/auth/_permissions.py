@@ -39,6 +39,7 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "write:sources",
             "read:collectors",
             "write:collectors",
+            "admin:collectors",
             "read:candidates",
             "write:candidates",
             "stream:linkages",
