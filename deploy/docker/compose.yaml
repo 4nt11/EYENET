@@ -1,0 +1,164 @@
+# EYENET — single-host Docker deployment.
+#
+# Build context is the REPO ROOT (two levels up), so run compose from here with:
+#   docker compose -f deploy/docker/compose.yaml build
+#   docker compose -f deploy/docker/compose.yaml up -d
+# or `cd deploy/docker && docker compose up -d --build`.
+#
+# One image (eyenet:base), one command per service. NATS is a container. The core
+# pipeline starts by default; the classifier and collectors are opt-in profiles.
+#
+# First run — bootstrap the admin (creates the schema + the first admin, whose
+# password is printed once):
+#   docker compose -f deploy/docker/compose.yaml run --rm api \
+#       user create admin --role admin --generate
+#
+# TLS: drop cert.pem/key.pem in ./tls/ (see .env.example). Self-signed for dev:
+#   openssl req -x509 -newkey ed25519 -nodes -days 365 \
+#       -keyout tls/key.pem -out tls/cert.pem -subj /CN=localhost
+
+x-eyenet-env: &eyenet-env
+  EYENET_DATA_DIR: /var/lib/eyenet
+  EYENET_NATS_URL: nats://nats:4222
+
+# Shared config for the bus workers (everything except api/nats): reuse the built
+# image, wait for the API (which owns first-boot schema creation) to be healthy.
+x-eyenet-worker: &eyenet-worker
+  image: eyenet:base
+  restart: unless-stopped
+  environment: *eyenet-env
+  volumes:
+    - eyenet-data:/var/lib/eyenet
+  depends_on:
+    api:
+      condition: service_healthy
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    # Core NATS only (no JetStream); -m 8222 exposes the monitoring/health port.
+    command: ["-a", "0.0.0.0", "-p", "4222", "-m", "8222", "--name", "eyenet-nats"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The API owns first-boot schema creation (create_all) and binds the only
+  # host-published port. Every worker depends on it being healthy.
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: eyenet:base
+    restart: unless-stopped
+    command:
+      - api
+      - --host=0.0.0.0
+      - --port=8443
+      - --certfile=/etc/eyenet/tls/cert.pem
+      - --keyfile=/etc/eyenet/tls/key.pem
+    environment:
+      <<: *eyenet-env
+      # CORS is env-gated (never config.toml). Set to your FE origin(s).
+      EYENET_API_CORS_ORIGINS: ${EYENET_CORS_ORIGINS:-}
+      EYENET_API_METRICS_ENABLED: ${EYENET_METRICS_ENABLED:-1}
+    volumes:
+      - eyenet-data:/var/lib/eyenet
+      # :Z relabels the bind mount for SELinux (Fedora/RHEL). Harmless on other
+      # distros. Without it, the container's SELinux context can't read the certs.
+      - ./tls:/etc/eyenet/tls:ro,Z
+    ports:
+      - "${EYENET_API_PORT:-8443}:8443"
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      # Self-signed TLS -> unverified context. /v1/healthz is 200 once live.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,ssl;urllib.request.urlopen('https://127.0.0.1:8443/v1/healthz',context=ssl._create_unverified_context(),timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+  graph:
+    <<: *eyenet-worker
+    command: ["graph"]
+
+  supervisor:
+    <<: *eyenet-worker
+    command: ["supervisor", "--tick", "5"]
+
+  anchor:
+    <<: *eyenet-worker
+    command: ["anchor", "--tick", "300"]
+
+  sensor:
+    <<: *eyenet-worker
+    command: ["sensor", "--profile", "stylometric"]
+
+  engine:
+    <<: *eyenet-worker
+    command: ["engine"]
+
+  linker:
+    <<: *eyenet-worker
+    command: ["linker"]
+
+  verifier:
+    <<: *eyenet-worker
+    command: ["verifier"]
+
+  # ---- opt-in: classifier (M10). REQUIRES TUNING (nsjail-in-Docker). ----------
+  # Enable with:  docker compose --profile classifier up -d
+  classifier:
+    profiles: ["classifier"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.classifier
+    image: eyenet:classifier
+    restart: unless-stopped
+    command: ["classifier", "--instance-id", "classifier_1"]
+    environment: *eyenet-env
+    volumes:
+      - eyenet-data:/var/lib/eyenet
+    depends_on:
+      api:
+        condition: service_healthy
+    # nsjail needs user namespaces + its own seccomp. Least-bad for a single-host
+    # deploy; tighten once a real classify runs end-to-end (see Dockerfile.classifier).
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_ADMIN
+
+  # ---- opt-in: per-identity collector. ---------------------------------------
+  # One collector per pool identity. Enable + scale by identity, e.g.:
+  #   EYENET_IDENTITY=scout01 EYENET_COLLECTOR_TYPE=telegram \
+  #     docker compose --profile collectors up -d collector
+  # For multiple identities, copy this service (collector-scout02, ...) or drive
+  # it with `docker compose run`.
+  collector:
+    profiles: ["collectors"]
+    image: eyenet:base
+    restart: unless-stopped
+    command:
+      - collector
+      - --identity=${EYENET_IDENTITY:-scout01}
+      - --type=${EYENET_COLLECTOR_TYPE:-telegram}
+    environment:
+      <<: *eyenet-env
+      EYENET_IDENTITIES: /var/lib/eyenet/identities
+    volumes:
+      - eyenet-data:/var/lib/eyenet
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  eyenet-data:

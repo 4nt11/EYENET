@@ -1,0 +1,25 @@
+[Unit]
+Description=EYENET forensic observation framework (full pipeline)
+Documentation=https://github.com/4nt11/EYENET
+# Convenience grouping for the whole EYENET service set. Ordering is resolved
+# per-unit via each service's own After=/Wants=eyenet-nats.service — this target
+# is a grouping + lifecycle handle, not an ordering primitive.
+#
+# Members = the observe -> link -> verify -> classify pipeline plus the control
+# plane (api/graph/supervisor/anchor). Collectors are NOT listed here: they are
+# instanced (eyenet-collector@.service) and enabled per identity, since EYENET
+# runs one collector per pool identity (plural from day one).
+Wants=eyenet-nats.service \
+      eyenet-api.service \
+      eyenet-graph.service \
+      eyenet-supervisor.service \
+      eyenet-anchor.service \
+      eyenet-sensor.service \
+      eyenet-engine.service \
+      eyenet-linker.service \
+      eyenet-verifier.service \
+      eyenet-classifier.service
+After=eyenet-nats.service
+
+[Install]
+WantedBy=multi-user.target

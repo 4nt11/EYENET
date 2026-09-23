@@ -1,0 +1,7 @@
+# /etc/tmpfiles.d/eyenet.conf — installed by `eyenet deploy`.
+#
+# EYENET has no host-local UNIX socket (the bus is NATS over TCP), so unlike
+# DECNET there is no /run/<app> socket dir to recreate on boot. This entry only
+# guarantees the log dir exists before any eyenet-*.service starts appending —
+# belt-and-suspenders with the installer's own mkdir and logrotate's `create`.
+d /var/log/eyenet 0750 {{ user }} {{ group }} -

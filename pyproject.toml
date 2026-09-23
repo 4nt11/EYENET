@@ -13,7 +13,11 @@ dependencies = [
   "sqlmodel>=0.0.22",
   "sqlalchemy>=2.0",
 
-  # storage
+  # storage — async SQLite is the mandated engine (sqlite+aiosqlite, CLAUDE.md
+  # §2.5). aiosqlite is the DBAPI driver; greenlet is SQLAlchemy's async bridge
+  # (only auto-installed on some platforms, so pin it explicitly).
+  "aiosqlite>=0.20",
+  "greenlet>=3",
   "sqlite-vec>=0.1.6",
 
   # bus
