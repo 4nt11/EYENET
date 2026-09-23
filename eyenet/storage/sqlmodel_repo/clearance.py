@@ -248,9 +248,7 @@ class ClearanceMixin:
         grants = await self.active_clearance_grants_for(user_id, now=now)
         return frozenset(g.scope for g in grants)
 
-    async def get_clearance_grant(
-        self, grant_id: UUID
-    ) -> SystemUserClearanceGrantRow | None:
+    async def get_clearance_grant(self, grant_id: UUID) -> SystemUserClearanceGrantRow | None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(SystemUserClearanceGrantTable, grant_id)
             return None if table is None else _row_from_table(table)

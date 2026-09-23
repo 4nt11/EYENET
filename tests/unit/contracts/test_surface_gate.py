@@ -25,6 +25,7 @@ _BUS_MODULES: frozenset[str] = frozenset(
         "eyenet.contracts.audit",
         "eyenet.contracts.classify_events",
         "eyenet.contracts.control",
+        "eyenet.contracts.anchor_events",
     }
 )
 _DB_ONLY_MODULES: frozenset[str] = frozenset(
@@ -51,6 +52,7 @@ _DB_ONLY_MODULES: frozenset[str] = frozenset(
         "eyenet.contracts.feedback",
         "eyenet.contracts.event_log",
         "eyenet.contracts.idempotency",
+        "eyenet.contracts.anchor",
     }
 )
 _INTERFACE_MODULES: frozenset[str] = frozenset(

@@ -27,7 +27,6 @@ from eyenet.api.v1.clearance.api_list_grants import clearance_list_grants
 from eyenet.api.v1.clearance.api_revoke_grant import clearance_revoke_grant
 from eyenet.api.v1.schemas.clearance import ClearanceGrantRequest, ClearanceRevokeRequest
 from eyenet.contracts.enums import ClearanceScope, SystemUserRole
-from eyenet.storage.errors import ClearanceGrantError
 from eyenet.storage.repository import BaseRepository
 
 pytestmark = pytest.mark.unit
@@ -152,9 +151,7 @@ async def test_revoke_happy_and_missing(storage: BaseRepository) -> None:
         )
 
 
-async def test_revoke_already_expired_is_422(
-    storage: BaseRepository, now: datetime
-) -> None:
+async def test_revoke_already_expired_is_422(storage: BaseRepository, now: datetime) -> None:
     # Seed a grant that lapsed in the past (fixture ``now`` is well before wall
     # clock): granted_at/expires_at both in 2026-05, expiry 1h out.
     grant = await storage.grant_clearance(
