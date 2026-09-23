@@ -1,0 +1,5 @@
+# Never commit local deploy secrets/config.
+tls/
+.env
+# vendored nsjail binary (see Dockerfile.classifier) — provide out of band.
+nsjail

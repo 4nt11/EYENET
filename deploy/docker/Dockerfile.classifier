@@ -1,0 +1,48 @@
+# EYENET classifier image — extends the base with the M10 extraction toolchain.
+# Build: `docker build -f deploy/docker/Dockerfile.classifier -t eyenet:classifier .`
+# (build the base first: -t eyenet:base .)
+#
+# ============================ REQUIRES TUNING ============================
+# The classifier runs untrusted extraction inside nsjail, which needs CLONE_NEWUSER
+# + its own mount/pid namespaces + seccomp. Inside Docker that requires either a
+# privileged container or, at minimum, `--security-opt seccomp=unconfined` plus
+# unprivileged-userns on the host (and often `--cap-add SYS_ADMIN`). This image is
+# a SCAFFOLD: it lays down the toolchain and the extract-venv path the sandbox
+# looks for (DEFAULT_EXTRACT_VENV=/opt/eyenet/extract-venv). Two things are NOT
+# guaranteed here and must be finished before it classifies for real:
+#   1. nsjail is not in Debian repos — vendor a prebuilt static binary next to this
+#      Dockerfile (deploy/docker/nsjail) or build it from source in a stage.
+#   2. The extract-venv deps below are the expected set; pin them from the real
+#      CLASSIFIER_PLAN extraction requirements before trusting output.
+# The classifier is a compose `profile` (opt-in) so the core stack ships without
+# blocking on this. See README.
+# ========================================================================
+FROM eyenet:base
+
+USER root
+
+# OCR (image/scanned-doc text) + es/en language data. build-essential + python3-dev
+# so any sdist-only extract-venv dep can compile (the base runtime has no toolchain).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng \
+      build-essential python3-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# nsjail: vendor a prebuilt static binary at deploy/docker/nsjail (see header).
+# Kept as a separate, optional COPY so the base build never depends on it.
+COPY deploy/docker/nsjail /usr/local/bin/nsjail
+
+# ABI-matched extraction venv at the path the sandbox resolves by default.
+# NOTE: pin these from the real extraction requirement set before production use.
+RUN python -m venv /opt/eyenet/extract-venv \
+ && /opt/eyenet/extract-venv/bin/pip install --no-cache-dir \
+      pymupdf python-docx presidio-analyzer pytesseract pillow \
+ && /opt/eyenet/extract-venv/bin/python -m spacy download es_core_news_sm \
+ && chown -R eyenet:eyenet /opt/eyenet
+
+ENV EYENET_EXTRACT_VENV=/opt/eyenet/extract-venv
+
+USER eyenet
+ENTRYPOINT ["eyenet"]
+CMD ["classifier"]

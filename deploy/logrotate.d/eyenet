@@ -1,0 +1,22 @@
+# /etc/logrotate.d/eyenet — installed by `eyenet deploy`.
+#
+# Every EYENET unit appends to /var/log/eyenet/eyenet.<name>.log. Without
+# rotation a busy collector fleet or a probe storm fills the disk. Bound to 7
+# daily rotations + a size cap.
+#
+# `copytruncate` is required: the Python services hold the log file open and
+# would keep writing to the deleted inode after a rename-based rotation.
+# `notifempty` avoids spurious .1 files on quiet hosts.
+
+/var/log/eyenet/*.log {
+    daily
+    rotate 7
+    maxsize 100M
+    copytruncate
+    missingok
+    notifempty
+    compress
+    delaycompress
+    su eyenet eyenet
+    create 0640 eyenet eyenet
+}

@@ -1,0 +1,58 @@
+[Unit]
+Description=EYENET HTTP API (Hypercorn, HTTP/2 + TLS)
+Documentation=https://github.com/4nt11/EYENET
+After=network-online.target eyenet-nats.service
+Wants=network-online.target eyenet-nats.service
+PartOf=eyenet.target
+
+[Service]
+Type=simple
+User={{ user }}
+Group={{ group }}
+WorkingDirectory={{ install_dir }}
+EnvironmentFile=-{{ install_dir }}/.env.local
+Environment=EYENET_DATA_DIR={{ data_dir }}
+Environment=EYENET_SYSTEM_LOGS=/var/log/eyenet/eyenet.api.log
+# CORS is env-gated (never config.toml) — see memory project_m9_i_frontend_hardening.
+# Override these in {{ install_dir }}/.env.local for the real origin allowlist.
+Environment=EYENET_API_CORS_ORIGINS={{ cors_origins | default('') }}
+Environment=EYENET_API_METRICS_ENABLED={{ metrics_enabled | default(1) }}
+# Refuses an insecure public bind; requires --certfile/--keyfile for a non-loopback
+# host (ALPN h2). See eyenet/api/_serve.py.
+ExecStart={{ venv_dir }}/bin/eyenet api \
+    --host {{ api_host | default('127.0.0.1') }} \
+    --port {{ api_port | default(8443) }} \
+    --data-dir {{ data_dir }} \
+    --nats-url {{ nats_url | default('nats://127.0.0.1:4222') }} \
+    --certfile {{ tls_certfile }} \
+    --keyfile {{ tls_keyfile }}
+StandardOutput=append:/var/log/eyenet/eyenet.api.log
+StandardError=append:/var/log/eyenet/eyenet.api.log
+
+# {{ api_port }} defaults to 8443 (>1024): no CAP_NET_BIND_SERVICE needed. If you
+# bind 443, add: AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# data_dir holds main.db/audit.db AND the server key material under jwt/
+# (JWT, exoneration, anchor, deployment_id) — must be writable. TLS cert/key are
+# read-only inputs.
+ReadWritePaths={{ data_dir }} /var/log/eyenet
+ReadOnlyPaths={{ tls_certfile }} {{ tls_keyfile }}
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

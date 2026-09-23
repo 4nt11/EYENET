@@ -1,0 +1,29 @@
+# Build context is the repo root (deploy/docker/compose.yaml). Keep it lean:
+# the images only need pyproject.toml, PLAN.md, eyenet/, and deploy/docker/nsjail.
+.git
+.github
+.claude
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.mypy_cache
+.ruff_cache
+.pytest_cache
+node_modules
+eyenet-fe
+tests
+development
+data
+*.db
+*.sqlite*
+build
+dist
+*.egg-info
+.coverage*
+htmlcov
+# stray untracked artifacts (never belong in an image)
+DSR-*.docx
+classifier_corpus.py
+docs-*.jsonl
+ruleset-additive.toml

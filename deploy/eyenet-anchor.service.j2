@@ -1,0 +1,47 @@
+[Unit]
+Description=EYENET external-witness anchor emitter (signed audit+journal heads, §5.9)
+Documentation=https://github.com/4nt11/EYENET
+After=network-online.target eyenet-nats.service
+Wants=network-online.target eyenet-nats.service
+PartOf=eyenet.target
+
+[Service]
+Type=simple
+User={{ user }}
+Group={{ group }}
+WorkingDirectory={{ install_dir }}
+EnvironmentFile=-{{ install_dir }}/.env.local
+Environment=EYENET_DATA_DIR={{ data_dir }}
+Environment=EYENET_SYSTEM_LOGS=/var/log/eyenet/eyenet.anchor.log
+# Signs (audit_head, journal_head) every --tick seconds with the deployment
+# Ed25519 key under {{ data_dir }}/jwt/anchor_ed25519.key (materialized on first
+# run) and records + publishes eyenet.audit.anchor. Default 300s.
+ExecStart={{ venv_dir }}/bin/eyenet anchor \
+    --data-dir {{ data_dir }} \
+    --nats-url {{ nats_url | default('nats://127.0.0.1:4222') }} \
+    --tick {{ anchor_tick | default(300) }}
+StandardOutput=append:/var/log/eyenet/eyenet.anchor.log
+StandardError=append:/var/log/eyenet/eyenet.anchor.log
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Needs RW on data_dir to materialize/read the anchor signing key + deployment_id
+# and to write anchor rows to main.db.
+ReadWritePaths={{ data_dir }} /var/log/eyenet
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

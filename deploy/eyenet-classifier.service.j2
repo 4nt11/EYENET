@@ -1,0 +1,50 @@
+[Unit]
+Description=EYENET M10 document classifier (nsjail-sandboxed extraction + PII)
+Documentation=https://github.com/4nt11/EYENET
+After=network-online.target eyenet-nats.service
+Wants=network-online.target eyenet-nats.service
+PartOf=eyenet.target
+
+[Service]
+Type=simple
+User={{ user }}
+Group={{ group }}
+WorkingDirectory={{ install_dir }}
+EnvironmentFile=-{{ install_dir }}/.env.local
+Environment=EYENET_DATA_DIR={{ data_dir }}
+Environment=EYENET_SYSTEM_LOGS=/var/log/eyenet/eyenet.classifier.log
+ExecStart={{ venv_dir }}/bin/eyenet classifier \
+    --data-dir {{ data_dir }} \
+    --nats-url {{ nats_url | default('nats://127.0.0.1:4222') }} \
+    --instance-id {{ classifier_instance_id | default('classifier_1') }}
+StandardOutput=append:/var/log/eyenet/eyenet.classifier.log
+StandardError=append:/var/log/eyenet/eyenet.classifier.log
+
+# ============================ REQUIRES TUNING ============================
+# The classifier runs untrusted document extraction inside nsjail (M10). nsjail
+# builds its OWN user/mount/pid namespaces + seccomp allowlist, which collides
+# with systemd sandboxing. Deliberately RELAXED vs the other units:
+#   - RestrictNamespaces is NOT set (nsjail needs CLONE_NEWUSER/NEWNS/NEWPID).
+#   - NoNewPrivileges is NOT set (kept off so nsjail's own privilege model works).
+#   - Host prereqs: unprivileged user namespaces enabled
+#     (sysctl kernel.unprivileged_userns_clone=1 on distros that gate it), and
+#     nsjail on PATH.
+# Extraction prereqs (see memory M10 slices): an ABI-matched extract venv
+# (py3.14) with pymupdf/python-docx/tesseract/presidio, and offline-forced libs.
+# First classify fetches spaCy/presidio models -> needs outbound net once.
+# Harden incrementally AFTER confirming a real classify runs end-to-end.
+# ========================================================================
+NoNewPrivileges=no
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+ReadWritePaths={{ data_dir }} {{ install_dir }} /var/log/eyenet
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
