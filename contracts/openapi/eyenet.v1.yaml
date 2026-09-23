@@ -851,6 +851,29 @@ paths:
               schema: { $ref: '#/components/schemas/CursorPageIdentitySummary' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [identities]
+      operationId: identities_create
+      summary: >-
+        Provision an identity from an uploaded session file (write:identity,
+        admin-only). The session blob is Fernet-encrypted at rest; OPSEC fields
+        are never returned.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/Body_identities_create' }
+      responses:
+        "201":
+          description: The provisioned identity (OPSEC fields omitted).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "413": { description: Session file exceeds the size limit. }
+        "422": { $ref: '#/components/responses/Validation' }
 
   /v1/identities/{identity_id}:
     get:
@@ -3432,6 +3455,25 @@ components:
         cooldown_seconds: { type: integer }
         graduated_at:     { type: string, format: date-time, nullable: true }
         notes:            { type: string, nullable: true }
+    Body_identities_create:
+      description: |
+        Multipart form for POST /v1/identities. `session` is the uploaded
+        credential file (Telegram: a `.session` SQLite blob); the remaining
+        fields are non-secret collector config. Telegram requires
+        telegram_api_id + telegram_api_hash.
+      type: object
+      required: [session, name, source_id]
+      properties:
+        session:          { type: string, format: binary, description: the credential file (Telegram .session) }
+        name:             { type: string, minLength: 1, maxLength: 128 }
+        source_id:        { type: string, format: uuid }
+        telegram_api_id:  { type: integer, nullable: true }
+        telegram_api_hash: { type: string, maxLength: 256, nullable: true }
+        monitor_groups:   { type: string, nullable: true, description: comma-separated }
+        cooldown_seconds: { type: integer, minimum: 0, default: 21600 }
+        proxy_uri:        { type: string, maxLength: 1024, nullable: true }
+        role:             { $ref: '#/components/schemas/IdentityRole' }
+        notes:            { type: string, maxLength: 4096, nullable: true }
     CursorPageIdentitySummary:
       type: object
       additionalProperties: false

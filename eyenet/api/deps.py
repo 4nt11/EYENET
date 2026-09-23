@@ -202,6 +202,15 @@ def get_mfa_key(request: Request) -> Fernet:
     return cast("_Fernet", fernet)
 
 
+def get_session_key(request: Request) -> Fernet:
+    fernet = getattr(request.app.state, "session_key", None)
+    if fernet is None:
+        raise RuntimeError("app.state.session_key is not configured")
+    from cryptography.fernet import Fernet as _Fernet  # noqa: PLC0415
+
+    return cast("_Fernet", fernet)
+
+
 def get_verifying_keys(request: Request) -> dict[str, VerifyingKey]:
     keys = getattr(request.app.state, "verifying_keys", None)
     if keys is None:
@@ -388,6 +397,7 @@ __all__ = [
     "get_mfa_key",
     "get_pat_pepper",
     "get_publisher",
+    "get_session_key",
     "get_storage",
     "get_stream_principal",
     "get_verifying_keys",

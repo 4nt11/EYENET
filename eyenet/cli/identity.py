@@ -16,6 +16,7 @@ from pathlib import Path
 import typer
 
 from eyenet.cli.config import RuntimeConfig
+from eyenet.crypto import load_session_key
 from eyenet.identity_pool.loader import load as load_identities
 from eyenet.services.discovery.identity_provisioning import ProvisionResult, provision_identities
 from eyenet.storage.factory import get_repository
@@ -37,11 +38,14 @@ def identity_sync(
     if cfg.identities_path is None:
         raise typer.BadParameter("identities path is required (--identities or EYENET_IDENTITIES)")
     pool_file = load_identities(cfg.identities_path, check_session_files=False)
+    session_key = load_session_key(cfg.data_dir)
 
     async def _main() -> ProvisionResult:
         storage = get_repository(data_dir=cfg.data_dir)
         try:
-            return await provision_identities(storage, pool_file)
+            return await provision_identities(
+                storage, pool_file, session_key=session_key, data_dir=cfg.data_dir
+            )
         finally:
             await storage.close()
 

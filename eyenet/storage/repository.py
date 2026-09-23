@@ -1866,11 +1866,16 @@ class BaseRepository(ABC):
         proxy_uri: str | None = None,
         cooldown_seconds: int = 21_600,
         notes: str | None = None,
+        source_config: dict[str, object] | None = None,
     ) -> IdentityRow:
         """Insert a new identity row. Raises on duplicate ``name``."""
 
     @abstractmethod
     async def get_identity(self, identity_id: UUID) -> IdentityRow | None: ...
+
+    @abstractmethod
+    async def get_identity_by_name(self, name: str) -> IdentityRow | None:
+        """Look up an identity by its unique ``name`` (the pool claim key)."""
 
     @abstractmethod
     async def list_identities(
@@ -1897,8 +1902,11 @@ class BaseRepository(ABC):
         *,
         identity_id: UUID,
         state: IdentityState,
+        last_used_at: datetime | None = None,
     ) -> IdentityRow:
-        """Set an identity's lifecycle state. Raises if it doesn't exist."""
+        """Set an identity's lifecycle state. Raises if it doesn't exist.
+
+        ``last_used_at``, when given, is stamped too (pool cooldown accounting)."""
 
     @abstractmethod
     async def graduate_identity(
