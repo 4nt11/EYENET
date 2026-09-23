@@ -7,7 +7,7 @@ import { apiGet } from '$lib/api.js';
 // down: 401/403 = not authorized (stale token / missing read scope), other =
 // unreachable.
 export const load = async () => {
-  const grants = await apiGet('/v1/clearance/grants?include_total=true', { auth: true })
+  const grants = await apiGet('/v1/clearance/grants?include_total=1', { auth: true })
     .then((page) => ({ page, status: 0 }))
     .catch((e) => ({ page: null, status: e.status ?? 0 }));
   return {
