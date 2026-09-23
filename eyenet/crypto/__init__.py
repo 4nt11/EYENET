@@ -26,19 +26,29 @@ from ._file_access_signing import (
     load_ed25519_public_key,
     verify_signature,
 )
+from ._session_key import (
+    SessionKeyError,
+    decrypt_session,
+    encrypt_session,
+    load_session_key,
+)
 
 __all__ = [
     "BY_USER_CONTENT_HASH_SENTINEL",
     "ExonerationSigner",
+    "SessionKeyError",
     "build_anchor_canonical",
     "build_canonical",
     "build_exoneration_canonical",
     "build_journal_row_canonical",
     "build_signing_key_challenge_canonical",
+    "decrypt_session",
+    "encrypt_session",
     "fingerprint",
     "load_anchor_key",
     "load_ed25519_public_key",
     "load_exoneration_key",
     "load_or_create_deployment_id",
+    "load_session_key",
     "verify_signature",
 ]

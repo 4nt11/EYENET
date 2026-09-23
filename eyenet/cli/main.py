@@ -19,7 +19,6 @@ from eyenet.classifier.service import ClassifierService
 from eyenet.cli.config import LinkerConfig, RuntimeConfig, VerifierConfig
 from eyenet.collectors.matrix.real import MatrixCollector
 from eyenet.collectors.matrix.stub import MatrixCollectorStub
-from eyenet.collectors.telegram.auth import ensure_session
 from eyenet.collectors.telegram.real import TelegramCollector
 from eyenet.collectors.telegram.stub import TelegramCollectorStub
 from eyenet.contracts._base import TraceContext
@@ -34,10 +33,11 @@ from eyenet.contracts.attribution import (
 )
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import GroupKind, LinkageState, SourceKind
+from eyenet.crypto import load_session_key
 from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
 from eyenet.identity_pool import FileIdentityPool
-from eyenet.identity_pool.loader import load as load_identities
+from eyenet.identity_pool.db import DbIdentityPool
 from eyenet.linker.linker import Linker
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
@@ -293,35 +293,33 @@ def collector_run(  # pragma: no cover
         nats_url=nats_url,
         use_memory_bus=memory_bus,
     )
-    if cfg.identities_path is None:
-        raise typer.BadParameter("identities path is required (--identities or EYENET_IDENTITIES)")
-
-    # Telegram is the only source today that requires a pre-existing session
-    # file on disk (MTProto). Matrix carries its auth in the TOML.
-    needs_session_file = collector == "telegram"
-
-    if needs_session_file:
-        ident_file = load_identities(cfg.identities_path, check_session_files=False)
-        entries = {e.name: e for e in ident_file.identities}
-        if identity not in entries:
-            raise typer.BadParameter(f"identity {identity!r} not found in identities file")
-        ensure_session(entries[identity])
-
-    pool = FileIdentityPool(cfg.identities_path, check_session_files=needs_session_file)
-
+    # Telegram's live path is DB-backed: the encrypted session comes from the
+    # IdentityTable (provisioned via POST /v1/identities or `eyenet identity
+    # sync`), NOT the TOML pool. The blob is decrypted into an in-memory
+    # StringSession at boot via the session key.
     if collector == "telegram":
+        session_key = load_session_key(cfg.data_dir)
 
         def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return TelegramCollector(
                 bus=bus,
                 storage=storage,
-                pool=pool,
+                pool=DbIdentityPool(storage),
                 identity_name=identity,
                 backfill=backfill,
+                session_key=session_key,
             )
 
         _run(_factory, cfg, tick=0.0)
-    elif collector == "matrix":
+        return
+
+    # Matrix + stub collectors still read the file-backed pool (Matrix auth is
+    # not encrypted yet; the generic seam extends to it when it is).
+    if cfg.identities_path is None:
+        raise typer.BadParameter("identities path is required (--identities or EYENET_IDENTITIES)")
+    pool = FileIdentityPool(cfg.identities_path, check_session_files=False)
+
+    if collector == "matrix":
 
         def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return MatrixCollector(

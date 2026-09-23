@@ -18,7 +18,7 @@ import hashlib
 import time as _time
 from collections import deque
 from datetime import UTC, datetime
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 import structlog
@@ -36,6 +36,7 @@ from telethon.tl.types import (
     User,
 )
 
+from eyenet.collectors.base._credentials import materialize_telegram_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton
 from eyenet.collectors.telegram._join import (
     CollectorJoinHandler,
@@ -60,6 +61,9 @@ from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
 from eyenet.identity_pool.loader import IdentityFileEntry
+
+if TYPE_CHECKING:
+    from cryptography.fernet import Fernet
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.services.discovery.scout_graduation import ScoutGraduationService
@@ -94,6 +98,7 @@ class TelegramCollector(CollectorSkeleton):
         pool: IdentityPool,
         identity_name: str,
         backfill: bool = False,
+        session_key: Fernet | None = None,
     ) -> None:
         super().__init__(
             bus=bus,
@@ -102,6 +107,9 @@ class TelegramCollector(CollectorSkeleton):
             identity_name=identity_name,
             source_kind=SourceKind.TELEGRAM,
         )
+        # Decrypts the session blob at boot (DB pool). None = legacy plaintext
+        # file pool, where session_path is opened by Telethon directly.
+        self._session_key = session_key
         self._client: TelegramClient | None = None
         self._source_uuid: UUID | None = None
         # Raw positive entity IDs (Channel.id / Chat.id) — the only form
@@ -136,8 +144,13 @@ class TelegramCollector(CollectorSkeleton):
 
         proxy = _parse_proxy(entry.proxy_uri)
 
+        # Decrypt-on-boot: the blob at session_path is Fernet-encrypted; this
+        # yields an in-memory StringSession (DB pool) or the plaintext path
+        # (legacy file pool). Plaintext never touches disk on the DB path.
+        session = materialize_telegram_session(entry, self._session_key)
+
         self._client = TelegramClient(
-            entry.session_path,
+            session,
             api_id,
             api_hash,
             proxy=proxy,
