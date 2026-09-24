@@ -4,7 +4,25 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Panel from '$lib/components/Panel.svelte';
-  import { sourceCtx, sourceView, loadSources, loadSourceDetail } from '$lib/source.svelte.js';
+  import Button from '$lib/components/Button.svelte';
+  import { sourceCtx, sourceView, sourceCreate, loadSources, loadSourceDetail, createSource } from '$lib/source.svelte.js';
+
+  const KINDS = ['telegram', 'matrix', 'irc', 'discord', 'forum', 'rss', 'xmpp'];
+  let newKind = $state('telegram');
+  let newName = $state('');
+  let newNotes = $state('');
+  const canCreate = $derived(newName.trim().length >= 1 && !sourceCreate.submitting);
+
+  async function submitSource(e) {
+    e.preventDefault();
+    if (!canCreate) return;
+    const id = await createSource({ kind: newKind, display_name: newName.trim(), notes: newNotes.trim() });
+    if (id) {
+      newName = '';
+      newNotes = '';
+      selectedId = id;
+    }
+  }
 
   // Columns are the fields /v1/sources actually returns. No `state` badge and
   // no `lastIngest` — the API has no backing field for either (see PR notes).
@@ -45,6 +63,16 @@
 
   <div class="body">
     <div class="table-col">
+      <form class="newsrc" onsubmit={submitSource}>
+        <select class="fin" bind:value={newKind} aria-label="Platform">
+          {#each KINDS as k}<option value={k}>{k}</option>{/each}
+        </select>
+        <input class="fin grow" type="text" bind:value={newName} placeholder="New source display name" />
+        <input class="fin grow" type="text" bind:value={newNotes} placeholder="Notes (optional)" />
+        <Button variant="primary" size="sm" type="submit" disabled={!canCreate}>Add source</Button>
+      </form>
+      {#if sourceCreate.error}<p class="pnote err">Failed: {sourceCreate.error}</p>{/if}
+      {#if sourceCreate.ok}<p class="pnote ok">{sourceCreate.ok}</p>{/if}
       {#if sourceCtx.list.length}
         <DataTable rowKey="id" columns={SOURCE_COLUMNS} rows={sourceCtx.list}
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
@@ -85,6 +113,12 @@
   .dname { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-body); }
   .empty { padding: 12px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
+  .pnote.err { color: var(--red-text); }
+  .pnote.ok { color: var(--accent); }
+  .newsrc { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 9px; }
+  .fin:focus { outline: none; border-color: var(--accent); }
+  .fin.grow { flex: 1; min-width: 0; }
 
   @media (max-width: 900px) { .body { grid-template-columns: 1fr; overflow: auto; } }
 </style>

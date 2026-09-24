@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time as _time
 from collections import deque
 from datetime import UTC, datetime
@@ -37,7 +38,7 @@ from telethon.tl.types import (
 )
 
 from eyenet.collectors.base._credentials import materialize_telegram_session
-from eyenet.collectors.base.skeleton import CollectorSkeleton
+from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.collectors.telegram._join import (
     CollectorJoinHandler,
     JoinAction,
@@ -59,7 +60,12 @@ from eyenet.contracts.enums import (
 )
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
-from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
+from eyenet.contracts.supervisor import (
+    JoinGroupCommand,
+    LeaveGroupCommand,
+    ScanVisibleGroupsCommand,
+    command_subject_for,
+)
 from eyenet.identity_pool.loader import IdentityFileEntry
 
 if TYPE_CHECKING:
@@ -116,12 +122,20 @@ class TelegramCollector(CollectorSkeleton):
         # that's consistent across get_entity(), dialog.entity.id, and
         # abs(event.chat_id). dialog.id and event.chat_id use varying
         # negative forms depending on Telethon version.
-        self._monitor_raw_ids: set[int] | None = None
+        # Fail-CLOSED: a live account SEES every dialog it's in, so the monitor
+        # set starts EMPTY (ingest nothing) and is filled only by explicit
+        # monitor_groups config + this collector's active memberships (groups the
+        # operator joined via /monitored-groups). There is deliberately no
+        # "monitor everything" mode: that is the firehose + ban risk we reject.
+        self._monitor_raw_ids: set[int] = set()
         self._backfill = backfill
         self._recent: deque[float] = deque(maxlen=3600)
         # E5 discovery recursion: this collector's own DB row + the join core.
         self._collector_id: UUID | None = None
         self._join: CollectorJoinHandler | None = None
+        # Held ref to the on-start visible-group scan task (RUF006: the loop only
+        # weak-refs tasks, so a bare create_task can be GC'd mid-run).
+        self._scan_task: asyncio.Task[None] | None = None
         # Monotonic timestamp of the last REQUESTED-membership probe sweep.
         self._last_requested_probe: float = 0.0
         # Hot-path guard (Defect 6): lowercased event-matchable platform_groupid
@@ -130,7 +144,7 @@ class TelegramCollector(CollectorSkeleton):
         # on_subscribe. joinchat: candidates are NOT here (probe-only, Defect 1).
         self._requested_match_forms: set[str] = set()
 
-    async def on_subscribe(self) -> None:
+    async def on_subscribe(self) -> None:  # noqa: PLR0915 — cohesive boot sequence
         await super().on_subscribe()
         entry = cast("IdentityFileEntry", self._claimed)
 
@@ -174,8 +188,7 @@ class TelegramCollector(CollectorSkeleton):
                         _log.info("collector.group_resolved", username=g, entity_id=entity.id)
                     except Exception as exc:
                         _log.warning("collector.group_resolve_failed", group=g, error=str(exc))
-            if resolved:
-                self._monitor_raw_ids = resolved
+            self._monitor_raw_ids.update(resolved)
 
         self._source_uuid = await self._storage.upsert_source(
             kind=SourceKind.TELEGRAM,
@@ -196,6 +209,31 @@ class TelegramCollector(CollectorSkeleton):
         # (the supervisor publishes JoinGroupCommand here for the leased scout).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
+
+        # Seed the monitor set from this collector's active memberships (the
+        # groups the operator joined via /monitored-groups), unioned onto any
+        # static monitor_groups config above. This is the ONLY way an account
+        # with no config monitors anything; without a resolvable collector row
+        # the set stays empty (fail-closed) and nothing is ingested. Live joins
+        # extend the set (_handle_join / _maybe_confirm_requested); leave
+        # discards.
+        if self._collector_id is not None:
+            for m in await self._storage.list_active_memberships(collector_id=self._collector_id):
+                grp = await self._storage.get_group(m.group_id)
+                if grp is None:
+                    continue
+                try:
+                    self._monitor_raw_ids.add(_to_raw_entity_id(grp.platform_groupid))
+                except ValueError:
+                    try:
+                        entity = await self._client.get_entity(grp.platform_groupid)
+                        self._monitor_raw_ids.add(entity.id)
+                    except Exception as exc:
+                        _log.warning(
+                            "collector.monitor_seed_resolve_failed",
+                            group=grp.platform_groupid,
+                            error=str(exc),
+                        )
         self._join = CollectorJoinHandler(
             storage=self._storage,
             audit=self.audit,
@@ -206,11 +244,24 @@ class TelegramCollector(CollectorSkeleton):
 
         async def _on_command(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
             try:
-                await self._handle_join(JoinGroupCommand.model_validate_json(payload))
+                kind = json.loads(payload).get("kind")
+                if kind == "scan_visible_groups":
+                    ScanVisibleGroupsCommand.model_validate_json(payload)
+                    if self._source_uuid is not None:
+                        await self.scan_visible_groups(source_id=self._source_uuid)
+                elif kind == "leave_group":
+                    await self._handle_leave(LeaveGroupCommand.model_validate_json(payload))
+                else:
+                    await self._handle_join(JoinGroupCommand.model_validate_json(payload))
             except Exception as exc:
                 _log.error("collector.command_error", error=str(exc))
 
         await self._bus.subscribe(command_subject_for(self.instance_id), _on_command)
+
+        # Scan the identity's visible groups on start so /monitored-groups reflects
+        # everything this account can see (non-blocking). Hold the reference so the
+        # loop's weak task ref can't GC it mid-run (RUF006).
+        self._scan_task = asyncio.create_task(self._scan_on_start())
 
         # Seed the hot-path REQUESTED match-form set (Defect 6) so the very
         # first messages after a restart can confirm a pending approval without
@@ -221,7 +272,8 @@ class TelegramCollector(CollectorSkeleton):
             "collector.ready",
             identity=entry.name,
             instance_id=self.instance_id,
-            monitor_raw_ids=sorted(self._monitor_raw_ids) if self._monitor_raw_ids else "all",
+            monitor_raw_ids=sorted(self._monitor_raw_ids),
+            monitored_count=len(self._monitor_raw_ids),
             backfill=self._backfill,
         )
 
@@ -298,6 +350,32 @@ class TelegramCollector(CollectorSkeleton):
                 await self._join.record_artifact_validation(cmd.access_artifact_id, exc_name)
             await self._join.fail_candidate(cmd, reason=f"{exc_name}: {exc}")
 
+    async def _resolve_public_entity(self, platform_groupid: str) -> object:
+        """Resolve a public-identifier group to a telethon entity for joining.
+
+        An ``@username`` resolves directly. A bare numeric id (a group with no
+        public username) is NOT resolvable via ``get_entity(str)`` — telethon
+        holds no access_hash for a raw id — so fall back to the account's dialog
+        list, which carries the access_hash for every group the account is
+        already a member of (the common case for join-at-will over visible
+        groups). ``iter_dialogs`` per numeric join is fine at operator cadence.
+        """
+        if self._client is None:
+            raise RuntimeError("client not attached")
+        try:
+            return await self._client.get_entity(platform_groupid)
+        except (ValueError, TypeError):
+            raw = _to_raw_entity_id(platform_groupid)  # raises ValueError if @username
+            async for dialog in self._client.iter_dialogs():
+                ent = dialog.entity
+                ent_id = getattr(ent, "id", None)
+                if isinstance(ent_id, int) and _strip_100(ent_id) == raw:
+                    return ent
+            raise ValueError(
+                f"no dialog matches group id {platform_groupid!r} "
+                "(account is not a member and the id has no public username)"
+            ) from None
+
     async def _handle_join(self, cmd: JoinGroupCommand) -> None:
         """Execute a supervisor-dispatched join (E5/E5.5, §4.12.4).
 
@@ -328,7 +406,7 @@ class TelegramCollector(CollectorSkeleton):
                 updates = await self._client(ImportChatInviteRequest(invite_hash))
                 entity = updates.chats[0]
             else:
-                entity = await self._client.get_entity(cmd.platform_groupid)
+                entity = await self._resolve_public_entity(cmd.platform_groupid)
                 await self._client(JoinChannelRequest(entity))
         except Exception as exc:
             await self._handle_join_error(cmd, exc)
@@ -353,7 +431,7 @@ class TelegramCollector(CollectorSkeleton):
             )
             return
         raw_id = getattr(entity, "id", None)
-        if self._monitor_raw_ids is not None and isinstance(raw_id, int):
+        if isinstance(raw_id, int):
             self._monitor_raw_ids.add(raw_id)
         _log.info(
             "collector.join_complete",
@@ -420,8 +498,7 @@ class TelegramCollector(CollectorSkeleton):
                 continue
             confirmed = await self._join.confirm_requested_membership(candidate.id)
             if confirmed:
-                if self._monitor_raw_ids is not None:
-                    self._monitor_raw_ids.add(_chat_raw_id(event.chat_id))
+                self._monitor_raw_ids.add(_chat_raw_id(event.chat_id))
                 self._requested_match_forms.discard(form)
                 _log.info(
                     "collector.requested_join_confirmed",
@@ -555,10 +632,10 @@ class TelegramCollector(CollectorSkeleton):
         # proves the approval. The Defect-6 hot-path set makes this near-free
         # (a set lookup; zero DB work when no REQUESTED candidates exist).
         await self._maybe_confirm_requested(event)
-        if (
-            self._monitor_raw_ids is not None
-            and _chat_raw_id(event.chat_id) not in self._monitor_raw_ids
-        ):
+        # Fail-closed gate: drop any message from a group not in the monitor set
+        # (empty set => ingest nothing). This is what stops the live-account
+        # firehose.
+        if _chat_raw_id(event.chat_id) not in self._monitor_raw_ids:
             return
         msg = event.message
         if not msg or not msg.message:
@@ -566,6 +643,62 @@ class TelegramCollector(CollectorSkeleton):
         sender = await event.get_sender()
         chat = await event.get_chat()
         await self._ingest_msg(msg, chat_id=event.chat_id, sender=sender, chat=chat)
+
+    async def enumerate_visible_groups(self) -> list[VisibleGroup]:
+        """Every group/channel this identity's account is in (its dialogs).
+
+        Skips DMs/users. Prefers ``@username`` as the platform id (resolvable by
+        any client for a public group); falls back to the raw entity id."""
+        if self._client is None:
+            raise RuntimeError("enumerate_visible_groups called before client attached")
+        out: list[VisibleGroup] = []
+        async for dialog in self._client.iter_dialogs():
+            if getattr(dialog, "is_user", False):
+                continue
+            entity = dialog.entity
+            username = getattr(entity, "username", None)
+            pgid = f"@{username}" if username else str(getattr(entity, "id", "") or "")
+            if not pgid or pgid == "@None":
+                continue
+            out.append(
+                VisibleGroup(
+                    platform_groupid=pgid,
+                    kind=_chat_kind(entity),
+                    title=getattr(dialog, "title", None) or None,
+                    is_member=True,
+                    member_count=getattr(entity, "participants_count", None),
+                )
+            )
+        return out
+
+    async def _handle_leave(self, cmd: LeaveGroupCommand) -> None:
+        """Leave a group on the platform (delete the dialog). The membership close +
+        candidate park are done API-side (optimistic, like join); this is the
+        best-effort platform-side departure."""
+        if self._client is None:
+            return
+        group = await self._storage.get_group(cmd.group_id)
+        if group is None:
+            _log.warning("collector.leave_unknown_group", group_id=str(cmd.group_id))
+            return
+        try:
+            entity = await self._client.get_entity(group.platform_groupid)
+            await self._client.delete_dialog(entity)
+            raw_id = getattr(entity, "id", None)
+            if isinstance(raw_id, int):
+                self._monitor_raw_ids.discard(raw_id)  # stop gating on a group we left
+            _log.info("collector.left_group", group_id=str(cmd.group_id), reason=cmd.reason)
+        except Exception as exc:
+            _log.warning("collector.leave_failed", group_id=str(cmd.group_id), error=str(exc))
+
+    async def _scan_on_start(self) -> None:
+        """One-shot visible-group scan after connect (fire-and-forget helper)."""
+        if self._source_uuid is None:
+            return
+        try:
+            await self.scan_visible_groups(source_id=self._source_uuid)
+        except Exception as exc:
+            _log.warning("collector.scan_on_start_failed", error=str(exc))
 
     async def _run_backfill(self) -> None:
         """Replay historical messages oldest-first for each monitored group.
@@ -576,10 +709,8 @@ class TelegramCollector(CollectorSkeleton):
         """
         if self._client is None:
             raise RuntimeError("backfill called before on_subscribe attached a client")
-        if self._monitor_raw_ids is None:
-            _log.warning(
-                "collector.backfill_skipped", reason="monitor_groups required for backfill"
-            )
+        if not self._monitor_raw_ids:
+            _log.warning("collector.backfill_skipped", reason="no monitored groups to backfill")
             return
 
         found: set[int] = set()

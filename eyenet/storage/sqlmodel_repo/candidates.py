@@ -190,6 +190,64 @@ class CandidatesMixin:
             await session.refresh(mention)
             return _candidate_row(candidate), _mention_row(mention)
 
+    async def ensure_candidate(
+        self,
+        *,
+        source_id: UUID,
+        platform_groupid: str,
+        seen_at: datetime,
+        kind: GroupKind | None = None,
+        title: str | None = None,
+        member_dialog: bool = False,
+    ) -> GroupCandidateRow:
+        """Find-or-create a GroupCandidate for ``(source_id, platform_groupid)``.
+
+        The single entry point for the two operator-facing group flows:
+        - visible-group scan (``member_dialog=True``): every dialog/room an
+          identity can see becomes a candidate, so /monitored-groups can list it.
+        - join-at-will: ensure a candidate exists for an undiscovered group so the
+          existing approve → supervisor → collector join path can run.
+
+        Never changes an existing candidate's ``state`` (the state machine owns
+        that); only bumps ``last_observed_at_ingest`` + hints, and sets
+        ``member_dialog`` once observed. New candidates start ``DISCOVERED``.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(GroupCandidateTable).where(
+                GroupCandidateTable.source_id == source_id,
+                GroupCandidateTable.platform_groupid == platform_groupid,
+            )
+            candidate = (await session.exec(stmt)).one_or_none()
+            if candidate is None:
+                candidate = GroupCandidateTable(
+                    source_id=source_id,
+                    platform_groupid=platform_groupid,
+                    kind_hint=kind,
+                    display_name_hint=title,
+                    state=CandidateState.DISCOVERED,
+                    score=0.0,
+                    score_breakdown={},
+                    score_function_version=1,
+                    first_observed_at_ingest=seen_at,
+                    last_observed_at_ingest=seen_at,
+                    member_dialog=member_dialog,
+                )
+                session.add(candidate)
+            else:
+                if title:
+                    candidate.display_name_hint = title
+                if kind is not None:
+                    candidate.kind_hint = kind
+                if member_dialog:
+                    candidate.member_dialog = True
+                stored = _coerce_utc(candidate.last_observed_at_ingest) or seen_at
+                if seen_at > stored:
+                    candidate.last_observed_at_ingest = seen_at
+                session.add(candidate)
+            await session.commit()
+            await session.refresh(candidate)
+            return _candidate_row(candidate)
+
     async def get_candidate(self, candidate_id: UUID) -> GroupCandidateRow | None:
         """Return one GroupCandidateRow by id, or ``None``."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]

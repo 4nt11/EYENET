@@ -29,7 +29,7 @@ export const NAV = [
       { slug: 'sources',    label: 'Sources',    href: '/sources', built: true, desc: 'Sources & source-domains · discovery storage surface' },
       { slug: 'collectors', label: 'Collectors', href: '/collectors', built: true, desc: 'Collector fleet management' },
       { slug: 'candidates', label: 'Candidates', href: '/candidates', built: true, desc: 'GroupCandidate triage queue' },
-      { slug: 'monitored-groups', label: 'Monitored groups', href: '/monitored-groups', future: true, desc: 'Chat groups we have joined / are monitoring (GroupTable) · no API yet' }
+      { slug: 'monitored-groups', label: 'Monitored groups', href: '/monitored-groups', built: true, desc: 'Groups you have vision over across all identities · see + join at will' }
     ]
   },
   {

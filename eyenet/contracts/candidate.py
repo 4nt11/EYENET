@@ -30,6 +30,7 @@ class GroupCandidateRow(DbRowBase):
     rejection_reason: str | None = Field(default=None, max_length=2048)
     assigned_collector_id: UUID | None = None
     resulting_group_id: UUID | None = None
+    member_dialog: bool = False
 
 
 class GroupCandidateMentionRow(DbRowBase):
