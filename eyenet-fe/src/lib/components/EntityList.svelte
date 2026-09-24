@@ -1,9 +1,12 @@
 <script>
   import Badge from './Badge.svelte';
-  // Selectable left rail of entities (actors, personas). Row = primary + secondary + tier dot.
-  // items: [{ id, primary, secondary, tier }]
+  // Selectable left rail of entities (actors, personas, crews). Row = primary +
+  // secondary + an optional chip. items: [{ id, primary, secondary, tier?, chip?, tone? }].
+  // `chip` is the badge label (falls back to `tier`); `tone` its Badge colour
+  // (falls back to `tier`). The badge only renders when there is a label.
   // onLoadMore + hasMore render a paging footer when the caller supports it.
   let { label, items = [], selectedId, onSelect, onLoadMore = null, hasMore = false } = $props();
+  const railColor = (t) => (t === 'critical' ? 'var(--red)' : t === 'high' ? 'var(--accent)' : 'var(--border-strong)');
 </script>
 
 <aside>
@@ -14,12 +17,12 @@
   <div class="list">
     {#each items as it (it.id)}
       <button class="row" class:active={it.id === selectedId} onclick={() => onSelect(it.id)}>
-        <span class="rail" style="background:{it.tier === 'critical' ? 'var(--red)' : it.tier === 'high' ? 'var(--accent)' : 'var(--border-strong)'};"></span>
+        <span class="rail" style="background:{railColor(it.tone ?? it.tier)};"></span>
         <span class="text">
           <span class="primary">{it.primary}</span>
           <span class="secondary">{it.secondary}</span>
         </span>
-        <Badge tone={it.tier} dot>{it.tier}</Badge>
+        {#if it.chip ?? it.tier}<Badge tone={it.tone ?? it.tier ?? 'neutral'} dot>{it.chip ?? it.tier}</Badge>{/if}
       </button>
     {/each}
     {#if onLoadMore && hasMore}

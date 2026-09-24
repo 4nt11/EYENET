@@ -4,6 +4,48 @@ import { apiGet, apiPost, apiDelete } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '');
 
+// Live actor search for the crew-builder (reuses GET /v1/graph/search, actors-only,
+// q REQUIRED). Same monotonic-token + debounce pattern as the graph page.
+export const crewSearch = $state({ idle: true, loading: false, results: [] });
+let searchSeq = 0;
+export async function searchCrewActors(q) {
+  const term = q.trim();
+  if (term === '') {
+    crewSearch.idle = true;
+    crewSearch.loading = false;
+    crewSearch.results = [];
+    return;
+  }
+  const mine = ++searchSeq;
+  crewSearch.idle = false;
+  crewSearch.loading = true;
+  try {
+    const page = await apiGet(`/v1/graph/search?q=${encodeURIComponent(term)}&limit=25`, { auth: true });
+    if (mine !== searchSeq) return;
+    crewSearch.results = (page.items ?? []).map((a) => ({ id: a.actor_id, handle: a.primary_handle }));
+  } catch {
+    if (mine === searchSeq) crewSearch.results = [];
+  } finally {
+    if (mine === searchSeq) crewSearch.loading = false;
+  }
+}
+export function clearCrewSearch() {
+  crewSearch.idle = true;
+  crewSearch.loading = false;
+  crewSearch.results = [];
+}
+
+// Create with an initial member set (POST supports seed members in one call).
+export async function createCrewWith(name, memberIds) {
+  const res = await apiPost(
+    '/v1/crews',
+    { name, notes: null, members: memberIds },
+    { auth: true, accept: [201] }
+  );
+  await loadManualCrews();
+  return res.crew_id;
+}
+
 export const manualCrewCtx = $state({ list: [], loaded: false, error: null });
 
 export async function loadManualCrews() {
@@ -86,6 +128,22 @@ export async function addMember(crewId, handle) {
     return true;
   } catch (e) {
     manualCrewView.msg = e.status === 404 ? `No actor for ${handle}` : `Failed: ${e.message ?? e}`;
+    return false;
+  } finally {
+    manualCrewView.busy = false;
+  }
+}
+
+export async function addMemberById(crewId, actorId) {
+  manualCrewView.busy = true;
+  manualCrewView.msg = null;
+  try {
+    const d = await apiPost(`/v1/crews/${crewId}/members`, { actor_id: actorId }, { auth: true });
+    _applyDetail(d);
+    await loadManualCrews();
+    return true;
+  } catch (e) {
+    manualCrewView.msg = `Failed: ${e.message ?? e}`;
     return false;
   } finally {
     manualCrewView.busy = false;
