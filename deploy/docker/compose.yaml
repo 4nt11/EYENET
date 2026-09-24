@@ -137,31 +137,13 @@ services:
     cap_add:
       - SYS_ADMIN
 
-  # ---- per-identity collector (the data plane) -------------------------------
-  # Part of the default stack: claims ONE provisioned identity BY NAME (via the
-  # DB-backed pool), decrypts its session, connects, and ingests. Set
-  # EYENET_IDENTITY to an identity you have provisioned (UI upload or
-  # `eyenet identity sync`) — set it in `.env` (see .env.example). Until a
-  # matching identity exists this ONE service crash-loops in isolation; the core
-  # pipeline is unaffected. For a second identity, copy this service
-  # (collector-<name>) or drive an extra with `docker compose run`.
-  collector:
-    image: eyenet:base
-    restart: unless-stopped
-    command:
-      - collector
-      - --identity=${EYENET_IDENTITY:-scout01}
-      - --type=${EYENET_COLLECTOR_TYPE:-telegram}
-    environment:
-      <<: *eyenet-env
-      # Only the file-pool collectors (matrix/stub) read this; the telegram
-      # data plane resolves credentials from the DB pool.
-      EYENET_IDENTITIES: /var/lib/eyenet/identities
-    volumes:
-      - eyenet-data:/var/lib/eyenet
-    depends_on:
-      api:
-        condition: service_healthy
+  # ---- collectors (the data plane) -------------------------------------------
+  # NOT a static compose service. The CollectorSupervisor spawns one collector
+  # child process per CollectorTable row whose desired_state is RUNNING (created
+  # + started via the API / UI, `POST /v1/collectors` then .../start), resolving
+  # each identity from the DB pool and driving real observed_state. There is no
+  # hardcoded --identity here on purpose: a fixed service crash-loops until that
+  # exact identity exists and double-claims against a supervisor-spawned child.
 
 volumes:
   eyenet-data:
