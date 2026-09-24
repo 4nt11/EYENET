@@ -22,6 +22,7 @@ from eyenet.api.v1.actor_groups.api_sweep_crew_cases import router as actor_grou
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
 from eyenet.api.v1.actors.api_get_neighbors import router as actors_neighbors_router
+from eyenet.api.v1.actors.api_get_relationships import router as actors_relationships_router
 from eyenet.api.v1.actors.api_get_timeline import router as actors_timeline_router
 from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
 from eyenet.api.v1.actors.api_list_observations import router as actors_observations_router
@@ -152,6 +153,7 @@ from eyenet.api.v1.linkages.api_list_linkages import router as linkages_list_rou
 from eyenet.api.v1.linkages.api_reject_linkage import router as linkages_reject_router
 from eyenet.api.v1.linkages.api_suspect_linkage import router as linkages_suspect_router
 from eyenet.api.v1.linker.api_run import router as linker_run_router
+from eyenet.api.v1.relations.api_rebuild import router as relations_rebuild_router
 
 # === meta (gated OpenAPI schema, §12.5) ===
 from eyenet.api.v1.meta.api_openapi import router as meta_openapi_router
@@ -242,7 +244,9 @@ v1_router.include_router(actors_set_assessment_router)
 v1_router.include_router(calibration_get_router)
 v1_router.include_router(actors_neighbors_router)
 v1_router.include_router(actors_observations_router)
+v1_router.include_router(actors_relationships_router)
 v1_router.include_router(actors_timeline_router)
+v1_router.include_router(relations_rebuild_router)
 
 # personas
 v1_router.include_router(personas_list_router)  # /personas (literal) before /personas/{id}

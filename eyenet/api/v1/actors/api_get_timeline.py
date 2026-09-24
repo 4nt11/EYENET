@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -32,35 +32,50 @@ async def actors_timeline(
     page: Annotated[CursorParams, Depends(cursor_params)],
     since: Annotated[datetime | None, Query()] = None,
     until: Annotated[datetime | None, Query()] = None,
+    kind: Annotated[Literal["message", "observation"] | None, Query()] = None,
 ) -> CursorPageTimelineEntry:
     if await storage.get_actor(actor_id) is None:
         raise ResourceNotFound("actor")
     # The timeline is the time-merge of two independently-ordered streams.
     # Over-fetch the leading `offset + limit + 1` of each, merge-sort newest-
     # first, then slice the requested window — correct for offset cursors at
-    # small-operator scale (both streams are per-actor bounded).
+    # small-operator scale (both streams are per-actor bounded). `kind` narrows to
+    # one stream so messages don't drown in the (far denser) observation stream.
     need = page.offset + page.limit + 1
-    msgs = cast(
-        "list[MessageTable]",
-        await storage.messages_for_actor(actor_id, since=since, until=until, limit=need, offset=0),
-    )
-    obs = cast(
-        "list[ObservationTable]",
-        await storage.observations_for_actor(
-            actor_id, since=since, until=until, limit=need, offset=0
-        ),
-    )
-    entries = [TimelineEntry.from_message(m) for m in msgs]
-    entries += [TimelineEntry.from_observation(o) for o in obs]
+    want_msgs = kind in (None, "message")
+    want_obs = kind in (None, "observation")
+    entries: list[TimelineEntry] = []
+    if want_msgs:
+        msgs = cast(
+            "list[MessageTable]",
+            await storage.messages_for_actor(
+                actor_id, since=since, until=until, limit=need, offset=0
+            ),
+        )
+        entries += [TimelineEntry.from_message(m) for m in msgs]
+    if want_obs:
+        obs = cast(
+            "list[ObservationTable]",
+            await storage.observations_for_actor(
+                actor_id, since=since, until=until, limit=need, offset=0
+            ),
+        )
+        entries += [TimelineEntry.from_observation(o) for o in obs]
     entries.sort(key=lambda e: (e.ts, e.id), reverse=True)
     end = page.offset + page.limit
     window = entries[page.offset : end]
     has_more = len(entries) > end
     estimated_total = None
     if page.include_total:
-        estimated_total = await storage.count_messages_for_actor(
-            actor_id, since=since, until=until
-        ) + await storage.count_observations_for_actor(actor_id, since=since, until=until)
+        estimated_total = 0
+        if want_msgs:
+            estimated_total += await storage.count_messages_for_actor(
+                actor_id, since=since, until=until
+            )
+        if want_obs:
+            estimated_total += await storage.count_observations_for_actor(
+                actor_id, since=since, until=until
+            )
     return CursorPageTimelineEntry(
         items=window,
         next_cursor=encode_cursor(end) if has_more else None,

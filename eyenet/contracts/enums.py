@@ -411,6 +411,18 @@ class MentionKind(StrEnum):
     OTHER = "other"
 
 
+class RelationKind(StrEnum):
+    """A directed actor-to-actor relationship materialized by the relation builder.
+
+    MENTION: the from-actor wrote an ``@handle`` in a message body that resolves
+    to the to-actor. FORWARD: the from-actor relayed (forwarded) a message whose
+    origin author is the to-actor.
+    """
+
+    MENTION = "mention"
+    FORWARD = "forward"
+
+
 class ResolutionState(StrEnum):
     """Bridge-resolution state for InfrastructureArtifact (MODELS §2.25).
 

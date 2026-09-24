@@ -16,7 +16,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from eyenet.contracts.enums import ActorAliasKind, ValueKind
+from eyenet.contracts.enums import ActorAliasKind, RelationKind, ValueKind
 from eyenet.models.actor import ActorAliasHistoryTable
 from eyenet.models.graph import GraphEdgeTable, GraphEdgeType
 from eyenet.models.message import MessageTable
@@ -188,6 +188,32 @@ class NeighborList(ApiSchema):
     estimated_total: int | None = Field(default=None, ge=0)
 
 
+class RelationNeighbor(ApiSchema):
+    """One actor related to the subject by mentions or forwards.
+
+    `count` is the number of messages carrying that relationship; `last_seen` is
+    the most recent one. Direction is implied by which list it appears in.
+    """
+
+    actor_id: UUID
+    handle: str | None = None
+    display_name: str | None = None
+    kind: RelationKind
+    count: int = Field(ge=1)
+    last_seen: datetime
+
+
+class RelationshipList(ApiSchema):
+    """200 response for `GET /v1/actors/{id}/relationships`.
+
+    `outbound` = actors this one mentioned/relayed; `inbound` = actors who
+    mentioned/relayed this one. Each side is top-N by occurrence count.
+    """
+
+    outbound: list[RelationNeighbor]
+    inbound: list[RelationNeighbor]
+
+
 class ObservationSummary(ApiSchema):
     """Projection of MODELS.md §2.4 Observation.
 
@@ -296,5 +322,7 @@ __all__ = [
     "NeighborEdge",
     "NeighborList",
     "ObservationSummary",
+    "RelationNeighbor",
+    "RelationshipList",
     "TimelineEntry",
 ]
