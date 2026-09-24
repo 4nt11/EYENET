@@ -45,7 +45,8 @@ export const NAV = [
       { slug: 'identities', label: 'Identities',    href: '/identities', built: true, desc: 'Identity-pool actions · claim/release/freeze/burn',
         children: [
           { slug: 'identities-overview', label: 'Pool', href: '/identities', built: true, desc: 'Identity pool and lifecycle actions' },
-          { slug: 'identities-provision', label: 'Provision', href: '/identities/provision', built: true, desc: 'Upload a session file to provision an identity' }
+          { slug: 'identities-provision-qr', label: 'QR login', href: '/identities/provision/qr', built: true, desc: 'Scan a Telegram QR to mint a user session' },
+          { slug: 'identities-provision', label: 'Provision (file)', href: '/identities/provision', built: true, desc: 'Upload a session file to provision an identity' }
         ] },
       { slug: 'clearance',  label: 'Clearance',     href: '/clearance', built: true, desc: 'Sensitivity-clearance grants' },
       { slug: 'control',    label: 'Control',       href: '/control', built: true, desc: 'System-wide operator actions (panic)' },

@@ -127,3 +127,75 @@ export async function provisionIdentity(formData) {
     provisionCtx.submitting = false;
   }
 }
+
+// QR-login provisioning (POST /v1/identities/qr-login, admin-only). Stateful:
+// start returns a login_id + QR, then poll status; if password_needed, submit 2FA.
+// status ∈ idle | pending_scan | password_needed | complete | error | expired.
+export const qrCtx = $state({
+  loginId: null,
+  qrUrl: null,
+  status: 'idle',
+  identityId: null,
+  detail: null,
+  error: null,
+  busy: false
+});
+
+export function resetQr() {
+  qrCtx.loginId = null;
+  qrCtx.qrUrl = null;
+  qrCtx.status = 'idle';
+  qrCtx.identityId = null;
+  qrCtx.detail = null;
+  qrCtx.error = null;
+  qrCtx.busy = false;
+}
+
+// `payload` = { name, source_id, telegram_api_id, telegram_api_hash,
+//   monitor_groups: [], cooldown_seconds?, proxy_uri?, notes? }
+export async function startQrLogin(payload) {
+  qrCtx.busy = true;
+  qrCtx.error = null;
+  qrCtx.identityId = null;
+  qrCtx.detail = null;
+  try {
+    const r = await apiPost('/v1/identities/qr-login', payload, { auth: true });
+    qrCtx.loginId = r.login_id;
+    qrCtx.qrUrl = r.qr_url;
+    qrCtx.status = r.status;
+    return r.login_id;
+  } catch (e) {
+    qrCtx.error = e.message ?? String(e);
+    return null;
+  } finally {
+    qrCtx.busy = false;
+  }
+}
+
+export async function pollQrStatus() {
+  if (!qrCtx.loginId) return;
+  try {
+    const r = await apiGet(`/v1/identities/qr-login/${qrCtx.loginId}`, { auth: true });
+    qrCtx.status = r.status;
+    if (r.qr_url) qrCtx.qrUrl = r.qr_url;
+    qrCtx.identityId = r.identity_id ?? null;
+    qrCtx.detail = r.detail ?? null;
+    if (r.status === 'complete') await loadIdentities();
+  } catch (e) {
+    qrCtx.error = e.message ?? String(e);
+  }
+}
+
+export async function submitQrPassword(password) {
+  if (!qrCtx.loginId) return;
+  qrCtx.busy = true;
+  try {
+    const r = await apiPost(`/v1/identities/qr-login/${qrCtx.loginId}/password`, { password }, { auth: true });
+    qrCtx.status = r.status;
+    qrCtx.detail = r.detail ?? null;
+  } catch (e) {
+    qrCtx.error = e.message ?? String(e);
+  } finally {
+    qrCtx.busy = false;
+  }
+}

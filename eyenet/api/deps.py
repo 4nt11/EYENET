@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from cryptography.fernet import Fernet
 
+    from eyenet.api.auth._qr_login import QrLoginRegistry
     from eyenet.bus.publisher import BusEnvelopePublisher
     from eyenet.contracts.bus import Bus
     from eyenet.crypto import ExonerationSigner
@@ -209,6 +210,13 @@ def get_session_key(request: Request) -> Fernet:
     from cryptography.fernet import Fernet as _Fernet  # noqa: PLC0415
 
     return cast("_Fernet", fernet)
+
+
+def get_qr_logins(request: Request) -> QrLoginRegistry:
+    registry = getattr(request.app.state, "qr_logins", None)
+    if registry is None:
+        raise RuntimeError("app.state.qr_logins is not configured")
+    return cast("QrLoginRegistry", registry)
 
 
 def get_verifying_keys(request: Request) -> dict[str, VerifyingKey]:
@@ -397,6 +405,7 @@ __all__ = [
     "get_mfa_key",
     "get_pat_pepper",
     "get_publisher",
+    "get_qr_logins",
     "get_session_key",
     "get_storage",
     "get_stream_principal",

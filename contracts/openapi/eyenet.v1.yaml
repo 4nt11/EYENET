@@ -875,6 +875,75 @@ paths:
         "413": { description: Session file exceeds the size limit. }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/identities/qr-login:
+    post:
+      tags: [identities]
+      operationId: identities_qr_start
+      summary: >-
+        Start a QR login to mint a Telegram USER session in-UI (write:identity,
+        admin-only). Returns a QR to scan; poll for status and submit 2FA if set.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QrLoginStartRequest' }
+      responses:
+        "201":
+          description: QR challenge — render qr_url as a QR code, then poll.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrLoginChallenge' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/identities/qr-login/{login_id}:
+    get:
+      tags: [identities]
+      operationId: identities_qr_status
+      summary: Poll a QR login (write:identity, admin-only, owner-scoped).
+      parameters:
+        - name: login_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current QR-login status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrLoginStatusResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/identities/qr-login/{login_id}/password:
+    post:
+      tags: [identities]
+      operationId: identities_qr_password
+      summary: Supply the 2FA password for a QR login (write:identity, admin-only).
+      parameters:
+        - name: login_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QrPasswordRequest' }
+      responses:
+        "200":
+          description: Updated QR-login status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrLoginStatusResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/identities/{identity_id}:
     get:
       tags: [identities]
@@ -3474,6 +3543,47 @@ components:
         proxy_uri:        { type: string, maxLength: 1024, nullable: true }
         role:             { $ref: '#/components/schemas/IdentityRole' }
         notes:            { type: string, maxLength: 4096, nullable: true }
+    QrLoginStartRequest:
+      description: |
+        Body of POST /v1/identities/qr-login. Same identity metadata as the upload
+        form minus the file — the session is minted live by scanning the QR.
+        Telegram api_id/api_hash are required up front (they build the client).
+      type: object
+      required: [name, source_id, telegram_api_id, telegram_api_hash]
+      properties:
+        name:              { type: string, minLength: 1, maxLength: 128 }
+        source_id:         { type: string, format: uuid }
+        telegram_api_id:   { type: integer }
+        telegram_api_hash: { type: string, minLength: 1, maxLength: 256 }
+        monitor_groups:    { type: array, items: { type: string } }
+        cooldown_seconds:  { type: integer, minimum: 0, default: 21600 }
+        proxy_uri:         { type: string, maxLength: 1024, nullable: true }
+        role:              { $ref: '#/components/schemas/IdentityRole' }
+        notes:             { type: string, maxLength: 4096, nullable: true }
+    QrLoginChallenge:
+      description: 201 response of POST /v1/identities/qr-login. Render qr_url as a QR.
+      type: object
+      required: [login_id, qr_url, expires_at, status]
+      properties:
+        login_id:   { type: string, format: uuid }
+        qr_url:     { type: string, description: 'tg://login?token=... — render as a QR code' }
+        expires_at: { type: string, format: date-time }
+        status:     { type: string, description: pending_scan | password_needed | complete | error | expired }
+    QrLoginStatusResponse:
+      description: Poll/submit response. identity_id set on complete; detail on error/expired.
+      type: object
+      required: [status]
+      properties:
+        status:      { type: string }
+        qr_url:      { type: string, nullable: true }
+        identity_id: { type: string, format: uuid, nullable: true }
+        detail:      { type: string, nullable: true }
+    QrPasswordRequest:
+      description: Body of POST /v1/identities/qr-login/{login_id}/password (2FA step).
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, minLength: 1, maxLength: 512 }
     CursorPageIdentitySummary:
       type: object
       additionalProperties: false
