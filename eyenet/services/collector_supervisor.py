@@ -36,7 +36,7 @@ from eyenet.contracts.enums import (
     GroupAccessKind,
     IdentityState,
 )
-from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
+from eyenet.contracts.supervisor import BackfillCommand, JoinGroupCommand, command_subject_for
 from eyenet.service import ServiceBase
 from eyenet.services.discovery.eligibility import CollectorEligibilityResult, collector_eligibility
 from eyenet.telemetry.logging import get_logger
@@ -226,6 +226,32 @@ class CollectorSupervisor(ServiceBase):
     async def tick(self) -> None:
         await self.reconcile_collectors()
         await self.dispatch_approved()
+        await self.dispatch_backfills()
+
+    async def dispatch_backfills(self) -> None:
+        """Dispatch a one-shot backfill to any collector whose config carries the
+        ``_backfill_pending`` flag (set via PATCH /v1/collectors/{id} backfill=true)
+        and which is a live child of this supervisor, then clear the flag.
+
+        The collector's ``_run_backfill`` is scoped to its monitored groups, so
+        this never scrapes the wider visible set."""
+        for collector in await self._storage.list_collectors():
+            if not collector.config.get("_backfill_pending"):
+                continue
+            if not self._collector_alive(collector.id):
+                continue  # not running here yet — leave the flag for a later tick
+            identity = await self._storage.get_identity(collector.identity_id)
+            if identity is None:
+                continue
+            cmd = BackfillCommand()
+            await self.bus.publish(
+                command_subject_for(compute_instance_id(identity.name, collector.kind)),
+                cmd.model_dump_json().encode("utf-8"),
+                headers={"command-kind": cmd.kind},
+            )
+            cleared = {k: v for k, v in collector.config.items() if k != "_backfill_pending"}
+            await self._storage.update_collector(collector_id=collector.id, config=cleared)
+            _log.info("supervisor.backfill_dispatched", collector_id=str(collector.id))
 
     async def reconcile_collectors(self) -> None:
         """Drive each collector toward its desired_state by spawning/terminating

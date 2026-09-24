@@ -52,6 +52,17 @@ class ScanVisibleGroupsCommand(BaseModel):
     kind: Literal["scan_visible_groups"] = "scan_visible_groups"
 
 
+class BackfillCommand(BaseModel):
+    """Tell a running collector to replay historical messages for its MONITORED
+    groups (``_run_backfill``). Scoped to the monitor set by construction — it
+    never touches groups the account is merely visible in, so it can't mass-scrape
+    into a ban. The API form of the boot-time ``--backfill`` flag."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["backfill"] = "backfill"
+
+
 def command_subject_for(scout_instance_id: str) -> str:
     """Bus subject for a collector's command channel (M9.E5, §4.12.4).
 
@@ -64,6 +75,7 @@ def command_subject_for(scout_instance_id: str) -> str:
 
 
 __all__ = [
+    "BackfillCommand",
     "JoinGroupCommand",
     "LeaveGroupCommand",
     "ScanVisibleGroupsCommand",
