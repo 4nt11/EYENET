@@ -14,7 +14,9 @@ function mapActor(a) {
     id: a.actor_id,
     handle: a.primary_handle,
     platforms: a.platforms ?? [],
-    isBot: !!a.is_bot
+    isBot: !!a.is_bot,
+    messageCount: a.message_count ?? 0,
+    observationCount: a.observation_count ?? 0
   };
 }
 
@@ -23,16 +25,41 @@ export const actorCtx = $state({
   loaded: false,
   error: null,
   nextCursor: null,
-  loadingMore: false
+  loadingMore: false,
+  total: null // estimated_total for the current filter set
 });
+
+// List filters + sort. isBot: null=all, true=bots, false=users. Empty strings =
+// unset numeric filters. groupId '' = all groups.
+export const actorFilters = $state({
+  sort: 'recent', // recent | messages | observations | handle
+  isBot: null,
+  groupId: '',
+  minMessages: '',
+  minObservations: ''
+});
+export const groupOptions = $state({ list: [] });
 
 const _PAGE = 200;
 
+function _query(extra = '') {
+  const p = new URLSearchParams();
+  p.set('limit', String(_PAGE));
+  p.set('include_total', '1');
+  p.set('sort', actorFilters.sort);
+  if (actorFilters.isBot !== null) p.set('is_bot', actorFilters.isBot ? 'true' : 'false');
+  if (actorFilters.groupId) p.set('group_id', actorFilters.groupId);
+  if (actorFilters.minMessages) p.set('min_messages', String(actorFilters.minMessages));
+  if (actorFilters.minObservations) p.set('min_observations', String(actorFilters.minObservations));
+  return `/v1/actors?${p.toString()}${extra}`;
+}
+
 export async function loadActors() {
   try {
-    const page = await apiGet(`/v1/actors?limit=${_PAGE}`, { auth: true });
+    const page = await apiGet(_query(), { auth: true });
     actorCtx.list = page.items.map(mapActor);
     actorCtx.nextCursor = page.next_cursor ?? null;
+    actorCtx.total = page.estimated_total ?? null;
     actorCtx.error = null;
   } catch (e) {
     actorCtx.error = e.message ?? String(e);
@@ -49,8 +76,7 @@ export async function loadMoreActors() {
   if (!actorCtx.nextCursor || actorCtx.loadingMore) return;
   actorCtx.loadingMore = true;
   try {
-    const q = `/v1/actors?limit=${_PAGE}&cursor=${encodeURIComponent(actorCtx.nextCursor)}`;
-    const page = await apiGet(q, { auth: true });
+    const page = await apiGet(_query(`&cursor=${encodeURIComponent(actorCtx.nextCursor)}`), { auth: true });
     actorCtx.list = [...actorCtx.list, ...page.items.map(mapActor)];
     actorCtx.nextCursor = page.next_cursor ?? null;
   } catch (e) {
@@ -58,6 +84,25 @@ export async function loadMoreActors() {
   } finally {
     actorCtx.loadingMore = false;
   }
+}
+
+// Group filter options: only monitored groups (those with a real group_id).
+export async function loadGroupOptions() {
+  try {
+    const page = await apiGet('/v1/groups?limit=200', { auth: true });
+    groupOptions.list = (page.items ?? [])
+      .filter((g) => g.group_id)
+      .map((g) => ({ id: g.group_id, label: g.title || g.platform_groupid }));
+  } catch {
+    groupOptions.list = [];
+  }
+}
+
+// Debounced reload when a filter changes (numeric inputs fire per keystroke).
+let _ftimer;
+export function applyFilters() {
+  clearTimeout(_ftimer);
+  _ftimer = setTimeout(loadActors, 150);
 }
 
 // Calibration is language-level config, fetched once and cached.

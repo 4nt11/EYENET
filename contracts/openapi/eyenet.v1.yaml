@@ -3552,6 +3552,8 @@ components:
           items: { type: string, maxLength: 32 }
         score:          { type: number, format: float, nullable: true }
         is_bot:         { type: boolean, default: false }
+        message_count:     { type: integer, minimum: 0, default: 0 }
+        observation_count: { type: integer, minimum: 0, default: 0 }
     CrewMember:
       type: object
       additionalProperties: false
