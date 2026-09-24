@@ -2,7 +2,7 @@
 // from GET /v1/collectors/health; selecting one fetches GET /v1/collectors/{id}
 // (identity, last error) and /{id}/memberships (active-group count — the list
 // carries no count). Start/stop/delete are supervisor-reconciled writes.
-import { apiGet, apiPost, apiDelete } from './api.js';
+import { apiGet, apiPost, apiPatch, apiDelete } from './api.js';
 
 const short = (id) => (id ? id.slice(0, 8) : '—');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
@@ -114,6 +114,22 @@ export async function createCollector(payload) {
 // reconciles observed_state → desired asynchronously, so we poll for the flip
 // and message honestly if no supervisor is running. delete needs observed
 // STOPPED server-side (409 otherwise → surfaced).
+// Request a one-shot history backfill of the collector's MONITORED groups
+// (PATCH backfill:true). The supervisor dispatches it to the running collector
+// on its next tick — so it only takes effect while the collector is RUNNING.
+export async function requestBackfill(id) {
+  collectorView.submitting = true;
+  collectorView.submitMsg = null;
+  try {
+    await apiPatch(`/v1/collectors/${id}`, { backfill: true }, { auth: true });
+    collectorView.submitMsg = 'backfill requested — supervisor will replay monitored-group history.';
+  } catch (e) {
+    collectorView.submitMsg = `backfill failed: ${e.message ?? e}`;
+  } finally {
+    collectorView.submitting = false;
+  }
+}
+
 export async function collectorAction(id, action) {
   collectorView.submitting = true;
   collectorView.submitMsg = null;

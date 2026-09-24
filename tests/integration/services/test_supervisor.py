@@ -495,3 +495,46 @@ async def test_dispatch_falls_back_to_public_when_no_usable_artifact(
     )
     cmd = await _dispatch_and_capture_command(storage)
     assert cmd.access_artifact_id is None
+
+
+async def test_dispatch_backfills_signals_live_collector_and_clears_flag(
+    storage: BaseRepository,
+) -> None:
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    await storage.update_collector(collector_id=coll, config={"_backfill_pending": True})
+
+    bus = MemoryBus()
+    captured: list[str] = []
+
+    async def _cap(subject: str, payload: bytes, headers: dict[str, str]) -> None:
+        captured.append(headers.get("command-kind", ""))
+
+    iid = compute_instance_id("id_a", SourceKind.TELEGRAM)
+    await bus.subscribe(command_subject_for(iid), _cap)
+    sup = _SpySupervisor(bus=bus, storage=storage)
+    sup._procs[coll] = _FakeProc()  # collector is a live child
+
+    await sup.dispatch_backfills()
+    assert captured == ["backfill"]
+    row = await storage.get_collector(coll)
+    assert "_backfill_pending" not in row.config  # flag cleared (one-shot)
+
+    await sup.dispatch_backfills()  # idempotent — nothing pending now
+    assert captured == ["backfill"]
+
+
+async def test_dispatch_backfills_skips_when_collector_not_alive(
+    storage: BaseRepository,
+) -> None:
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    await storage.update_collector(collector_id=coll, config={"_backfill_pending": True})
+    sup = _SpySupervisor(bus=MemoryBus(), storage=storage)  # _procs empty -> not alive
+    await sup.dispatch_backfills()
+    # Flag preserved for a later tick when the collector is actually running.
+    assert (await storage.get_collector(coll)).config.get("_backfill_pending") is True

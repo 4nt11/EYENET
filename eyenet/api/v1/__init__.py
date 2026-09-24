@@ -18,7 +18,6 @@ from fastapi import APIRouter
 from eyenet.api.v1.actor_groups.api_list_actor_groups import router as actor_groups_router
 from eyenet.api.v1.actor_groups.api_open_crew_case import router as actor_groups_case_router
 from eyenet.api.v1.actor_groups.api_sweep_crew_cases import router as actor_groups_sweep_router
-from eyenet.api.v1.linker.api_run import router as linker_run_router
 
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
@@ -152,6 +151,7 @@ from eyenet.api.v1.linkages.api_get_linkage import router as linkages_get_router
 from eyenet.api.v1.linkages.api_list_linkages import router as linkages_list_router
 from eyenet.api.v1.linkages.api_reject_linkage import router as linkages_reject_router
 from eyenet.api.v1.linkages.api_suspect_linkage import router as linkages_suspect_router
+from eyenet.api.v1.linker.api_run import router as linker_run_router
 
 # === meta (gated OpenAPI schema, §12.5) ===
 from eyenet.api.v1.meta.api_openapi import router as meta_openapi_router

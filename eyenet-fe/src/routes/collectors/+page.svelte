@@ -5,7 +5,7 @@
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
   import CollectorCreateDialog from '$lib/components/CollectorCreateDialog.svelte';
-  import { collectorCtx, collectorView, observedTone, loadCollectors, loadCollectorDetail, collectorAction, createCollector } from '$lib/collector.svelte.js';
+  import { collectorCtx, collectorView, observedTone, loadCollectors, loadCollectorDetail, collectorAction, createCollector, requestBackfill } from '$lib/collector.svelte.js';
   import { loadSources } from '$lib/source.svelte.js';
   import { loadIdentities } from '$lib/identity.svelte.js';
 
@@ -84,6 +84,9 @@
               <Button variant="primary" size="sm" disabled={collectorView.submitting} onclick={() => collectorAction(sel.id, 'start')}>Start</Button>
             {:else}
               <Button variant="ghost" size="sm" disabled={collectorView.submitting} onclick={() => collectorAction(sel.id, 'stop')}>Stop</Button>
+            {/if}
+            {#if sel.observed === 'running'}
+              <Button variant="ghost" size="sm" disabled={collectorView.submitting} onclick={() => requestBackfill(sel.id)}>Backfill history</Button>
             {/if}
             <Button variant="destructive" size="sm" disabled={collectorView.submitting} onclick={() => collectorAction(sel.id, 'delete')}>Delete</Button>
           </div>

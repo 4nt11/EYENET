@@ -101,6 +101,27 @@ export async function apiPut(path, body, { auth = false, accept = [], headers: e
   return res.json();
 }
 
+// PATCH JSON. Same contract as apiPut, for partial-update endpoints
+// (e.g. PATCH /v1/collectors/{id}).
+export async function apiPatch(path, body, { auth = false, accept = [], headers: extra = {} } = {}) {
+  const headers = { accept: 'application/json', 'content-type': 'application/json', ...extra };
+  if (auth) {
+    const t = authToken();
+    if (t) headers.authorization = `Bearer ${t}`;
+  }
+  const res = await fetch(`${BASE}${path}`, { method: 'PATCH', headers, body: JSON.stringify(body) });
+  if (!res.ok && !accept.includes(res.status)) {
+    let detail = `${res.status} ${res.statusText}`;
+    const problem = await res.json().catch(() => null);
+    if (problem?.detail) detail = problem.detail;
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
 // DELETE. Surfaces the problem+json `detail` on error (e.g. a 409 when a
 // collector isn't stopped). Returns null on 204.
 export async function apiDelete(path, { auth = false, accept = [] } = {}) {

@@ -160,6 +160,15 @@ class UpdateCollectorRequest(ApiSchema):
     instance_name: str | None = Field(default=None, min_length=3, max_length=128)
     notes: str | None = Field(default=None, max_length=1024)
     desired_state: CollectorDesiredState | None = None
+    backfill: bool | None = Field(
+        default=None,
+        description=(
+            "Set true to request a one-shot history backfill of the collector's "
+            "MONITORED groups; the supervisor dispatches it to the running "
+            "collector on its next tick. Scoped to the monitor set (never the "
+            "wider visible set)."
+        ),
+    )
 
 
 class CursorPageCollectorSummary(CursorPage[CollectorSummary]):
