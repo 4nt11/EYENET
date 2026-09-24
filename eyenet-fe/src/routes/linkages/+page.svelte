@@ -84,16 +84,26 @@
           </div>
         </div>
 
-        <Panel title="Evidence (comparators)">
-          {#each linkageView.evidence as e}
-            <div class="erow">
-              <span class="ecmp">{e.comparator}</span>
-              <span class="escore">{e.score}</span>
-              <span class="edetail">{e.detail}</span>
+        <Panel title="Evidence">
+          {#if linkageView.sharedIndicators.length}
+            <div class="esub">Shared infrastructure · {linkageView.sharedIndicators.length}</div>
+            <div class="chips">
+              {#each linkageView.sharedIndicators as tok}<span class="chip">{tok}</span>{/each}
             </div>
-          {:else}
-            <p class="pnote">{linkageView.loading ? 'Loading…' : 'No comparator evidence recorded.'}</p>
-          {/each}
+          {/if}
+          {#if linkageView.evidence.length}
+            <div class="esub">Comparators</div>
+            {#each linkageView.evidence as e}
+              <div class="erow">
+                <span class="ecmp">{e.comparator}</span>
+                <span class="escore">{e.score}</span>
+                <span class="edetail">{e.detail}</span>
+              </div>
+            {/each}
+          {/if}
+          {#if !linkageView.sharedIndicators.length && !linkageView.evidence.length}
+            <p class="pnote">{linkageView.loading ? 'Loading…' : 'No evidence recorded for this linkage.'}</p>
+          {/if}
         </Panel>
 
         <div class="decision">
@@ -141,6 +151,9 @@
   .m { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-body); }
   .m .k { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); margin-right: 5px; }
 
+  .esub { padding: 10px 12px 4px; font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 12px 12px; }
+  .chip { font-family: var(--font-mono); font-size: var(--fs-12); padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-body); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .erow { display: grid; grid-template-columns: minmax(0, 1.6fr) 60px 1fr; gap: 10px; align-items: baseline; padding: 7px 12px; border-bottom: 1px solid var(--border); }
   .erow:last-child { border-bottom: none; }
   .ecmp { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); }

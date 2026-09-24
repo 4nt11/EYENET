@@ -18,6 +18,16 @@ function fmtEvidenceDetail(d) {
     .join(' · ');
 }
 
+// Pretty-print a shared-infrastructure token ("handle:wbpay" -> "@wbpay").
+function prettyInfra(tok) {
+  if (!tok) return tok;
+  if (tok.startsWith('handle:')) return '@' + tok.slice(7);
+  if (tok.startsWith('tme:')) return 't.me/' + tok.slice(4);
+  if (tok.startsWith('wallet_trx:')) return 'TRX ' + tok.slice(11);
+  if (tok.startsWith('wallet_evm:')) return 'EVM ' + tok.slice(11);
+  return tok;
+}
+
 function mapLinkage(l) {
   return {
     id: l.linkage_id,
@@ -55,6 +65,8 @@ export const linkageView = $state({
   handleA: null,
   handleB: null,
   evidence: [],
+  sharedIndicators: [],
+  method: '',
   loading: false,
   error: null,
   submitting: false,
@@ -83,6 +95,7 @@ export async function loadLinkageDetail(id, actorAId, actorBId) {
   linkageView.handleA = null;
   linkageView.handleB = null;
   linkageView.evidence = [];
+  linkageView.sharedIndicators = [];
   linkageView.error = null;
   linkageView.submitMsg = null;
   try {
@@ -97,6 +110,8 @@ export async function loadLinkageDetail(id, actorAId, actorBId) {
       score: e.score.toFixed(2),
       detail: fmtEvidenceDetail(e.detail)
     }));
+    linkageView.sharedIndicators = (detail.shared_indicators ?? []).map(prettyInfra);
+    linkageView.method = detail.method ?? '';
     linkageView.handleA = handleA;
     linkageView.handleB = handleB;
     linkageView.error = null;
