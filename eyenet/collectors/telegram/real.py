@@ -665,9 +665,10 @@ class TelegramCollector(CollectorSkeleton):
                 continue
             entity = dialog.entity
             username = getattr(entity, "username", None)
-            pgid = f"@{username}" if username else str(getattr(entity, "id", "") or "")
-            if not pgid or pgid == "@None":
+            ent_id = int(getattr(entity, "id", 0) or 0)
+            if not username and not ent_id:
                 continue
+            pgid = _group_platform_id(username, ent_id)
             out.append(
                 VisibleGroup(
                     platform_groupid=pgid,
@@ -818,7 +819,11 @@ class TelegramCollector(CollectorSkeleton):
         display_name = author.display_name
 
         # --- chat metadata ---
-        platform_groupid = str(chat_id)
+        # Canonical platform_groupid MUST match enumerate_visible_groups / the
+        # join+candidate path: `@username` when public, else the raw POSITIVE
+        # entity id. event.chat_id is the -100 MARKED form, so using it verbatim
+        # split one group into two rows (e.g. 3914110555 vs -1003914110555).
+        platform_groupid = _group_platform_id(getattr(chat, "username", None), _strip_100(chat_id))
         group_kind = _chat_kind(chat)
         group_title: str | None = getattr(chat, "title", None)
 
@@ -1077,6 +1082,14 @@ def _authorship(msg: object, sender: object) -> _Authorship:
         or (isinstance(sender_id, int) and sender_id < 0),
         relayed_by_platform_userid=None,
     )
+
+
+def _group_platform_id(username: str | None, raw_positive_id: int) -> str:
+    """The ONE canonical platform_groupid for a group: ``@username`` when public,
+    else the raw POSITIVE entity id. Shared by enumerate_visible_groups and message
+    ingest so a group is never split across two rows (a `-100`-marked vs stripped
+    id, or a username vs numeric id)."""
+    return f"@{username}" if username else str(raw_positive_id)
 
 
 def _strip_100(n: int) -> int:
