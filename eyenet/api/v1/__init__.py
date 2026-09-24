@@ -117,6 +117,12 @@ from eyenet.api.v1.documents.api_upload_document import router as documents_uplo
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
 
+# === groups (monitored-groups: see + join at will) ===
+from eyenet.api.v1.groups.api_join_group import router as groups_join_router
+from eyenet.api.v1.groups.api_leave_group import router as groups_leave_router
+from eyenet.api.v1.groups.api_list_groups import router as groups_list_router
+from eyenet.api.v1.groups.api_scan_groups import router as groups_scan_router
+
 # === health / metrics ===
 from eyenet.api.v1.health.api_healthz import router as health_live_router
 from eyenet.api.v1.health.api_readyz import router as health_ready_router
@@ -327,6 +333,12 @@ v1_router.include_router(candidates_approve_router)
 v1_router.include_router(candidates_reject_router)
 v1_router.include_router(candidates_park_router)
 v1_router.include_router(candidates_retry_router)
+
+# groups (monitored-groups: see + join at will)
+v1_router.include_router(groups_list_router)
+v1_router.include_router(groups_join_router)
+v1_router.include_router(groups_leave_router)
+v1_router.include_router(groups_scan_router)
 
 # identities + panic
 v1_router.include_router(identities_list_router)

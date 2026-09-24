@@ -63,6 +63,11 @@ class GroupCandidateTable(SQLModel, table=True):
     rejection_reason: str | None = Field(default=None, max_length=2048)
     assigned_collector_id: UUID | None = Field(default=None, foreign_key="collector.id")
     resulting_group_id: UUID | None = Field(default=None, foreign_key="group_.id")
+    # True when a visible-group scan saw an identity DIRECTLY a member of this
+    # group (its dialog/room list) — distinct from a candidate reached only via
+    # recursive descent. Lets /monitored-groups show "you're in this, not
+    # monitoring it" vs "reachable, not joined".
+    member_dialog: bool = Field(default=False)
 
 
 class GroupCandidateMentionTable(SQLModel, table=True):
