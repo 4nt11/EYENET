@@ -119,6 +119,8 @@ class ActorsMixin:
         group_id: UUID | None,
         min_messages: int | None,
         min_observations: int | None,
+        max_messages: int | None,
+        max_observations: int | None,
     ) -> Any:
         stmt = stmt.where(self._individuals_only())
         if is_bot is not None:
@@ -132,9 +134,26 @@ class ActorsMixin:
             )
         if min_messages is not None:
             stmt = stmt.where(mc >= min_messages)
+        if max_messages is not None:
+            stmt = stmt.where(mc <= max_messages)
         if min_observations is not None:
             stmt = stmt.where(oc >= min_observations)
+        if max_observations is not None:
+            stmt = stmt.where(oc <= max_observations)
         return stmt
+
+    async def actor_stat_bounds(self) -> tuple[int, int]:
+        """(max messages, max observations) held by any individual actor — the
+        domain ceilings for the filter sliders."""
+        mc, oc = self._msg_count(), self._obs_count()
+        stmt = (
+            select(func.coalesce(func.max(mc), 0), func.coalesce(func.max(oc), 0))
+            .select_from(ActorTable)
+            .where(self._individuals_only())
+        )
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = (await session.exec(stmt)).one()
+            return int(row[0]), int(row[1])
 
     def _order_actors(self, stmt: Any, mc: Any, oc: Any, sort: str) -> Any:
         if sort == "messages":
@@ -152,6 +171,8 @@ class ActorsMixin:
         group_id: UUID | None = None,
         min_messages: int | None = None,
         min_observations: int | None = None,
+        max_messages: int | None = None,
+        max_observations: int | None = None,
     ) -> int:
         """Number of INDIVIDUAL actors matching the filters (channels excluded)."""
         mc, oc = self._msg_count(), self._obs_count()
@@ -163,6 +184,8 @@ class ActorsMixin:
             group_id=group_id,
             min_messages=min_messages,
             min_observations=min_observations,
+            max_messages=max_messages,
+            max_observations=max_observations,
         ).subquery()
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(select(func.count()).select_from(inner))
@@ -220,6 +243,8 @@ class ActorsMixin:
         group_id: UUID | None = None,
         min_messages: int | None = None,
         min_observations: int | None = None,
+        max_messages: int | None = None,
+        max_observations: int | None = None,
         sort: str = "recent",
     ) -> list[object]:
         """Individual actors matching the filters, with per-actor message +
@@ -235,6 +260,8 @@ class ActorsMixin:
             group_id=group_id,
             min_messages=min_messages,
             min_observations=min_observations,
+            max_messages=max_messages,
+            max_observations=max_observations,
         )
         stmt = (
             self._order_actors(stmt, mc, oc, sort)

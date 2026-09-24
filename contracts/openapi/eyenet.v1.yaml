@@ -610,6 +610,21 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/actors/stats:
+    get:
+      tags: [actors]
+      operationId: actors_stats
+      summary: Roster-wide filter bounds (max message / observation counts).
+      responses:
+        "200":
+          description: Filter-slider domain ceilings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActorStats' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors/{actor_id}:
     get:
       tags: [actors]
@@ -3554,6 +3569,13 @@ components:
         is_bot:         { type: boolean, default: false }
         message_count:     { type: integer, minimum: 0, default: 0 }
         observation_count: { type: integer, minimum: 0, default: 0 }
+    ActorStats:
+      type: object
+      additionalProperties: false
+      required: [max_messages, max_observations]
+      properties:
+        max_messages:     { type: integer, minimum: 0 }
+        max_observations: { type: integer, minimum: 0 }
     CrewMember:
       type: object
       additionalProperties: false

@@ -1446,7 +1446,13 @@ class BaseRepository(ABC):
         group_id: UUID | None = None,
         min_messages: int | None = None,
         min_observations: int | None = None,
+        max_messages: int | None = None,
+        max_observations: int | None = None,
     ) -> int: ...
+
+    @abstractmethod
+    async def actor_stat_bounds(self) -> tuple[int, int]:
+        """(max messages, max observations) held by any individual actor."""
 
     @abstractmethod
     async def search_actors(self, q: str, *, limit: int, offset: int = 0) -> list[object]:
@@ -1466,6 +1472,8 @@ class BaseRepository(ABC):
         group_id: UUID | None = None,
         min_messages: int | None = None,
         min_observations: int | None = None,
+        max_messages: int | None = None,
+        max_observations: int | None = None,
         sort: str = "recent",
     ) -> list[object]:
         """Individual actors matching the filters, each as a

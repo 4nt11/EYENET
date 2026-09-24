@@ -29,15 +29,19 @@ export const actorCtx = $state({
   total: null // estimated_total for the current filter set
 });
 
-// List filters + sort. isBot: null=all, true=bots, false=users. Empty strings =
-// unset numeric filters. groupId '' = all groups.
+// List filters + sort. isBot: null=all, true=bots, false=users. Message/observation
+// filters are [min, max] ranges; a thumb at 0 (min) or the roster ceiling (max)
+// means that side is unset and isn't sent.
 export const actorFilters = $state({
   sort: 'recent', // recent | messages | observations | handle
   isBot: null,
   groupId: '',
-  minMessages: '',
-  minObservations: ''
+  minMessages: 0,
+  maxMessages: 0,
+  minObservations: 0,
+  maxObservations: 0
 });
+export const actorBounds = $state({ maxMessages: 0, maxObservations: 0 });
 export const groupOptions = $state({ list: [] });
 
 const _PAGE = 200;
@@ -49,9 +53,26 @@ function _query(extra = '') {
   p.set('sort', actorFilters.sort);
   if (actorFilters.isBot !== null) p.set('is_bot', actorFilters.isBot ? 'true' : 'false');
   if (actorFilters.groupId) p.set('group_id', actorFilters.groupId);
-  if (actorFilters.minMessages) p.set('min_messages', String(actorFilters.minMessages));
-  if (actorFilters.minObservations) p.set('min_observations', String(actorFilters.minObservations));
+  if (actorFilters.minMessages > 0) p.set('min_messages', String(actorFilters.minMessages));
+  if (actorBounds.maxMessages && actorFilters.maxMessages < actorBounds.maxMessages)
+    p.set('max_messages', String(actorFilters.maxMessages));
+  if (actorFilters.minObservations > 0) p.set('min_observations', String(actorFilters.minObservations));
+  if (actorBounds.maxObservations && actorFilters.maxObservations < actorBounds.maxObservations)
+    p.set('max_observations', String(actorFilters.maxObservations));
   return `/v1/actors?${p.toString()}${extra}`;
+}
+
+// Roster-wide slider ceilings; fetched once, sets the initial max thumbs to full.
+export async function loadActorBounds() {
+  try {
+    const s = await apiGet('/v1/actors/stats', { auth: true });
+    actorBounds.maxMessages = s.max_messages ?? 0;
+    actorBounds.maxObservations = s.max_observations ?? 0;
+    actorFilters.maxMessages = actorBounds.maxMessages;
+    actorFilters.maxObservations = actorBounds.maxObservations;
+  } catch {
+    /* leave at 0 — sliders render inert until bounds load */
+  }
 }
 
 export async function loadActors() {
