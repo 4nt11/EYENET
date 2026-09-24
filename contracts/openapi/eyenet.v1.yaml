@@ -453,6 +453,21 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/relations/rebuild:
+    post:
+      tags: [relations]
+      operationId: relations_rebuild
+      summary: Rebuild the actor-to-actor relation graph (mentions + forwards).
+      responses:
+        "202":
+          description: Number of relation edges materialized.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RebuildRelationsResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors:
     get:
       tags: [actors]
@@ -551,6 +566,28 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/actors/{actor_id}/relationships:
+    get:
+      tags: [actors]
+      operationId: actors_relationships
+      summary: Actors related to this one by mentions and forwards (both directions).
+      parameters:
+        - { $ref: '#/components/parameters/ActorIdPath' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Outbound and inbound relation neighbors.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RelationshipList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors/{actor_id}/observations:
     get:
       tags: [actors]
@@ -586,6 +623,11 @@ paths:
         - { $ref: '#/components/parameters/IncludeTotal' }
         - { $ref: '#/components/parameters/SinceTs' }
         - { $ref: '#/components/parameters/UntilTs' }
+        - name: kind
+          in: query
+          required: false
+          description: Narrow to a single stream so messages are not drowned by observations.
+          schema: { type: string, enum: [message, observation] }
       responses:
         "200":
           description: Cursor page of timeline entries.
@@ -3461,6 +3503,34 @@ components:
       required: [flagged]
       properties:
         flagged: { type: integer, minimum: 0 }
+    RebuildRelationsResult:
+      type: object
+      additionalProperties: false
+      required: [edges]
+      properties:
+        edges: { type: integer, minimum: 0 }
+    RelationNeighbor:
+      type: object
+      additionalProperties: false
+      required: [actor_id, kind, count, last_seen]
+      properties:
+        actor_id: { type: string, format: uuid }
+        handle: { type: string, nullable: true }
+        display_name: { type: string, nullable: true }
+        kind: { $ref: '#/components/schemas/RelationKind' }
+        count: { type: integer, minimum: 1 }
+        last_seen: { type: string, format: date-time }
+    RelationshipList:
+      type: object
+      additionalProperties: false
+      required: [outbound, inbound]
+      properties:
+        outbound:
+          type: array
+          items: { $ref: '#/components/schemas/RelationNeighbor' }
+        inbound:
+          type: array
+          items: { $ref: '#/components/schemas/RelationNeighbor' }
     ActorDetail:
       allOf:
         - { $ref: '#/components/schemas/ActorSummary' }
@@ -4691,6 +4761,9 @@ components:
     MentionKind:
       type: string
       enum: [invite_link, username_mention, forward_origin, link_preview, bio_link, other]
+    RelationKind:
+      type: string
+      enum: [mention, forward]
     JoinedVia:
       type: string
       enum: [seed, candidate, manual, restored]

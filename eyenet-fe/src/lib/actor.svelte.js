@@ -3,7 +3,7 @@
 // calibration baseline (cached), and each linked neighbor's linkage detail for
 // the verifier composite. The BEHAVE panel is built from real observations
 // grouped by primitive namespace. Assessment is a sync write (write:actors).
-import { apiGet, apiPut } from './api.js';
+import { apiGet, apiPost, apiPut } from './api.js';
 
 const short = (id) => (id ? id.slice(0, 8) : '');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
@@ -17,18 +17,45 @@ function mapActor(a) {
   };
 }
 
-export const actorCtx = $state({ list: [], loaded: false, error: null });
+export const actorCtx = $state({
+  list: [],
+  loaded: false,
+  error: null,
+  nextCursor: null,
+  loadingMore: false
+});
+
+const _PAGE = 200;
 
 export async function loadActors() {
   try {
-    const page = await apiGet('/v1/actors?limit=200', { auth: true });
+    const page = await apiGet(`/v1/actors?limit=${_PAGE}`, { auth: true });
     actorCtx.list = page.items.map(mapActor);
+    actorCtx.nextCursor = page.next_cursor ?? null;
     actorCtx.error = null;
   } catch (e) {
     actorCtx.error = e.message ?? String(e);
     actorCtx.list = [];
+    actorCtx.nextCursor = null;
   } finally {
     actorCtx.loaded = true;
+  }
+}
+
+// Append the next cursor page (the "Load more" action). Cursor pagination, so we
+// pass the server's opaque next_cursor rather than an offset.
+export async function loadMoreActors() {
+  if (!actorCtx.nextCursor || actorCtx.loadingMore) return;
+  actorCtx.loadingMore = true;
+  try {
+    const q = `/v1/actors?limit=${_PAGE}&cursor=${encodeURIComponent(actorCtx.nextCursor)}`;
+    const page = await apiGet(q, { auth: true });
+    actorCtx.list = [...actorCtx.list, ...page.items.map(mapActor)];
+    actorCtx.nextCursor = page.next_cursor ?? null;
+  } catch (e) {
+    actorCtx.error = e.message ?? String(e);
+  } finally {
+    actorCtx.loadingMore = false;
   }
 }
 
@@ -52,12 +79,34 @@ export const actorView = $state({
   behave: null,
   observations: [],
   neighbors: [],
+  relationships: { outbound: [], inbound: [] },
   timeline: [],
+  timelineKind: 'all', // 'all' | 'message' | 'observation'
+  timelineLoading: false,
   loading: false,
   error: null,
   submitting: false,
-  submitMsg: null
+  submitMsg: null,
+  rebuilding: false,
+  rebuildMsg: null
 });
+
+const _shortRel = (r) => ({
+  actorId: r.actor_id,
+  handle: r.handle || r.actor_id.slice(0, 8),
+  displayName: r.display_name || '',
+  kind: r.kind,
+  count: r.count,
+  lastSeen: shortTs(r.last_seen)
+});
+
+function _timelineUrl(id, kind) {
+  const k = kind && kind !== 'all' ? `&kind=${kind}` : '';
+  return `/v1/actors/${id}/timeline?limit=50${k}`;
+}
+
+const _mapTimeline = (items) =>
+  (items ?? []).map((t) => ({ ts: shortTs(t.ts), kind: t.kind, summary: t.summary ?? '' }));
 
 // Which value_* field carries an observation's payload, by value_kind.
 function obsValue(o) {
@@ -149,15 +198,18 @@ export async function loadActorDetail(id) {
   actorView.behave = null;
   actorView.observations = [];
   actorView.neighbors = [];
+  actorView.relationships = { outbound: [], inbound: [] };
   actorView.timeline = [];
+  actorView.timelineKind = 'all';
   actorView.error = null;
   actorView.submitMsg = null;
   try {
-    const [detail, obsPage, tlPage, neighborList, calibration] = await Promise.all([
+    const [detail, obsPage, tlPage, neighborList, relList, calibration] = await Promise.all([
       apiGet(`/v1/actors/${id}`, { auth: true }),
       apiGet(`/v1/actors/${id}/observations?limit=200`, { auth: true }),
-      apiGet(`/v1/actors/${id}/timeline?limit=50`, { auth: true }),
+      apiGet(_timelineUrl(id, 'all'), { auth: true }),
       apiGet(`/v1/actors/${id}/neighbors?limit=50`, { auth: true }),
+      apiGet(`/v1/actors/${id}/relationships?limit=50`, { auth: true }),
       getCalibration()
     ]);
     if (mine !== detailSeq) return;
@@ -197,11 +249,11 @@ export async function loadActorDetail(id) {
             score: n.attrs?.score
           }
     );
-    actorView.timeline = (tlPage.items ?? []).map((t) => ({
-      ts: shortTs(t.ts),
-      kind: t.kind,
-      summary: t.summary ?? ''
-    }));
+    actorView.relationships = {
+      outbound: (relList.outbound ?? []).map(_shortRel),
+      inbound: (relList.inbound ?? []).map(_shortRel)
+    };
+    actorView.timeline = _mapTimeline(tlPage.items);
     actorView.behave = buildBehave(observations, calibration, verifier);
     actorView.error = null;
   } catch (e) {
@@ -209,6 +261,38 @@ export async function loadActorDetail(id) {
     actorView.error = e.message ?? String(e);
   } finally {
     if (mine === detailSeq) actorView.loading = false;
+  }
+}
+
+// Switch the timeline stream filter and refetch just that panel.
+export async function setTimelineKind(id, kind) {
+  actorView.timelineKind = kind;
+  actorView.timelineLoading = true;
+  try {
+    const page = await apiGet(_timelineUrl(id, kind), { auth: true });
+    actorView.timeline = _mapTimeline(page.items);
+  } catch (e) {
+    actorView.error = e.message ?? String(e);
+  } finally {
+    actorView.timelineLoading = false;
+  }
+}
+
+// Operator-triggered rebuild of the actor-to-actor relation graph, then reload
+// the current dossier so the Relationships panel reflects the fresh pass.
+export async function rebuildRelations(id) {
+  actorView.rebuilding = true;
+  actorView.rebuildMsg = null;
+  try {
+    const res = await apiPost('/v1/relations/rebuild', {}, { auth: true, accept: [202] });
+    actorView.rebuildMsg = `Rebuilt: ${res.edges} edges.`;
+    if (id) await loadActorDetail(id);
+    return true;
+  } catch (e) {
+    actorView.rebuildMsg = `Failed: ${e.message ?? e}`;
+    return false;
+  } finally {
+    actorView.rebuilding = false;
   }
 }
 

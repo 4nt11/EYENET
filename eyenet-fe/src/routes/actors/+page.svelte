@@ -8,7 +8,22 @@
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
-  import { actorCtx, actorView, loadActors, loadActorDetail, saveAssessment } from '$lib/actor.svelte.js';
+  import {
+    actorCtx,
+    actorView,
+    loadActors,
+    loadMoreActors,
+    loadActorDetail,
+    saveAssessment,
+    setTimelineKind,
+    rebuildRelations
+  } from '$lib/actor.svelte.js';
+
+  const TIMELINE_TABS = [
+    { key: 'all', label: 'All' },
+    { key: 'message', label: 'Messages' },
+    { key: 'observation', label: 'Observations' }
+  ];
 
   const OBS_COLUMNS = [
     { key: 'ts', header: 'Timestamp', mono: true, width: '150px' },
@@ -52,7 +67,8 @@
 </script>
 
 <EntityList label="Actors" items={actorCtx.list.map((x) => ({ id: x.id, primary: x.handle, secondary: x.id }))}
-  selectedId={a?.id} onSelect={(id) => (selectedId = id)} />
+  selectedId={a?.id} onSelect={(id) => (selectedId = id)}
+  onLoadMore={loadMoreActors} hasMore={!!actorCtx.nextCursor} />
 
 <main>
   {#if a && d}
@@ -130,7 +146,48 @@
             {/if}
           </Panel>
 
+          <Panel title="Relationships">
+            {#snippet action()}
+              <button class="tinybtn" disabled={actorView.rebuilding} onclick={() => rebuildRelations(a.id)}>
+                {actorView.rebuilding ? 'Rebuilding…' : 'Rebuild'}
+              </button>
+            {/snippet}
+            {#if actorView.rebuildMsg}<div class="submsg" class:err={actorView.rebuildMsg.startsWith('Failed')}>{actorView.rebuildMsg}</div>{/if}
+            {#if actorView.relationships.outbound.length || actorView.relationships.inbound.length}
+              {#if actorView.relationships.outbound.length}
+                <div class="rsub">mentions / relays</div>
+                {#each actorView.relationships.outbound as r}
+                  <div class="rrow">
+                    <span class="rkind" class:fwd={r.kind === 'forward'}>{r.kind}</span>
+                    <a class="rtarget" href={`/actors?id=${r.actorId}`}>{r.handle}</a>
+                    <span class="rcount">×{r.count}</span>
+                  </div>
+                {/each}
+              {/if}
+              {#if actorView.relationships.inbound.length}
+                <div class="rsub">mentioned / relayed by</div>
+                {#each actorView.relationships.inbound as r}
+                  <div class="rrow">
+                    <span class="rkind" class:fwd={r.kind === 'forward'}>{r.kind}</span>
+                    <a class="rtarget" href={`/actors?id=${r.actorId}`}>{r.handle}</a>
+                    <span class="rcount">×{r.count}</span>
+                  </div>
+                {/each}
+              {/if}
+            {:else}
+              <div class="empty">No relationships. Run Rebuild once messages are ingested.</div>
+            {/if}
+          </Panel>
+
           <Panel title="Timeline">
+            {#snippet action()}
+              <div class="tabs">
+                {#each TIMELINE_TABS as tab}
+                  <button class="tab" class:active={actorView.timelineKind === tab.key}
+                    onclick={() => setTimelineKind(a.id, tab.key)}>{tab.label}</button>
+                {/each}
+              </div>
+            {/snippet}
             {#if actorView.timeline.length}
               {#each actorView.timeline as t}
                 <div class="trow">
@@ -140,7 +197,7 @@
                 </div>
               {/each}
             {:else}
-              <div class="empty">No timeline entries.</div>
+              <div class="empty">{actorView.timelineLoading ? 'Loading…' : 'No timeline entries.'}</div>
             {/if}
           </Panel>
         </div>
@@ -193,6 +250,23 @@
   .ntarget { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); }
   .ndetail { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 
+  .rsub { padding: 8px 12px 4px; font-family: var(--font-sans); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .rrow { display: grid; grid-template-columns: 70px 1fr auto; gap: 10px; align-items: baseline; padding: 5px 12px; border-bottom: 1px solid var(--border); }
+  .rrow:last-child { border-bottom: none; }
+  .rkind { font-family: var(--font-mono); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-muted); }
+  .rkind.fwd { color: var(--accent-text); }
+  .rtarget { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rtarget:hover { color: var(--accent-text); text-decoration: underline; }
+  .rcount { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
+  .tinybtn { appearance: none; padding: 3px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-11); cursor: pointer; }
+  .tinybtn:hover:not(:disabled) { background: var(--panel-2); border-color: var(--accent); }
+  .tinybtn:disabled { opacity: 0.5; cursor: default; }
+  .submsg { padding: 6px 12px; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--accent-text); }
+  .submsg.err { color: var(--red-text); }
+  .tabs { display: flex; gap: 4px; }
+  .tab { appearance: none; padding: 2px 8px; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: var(--text-faint); font-family: var(--font-sans); font-size: var(--fs-11); cursor: pointer; }
+  .tab:hover { color: var(--text-body); }
+  .tab.active { color: var(--text); border-color: var(--accent); background: var(--accent-fill); }
   .trow { display: grid; grid-template-columns: 150px 84px 1fr; gap: 10px; align-items: baseline; padding: 6px 12px; border-bottom: 1px solid var(--border); }
   .trow:last-child { border-bottom: none; }
   .tts { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
