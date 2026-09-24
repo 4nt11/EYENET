@@ -57,6 +57,7 @@ from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
 from .profile import ProfileTable
 from .reaction import ReactionTable
+from .relation import ActorRelationTable
 from .social_graph import MembershipTable
 from .source import SourceTable
 from .source_domain import SourceDomainTable
@@ -66,6 +67,7 @@ from .system_user import SystemUserTable
 __all__ = [
     "ActorAliasHistoryTable",
     "ActorArtifactTable",
+    "ActorRelationTable",
     "ActorTable",
     "AttachmentTable",
     "ContentTemplateTable",

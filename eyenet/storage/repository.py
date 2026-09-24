@@ -26,6 +26,8 @@ from uuid import UUID
 from eyenet.contracts.enums import IdentityRole as _IdentityRole, IdentityState as _IdentityState
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.anchor import AnchorRow
     from eyenet.contracts.attribution import LinkageRow
@@ -66,6 +68,7 @@ if TYPE_CHECKING:
         JoinedVia,
         MentionKind,
         RedundancyPolicy,
+        RelationKind,
         SensitivityTier,
         SourceDomainPatternKind,
         SourceKind,
@@ -953,6 +956,40 @@ class BaseRepository(ABC):
     async def flagged_copypasta_fingerprints(self) -> set[str]:
         """Fingerprints of templates flagged as copypasta — the stylometric
         sensor's skip-set."""
+
+    # --- actor-to-actor relations (mentions/forwards) --------------------
+    @abstractmethod
+    async def handle_to_actor_index(self) -> dict[str, UUID]:
+        """Normalized ``@handle`` -> actor_id, for resolving message mentions."""
+
+    @abstractmethod
+    async def actor_id_by_platform_userid(self) -> dict[str, UUID]:
+        """platform_userid -> actor_id, for resolving a forward's relayer."""
+
+    @abstractmethod
+    async def relation_input_rows(
+        self,
+    ) -> list[tuple[UUID, str | None, datetime, UUID, UUID | None, str | None]]:
+        """Messages reduced to relation-builder inputs: (from_actor, body,
+        sent_at, source_id, forward_origin_actor, relayed_by_platform_userid)."""
+
+    @abstractmethod
+    async def replace_actor_relations(
+        self,
+        edges: Sequence[tuple[UUID, UUID, UUID, RelationKind, int, datetime, datetime]],
+    ) -> None:
+        """Full-rebuild the actor_relation edge set (delete-all + bulk insert).
+        Edge = (source_id, from_actor, to_actor, kind, count, first, last)."""
+
+    @abstractmethod
+    async def actor_relations_for(
+        self, actor_id: UUID, *, limit: int = 50
+    ) -> tuple[
+        list[tuple[UUID, str | None, str | None, RelationKind, int, datetime]],
+        list[tuple[UUID, str | None, str | None, RelationKind, int, datetime]],
+    ]:
+        """(outbound, inbound) relation neighbors; each row joins the other actor:
+        (other_actor_id, handle, display_name, kind, count, last_seen)."""
 
     @abstractmethod
     async def messages_for_actor(
