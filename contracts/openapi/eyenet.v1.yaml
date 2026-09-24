@@ -2584,6 +2584,86 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /v1/groups:
+    get:
+      tags: [groups]
+      operationId: groups_list
+      summary: >-
+        Every group the operator has vision over (joined + discovered + dialog-seen),
+        all sources (read:groups).
+      parameters:
+        - { name: source_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: state, in: query, required: false, schema: { $ref: '#/components/schemas/CandidateState' } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of groups.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageGroupSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/groups/join:
+    post:
+      tags: [groups]
+      operationId: groups_join
+      summary: Join a group at will (write:groups) — reuses the candidate join path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JoinGroupRequest' }
+      responses:
+        "202":
+          description: Join accepted; the supervisor executes it off-path.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/groups/leave:
+    post:
+      tags: [groups]
+      operationId: groups_leave
+      summary: Stop monitoring a joined group (write:groups) — leave + park.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveGroupRequest' }
+      responses:
+        "202":
+          description: Leave accepted; collectors depart off-path.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/groups/scan:
+    post:
+      tags: [groups]
+      operationId: groups_scan
+      summary: Refresh group visibility across running collectors (write:groups).
+      responses:
+        "202":
+          description: Scan command dispatched to running collectors.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanGroupsResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /v1/candidates/{candidate_id}:
     get:
       tags: [candidates]
@@ -4731,6 +4811,55 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/CandidateSummary' }
+    GroupSummary:
+      description: |
+        A group the operator has vision over — a source-agnostic projection of a
+        GroupCandidate. `status` derives from the candidate state + member_dialog.
+      type: object
+      required: [candidate_id, source_id, platform_groupid, status, score, last_observed_at_ingest]
+      properties:
+        candidate_id: { type: string, format: uuid }
+        source_id:    { type: string, format: uuid }
+        platform_groupid: { type: string, maxLength: 512 }
+        kind:         { $ref: '#/components/schemas/GroupKind' }
+        title:        { type: string, nullable: true }
+        status:       { type: string, description: 'monitored|joining|requested|approving|member_unmonitored|discovered|rejected|failed|parked' }
+        member_dialog: { type: boolean }
+        score:        { type: number, minimum: 0.0 }
+        group_id:     { type: string, format: uuid, nullable: true }
+        last_observed_at_ingest: { type: string, format: date-time }
+    CursorPageGroupSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/GroupSummary' }
+    JoinGroupRequest:
+      description: |
+        Join-at-will target: either an existing candidate_id, or an undiscovered
+        group by source_id + platform_groupid. A collector is assigned.
+      type: object
+      required: [collector_id]
+      properties:
+        collector_id:     { type: string, format: uuid }
+        candidate_id:     { type: string, format: uuid, nullable: true }
+        source_id:        { type: string, format: uuid, nullable: true }
+        platform_groupid: { type: string, maxLength: 512, nullable: true }
+        kind:             { $ref: '#/components/schemas/GroupKind' }
+    LeaveGroupRequest:
+      description: Stop monitoring a joined group (targets the group's candidate).
+      type: object
+      required: [candidate_id]
+      properties:
+        candidate_id: { type: string, format: uuid }
+        reason:       { type: string, minLength: 1, maxLength: 2048, default: operator_left }
+    ScanGroupsResult:
+      type: object
+      required: [collectors_signaled]
+      properties:
+        collectors_signaled: { type: integer }
     DocumentSummary:
       type: object
       additionalProperties: false

@@ -7,8 +7,10 @@ M1 default: no production unless a fixture replay loop is wired.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
+from uuid import UUID
 
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.collector import (
@@ -16,11 +18,26 @@ from eyenet.contracts.collector import (
     CollectorHealth,
     compute_instance_id,
 )
-from eyenet.contracts.enums import CollectorState, SourceKind
+from eyenet.contracts.enums import CollectorState, GroupKind, SourceKind
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.identity_pool.loader import IdentityFileEntry
 from eyenet.service import ServiceBase
 from eyenet.storage.repository import BaseRepository
+from eyenet.telemetry.logging import get_logger
+
+_log = get_logger()
+
+
+@dataclass(frozen=True)
+class VisibleGroup:
+    """A group an identity can see (source-agnostic). Telegram: a dialog; Matrix:
+    a joined room; etc. ``is_member`` True = the account is directly in it."""
+
+    platform_groupid: str
+    kind: GroupKind
+    title: str | None = None
+    is_member: bool = True
+    member_count: int | None = None
 
 
 class CollectorSkeleton(ServiceBase, CollectorBase):
@@ -85,5 +102,37 @@ class CollectorSkeleton(ServiceBase, CollectorBase):
         self._last_message_at = datetime.now(tz=UTC)
         self._messages_in_last_hour += 1
 
+    # -- visible-group scan (generic; per-source enumeration is overridden) ----
 
-__all__ = ["CollectorSkeleton"]
+    async def enumerate_visible_groups(self) -> list[VisibleGroup]:
+        """Return every group this identity can see. Override per source
+        (Telegram: iter_dialogs; Matrix: joined rooms; ...)."""
+        raise NotImplementedError(f"{self.name} does not implement visible-group enumeration")
+
+    async def scan_visible_groups(self, *, source_id: UUID) -> int:
+        """Enumerate visible groups and upsert each as a GroupCandidate.
+
+        Generic: relies only on the per-source ``enumerate_visible_groups`` seam
+        and the source-agnostic ``storage.ensure_candidate``. Returns the count
+        seen. Populates the /monitored-groups visibility set."""
+        groups = await self.enumerate_visible_groups()
+        now = datetime.now(tz=UTC)
+        for g in groups:
+            await self._storage.ensure_candidate(
+                source_id=source_id,
+                platform_groupid=g.platform_groupid,
+                seen_at=now,
+                kind=g.kind,
+                title=g.title,
+                member_dialog=g.is_member,
+            )
+        _log.info(
+            "collector.visible_groups_scanned",
+            identity=self._identity_name,
+            instance_id=self._instance_id,
+            count=len(groups),
+        )
+        return len(groups)
+
+
+__all__ = ["CollectorSkeleton", "VisibleGroup"]

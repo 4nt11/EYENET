@@ -40,6 +40,18 @@ class LeaveGroupCommand(BaseModel):
     reason: str
 
 
+class ScanVisibleGroupsCommand(BaseModel):
+    """Tell a collector to enumerate the groups its identity can see and upsert
+    each as a GroupCandidate (the /monitored-groups visibility refresh, §4.12).
+
+    Source-agnostic: each collector implements ``enumerate_visible_groups`` for
+    its platform (Telegram dialogs, Matrix joined rooms, ...)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["scan_visible_groups"] = "scan_visible_groups"
+
+
 def command_subject_for(scout_instance_id: str) -> str:
     """Bus subject for a collector's command channel (M9.E5, §4.12.4).
 
@@ -51,4 +63,9 @@ def command_subject_for(scout_instance_id: str) -> str:
     return f"eyenet.control.collector.{scout_instance_id}.command"
 
 
-__all__ = ["JoinGroupCommand", "LeaveGroupCommand", "command_subject_for"]
+__all__ = [
+    "JoinGroupCommand",
+    "LeaveGroupCommand",
+    "ScanVisibleGroupsCommand",
+    "command_subject_for",
+]
