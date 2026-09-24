@@ -196,6 +196,12 @@ async def test_spawn_builds_collector_argv(
         captured["argv"] = argv
         return _FakeProc()
 
+    # A stale IN_USE claim from a hard-killed prior child must be cleared so the
+    # respawn can claim the identity.
+    await storage.set_identity_state(
+        identity_id=collector.identity_id, state=IdentityState.IN_USE
+    )
+
     monkeypatch.setattr(mod.asyncio, "create_subprocess_exec", _fake_exec)
     sup = CollectorSupervisor(bus=MemoryBus(), storage=storage)
     proc = await sup._spawn(collector)
@@ -203,6 +209,8 @@ async def test_spawn_builds_collector_argv(
     assert proc is not None
     argv = captured["argv"]
     assert argv[1:] == ("-m", "eyenet.cli", "collector", "--identity", "id_a", "--type", "telegram")
+    # stale claim released
+    assert (await storage.get_identity(collector.identity_id)).state is IdentityState.AVAILABLE
 
 
 async def test_spawn_missing_identity_returns_none(

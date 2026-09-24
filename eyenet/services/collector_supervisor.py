@@ -34,6 +34,7 @@ from eyenet.contracts.enums import (
     CollectorDesiredState,
     CollectorObservedState,
     GroupAccessKind,
+    IdentityState,
 )
 from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
 from eyenet.service import ServiceBase
@@ -135,6 +136,24 @@ class CollectorSupervisor(ServiceBase):
         if ident is None:
             _log.error("supervisor.spawn_no_identity", collector_id=str(collector.id))
             return None
+        # Stale-claim recovery: the identity claim (IdentityState.IN_USE) has no
+        # liveness lease, so a hard-killed child (e.g. on supervisor restart)
+        # leaves it IN_USE and every respawn then dies with "identity already in
+        # use". This supervisor owns the collector process lifecycle and is about
+        # to (re)spawn this collector with no live child holding the claim, so a
+        # lingering IN_USE is stale — clear it to AVAILABLE so the child can claim
+        # on boot. COOLING/FROZEN/BURNED are honored (real cooldowns/bans).
+        # ponytail: assumes a single supervisor owns the fleet (small-operator
+        # default cardinality 1); a multi-supervisor deployment needs a real lease.
+        if ident.state is IdentityState.IN_USE:
+            _log.info(
+                "supervisor.stale_claim_cleared",
+                identity=ident.name,
+                collector_id=str(collector.id),
+            )
+            await self._storage.set_identity_state(
+                identity_id=ident.id, state=IdentityState.AVAILABLE
+            )
         try:
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
