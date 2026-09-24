@@ -38,6 +38,6 @@ async def test_channels_excluded_from_actor_roster(storage: BaseRepository) -> N
     await _actor("-1003928209947", "Other Channel")  # channel
 
     rows = await storage.list_actors(limit=50)
-    uids = {r.platform_userid for r in rows}
+    uids = {actor.platform_userid for actor, _mc, _oc in rows}
     assert uids == {"8595058147", "555"}  # channels excluded
     assert await storage.count_actors() == 2

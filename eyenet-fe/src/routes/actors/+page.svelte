@@ -11,8 +11,12 @@
   import {
     actorCtx,
     actorView,
+    actorFilters,
+    groupOptions,
     loadActors,
     loadMoreActors,
+    loadGroupOptions,
+    applyFilters,
     loadActorDetail,
     saveAssessment,
     setTimelineKind,
@@ -24,6 +28,14 @@
     { key: 'message', label: 'Messages' },
     { key: 'observation', label: 'Observations' }
   ];
+
+  const SORT_OPTS = [
+    { v: 'recent', l: 'Recent activity' },
+    { v: 'messages', l: 'Messages' },
+    { v: 'observations', l: 'Observations' },
+    { v: 'handle', l: 'Handle' }
+  ];
+  function setBot(v) { actorFilters.isBot = v; applyFilters(); }
 
   const OBS_COLUMNS = [
     { key: 'ts', header: 'Timestamp', mono: true, width: '150px' },
@@ -54,7 +66,7 @@
 
   $effect(() => { if (a) loadActorDetail(a.id); });
 
-  onMount(loadActors);
+  onMount(() => { loadActors(); loadGroupOptions(); });
 
   const assessmentReady = $derived(
     assessmentDraft.trim().length > 0 && assessmentReason.trim().length > 0 && !actorView.submitting
@@ -66,23 +78,26 @@
   }
 </script>
 
-<EntityList label="Actors" items={actorCtx.list.map((x) => ({ id: x.id, primary: x.isBot ? `${x.handle} 🤖` : x.handle, secondary: x.id }))}
+<EntityList label="Actors" items={actorCtx.list.map((x) => ({ id: x.id, primary: x.isBot ? `${x.handle} 🤖` : x.handle, secondary: `${x.messageCount} msg · ${x.observationCount} obs` }))}
   selectedId={a?.id} onSelect={(id) => (selectedId = id)}
   onLoadMore={loadMoreActors} hasMore={!!actorCtx.nextCursor} />
 
 <main>
-  {#if a && d}
-    <div class="dossier-head">
-      <div class="head-top">
-        <div class="handle-wrap">
+  <div class="dossier-head">
+    <div class="head-top">
+      <div class="handle-wrap">
+        {#if a && d}
           <span class="handle">{d.handle}</span>
           <span class="aid">{d.actorId}</span>
-        </div>
-        <div class="head-actions">
-          {#if d.personaId}<a class="pbtn" href="/personas">View persona</a>{/if}
-        </div>
+        {:else}
+          <span class="handle muted">Actors</span>
+        {/if}
       </div>
+      <div class="filters">{@render filterbar()}</div>
+    </div>
+    {#if a && d}
       <div class="badges">
+        {#if d.personaId}<a class="pbtn small" href="/personas">view persona</a>{/if}
         {#if d.platforms.length}<Badge tone="neutral">{d.platforms.join(' · ')}</Badge>{/if}
         {#if d.isBot}<Badge tone="high">bot</Badge>{/if}
         {#if d.personaId}<Badge tone="high" dot>persona {d.personaId.slice(0, 8)}</Badge>{/if}
@@ -104,8 +119,10 @@
         {#if actorView.submitMsg}<span class="submitmsg" class:err={actorView.submitMsg.startsWith('Failed')}>{actorView.submitMsg}</span>{/if}
       </div>
       {#if actorView.aliases.length}<p class="aliases">aliases: {actorView.aliases.join(', ')}</p>{/if}
-    </div>
+    {/if}
+  </div>
 
+  {#if a && d}
     <div class="body">
       <div class="tiles">
         <StatTile label="Observations" value={d.observationCount} />
@@ -205,11 +222,29 @@
       </div>
     </div>
   {:else}
-    <p class="pnote">
-      {#if !actorCtx.loaded}Loading…{:else if actorCtx.error}Could not load actors: {actorCtx.error}{:else}No actors yet.{/if}
-    </p>
+    <div class="body"><p class="pnote">
+      {#if !actorCtx.loaded}Loading…{:else if actorCtx.error}Could not load actors: {actorCtx.error}{:else}No actors match these filters.{/if}
+    </p></div>
   {/if}
 </main>
+
+{#snippet filterbar()}
+  <div class="fcount">{actorCtx.total ?? actorCtx.list.length} actor{(actorCtx.total ?? actorCtx.list.length) === 1 ? '' : 's'}</div>
+  <select class="fsel" bind:value={actorFilters.sort} onchange={applyFilters}>
+    {#each SORT_OPTS as o}<option value={o.v}>{o.l}</option>{/each}
+  </select>
+  <div class="seg">
+    <button class:on={actorFilters.isBot === null} onclick={() => setBot(null)}>All</button>
+    <button class:on={actorFilters.isBot === false} onclick={() => setBot(false)}>Users</button>
+    <button class:on={actorFilters.isBot === true} onclick={() => setBot(true)}>Bots</button>
+  </div>
+  <select class="fsel" bind:value={actorFilters.groupId} onchange={applyFilters}>
+    <option value="">All groups</option>
+    {#each groupOptions.list as g}<option value={g.id}>{g.label}</option>{/each}
+  </select>
+  <input class="fnum" type="number" min="0" placeholder="msgs ≥" bind:value={actorFilters.minMessages} oninput={applyFilters} />
+  <input class="fnum" type="number" min="0" placeholder="obs ≥" bind:value={actorFilters.minObservations} oninput={applyFilters} />
+{/snippet}
 
 <style>
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
@@ -220,6 +255,19 @@
   .handle { font-family: var(--font-mono); font-size: var(--fs-22); font-weight: var(--fw-bold); letter-spacing: var(--tracking-data); color: var(--text); }
   .aid { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   .head-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+  .handle.muted { color: var(--text-faint); }
+  .filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex: 1; min-width: 0; }
+  .fcount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); margin-right: 2px; white-space: nowrap; }
+  .fsel { height: 28px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-12); padding: 0 8px; cursor: pointer; max-width: 160px; }
+  .fsel:focus { outline: none; border-color: var(--accent); }
+  .fnum { width: 78px; height: 28px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); padding: 0 8px; }
+  .fnum:focus { outline: none; border-color: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; height: 28px; }
+  .seg button { appearance: none; background: transparent; border: none; border-right: 1px solid var(--border-strong); color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-12); padding: 0 10px; cursor: pointer; }
+  .seg button:last-child { border-right: none; }
+  .seg button.on { background: var(--accent-fill); color: var(--text); }
+  .seg button:hover:not(.on) { background: var(--panel); }
+  .pbtn.small { height: 22px; padding: 0 8px; font-size: var(--fs-11); }
   .pbtn { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-12); text-decoration: none; }
   .pbtn:hover { background: var(--panel-2); }
   .badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; }

@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, func, or_
+from sqlalchemy import ColumnElement, exists, func, or_
 from sqlmodel import col, select
 
 from eyenet.contracts.actor import ActorRow
@@ -15,6 +16,8 @@ from eyenet.contracts.group import GroupRow
 from eyenet.contracts.source import SourceRow
 from eyenet.models import ActorTable, GroupTable, SourceTable
 from eyenet.models.actor import ActorAliasHistoryTable
+from eyenet.models.message import MessageTable
+from eyenet.models.observation import ObservationTable
 
 from ._helpers import safe_session
 
@@ -86,12 +89,83 @@ class ActorsMixin:
         bogus actors. Forward origins that are people keep positive ids and stay."""
         return col(ActorTable.platform_userid).not_like("-%")
 
-    async def count_actors(self) -> int:
-        """Number of INDIVIDUAL actors (channels excluded; M9.F3 graph stats)."""
-        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            result = await session.exec(
-                select(func.count()).select_from(ActorTable).where(self._individuals_only())
+    # Per-actor message / observation counts as correlated scalar subqueries. At
+    # small-operator scale a correlated count per row is cheap and keeps the query
+    # generic (no join fan-out to de-duplicate). ponytail: a materialized
+    # actor_stats table is the upgrade if the roster outgrows this.
+    def _msg_count(self) -> Any:
+        return (
+            select(func.count())
+            .select_from(MessageTable)
+            .where(col(MessageTable.actor_id) == col(ActorTable.id))
+            .scalar_subquery()
+        )
+
+    def _obs_count(self) -> Any:
+        return (
+            select(func.count())
+            .select_from(ObservationTable)
+            .where(col(ObservationTable.actor_id) == col(ActorTable.id))
+            .scalar_subquery()
+        )
+
+    def _apply_actor_filters(
+        self,
+        stmt: Any,
+        mc: Any,
+        oc: Any,
+        *,
+        is_bot: bool | None,
+        group_id: UUID | None,
+        min_messages: int | None,
+        min_observations: int | None,
+    ) -> Any:
+        stmt = stmt.where(self._individuals_only())
+        if is_bot is not None:
+            stmt = stmt.where(col(ActorTable.is_bot_self_declared) == is_bot)
+        if group_id is not None:
+            stmt = stmt.where(
+                exists().where(
+                    col(MessageTable.actor_id) == col(ActorTable.id),
+                    col(MessageTable.group_id) == group_id,
+                )
             )
+        if min_messages is not None:
+            stmt = stmt.where(mc >= min_messages)
+        if min_observations is not None:
+            stmt = stmt.where(oc >= min_observations)
+        return stmt
+
+    def _order_actors(self, stmt: Any, mc: Any, oc: Any, sort: str) -> Any:
+        if sort == "messages":
+            return stmt.order_by(mc.desc())
+        if sort == "observations":
+            return stmt.order_by(oc.desc())
+        if sort == "handle":
+            return stmt.order_by(col(ActorTable.current_handle).asc())
+        return stmt.order_by(col(ActorTable.last_seen_at_ingest).desc())
+
+    async def count_actors(
+        self,
+        *,
+        is_bot: bool | None = None,
+        group_id: UUID | None = None,
+        min_messages: int | None = None,
+        min_observations: int | None = None,
+    ) -> int:
+        """Number of INDIVIDUAL actors matching the filters (channels excluded)."""
+        mc, oc = self._msg_count(), self._obs_count()
+        inner = self._apply_actor_filters(
+            select(ActorTable.id),
+            mc,
+            oc,
+            is_bot=is_bot,
+            group_id=group_id,
+            min_messages=min_messages,
+            min_observations=min_observations,
+        ).subquery()
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(func.count()).select_from(inner))
             return int(result.one())
 
     def _actor_search_clause(self, q: str) -> ColumnElement[bool]:
@@ -137,24 +211,40 @@ class ActorsMixin:
             result = await session.exec(stmt)
             return int(result.one())
 
-    async def list_actors(self, *, limit: int, offset: int = 0) -> list[object]:
-        """All actors, newest-activity first (the unfiltered list surface).
-
-        Same projection/ordering as :meth:`search_actors` without the substring
-        clause; pairs with the existing :meth:`count_actors` for paging.
-        Returns ``ActorTable`` rows (type-erased).
+    async def list_actors(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        is_bot: bool | None = None,
+        group_id: UUID | None = None,
+        min_messages: int | None = None,
+        min_observations: int | None = None,
+        sort: str = "recent",
+    ) -> list[object]:
+        """Individual actors matching the filters, with per-actor message +
+        observation counts. Returns ``(ActorTable, message_count, observation_count)``
+        tuples (type-erased). ``sort``: recent | messages | observations | handle.
         """
+        mc, oc = self._msg_count(), self._obs_count()
+        stmt = self._apply_actor_filters(
+            select(ActorTable, mc.label("mc"), oc.label("oc")),
+            mc,
+            oc,
+            is_bot=is_bot,
+            group_id=group_id,
+            min_messages=min_messages,
+            min_observations=min_observations,
+        )
+        stmt = (
+            self._order_actors(stmt, mc, oc, sort)
+            .order_by(col(ActorTable.id))
+            .limit(limit)
+            .offset(offset)
+        )
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = (
-                select(ActorTable)
-                .where(self._individuals_only())
-                .order_by(col(ActorTable.last_seen_at_ingest).desc())
-                .order_by(col(ActorTable.id))
-                .limit(limit)
-                .offset(offset)
-            )
             result = await session.exec(stmt)
-            return list(result)
+            return [(row[0], int(row[1]), int(row[2])) for row in result.all()]
 
     async def set_actor_assessment(self, actor_id: UUID, assessment: str | None) -> bool:
         """Set the operator free-text assessment. Returns False if no such actor.

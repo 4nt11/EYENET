@@ -1439,7 +1439,14 @@ class BaseRepository(ABC):
         """Return the SourceRow for a primary-key id, or None (M9.F1)."""
 
     @abstractmethod
-    async def count_actors(self) -> int: ...
+    async def count_actors(
+        self,
+        *,
+        is_bot: bool | None = None,
+        group_id: UUID | None = None,
+        min_messages: int | None = None,
+        min_observations: int | None = None,
+    ) -> int: ...
 
     @abstractmethod
     async def search_actors(self, q: str, *, limit: int, offset: int = 0) -> list[object]:
@@ -1450,9 +1457,20 @@ class BaseRepository(ABC):
     async def count_search_actors(self, q: str) -> int: ...
 
     @abstractmethod
-    async def list_actors(self, *, limit: int, offset: int = 0) -> list[object]:
-        """All actors, newest-activity first; ActorTable rows type-erased.
-        Pairs with :meth:`count_actors` for the unfiltered list surface."""
+    async def list_actors(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        is_bot: bool | None = None,
+        group_id: UUID | None = None,
+        min_messages: int | None = None,
+        min_observations: int | None = None,
+        sort: str = "recent",
+    ) -> list[object]:
+        """Individual actors matching the filters, each as a
+        ``(ActorTable, message_count, observation_count)`` tuple (type-erased).
+        ``sort``: recent | messages | observations | handle."""
 
     @abstractmethod
     async def actor_aliases(self, actor_id: UUID) -> list[object]:
