@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.bus import Bus
+    from eyenet.contracts.candidate import GroupCandidateRow
     from eyenet.contracts.collector import CollectorRow
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.source import SourceRow
@@ -276,45 +277,132 @@ class CollectorSupervisor(ServiceBase):
                     error_message="spawn failed: missing identity or OS refused the process",
                 )
 
+    def _collector_alive(self, collector_id: UUID | None) -> bool:
+        """True only if this supervisor is running a live child for that collector
+        (running => subscribed to its command channel, so a join command lands)."""
+        if collector_id is None:
+            return False
+        proc = self._procs.get(collector_id)
+        return proc is not None and proc.returncode is None
+
     async def dispatch_approved(self) -> None:
-        """Gate + lease + dispatch every approved candidate ready to join."""
+        """Dispatch every candidate ready to join.
+
+        Two shapes share the candidate machinery but diverge on selection:
+
+        * **Operator join-at-will** (no discovery lineage — the candidate has no
+          mention rows because it was created by ``ensure_candidate`` from
+          /monitored-groups): the operator explicitly chose this group AND a
+          collector, so skip the discovery eligibility gate + scout lease and
+          dispatch straight to the assigned collector, which joins with its own
+          identity. Only dispatched when that collector is a live child of this
+          supervisor (else the command would be published to a channel nobody is
+          subscribed to and lost). Re-dispatched while the candidate is still
+          JOINING so a lost command / collector restart self-heals — the
+          ``joining → joined`` finalize is CAS-guarded + idempotent.
+        * **Discovery** (born from ``record_candidate_mention``, ≥1 mention): run
+          the §4.12.3 eligibility predicate, lease a scout, dispatch to it.
+        """
+        # Snapshot both lists FIRST so a candidate that transitions APPROVED →
+        # JOINING during this call is not then re-found (and double-published) by
+        # the JOINING pass. APPROVED = initial dispatch; JOINING = operator
+        # re-dispatch of a not-yet-confirmed join (discovery JOINING is left alone).
         approved = await self._storage.list_candidates(
             state=CandidateState.APPROVED, limit=_APPROVED_BATCH
         )
+        joining = await self._storage.list_candidates(
+            state=CandidateState.JOINING, limit=_APPROVED_BATCH
+        )
         for candidate in approved:
-            if candidate.assigned_collector_id is None:
-                continue
-            verdict = await collector_eligibility(
-                candidate.id, candidate.assigned_collector_id, self._storage
+            await self._dispatch_candidate(candidate, state=CandidateState.APPROVED)
+        for candidate in joining:
+            await self._dispatch_candidate(candidate, state=CandidateState.JOINING)
+
+    async def _dispatch_candidate(
+        self, candidate: GroupCandidateRow, *, state: CandidateState
+    ) -> None:
+        if candidate.assigned_collector_id is None:
+            return
+        inputs = await self._storage.compute_eligibility_inputs(candidate.id)
+        if not inputs.mentions:
+            # Operator candidate: (re)dispatch only when its collector is alive.
+            if self._collector_alive(candidate.assigned_collector_id):
+                await self._dispatch_operator_join(candidate)
+            return
+        # Discovery candidate: only dispatch out of APPROVED.
+        if state is not CandidateState.APPROVED:
+            return
+        verdict = await collector_eligibility(
+            candidate.id, candidate.assigned_collector_id, self._storage
+        )
+        if verdict.result is not CollectorEligibilityResult.OK:
+            # Not eligible right now — leave APPROVED for a later tick
+            # (transient, e.g. no scout) or operator re-decision (structural).
+            _log.info(
+                "supervisor.join_skipped",
+                candidate_id=str(candidate.id),
+                result=verdict.result.value,
+                reason=verdict.reason,
             )
-            if verdict.result is not CollectorEligibilityResult.OK:
-                # Not eligible right now — leave APPROVED for a later tick
-                # (transient, e.g. no scout) or operator re-decision (structural).
-                _log.info(
-                    "supervisor.join_skipped",
-                    candidate_id=str(candidate.id),
-                    result=verdict.result.value,
-                    reason=verdict.reason,
-                )
-                continue
-            scout = await self._storage.lease_scout(candidate.source_id)
-            if scout is None:
-                # Lost the scout to a concurrent lease — retry next tick.
-                _log.info("supervisor.scout_lease_lost", candidate_id=str(candidate.id))
-                continue
-            # E5.5: pick the cheapest usable access artifact (invite link, etc.);
-            # None → the public-identifier path on platform_groupid.
-            artifacts = await self._storage.list_group_access_artifacts_for_candidate(candidate.id)
-            selected = select_access_artifact(artifacts)
-            command = JoinGroupCommand(
-                candidate_id=candidate.id,
-                platform_groupid=candidate.platform_groupid,
-                scout_identity_id=scout.id,
-                access_artifact_id=selected.id if selected is not None else None,
-            )
+            return
+        scout = await self._storage.lease_scout(candidate.source_id)
+        if scout is None:
+            # Lost the scout to a concurrent lease — retry next tick.
+            _log.info("supervisor.scout_lease_lost", candidate_id=str(candidate.id))
+            return
+        # E5.5: pick the cheapest usable access artifact (invite link, etc.);
+        # None → the public-identifier path on platform_groupid.
+        artifacts = await self._storage.list_group_access_artifacts_for_candidate(candidate.id)
+        selected = select_access_artifact(artifacts)
+        command = JoinGroupCommand(
+            candidate_id=candidate.id,
+            platform_groupid=candidate.platform_groupid,
+            scout_identity_id=scout.id,
+            access_artifact_id=selected.id if selected is not None else None,
+        )
+        await self._storage.transition_candidate(
+            candidate_id=candidate.id,
+            to_state=CandidateState.JOINING,
+        )
+        await self.audit.emit(
+            event=AuditSubject.CANDIDATE_JOINING.value,
+            subject_kind="candidate",
+            subject_id=candidate.id,
+            payload={
+                "command": command.model_dump(mode="json"),
+                "assigned_collector_id": str(candidate.assigned_collector_id),
+                "scout_identity_id": str(scout.id),
+            },
+        )
+        await self._publish_join_command(scout, command)
+
+    async def _dispatch_operator_join(self, candidate: GroupCandidateRow) -> None:
+        """Dispatch an operator-initiated join to its assigned collector.
+
+        No eligibility gate, no scout lease: the operator's explicit choice IS the
+        authorization. The command is routed to the assigned collector's own
+        command channel so it joins with its own identity."""
+        collector = await self._storage.get_collector(candidate.assigned_collector_id)  # type: ignore[arg-type]
+        if collector is None:
+            _log.warning("supervisor.operator_join_no_collector", candidate_id=str(candidate.id))
+            return
+        identity = await self._storage.get_identity(collector.identity_id)
+        if identity is None:
+            _log.warning("supervisor.operator_join_no_identity", candidate_id=str(candidate.id))
+            return
+        artifacts = await self._storage.list_group_access_artifacts_for_candidate(candidate.id)
+        selected = select_access_artifact(artifacts)
+        command = JoinGroupCommand(
+            candidate_id=candidate.id,
+            platform_groupid=candidate.platform_groupid,
+            scout_identity_id=identity.id,
+            access_artifact_id=selected.id if selected is not None else None,
+        )
+        # First dispatch (APPROVED) transitions + audits once; a re-dispatch of a
+        # still-JOINING candidate just re-publishes (idempotent recovery).
+        if candidate.state is CandidateState.APPROVED:
             await self._storage.transition_candidate(
-                candidate_id=candidate.id,
-                to_state=CandidateState.JOINING,
+                candidate_id=candidate.id, to_state=CandidateState.JOINING
             )
             await self.audit.emit(
                 event=AuditSubject.CANDIDATE_JOINING.value,
@@ -323,10 +411,10 @@ class CollectorSupervisor(ServiceBase):
                 payload={
                     "command": command.model_dump(mode="json"),
                     "assigned_collector_id": str(candidate.assigned_collector_id),
-                    "scout_identity_id": str(scout.id),
+                    "operator_initiated": True,
                 },
             )
-            await self._publish_join_command(scout, command)
+        await self._publish_join_command(identity, command)
 
     async def _publish_join_command(self, scout: IdentityRow, command: JoinGroupCommand) -> None:
         """Publish the JoinGroupCommand to the scout's command channel (M9.E5).
