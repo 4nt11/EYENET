@@ -68,7 +68,7 @@
       </div>
       <h1>Provision identity</h1>
     </div>
-    <a class="back" href="/identities">Back to pool</a>
+    <a class="back" href="/identities/provision/qr">Use QR login instead</a>
   </div>
 
   <p class="lede">
