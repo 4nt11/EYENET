@@ -95,3 +95,38 @@ async def test_actor_groups_empty(storage: BaseRepository) -> None:
     result = await actor_groups_list(_user(), storage)
     assert result.count == 0
     assert result.items == []
+
+
+@pytest.mark.unit
+async def test_open_crew_case_promotes_and_is_idempotent(storage: BaseRepository) -> None:
+    from eyenet.api.v1.actor_groups.api_open_crew_case import actor_groups_open_case
+    from eyenet.api.v1.schemas.actor_groups import OpenCrewCaseRequest
+    from eyenet.bus.memory import MemoryBus
+    from eyenet.bus.publisher import BusEnvelopePublisher
+    from eyenet.telemetry.audit import AuditEmitter
+
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="tg", created_at=datetime.now(tz=UTC)
+    )
+    a = await _actor(storage, src, "1", display="A")
+    b = await _actor(storage, src, "2", display="B")
+    audit = AuditEmitter(
+        BusEnvelopePublisher(MemoryBus()), storage, service="api", instance_id="api-0"
+    )
+
+    def _writer() -> CurrentUser:
+        return CurrentUser(
+            user_id=uuid4(),
+            username="op",
+            role=SystemUserRole.ADMIN,
+            effective_scopes=frozenset({"write:cases"}),
+            token_expires_at=None,
+        )
+
+    body = OpenCrewCaseRequest(members=[a, b], top_infra=["handle:wbpay_mm1888"])
+    r1 = await actor_groups_open_case(body, _writer(), storage, audit)
+    r2 = await actor_groups_open_case(body, _writer(), storage, audit)
+    assert r1.case_id == r2.case_id  # idempotent on crew_key
+    assert r1.crew_key == "handle:wbpay_mm1888"
+    case = await storage.get_case_by_crew_key("handle:wbpay_mm1888")
+    assert case is not None and case.id == r1.case_id

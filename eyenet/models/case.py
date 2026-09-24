@@ -82,6 +82,10 @@ class CaseTable(SQLModel, table=True):
     title: str = Field(max_length=256)
     description: str | None = Field(default=None, max_length=8192)
     status: CaseStatus = Field(default=CaseStatus.OPEN, index=True)
+    # Stable identity of the crew this case was opened for (a shared-infra
+    # indicator token, e.g. "handle:wbpay_mm1888"). Set only for crew-derived
+    # cases; used to keep auto-creation idempotent. NULL for hand-opened cases.
+    crew_key: str | None = Field(default=None, index=True)
     effective_tier: SensitivityTier = Field(default=SensitivityTier.NORMAL)
     created_by_user_id: UUID = Field(index=True)
     created_at: datetime

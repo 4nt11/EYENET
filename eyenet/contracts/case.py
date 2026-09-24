@@ -37,6 +37,10 @@ class CaseRow(DbRowBase):
 
     title: str = Field(min_length=3, max_length=256)
     description: str | None = Field(default=None, max_length=8192)
+    crew_key: str | None = Field(
+        default=None,
+        description="Shared-infra crew identity when this case was opened from a crew.",
+    )
     status: CaseStatus = CaseStatus.OPEN
     effective_tier: SensitivityTier = SensitivityTier.NORMAL
     created_by_user_id: UUID

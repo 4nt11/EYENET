@@ -4,7 +4,10 @@
   import EntityList from '$lib/components/EntityList.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
-  import { actorGroupCtx, loadActorGroups, prettyInfra } from '$lib/actorGroup.svelte.js';
+  import Button from '$lib/components/Button.svelte';
+  import { actorGroupCtx, crewCase, loadActorGroups, openCase, prettyInfra } from '$lib/actorGroup.svelte.js';
+
+  let caseId = $derived(c ? crewCase.byId[c.id] : null);
 
   let selectedId = $state(null);
   let c = $derived(
@@ -36,8 +39,14 @@
             <Badge tone="accent">{c.size} accounts</Badge>
             <Badge tone="neutral">{c.edgeCount} link{c.edgeCount === 1 ? '' : 's'}</Badge>
             <Badge tone="high">score {c.maxScore}</Badge>
+            {#if caseId}
+              <a class="caselink" href={`/cases/${caseId}`}>Open case →</a>
+            {:else}
+              <Button variant="primary" size="sm" disabled={crewCase.submitting} onclick={() => openCase(c)}>Open case</Button>
+            {/if}
           </div>
         </div>
+        {#if crewCase.error}<div class="err">Could not open case: {crewCase.error}</div>{/if}
 
         <Panel title={`Shared infrastructure · ${c.topInfra.length}`}>
           {#if c.topInfra.length}
@@ -77,5 +86,8 @@
   .mlabel { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); }
   .mid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .empty, .pnote { padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
+  .caselink { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--accent); text-decoration: none; align-self: center; }
+  .caselink:hover { text-decoration: underline; }
+  .err { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red); padding: 4px 0; }
   @media (max-width: 900px) { .split { grid-template-columns: 1fr; overflow: auto; } }
 </style>
