@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.event_log import EventLogRow
     from eyenet.contracts.feedback import FeedbackPairRow
     from eyenet.contracts.file_access import FileAccessJournalRow
+    from eyenet.contracts.group import GroupRow
     from eyenet.contracts.idempotency import IdempotencyRecordRow, ReserveResult
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
@@ -1646,6 +1647,26 @@ class BaseRepository(ABC):
         ``(source_id + platform_groupid, mention_evidence_ref)`` returns the
         existing rows without inserting a duplicate.
         """
+
+    @abstractmethod
+    async def get_group(self, group_id: UUID) -> GroupRow | None:
+        """Return one GroupRow by id, or ``None`` (leave-group path)."""
+
+    @abstractmethod
+    async def ensure_candidate(
+        self,
+        *,
+        source_id: UUID,
+        platform_groupid: str,
+        seen_at: datetime,
+        kind: GroupKind | None = None,
+        title: str | None = None,
+        member_dialog: bool = False,
+    ) -> GroupCandidateRow:
+        """Find-or-create a GroupCandidate (visible-group scan + join-at-will).
+
+        Never changes an existing candidate's ``state``; bumps hints +
+        ``last_observed_at_ingest`` and sets ``member_dialog`` once observed."""
 
     @abstractmethod
     async def get_candidate(self, candidate_id: UUID) -> GroupCandidateRow | None:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time as _time
 from collections import deque
 from datetime import UTC, datetime
@@ -37,7 +38,7 @@ from telethon.tl.types import (
 )
 
 from eyenet.collectors.base._credentials import materialize_telegram_session
-from eyenet.collectors.base.skeleton import CollectorSkeleton
+from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.collectors.telegram._join import (
     CollectorJoinHandler,
     JoinAction,
@@ -59,7 +60,12 @@ from eyenet.contracts.enums import (
 )
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
-from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
+from eyenet.contracts.supervisor import (
+    JoinGroupCommand,
+    LeaveGroupCommand,
+    ScanVisibleGroupsCommand,
+    command_subject_for,
+)
 from eyenet.identity_pool.loader import IdentityFileEntry
 
 if TYPE_CHECKING:
@@ -122,6 +128,9 @@ class TelegramCollector(CollectorSkeleton):
         # E5 discovery recursion: this collector's own DB row + the join core.
         self._collector_id: UUID | None = None
         self._join: CollectorJoinHandler | None = None
+        # Held ref to the on-start visible-group scan task (RUF006: the loop only
+        # weak-refs tasks, so a bare create_task can be GC'd mid-run).
+        self._scan_task: asyncio.Task[None] | None = None
         # Monotonic timestamp of the last REQUESTED-membership probe sweep.
         self._last_requested_probe: float = 0.0
         # Hot-path guard (Defect 6): lowercased event-matchable platform_groupid
@@ -130,7 +139,7 @@ class TelegramCollector(CollectorSkeleton):
         # on_subscribe. joinchat: candidates are NOT here (probe-only, Defect 1).
         self._requested_match_forms: set[str] = set()
 
-    async def on_subscribe(self) -> None:
+    async def on_subscribe(self) -> None:  # noqa: PLR0915 — cohesive boot sequence
         await super().on_subscribe()
         entry = cast("IdentityFileEntry", self._claimed)
 
@@ -206,11 +215,24 @@ class TelegramCollector(CollectorSkeleton):
 
         async def _on_command(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
             try:
-                await self._handle_join(JoinGroupCommand.model_validate_json(payload))
+                kind = json.loads(payload).get("kind")
+                if kind == "scan_visible_groups":
+                    ScanVisibleGroupsCommand.model_validate_json(payload)
+                    if self._source_uuid is not None:
+                        await self.scan_visible_groups(source_id=self._source_uuid)
+                elif kind == "leave_group":
+                    await self._handle_leave(LeaveGroupCommand.model_validate_json(payload))
+                else:
+                    await self._handle_join(JoinGroupCommand.model_validate_json(payload))
             except Exception as exc:
                 _log.error("collector.command_error", error=str(exc))
 
         await self._bus.subscribe(command_subject_for(self.instance_id), _on_command)
+
+        # Scan the identity's visible groups on start so /monitored-groups reflects
+        # everything this account can see (non-blocking). Hold the reference so the
+        # loop's weak task ref can't GC it mid-run (RUF006).
+        self._scan_task = asyncio.create_task(self._scan_on_start())
 
         # Seed the hot-path REQUESTED match-form set (Defect 6) so the very
         # first messages after a restart can confirm a pending approval without
@@ -566,6 +588,59 @@ class TelegramCollector(CollectorSkeleton):
         sender = await event.get_sender()
         chat = await event.get_chat()
         await self._ingest_msg(msg, chat_id=event.chat_id, sender=sender, chat=chat)
+
+    async def enumerate_visible_groups(self) -> list[VisibleGroup]:
+        """Every group/channel this identity's account is in (its dialogs).
+
+        Skips DMs/users. Prefers ``@username`` as the platform id (resolvable by
+        any client for a public group); falls back to the raw entity id."""
+        if self._client is None:
+            raise RuntimeError("enumerate_visible_groups called before client attached")
+        out: list[VisibleGroup] = []
+        async for dialog in self._client.iter_dialogs():
+            if getattr(dialog, "is_user", False):
+                continue
+            entity = dialog.entity
+            username = getattr(entity, "username", None)
+            pgid = f"@{username}" if username else str(getattr(entity, "id", "") or "")
+            if not pgid or pgid == "@None":
+                continue
+            out.append(
+                VisibleGroup(
+                    platform_groupid=pgid,
+                    kind=_chat_kind(entity),
+                    title=getattr(dialog, "title", None) or None,
+                    is_member=True,
+                    member_count=getattr(entity, "participants_count", None),
+                )
+            )
+        return out
+
+    async def _handle_leave(self, cmd: LeaveGroupCommand) -> None:
+        """Leave a group on the platform (delete the dialog). The membership close +
+        candidate park are done API-side (optimistic, like join); this is the
+        best-effort platform-side departure."""
+        if self._client is None:
+            return
+        group = await self._storage.get_group(cmd.group_id)
+        if group is None:
+            _log.warning("collector.leave_unknown_group", group_id=str(cmd.group_id))
+            return
+        try:
+            entity = await self._client.get_entity(group.platform_groupid)
+            await self._client.delete_dialog(entity)
+            _log.info("collector.left_group", group_id=str(cmd.group_id), reason=cmd.reason)
+        except Exception as exc:
+            _log.warning("collector.leave_failed", group_id=str(cmd.group_id), error=str(exc))
+
+    async def _scan_on_start(self) -> None:
+        """One-shot visible-group scan after connect (fire-and-forget helper)."""
+        if self._source_uuid is None:
+            return
+        try:
+            await self.scan_visible_groups(source_id=self._source_uuid)
+        except Exception as exc:
+            _log.warning("collector.scan_on_start_failed", error=str(exc))
 
     async def _run_backfill(self) -> None:
         """Replay historical messages oldest-first for each monitored group.

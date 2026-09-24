@@ -11,6 +11,7 @@ from sqlmodel import col, select
 
 from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.enums import GroupKind, SourceKind
+from eyenet.contracts.group import GroupRow
 from eyenet.contracts.source import SourceRow
 from eyenet.models import ActorTable, GroupTable, SourceTable
 from eyenet.models.actor import ActorAliasHistoryTable
@@ -237,6 +238,19 @@ class ActorsMixin:
             row_id = row.id
             await session.commit()
             return row_id
+
+    async def get_group(self, group_id: UUID) -> GroupRow | None:
+        """Return one GroupRow by id, or ``None`` (used by the leave path)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(GroupTable, group_id)
+            if table is None:
+                return None
+            data = table.model_dump()
+            for k in ("first_seen_at_ingest", "last_observed_at_ingest"):
+                v = data.get(k)
+                if v is not None and v.tzinfo is None:
+                    data[k] = v.replace(tzinfo=UTC)
+            return GroupRow.model_validate(data)
 
     async def upsert_actor(
         self,
