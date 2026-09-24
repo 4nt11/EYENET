@@ -79,10 +79,19 @@ class ActorsMixin:
             row = await session.get(SourceTable, source_id)
             return _row_to_source(row) if row is not None else None
 
+    def _individuals_only(self) -> ColumnElement[bool]:
+        """Exclude channel/group senders from the individual-actor roster: their
+        ``platform_userid`` is a negative -100 marked peer id (e.g.
+        ``-1003573398394``). They are entities, not people, and were surfacing as
+        bogus actors. Forward origins that are people keep positive ids and stay."""
+        return col(ActorTable.platform_userid).not_like("-%")
+
     async def count_actors(self) -> int:
-        """Total number of actors (M9.F3 graph stats)."""
+        """Number of INDIVIDUAL actors (channels excluded; M9.F3 graph stats)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            result = await session.exec(select(func.count()).select_from(ActorTable))
+            result = await session.exec(
+                select(func.count()).select_from(ActorTable).where(self._individuals_only())
+            )
             return int(result.one())
 
     def _actor_search_clause(self, q: str) -> ColumnElement[bool]:
@@ -138,6 +147,7 @@ class ActorsMixin:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(ActorTable)
+                .where(self._individuals_only())
                 .order_by(col(ActorTable.last_seen_at_ingest).desc())
                 .order_by(col(ActorTable.id))
                 .limit(limit)
