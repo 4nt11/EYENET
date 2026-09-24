@@ -9,6 +9,7 @@
   import Button from '$lib/components/Button.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
   import RangeSlider from '$lib/components/RangeSlider.svelte';
+  import Dropdown from '$lib/components/Dropdown.svelte';
   import {
     actorCtx,
     actorView,
@@ -39,6 +40,10 @@
     { v: 'handle', l: 'Handle' }
   ];
   function setBot(v) { actorFilters.isBot = v; applyFilters(); }
+  let groupDdOpts = $derived([
+    { v: '', l: 'All groups' },
+    ...groupOptions.list.map((g) => ({ v: g.id, l: g.label }))
+  ]);
 
   const OBS_COLUMNS = [
     { key: 'ts', header: 'Timestamp', mono: true, width: '150px' },
@@ -233,18 +238,13 @@
 
 {#snippet filterbar()}
   <div class="fcount">{actorCtx.total ?? actorCtx.list.length} actor{(actorCtx.total ?? actorCtx.list.length) === 1 ? '' : 's'}</div>
-  <select class="fsel" bind:value={actorFilters.sort} onchange={applyFilters}>
-    {#each SORT_OPTS as o}<option value={o.v}>{o.l}</option>{/each}
-  </select>
+  <Dropdown options={SORT_OPTS.map((o) => ({ v: o.v, l: o.l }))} bind:value={actorFilters.sort} onchange={applyFilters} minWidth="148px" />
   <div class="seg">
     <button class:on={actorFilters.isBot === null} onclick={() => setBot(null)}>All</button>
     <button class:on={actorFilters.isBot === false} onclick={() => setBot(false)}>Users</button>
     <button class:on={actorFilters.isBot === true} onclick={() => setBot(true)}>Bots</button>
   </div>
-  <select class="fsel" bind:value={actorFilters.groupId} onchange={applyFilters}>
-    <option value="">All groups</option>
-    {#each groupOptions.list as g}<option value={g.id}>{g.label}</option>{/each}
-  </select>
+  <Dropdown options={groupDdOpts} bind:value={actorFilters.groupId} onchange={applyFilters} minWidth="140px" />
   {#if actorBounds.maxMessages > 0}
     <RangeSlider label="messages" max={actorBounds.maxMessages}
       bind:low={actorFilters.minMessages} bind:high={actorFilters.maxMessages} onchange={applyFilters} />
