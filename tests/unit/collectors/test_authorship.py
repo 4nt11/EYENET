@@ -8,11 +8,19 @@ from types import SimpleNamespace
 import pytest
 from telethon.tl.types import PeerChannel, PeerUser, User
 
-from eyenet.collectors.telegram.real import _authorship
+from eyenet.collectors.telegram.real import _authorship, _group_platform_id
 
 
 def _msg(sender_id: int, fwd: object | None = None) -> SimpleNamespace:
     return SimpleNamespace(sender_id=sender_id, fwd_from=fwd)
+
+
+@pytest.mark.unit
+def test_group_platform_id_canonical() -> None:
+    # Public group -> @username; else the raw POSITIVE id (never the -100 form),
+    # so ingest and enumerate agree on one row per group.
+    assert _group_platform_id("cvv190logs", 3573398394) == "@cvv190logs"
+    assert _group_platform_id(None, 3914110555) == "3914110555"
 
 
 @pytest.mark.unit
