@@ -423,6 +423,128 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/crews:
+    post:
+      tags: [crews]
+      operationId: crews_create
+      summary: Create a manual (operator-curated) crew.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateManualCrewRequest' }
+      responses:
+        "201":
+          description: The created crew id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateManualCrewResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    get:
+      tags: [crews]
+      operationId: crews_list
+      summary: List manual crews, newest-updated first.
+      responses:
+        "200":
+          description: All manual crews.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManualCrewList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/crews/{crew_id}:
+    get:
+      tags: [crews]
+      operationId: crews_get
+      summary: A manual crew with its members.
+      parameters:
+        - name: crew_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Crew detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManualCrewDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    delete:
+      tags: [crews]
+      operationId: crews_delete
+      summary: Delete a manual crew.
+      parameters:
+        - name: crew_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/crews/{crew_id}/members:
+    post:
+      tags: [crews]
+      operationId: crews_add_member
+      summary: Add an actor to a manual crew (by actor id or handle).
+      parameters:
+        - name: crew_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddCrewMemberRequest' }
+      responses:
+        "200":
+          description: The updated crew.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManualCrewDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/crews/{crew_id}/members/{actor_id}:
+    delete:
+      tags: [crews]
+      operationId: crews_remove_member
+      summary: Remove an actor from a manual crew.
+      parameters:
+        - name: crew_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: actor_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The updated crew.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ManualCrewDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/linker/run-infra:
     post:
       tags: [linker]
@@ -3474,6 +3596,69 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ActorGroupSummary' }
         count: { type: integer, minimum: 0 }
+    CreateManualCrewRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:  { type: string, minLength: 1, maxLength: 256 }
+        notes: { type: string, nullable: true, maxLength: 4096 }
+        members:
+          type: array
+          items: { type: string, format: uuid }
+    CreateManualCrewResult:
+      type: object
+      additionalProperties: false
+      required: [crew_id]
+      properties:
+        crew_id: { type: string, format: uuid }
+    ManualCrewSummary:
+      type: object
+      additionalProperties: false
+      required: [crew_id, name, member_count, updated_at]
+      properties:
+        crew_id:      { type: string, format: uuid }
+        name:         { type: string, maxLength: 256 }
+        notes:        { type: string, nullable: true }
+        member_count: { type: integer, minimum: 0 }
+        updated_at:   { type: string, format: date-time }
+    ManualCrewList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ManualCrewSummary' }
+        count: { type: integer, minimum: 0 }
+    ManualCrewMemberEntry:
+      type: object
+      additionalProperties: false
+      required: [actor_id, added_at]
+      properties:
+        actor_id:     { type: string, format: uuid }
+        handle:       { type: string, nullable: true }
+        display_name: { type: string, nullable: true }
+        added_at:     { type: string, format: date-time }
+    ManualCrewDetail:
+      type: object
+      additionalProperties: false
+      required: [crew_id, name, created_at, updated_at]
+      properties:
+        crew_id:    { type: string, format: uuid }
+        name:       { type: string, maxLength: 256 }
+        notes:      { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/ManualCrewMemberEntry' }
+    AddCrewMemberRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        actor_id: { type: string, format: uuid, nullable: true }
+        handle:   { type: string, nullable: true, maxLength: 256 }
     OpenCrewCaseRequest:
       type: object
       additionalProperties: false

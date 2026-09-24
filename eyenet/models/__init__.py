@@ -49,6 +49,7 @@ from .identity import (
 )
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
+from .manual_crew import ManualCrewMemberTable, ManualCrewTable
 from .linkage_verifier_result import LinkageVerifierResultTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .message import AttachmentTable, ContentTemplateTable, MessageTable
@@ -103,6 +104,8 @@ __all__ = [
     "LinkageEventLogTable",
     "LinkageTable",
     "LinkageVerifierResultTable",
+    "ManualCrewMemberTable",
+    "ManualCrewTable",
     "MembershipTable",
     "MessageObservationTable",
     "MessageTable",

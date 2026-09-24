@@ -18,6 +18,7 @@ from fastapi import APIRouter
 from eyenet.api.v1.actor_groups.api_list_actor_groups import router as actor_groups_router
 from eyenet.api.v1.actor_groups.api_open_crew_case import router as actor_groups_case_router
 from eyenet.api.v1.actor_groups.api_sweep_crew_cases import router as actor_groups_sweep_router
+from eyenet.api.v1.crews.api_crews import router as crews_router
 
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
@@ -237,6 +238,7 @@ v1_router.include_router(auth_register_signing_key_router)
 v1_router.include_router(actor_groups_router)  # /actor-groups (literal) before /actors/{id}
 v1_router.include_router(actor_groups_case_router)
 v1_router.include_router(actor_groups_sweep_router)
+v1_router.include_router(crews_router)  # /crews (literal) before /crews/{id}
 v1_router.include_router(linker_run_router)
 v1_router.include_router(actors_list_router)  # /actors (literal) before /actors/{id}
 v1_router.include_router(actors_get_router)
