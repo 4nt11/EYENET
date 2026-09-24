@@ -125,3 +125,19 @@ stays empty. Operators see "running" for a collector that ingests nothing.
 Depends on the control/data-plane binding above. Consider whether the supervisor
 should actually *launch* the data plane (spawn the collector) rather than only
 reconcile a flag.
+
+## QR login — QR code does not regenerate in the UI on expiry
+
+The server driver (`eyenet/api/auth/_qr_login.py` `_run_login`) DOES call
+`qr.recreate()` on `qr.wait` timeout and updates `state.qr_url`, and the poll
+returns the fresh `qr_url` — but in practice the displayed QR does not refresh
+before Telegram's ~30s token expiry, so a slow scan fails against a stale code.
+Observed live 2026-09-23; provisioning itself works (scan promptly and it's fine).
+
+**Shape when we fix it:** verify the recreate loop actually advances `state.qr_url`
+(is `_QR_REFRESH_SECONDS=25` firing? does telethon's `recreate()` mutate in place
+vs return a new object the driver must reassign?), and that the FE `$effect` in
+`src/routes/identities/provision/qr/+page.svelte` re-renders on `qrCtx.qrUrl`
+change (poll cadence is 2s, so a changed url should re-render within 2s). Likely a
+driver-side reassignment bug or the poll not observing the new url. Add a visible
+"code refreshed" tick + a manual "regenerate" button as a fallback.
