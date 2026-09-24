@@ -350,6 +350,32 @@ class TelegramCollector(CollectorSkeleton):
                 await self._join.record_artifact_validation(cmd.access_artifact_id, exc_name)
             await self._join.fail_candidate(cmd, reason=f"{exc_name}: {exc}")
 
+    async def _resolve_public_entity(self, platform_groupid: str) -> object:
+        """Resolve a public-identifier group to a telethon entity for joining.
+
+        An ``@username`` resolves directly. A bare numeric id (a group with no
+        public username) is NOT resolvable via ``get_entity(str)`` — telethon
+        holds no access_hash for a raw id — so fall back to the account's dialog
+        list, which carries the access_hash for every group the account is
+        already a member of (the common case for join-at-will over visible
+        groups). ``iter_dialogs`` per numeric join is fine at operator cadence.
+        """
+        if self._client is None:
+            raise RuntimeError("client not attached")
+        try:
+            return await self._client.get_entity(platform_groupid)
+        except (ValueError, TypeError):
+            raw = _to_raw_entity_id(platform_groupid)  # raises ValueError if @username
+            async for dialog in self._client.iter_dialogs():
+                ent = dialog.entity
+                ent_id = getattr(ent, "id", None)
+                if isinstance(ent_id, int) and _strip_100(ent_id) == raw:
+                    return ent
+            raise ValueError(
+                f"no dialog matches group id {platform_groupid!r} "
+                "(account is not a member and the id has no public username)"
+            ) from None
+
     async def _handle_join(self, cmd: JoinGroupCommand) -> None:
         """Execute a supervisor-dispatched join (E5/E5.5, §4.12.4).
 
@@ -380,7 +406,7 @@ class TelegramCollector(CollectorSkeleton):
                 updates = await self._client(ImportChatInviteRequest(invite_hash))
                 entity = updates.chats[0]
             else:
-                entity = await self._client.get_entity(cmd.platform_groupid)
+                entity = await self._resolve_public_entity(cmd.platform_groupid)
                 await self._client(JoinChannelRequest(entity))
         except Exception as exc:
             await self._handle_join_error(cmd, exc)
