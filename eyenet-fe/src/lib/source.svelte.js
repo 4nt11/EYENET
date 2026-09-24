@@ -2,7 +2,7 @@
 // selecting a source fetches GET /v1/sources/{id} for its inlined active
 // domains + resolved-artifact count. Svelte 5 runes in a module = universal
 // reactive state, same shape as case.svelte.js.
-import { apiGet } from './api.js';
+import { apiGet, apiPost } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '');
 
@@ -72,5 +72,30 @@ export async function loadSourceDetail(sourceId) {
     sourceView.resolvedCount = 0;
   } finally {
     if (mine === detailSeq) sourceView.loading = false;
+  }
+}
+
+// Create-source form state + action (POST /v1/sources, write:sources).
+// Upsert-by-(kind, display_name): creating a duplicate returns the existing row.
+export const sourceCreate = $state({ submitting: false, error: null, ok: null });
+
+export async function createSource({ kind, display_name, notes }) {
+  sourceCreate.submitting = true;
+  sourceCreate.error = null;
+  sourceCreate.ok = null;
+  try {
+    const created = await apiPost(
+      '/v1/sources',
+      { kind, display_name, notes: notes || null },
+      { auth: true, headers: { 'Idempotency-Key': crypto.randomUUID() } }
+    );
+    sourceCreate.ok = `Created ${created.display_name}.`;
+    await loadSources();
+    return created.source_id;
+  } catch (e) {
+    sourceCreate.error = e.message ?? String(e);
+    return null;
+  } finally {
+    sourceCreate.submitting = false;
   }
 }
