@@ -181,7 +181,12 @@ class BaseRepository(ABC):
         instance_id: str,
         trace_id: str | None = None,
         span_id: str | None = None,
+        crew_key: str | None = None,
     ) -> CaseRow: ...
+
+    @abstractmethod
+    async def get_case_by_crew_key(self, crew_key: str) -> CaseRow | None:
+        """The crew-derived case with this crew_key (idempotency), or None."""
 
     @abstractmethod
     async def update_case(
