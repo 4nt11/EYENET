@@ -20,7 +20,7 @@ export const NAV = [
       { slug: 'personas',   label: 'Personas',   href: '/personas', built: true, desc: 'Persona detail and member list' },
       { slug: 'linkages',   label: 'Linkages',   href: '/linkages', built: true, desc: 'Linkage reads and confirm/reject/suspect decisions' },
       { slug: 'graph',      label: 'Graph',      href: '/graph', built: true, desc: 'Aggregate graph stats and actor search' },
-      { slug: 'actor-groups', label: 'Actor groups', href: '/actor-groups', future: true, desc: 'Threat-actor collectives / crews (e.g. The Gentlemen, LulzSec) · no API yet' }
+      { slug: 'actor-groups', label: 'Actor groups', href: '/actor-groups', built: true, desc: 'Crews · accounts clustered by shared operational infrastructure' }
     ]
   },
   {

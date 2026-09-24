@@ -14,6 +14,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+# === actor-groups (crews: connected components of shared-infra links) ===
+from eyenet.api.v1.actor_groups.api_list_actor_groups import router as actor_groups_router
+
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
 from eyenet.api.v1.actors.api_get_neighbors import router as actors_neighbors_router
@@ -226,6 +229,7 @@ v1_router.include_router(auth_signing_key_challenge_router)
 v1_router.include_router(auth_register_signing_key_router)
 
 # actors
+v1_router.include_router(actor_groups_router)  # /actor-groups (literal) before /actors/{id}
 v1_router.include_router(actors_list_router)  # /actors (literal) before /actors/{id}
 v1_router.include_router(actors_get_router)
 v1_router.include_router(actors_set_assessment_router)
