@@ -21,6 +21,7 @@
     loadMoreActors,
     loadGroupOptions,
     loadActorBounds,
+    resolveActorIdByHandle,
     applyFilters,
     loadActorDetail,
     saveAssessment,
@@ -52,13 +53,18 @@
     { key: 'sensitivity', header: 'Tier', mono: true, width: '90px' }
   ];
 
-  // Deep-link support: /actors?id=<uuid> (e.g. click-through from the graph).
+  // Deep-link: /actors?id=<uuid> or /actors?handle=@x (click-through from graph,
+  // crew infra chips, relationships…). An id/handle target need not be in the
+  // current (filtered/paged) list — effectiveId drives the dossier either way.
   let selectedId = $state(null);
   $effect(() => {
-    const q = $page.url.searchParams.get('id');
-    if (q) selectedId = q;
+    const id = $page.url.searchParams.get('id');
+    if (id) { selectedId = id; return; }
+    const h = $page.url.searchParams.get('handle');
+    if (h) resolveActorIdByHandle(h).then((id) => { if (id) selectedId = id; });
   });
-  let a = $derived(actorCtx.list.find((x) => x.id === selectedId) ?? actorCtx.list[0] ?? null);
+  let effectiveId = $derived(selectedId ?? actorCtx.list[0]?.id ?? null);
+  $effect(() => { if (effectiveId) loadActorDetail(effectiveId); });
   let d = $derived(actorView.detail);
 
   // Assessment editor (local draft + reason).
@@ -72,8 +78,6 @@
     assessmentReason = '';
   });
 
-  $effect(() => { if (a) loadActorDetail(a.id); });
-
   onMount(() => { loadActors(); loadGroupOptions(); loadActorBounds(); });
 
   const assessmentReady = $derived(
@@ -81,19 +85,19 @@
   );
 
   async function onSaveAssessment() {
-    const ok = await saveAssessment(a.id, assessmentDraft.trim(), assessmentReason.trim());
+    const ok = await saveAssessment(effectiveId, assessmentDraft.trim(), assessmentReason.trim());
     if (ok) editingAssessment = false;
   }
 </script>
 
 <DossierLayout listLabel="Actors"
   items={actorCtx.list.map((x) => ({ id: x.id, primary: x.isBot ? `${x.handle} 🤖` : x.handle, secondary: `${x.messageCount} msg · ${x.observationCount} obs` }))}
-  selectedId={a?.id} onSelect={(id) => (selectedId = id)}
+  selectedId={effectiveId} onSelect={(id) => (selectedId = id)}
   onLoadMore={loadMoreActors} hasMore={!!actorCtx.nextCursor}
-  selected={!!(a && d)}>
+  selected={!!d}>
 
   {#snippet title()}
-    {#if a && d}
+    {#if d}
       <span class="handle">{d.handle}</span>
       <span class="aid">{d.actorId}</span>
     {:else}
@@ -172,7 +176,7 @@
 
           <Panel title="Relationships">
             {#snippet action()}
-              <button class="tinybtn" disabled={actorView.rebuilding} onclick={() => rebuildRelations(a.id)}>
+              <button class="tinybtn" disabled={actorView.rebuilding} onclick={() => rebuildRelations(effectiveId)}>
                 {actorView.rebuilding ? 'Rebuilding…' : 'Rebuild'}
               </button>
             {/snippet}
@@ -208,7 +212,7 @@
               <div class="tabs">
                 {#each TIMELINE_TABS as tab}
                   <button class="tab" class:active={actorView.timelineKind === tab.key}
-                    onclick={() => setTimelineKind(a.id, tab.key)}>{tab.label}</button>
+                    onclick={() => setTimelineKind(effectiveId, tab.key)}>{tab.label}</button>
                 {/each}
               </div>
             {/snippet}

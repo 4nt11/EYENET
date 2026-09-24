@@ -57,6 +57,11 @@
   let addQ = $state('');
   let timer;
   function onSearch(v) { clearTimeout(timer); timer = setTimeout(() => searchCrewActors(v), 200); }
+  // A shared-infra handle indicator links to that actor's dossier; other kinds
+  // (wallets, t.me) aren't actors we hold, so they stay plain chips.
+  function infraHref(tok) {
+    return tok.startsWith('handle:') ? `/actors?handle=${encodeURIComponent(tok.slice(7))}` : null;
+  }
   function startCreate() { creating = true; newName = ''; picked = []; cq = ''; clearCrewSearch(); }
   function cancelCreate() { creating = false; clearCrewSearch(); }
   function togglePick(a) {
@@ -158,16 +163,21 @@
           <StatTile label="Max score" value={dc.maxScore} tone="accent" />
         </div>
         <Panel title={`Shared infrastructure · ${dc.topInfra.length}`}>
-          {#if dc.topInfra.length}<div class="chips">{#each dc.topInfra as tok}<span class="chip">{prettyInfra(tok)}</span>{/each}</div>
+          {#if dc.topInfra.length}<div class="chips">
+            {#each dc.topInfra as tok}
+              {#if infraHref(tok)}<a class="chip clink" href={infraHref(tok)}>{prettyInfra(tok)}</a>
+              {:else}<span class="chip">{prettyInfra(tok)}</span>{/if}
+            {/each}
+          </div>
           {:else}<div class="rempty">No shared indicators recorded.</div>{/if}
         </Panel>
         <Panel title={`Links · ${dc.edgeCount}`}>
           {#if dc.links.length}
-            {#each dc.links as l}<div class="lrow"><span class="lpair">{l.a} <span class="larrow">↔</span> {l.b}</span><span class="lshared">{l.shared.join(', ')}</span><span class="lscore">{l.score.toFixed(2)}</span></div>{/each}
+            {#each dc.links as l}<div class="lrow"><span class="lpair"><a class="clink" href={`/actors?id=${l.aId}`}>{l.a}</a> <span class="larrow">↔</span> <a class="clink" href={`/actors?id=${l.bId}`}>{l.b}</a></span><span class="lshared">{l.shared.join(', ')}</span><span class="lscore">{l.score.toFixed(2)}</span></div>{/each}
           {:else}<div class="rempty">No links recorded.</div>{/if}
         </Panel>
         <Panel title={`Members · ${dc.members.length}`}>
-          {#each dc.members as m}<div class="mrow"><span class="mlabel">{m.label}</span><span class="mid">{m.actor_id.slice(0, 8)}</span></div>{/each}
+          {#each dc.members as m}<div class="mrow"><a class="mlabel clink" href={`/actors?id=${m.actor_id}`}>{m.label}</a><span class="mid">{m.actor_id.slice(0, 8)}</span></div>{/each}
         </Panel>
       </div>
     {:else if selKind === 'manual' && manualCrewView.detail}
@@ -182,7 +192,7 @@
         </Panel>
         <Panel title={`Members · ${d.members.length}`}>
           {#each d.members as m}
-            <div class="mrow"><span class="mlabel">{m.handle}{#if m.displayName} · {m.displayName}{/if}</span><button class="rm" disabled={manualCrewView.busy} onclick={() => removeMember(selectedId, m.actor_id)}>remove</button></div>
+            <div class="mrow"><a class="mlabel clink" href={`/actors?id=${m.actor_id}`}>{m.handle}{#if m.displayName} · {m.displayName}{/if}</a><button class="rm" disabled={manualCrewView.busy} onclick={() => removeMember(selectedId, m.actor_id)}>remove</button></div>
           {:else}<div class="rempty">No members yet. Search above to add.</div>{/each}
         </Panel>
       </div>
@@ -222,6 +232,10 @@
   .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
   .chip { font-family: var(--font-mono); font-size: var(--fs-12); padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-body); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chip.pick { cursor: pointer; background: var(--accent-fill); border-color: var(--accent); color: var(--text); }
+  .clink { color: var(--accent-text); text-decoration: none; }
+  .clink:hover { text-decoration: underline; }
+  a.chip.clink { color: var(--text-body); }
+  a.chip.clink:hover { border-color: var(--accent); color: var(--accent-text); text-decoration: none; }
 
   .lrow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 48px; gap: 10px; align-items: baseline; padding: 6px 12px; border-bottom: 1px solid var(--border); }
   .lrow:last-child { border-bottom: none; }

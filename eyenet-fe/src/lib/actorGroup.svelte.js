@@ -29,6 +29,8 @@ function mapCrew(c, i) {
     links: (c.links ?? []).map((l) => ({
       a: lbl(l.actor_a_id),
       b: lbl(l.actor_b_id),
+      aId: l.actor_a_id,
+      bId: l.actor_b_id,
       score: l.score,
       shared: (l.shared ?? []).map(prettyInfra)
     })),

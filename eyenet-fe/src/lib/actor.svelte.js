@@ -62,6 +62,19 @@ function _query(extra = '') {
   return `/v1/actors?${p.toString()}${extra}`;
 }
 
+// Resolve an @handle to an actor id (for cross-page links from infra chips etc.).
+// Reuses the actors-only graph search; returns the top match's id or null.
+export async function resolveActorIdByHandle(handle) {
+  const term = String(handle ?? '').replace(/^@/, '').trim();
+  if (!term) return null;
+  try {
+    const p = await apiGet(`/v1/graph/search?q=${encodeURIComponent(term)}&limit=1`, { auth: true });
+    return p.items?.[0]?.actor_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Roster-wide slider ceilings; fetched once, sets the initial max thumbs to full.
 export async function loadActorBounds() {
   try {
