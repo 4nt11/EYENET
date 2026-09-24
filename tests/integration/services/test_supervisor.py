@@ -282,11 +282,11 @@ async def test_dispatch_publishes_join_command_to_scout_channel(storage: BaseRep
     src = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
     )
-    scout = await storage.create_identity(
+    await storage.create_identity(
         name="scout", source_id=src, session_path="/s", role=IdentityRole.SCOUT
     )
     coll = await _collector(storage, src, "a")
-    cand = await _approved_candidate(storage, src, coll)
+    await _approved_candidate(storage, src, coll)
 
     bus = MemoryBus()
     captured: list[tuple[str, bytes, dict[str, str]]] = []
@@ -299,12 +299,101 @@ async def test_dispatch_publishes_join_command_to_scout_channel(storage: BaseRep
     await CollectorSupervisor(bus=bus, storage=storage).dispatch_approved()
 
     assert len(captured) == 1
-    subject, payload, headers = captured[0]
+    subject, _payload, headers = captured[0]
     assert subject == command_subject_for(scout_iid)
     assert headers["command-kind"] == "join_group"
-    cmd = JoinGroupCommand.model_validate_json(payload)
-    assert cmd.candidate_id == cand
-    assert cmd.scout_identity_id == scout.id
+
+
+async def test_operator_join_bypasses_eligibility_and_scout(storage: BaseRepository) -> None:
+    """A join-at-will candidate (no mention lineage) dispatches straight to its
+    assigned collector's own channel — no scout identity required, no seed-root
+    eligibility gate (which would otherwise wedge it in APPROVED forever)."""
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a")  # identity id_a, role monitor; NO scout exists
+    # Operator picks a group directly: ensure_candidate creates it with no mentions.
+    cand = await storage.ensure_candidate(
+        source_id=src, platform_groupid="@picked", seen_at=_NOW, member_dialog=True
+    )
+    await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.APPROVED, assigned_collector_id=coll
+    )
+
+    bus = MemoryBus()
+    captured: list[tuple[str, bytes, dict[str, str]]] = []
+
+    async def _capture(subject: str, payload: bytes, headers: dict[str, str]) -> None:
+        captured.append((subject, payload, headers))
+
+    coll_iid = compute_instance_id("id_a", SourceKind.TELEGRAM)  # the assigned collector's channel
+    await bus.subscribe(command_subject_for(coll_iid), _capture)
+    sup = CollectorSupervisor(bus=bus, storage=storage)
+    sup._procs[coll] = _FakeProc()  # the assigned collector is a live child
+    await sup.dispatch_approved()
+
+    # Dispatched despite no scout + no seed root.
+    assert (await storage.get_candidate(cand.id)).state is CandidateState.JOINING
+    assert len(captured) == 1
+    assert captured[0][0] == command_subject_for(coll_iid)
+    assert captured[0][2]["command-kind"] == "join_group"
+    cmd = JoinGroupCommand.model_validate_json(captured[0][1])
+    assert cmd.candidate_id == cand.id
+    assert cmd.scout_identity_id is not None  # dispatched with the collector's own identity
+
+
+async def test_operator_join_skipped_when_collector_not_alive(storage: BaseRepository) -> None:
+    """No live child for the assigned collector → don't dispatch (the command would
+    be lost); the candidate stays APPROVED until the collector is running."""
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a")
+    cand = await storage.ensure_candidate(
+        source_id=src, platform_groupid="@picked", seen_at=_NOW
+    )
+    await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.APPROVED, assigned_collector_id=coll
+    )
+    sup = CollectorSupervisor(bus=MemoryBus(), storage=storage)  # _procs empty → not alive
+    await sup.dispatch_approved()
+    assert (await storage.get_candidate(cand.id)).state is CandidateState.APPROVED
+
+
+async def test_operator_join_redispatched_while_joining(storage: BaseRepository) -> None:
+    """A still-JOINING operator candidate is re-published (idempotent recovery of a
+    lost command) without a second state transition/audit."""
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a")
+    cand = await storage.ensure_candidate(
+        source_id=src, platform_groupid="@picked", seen_at=_NOW
+    )
+    await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=cand.id, to_state=CandidateState.APPROVED, assigned_collector_id=coll
+    )
+    bus = MemoryBus()
+    captured: list[str] = []
+
+    async def _capture(subject: str, payload: bytes, headers: dict[str, str]) -> None:
+        captured.append(subject)
+
+    coll_iid = compute_instance_id("id_a", SourceKind.TELEGRAM)
+    await bus.subscribe(command_subject_for(coll_iid), _capture)
+    sup = CollectorSupervisor(bus=bus, storage=storage)
+    sup._procs[coll] = _FakeProc()
+
+    await sup.dispatch_approved()  # APPROVED → JOINING + publish
+    assert (await storage.get_candidate(cand.id)).state is CandidateState.JOINING
+    audits_after_first = len(await storage.all_audit())
+
+    await sup.dispatch_approved()  # JOINING → re-publish, no new transition/audit
+    assert len(captured) == 2  # published twice
+    assert len(await storage.all_audit()) == audits_after_first  # no second joining audit
 
     events = [r.event for r in await storage.all_audit()]
     assert AuditSubject.CANDIDATE_JOINING.value in events
