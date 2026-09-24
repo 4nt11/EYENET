@@ -19,6 +19,9 @@ Storage, audit emitter, JWT verifying keys, and the auth cache live on
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,6 +32,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from eyenet.api.auth import AuthCache, load_mfa_key, load_pat_pepper, load_verifying_keys
+from eyenet.api.auth._qr_login import QrLoginRegistry
 from eyenet.api.deps import (
     AuthError,
     ConflictError,
@@ -76,6 +80,20 @@ def _problem_response(problem: ProblemDetail, status_code: int) -> JSONResponse:
     )
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Run the QR-login reaper for the app's lifetime; disconnect all live
+    Telethon clients on shutdown (the registry holds outbound connections that
+    passive eviction can't close)."""
+    registry: QrLoginRegistry = app.state.qr_logins
+    reaper = asyncio.create_task(registry.reap_loop())
+    try:
+        yield
+    finally:
+        reaper.cancel()
+        await registry.shutdown()
+
+
 def create_app(  # noqa: PLR0915 - boot wiring plus every §7 exception handler lives here
     *,
     storage: BaseRepository,
@@ -93,6 +111,7 @@ def create_app(  # noqa: PLR0915 - boot wiring plus every §7 exception handler 
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
+        lifespan=_lifespan,
     )
 
     bus_publisher = publisher or BusEnvelopePublisher(MemoryBus())
@@ -108,9 +127,17 @@ def create_app(  # noqa: PLR0915 - boot wiring plus every §7 exception handler 
     app.state.mfa_key = load_mfa_key(data_dir)
     app.state.pat_pepper = load_pat_pepper(data_dir)
     app.state.exoneration_signer = load_exoneration_key(data_dir)
-    app.state.session_key = load_session_key(data_dir)
+    session_key = load_session_key(data_dir)
+    app.state.session_key = session_key
     app.state.data_dir = data_dir
     app.state.auth_cache = AuthCache.from_env()
+    # Live-client registry for the QR-login flow; its reaper runs under _lifespan.
+    app.state.qr_logins = QrLoginRegistry(
+        storage=storage,
+        session_key=session_key,
+        data_dir=data_dir,
+        audit=app.state.audit,
+    )
 
     # M9.6 metrics (§11.7): sets the MeterProvider when a scrape/OTLP surface is
     # enabled via env; a no-op otherwise. These are boot-time optimism — the
