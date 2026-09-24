@@ -198,9 +198,7 @@ async def test_spawn_builds_collector_argv(
 
     # A stale IN_USE claim from a hard-killed prior child must be cleared so the
     # respawn can claim the identity.
-    await storage.set_identity_state(
-        identity_id=collector.identity_id, state=IdentityState.IN_USE
-    )
+    await storage.set_identity_state(identity_id=collector.identity_id, state=IdentityState.IN_USE)
 
     monkeypatch.setattr(mod.asyncio, "create_subprocess_exec", _fake_exec)
     sup = CollectorSupervisor(bus=MemoryBus(), storage=storage)
@@ -358,9 +356,7 @@ async def test_operator_join_skipped_when_collector_not_alive(storage: BaseRepos
         kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
     )
     coll = await _collector(storage, src, "a")
-    cand = await storage.ensure_candidate(
-        source_id=src, platform_groupid="@picked", seen_at=_NOW
-    )
+    cand = await storage.ensure_candidate(source_id=src, platform_groupid="@picked", seen_at=_NOW)
     await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
     await storage.transition_candidate(
         candidate_id=cand.id, to_state=CandidateState.APPROVED, assigned_collector_id=coll
@@ -377,9 +373,7 @@ async def test_operator_join_redispatched_while_joining(storage: BaseRepository)
         kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
     )
     coll = await _collector(storage, src, "a")
-    cand = await storage.ensure_candidate(
-        source_id=src, platform_groupid="@picked", seen_at=_NOW
-    )
+    cand = await storage.ensure_candidate(source_id=src, platform_groupid="@picked", seen_at=_NOW)
     await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
     await storage.transition_candidate(
         candidate_id=cand.id, to_state=CandidateState.APPROVED, assigned_collector_id=coll
