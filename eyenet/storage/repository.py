@@ -991,6 +991,41 @@ class BaseRepository(ABC):
         """(outbound, inbound) relation neighbors; each row joins the other actor:
         (other_actor_id, handle, display_name, kind, count, last_seen)."""
 
+    # --- manual (operator-curated) crews ---------------------------------
+    @abstractmethod
+    async def create_manual_crew(
+        self, *, name: str, notes: str | None, created_by: UUID, now: datetime
+    ) -> UUID: ...
+
+    @abstractmethod
+    async def manual_crew_exists(self, crew_id: UUID) -> bool: ...
+
+    @abstractmethod
+    async def list_manual_crews(self) -> list[tuple[UUID, str, str | None, int, datetime]]:
+        """Manual crews, newest-updated first: (id, name, notes, member_count, updated_at)."""
+
+    @abstractmethod
+    async def get_manual_crew(
+        self, crew_id: UUID
+    ) -> tuple[
+        str, str | None, datetime, datetime, list[tuple[UUID, str | None, str | None, datetime]]
+    ] | None:
+        """(name, notes, created_at, updated_at, members) or None; member =
+        (actor_id, handle, display_name, added_at)."""
+
+    @abstractmethod
+    async def add_manual_crew_member(
+        self, *, crew_id: UUID, actor_id: UUID, now: datetime
+    ) -> bool: ...
+
+    @abstractmethod
+    async def remove_manual_crew_member(
+        self, *, crew_id: UUID, actor_id: UUID, now: datetime
+    ) -> None: ...
+
+    @abstractmethod
+    async def delete_manual_crew(self, crew_id: UUID) -> None: ...
+
     @abstractmethod
     async def messages_for_actor(
         self,

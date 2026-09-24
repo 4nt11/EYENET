@@ -6,6 +6,9 @@
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
   import { actorGroupCtx, crewCase, crewSweep, linkerRun, loadActorGroups, openCase, sweepCases, runInfra, detectCopypasta, prettyInfra } from '$lib/actorGroup.svelte.js';
+  import { manualCrewCtx, manualCrewView, loadManualCrews, loadManualCrewDetail, createCrew, addMember, removeMember, deleteCrew } from '$lib/manualCrew.svelte.js';
+
+  let tab = $state('derived'); // 'derived' | 'manual'
 
   async function runSweep() {
     const n = await sweepCases();
@@ -26,12 +29,46 @@
     actorGroupCtx.list.map((x) => ({ id: x.id, primary: x.name, secondary: `${x.size} accounts` }))
   );
 
-  onMount(loadActorGroups);
+  // Manual crews
+  let mSelectedId = $state(null);
+  let mc = $derived(
+    manualCrewCtx.list.find((x) => x.id === mSelectedId) ?? manualCrewCtx.list[0] ?? null
+  );
+  let mListItems = $derived(
+    manualCrewCtx.list.map((x) => ({ id: x.id, primary: x.name, secondary: `${x.memberCount} members` }))
+  );
+  $effect(() => { if (tab === 'manual' && mc) loadManualCrewDetail(mc.id); });
+
+  let newName = $state('');
+  let addHandle = $state('');
+
+  async function onCreate() {
+    if (!newName.trim()) return;
+    const id = await createCrew(newName.trim(), '');
+    newName = '';
+    mSelectedId = id;
+  }
+  async function onAdd() {
+    if (!addHandle.trim() || !mc) return;
+    const ok = await addMember(mc.id, addHandle.trim());
+    if (ok) addHandle = '';
+  }
+  async function onDelete() {
+    if (mc) await deleteCrew(mc.id);
+  }
+
+  onMount(() => { loadActorGroups(); loadManualCrews(); });
 </script>
 
 <main class="wrap">
   <SectionHeader group="Attribution" slug="actor-groups" title="Actor groups" />
 
+  <div class="tabbar">
+    <button class="tabx" class:on={tab === 'derived'} onclick={() => (tab = 'derived')}>Derived</button>
+    <button class="tabx" class:on={tab === 'manual'} onclick={() => (tab = 'manual')}>Manual</button>
+  </div>
+
+{#if tab === 'derived'}
   <div class="toolbar">
     <Button variant="primary" size="sm" disabled={linkerRun.submitting} onclick={rebuildCrews}>
       {linkerRun.submitting ? 'Running…' : 'Rebuild crews (infra linker)'}
@@ -109,6 +146,57 @@
       </p>
     {/if}
   </div>
+{:else}
+  <div class="toolbar">
+    <input class="fin" type="text" placeholder="New crew name…" bind:value={newName}
+      onkeydown={(e) => e.key === 'Enter' && onCreate()} />
+    <Button variant="primary" size="sm" disabled={!newName.trim()} onclick={onCreate}>Create crew</Button>
+    {#if manualCrewCtx.error}<span class="err">{manualCrewCtx.error}</span>{/if}
+  </div>
+
+  <div class="split">
+    {#if manualCrewCtx.list.length}
+      <EntityList label="Manual crews" items={mListItems} selectedId={mc?.id} onSelect={(id) => (mSelectedId = id)} />
+
+      <section class="detail">
+        {#if manualCrewView.detail}
+          {@const d = manualCrewView.detail}
+          <div class="head">
+            <span class="name">{d.name}</span>
+            <div class="badges">
+              <Badge tone="accent">{d.members.length} members</Badge>
+              <button class="danger" onclick={onDelete}>Delete crew</button>
+            </div>
+          </div>
+
+          <Panel title="Add member">
+            <div class="addrow">
+              <input class="fin" type="text" placeholder="@handle" bind:value={addHandle}
+                onkeydown={(e) => e.key === 'Enter' && onAdd()} />
+              <Button variant="primary" size="sm" disabled={manualCrewView.busy || !addHandle.trim()} onclick={onAdd}>Add</Button>
+              {#if manualCrewView.msg}<span class="err">{manualCrewView.msg}</span>{/if}
+            </div>
+          </Panel>
+
+          <Panel title={`Members · ${d.members.length}`}>
+            {#each d.members as m}
+              <div class="mrow">
+                <span class="mlabel">{m.handle}{#if m.displayName} · {m.displayName}{/if}</span>
+                <button class="rm" disabled={manualCrewView.busy} onclick={() => removeMember(mc.id, m.actor_id)}>remove</button>
+              </div>
+            {:else}
+              <div class="empty">No members yet. Add one by @handle above.</div>
+            {/each}
+          </Panel>
+        {:else}
+          <p class="pnote">{manualCrewView.loading ? 'Loading…' : 'Select a crew.'}</p>
+        {/if}
+      </section>
+    {:else}
+      <p class="pnote">{manualCrewCtx.loaded ? 'No manual crews yet. Name one above to start curating.' : 'Loading…'}</p>
+    {/if}
+  </div>
+{/if}
 </main>
 
 <style>
@@ -138,6 +226,17 @@
   .caselink:hover { text-decoration: underline; }
   .err { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red); padding: 4px 0; }
   .toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 20px 0; }
+  .tabbar { display: flex; gap: 4px; padding: 8px 20px 0; }
+  .tabx { appearance: none; padding: 5px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-12); cursor: pointer; }
+  .tabx:hover { background: var(--panel); }
+  .tabx.on { color: var(--text); border-color: var(--accent); background: var(--accent-fill); }
+  .fin { flex: 0 1 260px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; }
+  .fin:focus { outline: none; border-color: var(--accent); }
+  .addrow { display: flex; align-items: center; gap: 10px; padding: 12px; }
+  .danger { appearance: none; padding: 3px 10px; border: 1px solid var(--red-border, var(--border-strong)); border-radius: var(--radius); background: transparent; color: var(--red-text); font-family: var(--font-sans); font-size: var(--fs-11); cursor: pointer; }
+  .danger:hover { background: var(--red-fill, var(--panel-2)); }
+  .rm { appearance: none; background: none; border: none; cursor: pointer; padding: 0; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--red-text); }
+  .rm:disabled { opacity: 0.5; cursor: default; }
   .note { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   @media (max-width: 900px) { .split { grid-template-columns: 1fr; overflow: auto; } }
 </style>
