@@ -130,3 +130,38 @@ async def test_open_crew_case_promotes_and_is_idempotent(storage: BaseRepository
     assert r1.crew_key == "handle:wbpay_mm1888"
     case = await storage.get_case_by_crew_key("handle:wbpay_mm1888")
     assert case is not None and case.id == r1.case_id
+
+
+@pytest.mark.unit
+async def test_sweep_cases_opens_big_crews(storage: BaseRepository) -> None:
+    from eyenet.api.v1.actor_groups.api_sweep_crew_cases import actor_groups_sweep_cases
+    from eyenet.api.v1.schemas.actor_groups import SweepCrewCasesRequest
+    from eyenet.bus.memory import MemoryBus
+    from eyenet.bus.publisher import BusEnvelopePublisher
+    from eyenet.telemetry.audit import AuditEmitter
+
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="tg", created_at=datetime.now(tz=UTC)
+    )
+    members = [await _actor(storage, src, str(i)) for i in range(8)]
+    for other in members[1:]:
+        await storage.insert_proposed_linkage(
+            actor_a=members[0],
+            actor_b=other,
+            method="shared_infra",
+            score=0.9,
+            evidence={"shared": ["handle:xldf_bot"]},
+        )
+    audit = AuditEmitter(
+        BusEnvelopePublisher(MemoryBus()), storage, service="api", instance_id="api-0"
+    )
+    writer = CurrentUser(
+        user_id=uuid4(),
+        username="op",
+        role=SystemUserRole.ADMIN,
+        effective_scopes=frozenset({"write:cases"}),
+        token_expires_at=None,
+    )
+    res = await actor_groups_sweep_cases(SweepCrewCasesRequest(), writer, storage, audit)
+    assert res.opened == 1
+    assert await storage.get_case_by_crew_key("handle:xldf_bot") is not None

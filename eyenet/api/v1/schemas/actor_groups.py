@@ -62,10 +62,25 @@ class OpenCrewCaseResult(ApiSchema):
     crew_key: str
 
 
+class SweepCrewCasesRequest(ApiSchema):
+    """Body for POST /v1/actor-groups/sweep-cases — auto-open big-crew cases."""
+
+    min_size: int = Field(default=8, ge=2, description="auto-open crews with >= this many members")
+    min_score: float = Field(default=0.8, ge=0.0, le=1.0, description="and max edge score >= this")
+
+
+class SweepCrewCasesResult(ApiSchema):
+    """202 response for POST /v1/actor-groups/sweep-cases."""
+
+    opened: int = Field(ge=0, description="new cases opened this sweep")
+
+
 __all__ = [
     "ActorGroupList",
     "ActorGroupSummary",
     "CrewMember",
     "OpenCrewCaseRequest",
     "OpenCrewCaseResult",
+    "SweepCrewCasesRequest",
+    "SweepCrewCasesResult",
 ]
