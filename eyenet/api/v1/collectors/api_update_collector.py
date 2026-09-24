@@ -34,13 +34,21 @@ async def collectors_update(
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
 ) -> CollectorDetail:
-    if await storage.get_collector(collector_id) is None:
+    current = await storage.get_collector(collector_id)
+    if current is None:
         raise ResourceNotFound("collector")
     fields = body.model_fields_set
-    if "config" in fields or "instance_name" in fields or "notes" in fields:
+    # A backfill request is a one-shot flag folded into config; the supervisor
+    # dispatches BackfillCommand to the running collector on its next tick and
+    # clears the flag. Merges onto whatever config this PATCH is already writing.
+    config_update = body.config if "config" in fields else None
+    if "backfill" in fields and body.backfill:
+        config_update = dict(config_update if config_update is not None else current.config)
+        config_update["_backfill_pending"] = True
+    if config_update is not None or "instance_name" in fields or "notes" in fields:
         await storage.update_collector(
             collector_id=collector_id,
-            config=body.config if "config" in fields else None,
+            config=config_update,
             instance_name=body.instance_name if "instance_name" in fields else None,
             notes=body.notes if "notes" in fields else None,
         )

@@ -61,6 +61,7 @@ from eyenet.contracts.enums import (
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import (
+    BackfillCommand,
     JoinGroupCommand,
     LeaveGroupCommand,
     ScanVisibleGroupsCommand,
@@ -136,6 +137,7 @@ class TelegramCollector(CollectorSkeleton):
         # Held ref to the on-start visible-group scan task (RUF006: the loop only
         # weak-refs tasks, so a bare create_task can be GC'd mid-run).
         self._scan_task: asyncio.Task[None] | None = None
+        self._backfill_task: asyncio.Task[None] | None = None
         # Monotonic timestamp of the last REQUESTED-membership probe sweep.
         self._last_requested_probe: float = 0.0
         # Hot-path guard (Defect 6): lowercased event-matchable platform_groupid
@@ -251,6 +253,11 @@ class TelegramCollector(CollectorSkeleton):
                         await self.scan_visible_groups(source_id=self._source_uuid)
                 elif kind == "leave_group":
                     await self._handle_leave(LeaveGroupCommand.model_validate_json(payload))
+                elif kind == "backfill":
+                    BackfillCommand.model_validate_json(payload)
+                    # Long-running: replay history off the command handler. Held
+                    # ref so the loop's weak task ref can't GC it (RUF006).
+                    self._backfill_task = asyncio.create_task(self._run_backfill())
                 else:
                     await self._handle_join(JoinGroupCommand.model_validate_json(payload))
             except Exception as exc:
