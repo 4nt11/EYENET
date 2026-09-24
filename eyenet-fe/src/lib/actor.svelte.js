@@ -123,17 +123,35 @@ function obsValue(o) {
 
 const _BUCKET = { meta: 'activity', lexical: 'lexical', stylometric: 'stylometric' };
 
+// One BEHAVE row per primitive: a primitive is re-observed on every message, so
+// the raw stream repeats the same ~8 primitives dozens of times. Collapse to the
+// latest value per primitive (by ts) — the "current reading" that updates as new
+// observations land, instead of a wall of duplicates.
+function _latestPerPrimitive(observations) {
+  const latest = new Map();
+  for (const o of observations) {
+    const prev = latest.get(o.kind);
+    if (!prev || String(o.ts ?? '') >= String(prev.ts ?? '')) latest.set(o.kind, o);
+  }
+  return [...latest.values()];
+}
+
 function buildBehave(observations, calibration, verifier) {
   const activity = [];
   const lexical = [];
   const stylometric = [];
-  for (const o of observations) {
+  for (const o of _latestPerPrimitive(observations)) {
     const row = { primitive: o.kind, label: o.primitive ?? o.kind, value: obsValue(o), kind: o.value_kind ?? '' };
     const bucket = _BUCKET[o.primitive_namespace] ?? 'lexical';
     if (bucket === 'activity') activity.push(row);
     else if (bucket === 'stylometric') stylometric.push(row);
     else lexical.push(row);
   }
+  // Stable, readable order within each bucket.
+  const byLabel = (a, b) => a.label.localeCompare(b.label);
+  activity.sort(byLabel);
+  lexical.sort(byLabel);
+  stylometric.sort(byLabel);
   // Comparators are language-level calibration; with no per-actor pairwise
   // distance we render enabled/disabled status + the threshold (no result).
   const comparators = (calibration.comparators ?? []).map((c) => {
