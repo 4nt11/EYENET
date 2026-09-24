@@ -3429,6 +3429,7 @@ components:
           type: array
           items: { type: string, maxLength: 32 }
         score:          { type: number, format: float, nullable: true }
+        is_bot:         { type: boolean, default: false }
     CrewMember:
       type: object
       additionalProperties: false

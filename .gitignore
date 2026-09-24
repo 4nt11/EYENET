@@ -98,3 +98,6 @@ tests/fixtures/corpora/*.real.jsonl
 /rutify-users.json.bak
 # Stray planning artifacts emitted before plan-mode workflow kicked in
 /M5_PLAN.md
+
+# Claude Code session + worktrees
+.claude/

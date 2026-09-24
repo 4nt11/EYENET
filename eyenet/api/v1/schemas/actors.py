@@ -65,6 +65,7 @@ class ActorSummary(ApiSchema):
         ),
     )
     score: float | None = None
+    is_bot: bool = Field(default=False, description="Telegram's authoritative bot flag (User.bot).")
 
 
 class SetActorAssessmentRequest(ApiSchema):

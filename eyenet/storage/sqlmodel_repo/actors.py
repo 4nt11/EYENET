@@ -271,6 +271,7 @@ class ActorsMixin:
         handle: str | None,
         display_name: str | None,
         seen_at: datetime,
+        is_bot: bool = False,
     ) -> UUID:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(select(ActorTable).where(ActorTable.actor_key == actor_key))
@@ -286,12 +287,15 @@ class ActorsMixin:
                     last_seen_at_ingest=seen_at,
                     first_seen_at_source=seen_at,
                     last_seen_at_source=seen_at,
+                    is_bot_self_declared=is_bot,
                 )
                 session.add(row)
                 await session.flush()
             else:
                 row.current_handle = handle or row.current_handle
                 row.current_display_name = display_name or row.current_display_name
+                # Sticky: once Telegram tells us it's a bot, keep it flagged.
+                row.is_bot_self_declared = is_bot or row.is_bot_self_declared
                 li = row.last_seen_at_ingest
                 stored_ingest = li if li.tzinfo is not None else li.replace(tzinfo=UTC)
                 row.last_seen_at_ingest = max(stored_ingest, seen_at)

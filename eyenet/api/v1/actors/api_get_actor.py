@@ -47,6 +47,7 @@ async def actors_get(
         primary_handle=actor_primary_handle(actor),
         platforms=platforms,
         score=None,
+        is_bot=getattr(actor, "is_bot_self_declared", False),
         first_seen=actor.first_seen_at_source or actor.first_seen_at_ingest,
         last_seen=actor.last_seen_at_source or actor.last_seen_at_ingest,
         alias_count=len(aliases),

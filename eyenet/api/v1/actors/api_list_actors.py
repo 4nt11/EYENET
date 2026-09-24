@@ -54,6 +54,7 @@ async def actors_list(
                 primary_handle=actor_primary_handle(actor),
                 platforms=[kind] if kind is not None else [],
                 score=None,
+                is_bot=getattr(actor, "is_bot_self_declared", False),
             )
         )
     return CursorPageActorSummary(

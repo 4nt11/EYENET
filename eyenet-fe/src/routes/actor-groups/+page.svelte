@@ -101,6 +101,9 @@
   .wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .detail { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
+  /* Panels keep natural height; the column scrolls. Without this, flex-shrink
+     crushes the short infra panel to a sliver and overflow:hidden clips the chips. */
+  .detail > :global(.panel) { flex: 0 0 auto; }
   .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .name { font-family: var(--font-mono); font-size: var(--fs-16); color: var(--text-strong); letter-spacing: var(--tracking-data); }
   .badges { display: flex; gap: 8px; flex-wrap: wrap; }
