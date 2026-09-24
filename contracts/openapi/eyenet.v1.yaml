@@ -366,6 +366,63 @@ paths:
   # ────────────────────────────────────────────────────────────────────────
   # 3.2 Reads
   # ────────────────────────────────────────────────────────────────────────
+  /v1/actor-groups:
+    get:
+      tags: [actor-groups]
+      operationId: actor_groups_list
+      summary: List crews — connected components of the shared-infrastructure graph.
+      responses:
+        "200":
+          description: All crews, largest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActorGroupList' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/actor-groups/case:
+    post:
+      tags: [actor-groups]
+      operationId: actor_groups_open_case
+      summary: Promote a crew to an investigation Case (idempotent on crew key).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenCrewCaseRequest' }
+      responses:
+        "200":
+          description: The case opened (or the existing one) for this crew.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenCrewCaseResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/actor-groups/sweep-cases:
+    post:
+      tags: [actor-groups]
+      operationId: actor_groups_sweep_cases
+      summary: Auto-open Cases for large, high-confidence crews (idempotent).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SweepCrewCasesRequest' }
+      responses:
+        "202":
+          description: Number of new crew cases opened.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SweepCrewCasesResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors:
     get:
       tags: [actors]
@@ -3300,6 +3357,68 @@ components:
           type: array
           items: { type: string, maxLength: 32 }
         score:          { type: number, format: float, nullable: true }
+    CrewMember:
+      type: object
+      additionalProperties: false
+      required: [actor_id, label]
+      properties:
+        actor_id: { type: string, format: uuid }
+        label:    { type: string, maxLength: 256 }
+    ActorGroupSummary:
+      type: object
+      additionalProperties: false
+      required: [size, members, edge_count, max_score]
+      properties:
+        size:       { type: integer, minimum: 2 }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/CrewMember' }
+        top_infra:
+          type: array
+          items: { type: string }
+        edge_count: { type: integer, minimum: 1 }
+        max_score:  { type: number, format: float, minimum: 0.0, maximum: 1.0 }
+    ActorGroupList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ActorGroupSummary' }
+        count: { type: integer, minimum: 0 }
+    OpenCrewCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          minItems: 2
+          items: { type: string, format: uuid }
+        top_infra:
+          type: array
+          items: { type: string }
+        title: { type: string, maxLength: 256, nullable: true }
+    OpenCrewCaseResult:
+      type: object
+      additionalProperties: false
+      required: [case_id, crew_key]
+      properties:
+        case_id:  { type: string, format: uuid }
+        crew_key: { type: string }
+    SweepCrewCasesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        min_size:  { type: integer, minimum: 2, default: 8 }
+        min_score: { type: number, format: float, minimum: 0.0, maximum: 1.0, default: 0.8 }
+    SweepCrewCasesResult:
+      type: object
+      additionalProperties: false
+      required: [opened]
+      properties:
+        opened: { type: integer, minimum: 0 }
     ActorDetail:
       allOf:
         - { $ref: '#/components/schemas/ActorSummary' }

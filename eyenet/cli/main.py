@@ -454,6 +454,41 @@ def detect_copypasta(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("crew-cases")
+def crew_cases(  # pragma: no cover
+    as_user: str = typer.Option(..., "--as", help="username to own the auto-opened cases"),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    min_size: int = typer.Option(8, "--min-size", help="auto-open crews with >= N members"),
+    min_score: float = typer.Option(0.8, "--min-score", help="and max edge score >= this"),
+) -> None:
+    """Auto-open Cases for large, high-confidence crews (anti-spam §3).
+
+    Idempotent: crews that already have a case (by crew key) are skipped. The long
+    tail is left for operator promotion via POST /v1/actor-groups/case.
+    """
+    from eyenet.linker.crew_cases import open_cases_for_big_crews  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        user = await storage.get_system_user_by_username(as_user)
+        if user is None:
+            await storage.close()
+            raise typer.BadParameter(f"unknown user: {as_user!r}")
+        n = await open_cases_for_big_crews(
+            storage,
+            opened_by_user_id=user.id,
+            service="cli",
+            instance_id="crew-cases",
+            min_size=min_size,
+            min_score=min_score,
+        )
+        await storage.close()
+        typer.echo(f"opened {n} crew cases")
+
+    asyncio.run(_main())
+
+
 @app.command("verifier")
 def verifier_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
