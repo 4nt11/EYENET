@@ -423,6 +423,36 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/linker/run-infra:
+    post:
+      tags: [linker]
+      operationId: linker_run_infra
+      summary: Run the shared-infrastructure linker over stored messages (batch).
+      responses:
+        "202":
+          description: Number of shared_infra linkages proposed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunInfraResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/linker/detect-copypasta:
+    post:
+      tags: [linker]
+      operationId: linker_detect_copypasta
+      summary: Detect + flag copypasta templates over stored messages (batch).
+      responses:
+        "202":
+          description: Number of copypasta templates flagged.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectCopypastaResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors:
     get:
       tags: [actors]
@@ -3419,6 +3449,18 @@ components:
       required: [opened]
       properties:
         opened: { type: integer, minimum: 0 }
+    RunInfraResult:
+      type: object
+      additionalProperties: false
+      required: [proposed]
+      properties:
+        proposed: { type: integer, minimum: 0 }
+    DetectCopypastaResult:
+      type: object
+      additionalProperties: false
+      required: [flagged]
+      properties:
+        flagged: { type: integer, minimum: 0 }
     ActorDetail:
       allOf:
         - { $ref: '#/components/schemas/ActorSummary' }
