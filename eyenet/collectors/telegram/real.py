@@ -18,6 +18,7 @@ import hashlib
 import json
 import time as _time
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
@@ -807,16 +808,14 @@ class TelegramCollector(CollectorSkeleton):
         sent_at = msg.date.replace(tzinfo=UTC) if msg.date.tzinfo is None else msg.date
         collected_at = datetime.now(tz=UTC)
 
-        # --- actor_key ---
-        sender_id = msg.sender_id or 0
-        actor_key = "actor:" + hashlib.sha256(f"telegram||{sender_id}".encode()).hexdigest()
-
-        # --- sender metadata ---
-        handle: str | None = None
-        display_name: str | None = None
-        if isinstance(sender, User):
-            handle = f"@{sender.username}" if sender.username else None
-            display_name = " ".join(filter(None, [sender.first_name, sender.last_name])) or None
+        # --- authorship (§forward-attribution) ---
+        # A forward's author is its ORIGIN (the real content author), not the
+        # relay; a channel-broadcast's author is not an individual. Both are kept
+        # out of stylometric profiling below.
+        author = _authorship(msg, sender)
+        actor_key = author.actor_key
+        handle = author.handle
+        display_name = author.display_name
 
         # --- chat metadata ---
         platform_groupid = str(chat_id)
@@ -836,7 +835,7 @@ class TelegramCollector(CollectorSkeleton):
         actor_id = await self._storage.upsert_actor(
             source_id=self._source_uuid,
             actor_key=actor_key,
-            platform_userid=str(sender_id),
+            platform_userid=author.platform_userid,
             handle=handle,
             display_name=display_name,
             seen_at=sent_at,
@@ -857,6 +856,11 @@ class TelegramCollector(CollectorSkeleton):
                 attachments.append(att)
 
         source_uuid: UUID = self._source_uuid
+        # For a forward, the actor IS the origin author, so record it as the
+        # forward origin and note the relay (the reposter) in source_specific.
+        source_specific: dict[str, object] = {}
+        if author.relayed_by_platform_userid is not None:
+            source_specific["relayed_by_platform_userid"] = author.relayed_by_platform_userid
         msg_row = MessageTable(
             id=new_uuid7(),
             source_id=source_uuid,
@@ -872,6 +876,8 @@ class TelegramCollector(CollectorSkeleton):
             has_attachment=has_attachment,
             reply_to_msg_id=None,
             forward_of_msg_id=None,
+            forward_origin_actor_id=actor_id if author.is_forward else None,
+            source_specific=source_specific,
         )
 
         # Fix attachment message_id FK
@@ -904,10 +910,15 @@ class TelegramCollector(CollectorSkeleton):
             trace_context=TraceContext(traceparent=traceparent),
         )
 
-        await self.publisher.publish(
-            subject_for(SourceKind.TELEGRAM, self.instance_id),
-            env,
-        )
+        # Stylometric gate: only an individual's OWN words feed the profiler. A
+        # forward (text authored elsewhere) or a channel-broadcast (no individual
+        # author) is stored as evidence but NOT published to the sensor, so it
+        # can't poison an actor's writing-style profile.
+        if not (author.is_forward or author.is_channel_author):
+            await self.publisher.publish(
+                subject_for(SourceKind.TELEGRAM, self.instance_id),
+                env,
+            )
         if written:
             self._record_emission()
             self._recent.append(_time.monotonic())
@@ -977,6 +988,95 @@ class TelegramCollector(CollectorSkeleton):
 
 
 # --- helpers ---
+
+
+@dataclass(frozen=True)
+class _Authorship:
+    """Who a message is attributed to, and how it got here.
+
+    For a plain post the author IS the sender. For a FORWARD the author is the
+    forward *origin* (the real content author — a person or a source channel) and
+    the sender is only the relay, recorded in ``relayed_by_platform_userid``.
+    ``is_channel_author`` marks a non-individual author (channel broadcast /
+    anonymous) and ``is_forward`` marks forwarded content — both are excluded from
+    stylometric profiling (the text is not the sender's own writing)."""
+
+    actor_key: str
+    platform_userid: str
+    handle: str | None
+    display_name: str | None
+    is_forward: bool
+    is_channel_author: bool
+    relayed_by_platform_userid: str | None
+
+
+def _actor_key(token: str) -> str:
+    return "actor:" + hashlib.sha256(f"telegram||{token}".encode()).hexdigest()
+
+
+def _fwd_origin_marked_id(from_id: object) -> int | None:
+    """Marked peer id (-100… for channels, positive for users) of a forward origin
+    ``fwd_from.from_id``, or None when the origin is hidden."""
+    if from_id is None:
+        return None
+    try:
+        from telethon import utils as _tl_utils  # noqa: PLC0415
+
+        return int(_tl_utils.get_peer_id(from_id))
+    except Exception:
+        return None
+
+
+def _authorship(msg: object, sender: object) -> _Authorship:
+    """Resolve message authorship (see :class:`_Authorship`). Pure — operates on
+    the telethon message + sender via duck typing, so it is unit-testable."""
+    fwd = getattr(msg, "fwd_from", None)
+    if fwd is not None:
+        relay = str(getattr(msg, "sender_id", 0) or 0)
+        from_name = getattr(fwd, "from_name", None)
+        origin = _fwd_origin_marked_id(getattr(fwd, "from_id", None))
+        if origin is not None:
+            uid = str(origin)
+            return _Authorship(
+                actor_key=_actor_key(uid),
+                platform_userid=uid,
+                handle=None,
+                display_name=from_name,
+                is_forward=True,
+                is_channel_author=origin < 0,
+                relayed_by_platform_userid=relay,
+            )
+        # Hidden origin: only a display name. Coalesce by name so one hidden source
+        # is one actor. No resolvable id, so it is not an individual we can profile.
+        name = from_name or "unknown"
+        return _Authorship(
+            actor_key=_actor_key("fwdname:" + name),
+            platform_userid="fwd:" + name,
+            handle=None,
+            display_name=from_name,
+            is_forward=True,
+            is_channel_author=True,
+            relayed_by_platform_userid=relay,
+        )
+    sender_id = getattr(msg, "sender_id", 0) or 0
+    uid = str(sender_id)
+    handle: str | None = None
+    display: str | None = None
+    if isinstance(sender, User):
+        handle = f"@{sender.username}" if sender.username else None
+        display = " ".join(filter(None, [sender.first_name, sender.last_name])) or None
+    return _Authorship(
+        actor_key=_actor_key(uid),
+        platform_userid=uid,
+        handle=handle,
+        display_name=display,
+        is_forward=False,
+        # Not an individual: channel broadcast / anonymous admin (sender is not a
+        # User, or the peer id is a negative channel id).
+        is_channel_author=not isinstance(sender, User)
+        or (isinstance(sender_id, int) and sender_id < 0),
+        relayed_by_platform_userid=None,
+    )
 
 
 def _strip_100(n: int) -> int:
