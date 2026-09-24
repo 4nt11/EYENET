@@ -934,6 +934,11 @@ class BaseRepository(ABC):
         oldest-first. Used by the Verifier window-corpus loader."""
 
     @abstractmethod
+    async def message_bodies_by_actor(self) -> dict[UUID, list[str]]:
+        """All non-empty message bodies grouped by author actor_id (batch read
+        for the shared-infrastructure linker)."""
+
+    @abstractmethod
     async def messages_for_actor(
         self,
         actor_id: UUID,
