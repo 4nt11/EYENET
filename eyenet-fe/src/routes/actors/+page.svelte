@@ -66,7 +66,7 @@
   }
 </script>
 
-<EntityList label="Actors" items={actorCtx.list.map((x) => ({ id: x.id, primary: x.handle, secondary: x.id }))}
+<EntityList label="Actors" items={actorCtx.list.map((x) => ({ id: x.id, primary: x.isBot ? `${x.handle} 🤖` : x.handle, secondary: x.id }))}
   selectedId={a?.id} onSelect={(id) => (selectedId = id)}
   onLoadMore={loadMoreActors} hasMore={!!actorCtx.nextCursor} />
 
@@ -84,6 +84,7 @@
       </div>
       <div class="badges">
         {#if d.platforms.length}<Badge tone="neutral">{d.platforms.join(' · ')}</Badge>{/if}
+        {#if d.isBot}<Badge tone="high">bot</Badge>{/if}
         {#if d.personaId}<Badge tone="high" dot>persona {d.personaId.slice(0, 8)}</Badge>{/if}
       </div>
 

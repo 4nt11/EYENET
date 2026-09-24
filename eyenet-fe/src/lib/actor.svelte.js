@@ -13,7 +13,8 @@ function mapActor(a) {
   return {
     id: a.actor_id,
     handle: a.primary_handle,
-    platforms: a.platforms ?? []
+    platforms: a.platforms ?? [],
+    isBot: !!a.is_bot
   };
 }
 
@@ -227,7 +228,8 @@ export async function loadActorDetail(id) {
       aliasCount: detail.alias_count ?? 0,
       observationCount: detail.observation_count ?? 0,
       personaId: detail.persona_id ?? null,
-      score: detail.score ?? null
+      score: detail.score ?? null,
+      isBot: !!detail.is_bot
     };
     actorView.aliases = (detail.aliases ?? []).map((al) => `${al.value} (${al.kind})`);
     actorView.assessment = detail.assessment ?? '';

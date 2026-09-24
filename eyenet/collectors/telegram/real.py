@@ -844,6 +844,7 @@ class TelegramCollector(CollectorSkeleton):
             handle=handle,
             display_name=display_name,
             seen_at=sent_at,
+            is_bot=author.is_bot,
         )
 
         platform_msgid = str(msg.id)
@@ -1013,6 +1014,9 @@ class _Authorship:
     is_forward: bool
     is_channel_author: bool
     relayed_by_platform_userid: str | None
+    # Telegram's authoritative bot flag (User.bot). Knowable only for a direct
+    # User sender; False for forwards/channels where the origin's flag is unseen.
+    is_bot: bool = False
 
 
 def _actor_key(token: str) -> str:
@@ -1067,9 +1071,11 @@ def _authorship(msg: object, sender: object) -> _Authorship:
     uid = str(sender_id)
     handle: str | None = None
     display: str | None = None
+    is_bot = False
     if isinstance(sender, User):
         handle = f"@{sender.username}" if sender.username else None
         display = " ".join(filter(None, [sender.first_name, sender.last_name])) or None
+        is_bot = bool(getattr(sender, "bot", False))
     return _Authorship(
         actor_key=_actor_key(uid),
         platform_userid=uid,
@@ -1081,6 +1087,7 @@ def _authorship(msg: object, sender: object) -> _Authorship:
         is_channel_author=not isinstance(sender, User)
         or (isinstance(sender_id, int) and sender_id < 0),
         relayed_by_platform_userid=None,
+        is_bot=is_bot,
     )
 
 

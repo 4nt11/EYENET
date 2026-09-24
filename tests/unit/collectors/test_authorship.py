@@ -33,6 +33,17 @@ def test_plain_user_post_is_individual() -> None:
     assert not a.is_forward
     assert not a.is_channel_author
     assert a.relayed_by_platform_userid is None
+    assert not a.is_bot
+
+
+@pytest.mark.unit
+def test_user_bot_flag_captured() -> None:
+    sender = User(id=99, first_name="Rose", last_name=None, username="MissRose_bot", bot=True)
+    a = _authorship(_msg(99), sender)
+    assert a.is_bot
+    # A forward's origin bot status is unknown → never asserted as a bot.
+    fwd = SimpleNamespace(from_id=PeerUser(99), from_name="Rose")
+    assert not _authorship(_msg(-100123, fwd), SimpleNamespace()).is_bot
 
 
 @pytest.mark.unit

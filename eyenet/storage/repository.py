@@ -1389,6 +1389,7 @@ class BaseRepository(ABC):
         handle: str | None,
         display_name: str | None,
         seen_at: datetime,
+        is_bot: bool = False,
     ) -> UUID: ...
 
     @abstractmethod
