@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params
-from eyenet.api.v1.schemas.actors import ActorSummary, CursorPageActorSummary
+from eyenet.api.v1.schemas.actors import ActorSummary, CursorPageActorSummary, actor_primary_handle
 from eyenet.contracts.source import SourceRow
 from eyenet.models.actor import ActorTable
 from eyenet.storage.repository import BaseRepository
@@ -47,7 +47,7 @@ async def graph_search(
         items.append(
             ActorSummary(
                 actor_id=actor.id,
-                primary_handle=actor.current_handle or actor.platform_userid,
+                primary_handle=actor_primary_handle(actor),
                 platforms=[kind] if kind is not None else [],
                 score=None,
             )

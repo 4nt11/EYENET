@@ -17,7 +17,7 @@ from uuid import UUID
 from pydantic import Field
 
 from eyenet.contracts.enums import ActorAliasKind, ValueKind
-from eyenet.models.actor import ActorAliasHistoryTable
+from eyenet.models.actor import ActorAliasHistoryTable, ActorTable
 from eyenet.models.graph import GraphEdgeTable, GraphEdgeType
 from eyenet.models.message import MessageTable
 from eyenet.models.observation import ObservationTable
@@ -25,6 +25,16 @@ from eyenet.models.observation import ObservationTable
 from ._base import ApiSchema
 from .enums import LinkageState, SensitivityTier
 from .pagination import CursorPage
+
+
+def actor_primary_handle(actor: ActorTable) -> str:
+    """The label to show for an actor: ``@handle`` > display name > raw platform id.
+
+    Many accounts (spam bots especially) have no public ``@username`` but do carry
+    a display name, so falling straight through to the numeric ``platform_userid``
+    left operators staring at ids like ``8595058147``. Prefer the display name over
+    the raw id."""
+    return actor.current_handle or actor.current_display_name or actor.platform_userid
 
 
 class ActorSummary(ApiSchema):
