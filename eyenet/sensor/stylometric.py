@@ -46,6 +46,28 @@ _NULL_UUID = UUID("00000000-0000-0000-0000-000000000000")
 class StylometricSensor(ServiceBase, SensorBase):
     """Stylometric sensor running the 4 M2 primitives."""
 
+    # Copypasta gate (anti-spam §A): a cached set of flagged template fingerprints,
+    # refreshed lazily. Templated spam (identical ad text) is not authorship signal,
+    # so a message whose body matches a flagged template is skipped — it never
+    # pollutes an actor's writing-style profile. The set only grows as the batch
+    # detector runs, so a stale cache under-gates (safe), never over-gates.
+    _COPYPASTA_TTL_S = 300.0
+
+    def _copypasta_state(self) -> tuple[frozenset[str], float]:
+        # Lazy init without an __init__ override (keeps the ServiceBase ctor intact).
+        return getattr(self, "_copypasta_fps", frozenset()), getattr(self, "_copypasta_at", 0.0)
+
+    async def _is_copypasta(self, body: str) -> bool:
+        from eyenet.linker.copypasta import template_fingerprint  # noqa: PLC0415
+
+        fps, loaded_at = self._copypasta_state()
+        now = time.monotonic()
+        if now - loaded_at >= self._COPYPASTA_TTL_S:
+            fps = frozenset(await self._storage.flagged_copypasta_fingerprints())
+            self._copypasta_fps = fps
+            self._copypasta_at = now
+        return template_fingerprint(body) in fps
+
     @property
     def name(self) -> str:
         return "sensor"
@@ -116,6 +138,14 @@ class StylometricSensor(ServiceBase, SensorBase):
             },
         )
 
+        body = body_bytes.decode("utf-8")
+        # Anti-spam §A: templated spam is not authorship signal — skip it so it
+        # never enters the actor's stylometric profile (that is what produced the
+        # false "same author" clusters over copypasta ad text).
+        if await self._is_copypasta(body):
+            _log.debug("sensor.copypasta_skipped", evidence_ref=env.evidence_ref)
+            return
+
         with _tracer.start_as_current_span(
             "sensor.dispatch",
             attributes={
@@ -126,7 +156,7 @@ class StylometricSensor(ServiceBase, SensorBase):
                 "sensor.primitive_count": len(PRIMITIVES),
             },
         ):
-            await self._run_primitives(actor_id, env, body_bytes.decode("utf-8"))
+            await self._run_primitives(actor_id, env, body)
 
     async def _run_primitives(self, actor_id: UUID, env: RawMessageEnvelope, _body: str) -> None:
         _full_corpus: list[tuple[datetime, UUID, str]] | None = None
