@@ -2,7 +2,8 @@
   import Badge from './Badge.svelte';
   // Selectable left rail of entities (actors, personas). Row = primary + secondary + tier dot.
   // items: [{ id, primary, secondary, tier }]
-  let { label, items = [], selectedId, onSelect } = $props();
+  // onLoadMore + hasMore render a paging footer when the caller supports it.
+  let { label, items = [], selectedId, onSelect, onLoadMore = null, hasMore = false } = $props();
 </script>
 
 <aside>
@@ -21,6 +22,9 @@
         <Badge tone={it.tier} dot>{it.tier}</Badge>
       </button>
     {/each}
+    {#if onLoadMore && hasMore}
+      <button class="more" onclick={onLoadMore}>Load more</button>
+    {/if}
   </div>
 </aside>
 
@@ -49,4 +53,6 @@
   .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .primary { font-family: var(--font-mono); font-size: var(--fs-13); letter-spacing: var(--tracking-data); color: var(--text-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .secondary { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
+  .more { margin: 4px 6px 6px; padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-12); cursor: pointer; }
+  .more:hover { background: var(--panel); border-color: var(--accent); }
 </style>
