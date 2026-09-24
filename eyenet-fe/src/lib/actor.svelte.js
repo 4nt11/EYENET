@@ -109,15 +109,32 @@ function _timelineUrl(id, kind) {
 const _mapTimeline = (items) =>
   (items ?? []).map((t) => ({ ts: shortTs(t.ts), kind: t.kind, summary: t.summary ?? '' }));
 
+// Round to at most 4 decimals, dropping trailing zeros (integers stay integers).
+// Keeps the value column uniform + right-aligned instead of a 16-digit float
+// overflowing its width.
+function fmtNum(n) {
+  if (n == null) return '';
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 1e4) / 1e4);
+}
+
+// A hash-kind value that is actually a timestamp (first_seen_ts / last_seen_ts)
+// renders as a clean YYYY-MM-DD date, not a mid-string ellipsis. Real hashes
+// (punctuation_style etc.) still get the short-hash treatment.
+function fmtHash(v) {
+  if (!v) return '';
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(v);
+  return iso ? iso[1] : shortHash(v);
+}
+
 // Which value_* field carries an observation's payload, by value_kind.
 function obsValue(o) {
   switch (o.value_kind) {
-    case 'numeric': return o.score == null ? '' : String(o.score);
-    case 'hash': return shortHash(o.value_hash);
+    case 'numeric': return fmtNum(o.score);
+    case 'hash': return fmtHash(o.value_hash);
     case 'enum_str': return o.value_enum ?? '';
     case 'array_str': return (o.value_array ?? []).join(', ');
     case 'array_numeric': return (o.value_array_numeric ?? []).map((n) => n.toFixed(2)).join(', ');
-    default: return o.score == null ? '' : String(o.score);
+    default: return fmtNum(o.score);
   }
 }
 
