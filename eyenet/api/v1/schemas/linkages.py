@@ -116,6 +116,10 @@ class LinkageDetail(LinkageSummary):
     """
 
     evidence: list[LinkageEvidence] = Field(default_factory=list)
+    # Non-comparator evidence: the shared infrastructure tokens (contact handles,
+    # wallets, t.me links) that a `shared_infra` linkage was built from. Raw tokens
+    # (e.g. "handle:wbpay"); the client prettifies. Empty for stylometric methods.
+    shared_indicators: list[str] = Field(default_factory=list)
     verifier: VerifierResultView | None = None
 
     @classmethod
@@ -136,6 +140,8 @@ class LinkageDetail(LinkageSummary):
             evidence_rows.append(
                 LinkageEvidence(comparator=comparator, score=float(score), detail=detail),
             )
+        shared = (linkage.evidence or {}).get("shared")
+        shared_indicators = [str(s) for s in shared] if isinstance(shared, list) else []
         return cls(
             linkage_id=linkage.id,
             actor_a_id=linkage.actor_a_id,
@@ -147,6 +153,7 @@ class LinkageDetail(LinkageSummary):
             decided_at=linkage.decided_at,
             decided_by=decided_by_user_id,
             evidence=evidence_rows,
+            shared_indicators=shared_indicators,
             verifier=VerifierResultView.from_domain(verifier) if verifier is not None else None,
         )
 

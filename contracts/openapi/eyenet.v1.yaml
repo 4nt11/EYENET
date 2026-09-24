@@ -3738,6 +3738,9 @@ components:
             evidence:
               type: array
               items: { $ref: '#/components/schemas/LinkageEvidence' }
+            shared_indicators:
+              type: array
+              items: { type: string }
             verifier:
               oneOf:
                 - { $ref: '#/components/schemas/VerifierResultView' }
