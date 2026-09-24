@@ -402,6 +402,27 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/actor-groups/sweep-cases:
+    post:
+      tags: [actor-groups]
+      operationId: actor_groups_sweep_cases
+      summary: Auto-open Cases for large, high-confidence crews (idempotent).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SweepCrewCasesRequest' }
+      responses:
+        "202":
+          description: Number of new crew cases opened.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SweepCrewCasesResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors:
     get:
       tags: [actors]
@@ -3386,6 +3407,18 @@ components:
       properties:
         case_id:  { type: string, format: uuid }
         crew_key: { type: string }
+    SweepCrewCasesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        min_size:  { type: integer, minimum: 2, default: 8 }
+        min_score: { type: number, format: float, minimum: 0.0, maximum: 1.0, default: 0.8 }
+    SweepCrewCasesResult:
+      type: object
+      additionalProperties: false
+      required: [opened]
+      properties:
+        opened: { type: integer, minimum: 0 }
     ActorDetail:
       allOf:
         - { $ref: '#/components/schemas/ActorSummary' }

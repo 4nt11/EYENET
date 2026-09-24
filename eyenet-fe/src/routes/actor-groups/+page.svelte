@@ -5,7 +5,12 @@
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { actorGroupCtx, crewCase, loadActorGroups, openCase, prettyInfra } from '$lib/actorGroup.svelte.js';
+  import { actorGroupCtx, crewCase, crewSweep, loadActorGroups, openCase, sweepCases, prettyInfra } from '$lib/actorGroup.svelte.js';
+
+  async function runSweep() {
+    const n = await sweepCases();
+    if (n !== null) await loadActorGroups();
+  }
 
   let caseId = $derived(c ? crewCase.byId[c.id] : null);
 
@@ -22,6 +27,14 @@
 
 <main class="wrap">
   <SectionHeader group="Attribution" slug="actor-groups" title="Actor groups" />
+
+  <div class="toolbar">
+    <Button variant="ghost" size="sm" disabled={crewSweep.submitting} onclick={runSweep}>
+      {crewSweep.submitting ? 'Opening…' : 'Auto-open big-crew cases'}
+    </Button>
+    {#if crewSweep.opened !== null}<span class="note">Opened {crewSweep.opened} case{crewSweep.opened === 1 ? '' : 's'}.</span>{/if}
+    {#if crewSweep.error}<span class="err">{crewSweep.error}</span>{/if}
+  </div>
 
   <div class="split">
     {#if actorGroupCtx.list.length}
@@ -89,5 +102,7 @@
   .caselink { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--accent); text-decoration: none; align-self: center; }
   .caselink:hover { text-decoration: underline; }
   .err { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red); padding: 4px 0; }
+  .toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 20px 0; }
+  .note { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   @media (max-width: 900px) { .split { grid-template-columns: 1fr; overflow: auto; } }
 </style>

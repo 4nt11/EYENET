@@ -34,6 +34,25 @@ export const actorGroupCtx = $state({ list: [], loaded: false, error: null });
 // on the crew key, so re-opening returns the same case. Tracks per-crew result.
 export const crewCase = $state({ submitting: false, error: null, byId: {} });
 
+// Auto-open cases for all big, high-confidence crews (POST .../sweep-cases, 202).
+export const crewSweep = $state({ submitting: false, error: null, opened: null });
+
+export async function sweepCases() {
+  crewSweep.submitting = true;
+  crewSweep.error = null;
+  crewSweep.opened = null;
+  try {
+    const res = await apiPost('/v1/actor-groups/sweep-cases', {}, { auth: true, accept: [202] });
+    crewSweep.opened = res.opened;
+    return res.opened;
+  } catch (e) {
+    crewSweep.error = e.message ?? String(e);
+    return null;
+  } finally {
+    crewSweep.submitting = false;
+  }
+}
+
 export async function openCase(crew) {
   crewCase.submitting = true;
   crewCase.error = null;
