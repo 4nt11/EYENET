@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import EntityList from '$lib/components/EntityList.svelte';
+  import DossierLayout from '$lib/components/DossierLayout.svelte';
+  import Segmented from '$lib/components/Segmented.svelte';
   import BehavePanel from '$lib/components/BehavePanel.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
   import Panel from '$lib/components/Panel.svelte';
@@ -39,7 +40,6 @@
     { v: 'observations', l: 'Observations' },
     { v: 'handle', l: 'Handle' }
   ];
-  function setBot(v) { actorFilters.isBot = v; applyFilters(); }
   let groupDdOpts = $derived([
     { v: '', l: 'All groups' },
     ...groupOptions.list.map((g) => ({ v: g.id, l: g.label }))
@@ -86,24 +86,24 @@
   }
 </script>
 
-<EntityList label="Actors" items={actorCtx.list.map((x) => ({ id: x.id, primary: x.isBot ? `${x.handle} 🤖` : x.handle, secondary: `${x.messageCount} msg · ${x.observationCount} obs` }))}
+<DossierLayout listLabel="Actors"
+  items={actorCtx.list.map((x) => ({ id: x.id, primary: x.isBot ? `${x.handle} 🤖` : x.handle, secondary: `${x.messageCount} msg · ${x.observationCount} obs` }))}
   selectedId={a?.id} onSelect={(id) => (selectedId = id)}
-  onLoadMore={loadMoreActors} hasMore={!!actorCtx.nextCursor} />
+  onLoadMore={loadMoreActors} hasMore={!!actorCtx.nextCursor}
+  selected={!!(a && d)}>
 
-<main>
-  <div class="dossier-head">
-    <div class="head-top">
-      <div class="handle-wrap">
-        {#if a && d}
-          <span class="handle">{d.handle}</span>
-          <span class="aid">{d.actorId}</span>
-        {:else}
-          <span class="handle muted">Actors</span>
-        {/if}
-      </div>
-      <div class="filters">{@render filterbar()}</div>
-    </div>
+  {#snippet title()}
     {#if a && d}
+      <span class="handle">{d.handle}</span>
+      <span class="aid">{d.actorId}</span>
+    {:else}
+      <span class="handle muted">Actors</span>
+    {/if}
+  {/snippet}
+
+  {#snippet filters()}{@render filterbar()}{/snippet}
+
+  {#snippet head()}
       <div class="badges">
         {#if d.personaId}<a class="pbtn small" href="/personas">view persona</a>{/if}
         {#if d.platforms.length}<Badge tone="neutral">{d.platforms.join(' · ')}</Badge>{/if}
@@ -127,11 +127,9 @@
         {#if actorView.submitMsg}<span class="submitmsg" class:err={actorView.submitMsg.startsWith('Failed')}>{actorView.submitMsg}</span>{/if}
       </div>
       {#if actorView.aliases.length}<p class="aliases">aliases: {actorView.aliases.join(', ')}</p>{/if}
-    {/if}
-  </div>
+  {/snippet}
 
-  {#if a && d}
-    <div class="body">
+  {#snippet body()}
       <div class="tiles">
         <StatTile label="Observations" value={d.observationCount} />
         <StatTile label="Aliases" value={d.aliasCount} />
@@ -228,22 +226,19 @@
           </Panel>
         </div>
       </div>
-    </div>
-  {:else}
-    <div class="body"><p class="pnote">
+  {/snippet}
+
+  {#snippet empty()}
+    <p class="pnote">
       {#if !actorCtx.loaded}Loading…{:else if actorCtx.error}Could not load actors: {actorCtx.error}{:else}No actors match these filters.{/if}
-    </p></div>
-  {/if}
-</main>
+    </p>
+  {/snippet}
+</DossierLayout>
 
 {#snippet filterbar()}
   <div class="fcount">{actorCtx.total ?? actorCtx.list.length} actor{(actorCtx.total ?? actorCtx.list.length) === 1 ? '' : 's'}</div>
   <Dropdown options={SORT_OPTS.map((o) => ({ v: o.v, l: o.l }))} bind:value={actorFilters.sort} onchange={applyFilters} minWidth="148px" />
-  <div class="seg">
-    <button class:on={actorFilters.isBot === null} onclick={() => setBot(null)}>All</button>
-    <button class:on={actorFilters.isBot === false} onclick={() => setBot(false)}>Users</button>
-    <button class:on={actorFilters.isBot === true} onclick={() => setBot(true)}>Bots</button>
-  </div>
+  <Segmented options={[{ v: null, l: 'All' }, { v: false, l: 'Users' }, { v: true, l: 'Bots' }]} bind:value={actorFilters.isBot} onchange={applyFilters} />
   <Dropdown options={groupDdOpts} bind:value={actorFilters.groupId} onchange={applyFilters} minWidth="140px" />
   {#if actorBounds.maxMessages > 0}
     <RangeSlider label="messages" max={actorBounds.maxMessages}
@@ -256,26 +251,10 @@
 {/snippet}
 
 <style>
-  main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
-
-  .dossier-head { flex: 0 0 auto; padding: 16px 20px 16px 22px; border-bottom: 1px solid var(--border); border-left: 3px solid var(--border-strong); }
-  .head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-  .handle-wrap { display: flex; align-items: baseline; gap: 10px; }
+  /* Shell (two-pane, dossier head + scrolling body) lives in DossierLayout. */
   .handle { font-family: var(--font-mono); font-size: var(--fs-22); font-weight: var(--fw-bold); letter-spacing: var(--tracking-data); color: var(--text); }
   .aid { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
-  .head-actions { display: flex; gap: 8px; flex: 0 0 auto; }
   .handle.muted { color: var(--text-faint); }
-  .filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex: 1; min-width: 0; }
-  .fcount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); margin-right: 2px; white-space: nowrap; }
-  .fsel { height: 28px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-12); padding: 0 8px; cursor: pointer; max-width: 160px; }
-  .fsel:focus { outline: none; border-color: var(--accent); }
-  .fnum { width: 78px; height: 28px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); padding: 0 8px; }
-  .fnum:focus { outline: none; border-color: var(--accent); }
-  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; height: 28px; }
-  .seg button { appearance: none; background: transparent; border: none; border-right: 1px solid var(--border-strong); color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-12); padding: 0 10px; cursor: pointer; }
-  .seg button:last-child { border-right: none; }
-  .seg button.on { background: var(--accent-fill); color: var(--text); }
-  .seg button:hover:not(.on) { background: var(--panel); }
   .pbtn.small { height: 22px; padding: 0 8px; font-size: var(--fs-11); }
   .pbtn { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-12); text-decoration: none; }
   .pbtn:hover { background: var(--panel-2); }
