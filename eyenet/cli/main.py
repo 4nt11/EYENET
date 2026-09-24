@@ -433,6 +433,27 @@ def link_infra(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("detect-copypasta")
+def detect_copypasta(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+) -> None:
+    """Batch-detect copypasta templates over stored messages (anti-spam §A).
+
+    Groups message bodies by masked fingerprint, flags templates that are long and
+    posted by many actors, and tags those messages so the stylometric sensor skips
+    them (templated ad text is not authorship signal).
+    """
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        n = await storage.detect_copypasta_templates()
+        await storage.close()
+        typer.echo(f"flagged {n} copypasta templates")
+
+    asyncio.run(_main())
+
+
 @app.command("verifier")
 def verifier_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),

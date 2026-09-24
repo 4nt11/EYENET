@@ -40,6 +40,30 @@ class MessageTable(SQLModel, table=True):
     forward_origin_actor_id: UUID | None = Field(default=None, foreign_key="actor.id")
     has_attachment: bool = False
     source_specific: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Copypasta detection (anti-spam §A): set when this body matches a known
+    # content template; authorship linkage skips messages whose template is
+    # flagged copypasta. NULL = not yet classified / unique text.
+    template_id: UUID | None = Field(default=None, foreign_key="content_template.id", index=True)
+
+
+class ContentTemplateTable(SQLModel, table=True):
+    """A repeated message body (copypasta), keyed by its masked fingerprint.
+
+    See ``eyenet.linker.copypasta`` for the fingerprint + ``is_copypasta`` policy
+    and ``development/linker-antispam-spec.md`` §2. A template is ``is_copypasta``
+    once it is long enough AND posted by enough distinct actors."""
+
+    __tablename__ = "content_template"
+
+    id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    fingerprint: str = Field(unique=True, index=True)
+    char_len: int
+    occurrence_count: int = 0
+    distinct_actor_count: int = 0
+    is_copypasta: bool = Field(default=False, index=True)
+    sample_body: str
+    first_seen_at_ingest: datetime
+    last_seen_at_ingest: datetime
 
 
 class AttachmentTable(SQLModel, table=True):
