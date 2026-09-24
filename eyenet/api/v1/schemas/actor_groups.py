@@ -25,6 +25,15 @@ class CrewMember(ApiSchema):
     label: str = Field(max_length=256, description="@handle, else display name, else platform id")
 
 
+class CrewLink(ApiSchema):
+    """One pairwise shared_infra link inside a crew (the evidence behind edge_count)."""
+
+    actor_a_id: UUID
+    actor_b_id: UUID
+    score: float = Field(ge=0.0, le=1.0)
+    shared: list[str] = Field(default_factory=list, description="raw indicator tokens on this link")
+
+
 class ActorGroupSummary(ApiSchema):
     """A crew: a connected component of shared-infrastructure links."""
 
@@ -36,6 +45,9 @@ class ActorGroupSummary(ApiSchema):
     )
     edge_count: int = Field(ge=1, description="shared_infra links inside the crew")
     max_score: float = Field(ge=0.0, le=1.0)
+    links: list[CrewLink] = Field(
+        default_factory=list, description="the pairwise links behind edge_count, strongest first"
+    )
 
 
 class ActorGroupList(ApiSchema):
@@ -78,6 +90,7 @@ class SweepCrewCasesResult(ApiSchema):
 __all__ = [
     "ActorGroupList",
     "ActorGroupSummary",
+    "CrewLink",
     "CrewMember",
     "OpenCrewCaseRequest",
     "OpenCrewCaseResult",

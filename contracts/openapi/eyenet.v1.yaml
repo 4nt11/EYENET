@@ -3451,6 +3451,20 @@ components:
           items: { type: string }
         edge_count: { type: integer, minimum: 1 }
         max_score:  { type: number, format: float, minimum: 0.0, maximum: 1.0 }
+        links:
+          type: array
+          items: { $ref: '#/components/schemas/CrewLink' }
+    CrewLink:
+      type: object
+      additionalProperties: false
+      required: [actor_a_id, actor_b_id, score]
+      properties:
+        actor_a_id: { type: string, format: uuid }
+        actor_b_id: { type: string, format: uuid }
+        score:      { type: number, format: float, minimum: 0.0, maximum: 1.0 }
+        shared:
+          type: array
+          items: { type: string }
     ActorGroupList:
       type: object
       additionalProperties: false

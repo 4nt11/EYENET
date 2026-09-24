@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""GET /v1/linkages/{linkage_id} — linkage detail incl. evidence (M9.F2)."""
+"""GET /v1/linkages/{linkage_id} — linkage detail incl. evidence (M9.F2).
+
+TODO(evidence-messages): expose the actual messages behind a linkage's evidence —
+for shared_infra, the posts carrying each shared indicator; for a stylometric
+comparator, the messages that produced the hamming distance. Needs a per-linkage
+evidence-messages query + endpoint. Deferred per operator (indicators shown for now).
+"""
 
 from __future__ import annotations
 

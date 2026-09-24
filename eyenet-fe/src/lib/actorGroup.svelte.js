@@ -16,6 +16,8 @@ export function prettyInfra(tok) {
 
 function mapCrew(c, i) {
   const top = c.top_infra ?? [];
+  const labelOf = new Map((c.members ?? []).map((m) => [m.actor_id, m.label]));
+  const lbl = (id) => labelOf.get(id) ?? id.slice(0, 8);
   return {
     id: `crew-${i}`,
     size: c.size,
@@ -23,6 +25,13 @@ function mapCrew(c, i) {
     topInfra: top,
     edgeCount: c.edge_count,
     maxScore: c.max_score,
+    // The actual pairwise links behind edge_count, endpoints resolved to labels.
+    links: (c.links ?? []).map((l) => ({
+      a: lbl(l.actor_a_id),
+      b: lbl(l.actor_b_id),
+      score: l.score,
+      shared: (l.shared ?? []).map(prettyInfra)
+    })),
     // Name a nameless crew by its dominant shared infrastructure.
     name: top.length ? prettyInfra(top[0]) : `${c.size} accounts`
   };

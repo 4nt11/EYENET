@@ -29,6 +29,9 @@ class Crew:
     top_infra: list[str]  # most-frequently-shared indicators within the crew, desc
     edge_count: int
     max_score: float
+    # The actual pairwise links behind edge_count, strongest first: the operator
+    # can SEE every link, not just its count. (actor_a, actor_b, score, shared).
+    links: list[tuple[UUID, UUID, float, list[str]]] = field(default_factory=list)
 
 
 @dataclass
@@ -37,6 +40,7 @@ class _Agg:
     infra: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     edges: int = 0
     max_score: float = 0.0
+    links: list[tuple[UUID, UUID, float, list[str]]] = field(default_factory=list)
 
 
 def build_crews(edges: list[tuple[UUID, UUID, float, list[str]]]) -> list[Crew]:
@@ -72,6 +76,7 @@ def build_crews(edges: list[tuple[UUID, UUID, float, list[str]]]) -> list[Crew]:
         agg.members.add(b)
         agg.edges += 1
         agg.max_score = max(agg.max_score, score)
+        agg.links.append((a, b, score, shared))
         for v in shared:
             agg.infra[v] += 1
 
@@ -86,6 +91,7 @@ def build_crews(edges: list[tuple[UUID, UUID, float, list[str]]]) -> list[Crew]:
                 top_infra=top,
                 edge_count=agg.edges,
                 max_score=round(agg.max_score, 4),
+                links=sorted(agg.links, key=lambda e: -e[2]),
             )
         )
     crews.sort(key=lambda c: (len(c.members), c.max_score), reverse=True)
