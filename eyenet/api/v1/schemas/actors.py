@@ -124,6 +124,9 @@ class LinkedToAttrs(ApiSchema):
     method: str = Field(max_length=64)
     score: float
     linkage_id: UUID
+    # The graph applier stamps every LINKED_TO edge with when it last changed.
+    # Model it (ApiSchema forbids extras) so neighbor projection doesn't 500.
+    updated_at: datetime | None = None
 
 
 class BelongsToPersonaAttrs(ApiSchema):
