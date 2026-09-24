@@ -32,7 +32,7 @@ from eyenet.contracts.enums import (
     SourceKind,
 )
 from eyenet.contracts.supervisor import JoinGroupCommand, command_subject_for
-from eyenet.services.collector_supervisor import CollectorSupervisor
+from eyenet.services.collector_supervisor import _MAX_COOLING_S, CollectorSupervisor
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 
@@ -46,8 +46,41 @@ def storage() -> BaseRepository:
     return get_repository(in_memory=True)
 
 
-def _supervisor(storage: BaseRepository) -> CollectorSupervisor:
-    return CollectorSupervisor(bus=MemoryBus(), storage=storage)
+class _FakeProc:
+    """Stand-in for asyncio.subprocess.Process (no real child spawned)."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.pid = 4242
+        self.terminated = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+
+
+class _SpySupervisor(CollectorSupervisor):
+    """Supervisor whose _spawn returns a fake process and whose clock is fixed,
+    so reconcile's spawn/crash/cooling logic is testable without real children."""
+
+    def __init__(self, *, bus: MemoryBus, storage: BaseRepository) -> None:
+        super().__init__(bus=bus, storage=storage)
+        self.spawned: list[UUID] = []
+        self.spawn_ok = True
+        self.clock = 1000.0
+
+    def _monotonic(self) -> float:
+        return self.clock
+
+    async def _spawn(self, collector):  # type: ignore[no-untyped-def]
+        if not self.spawn_ok:
+            return None
+        self.spawned.append(collector.id)
+        return _FakeProc()
+
+
+def _supervisor(storage: BaseRepository) -> _SpySupervisor:
+    return _SpySupervisor(bus=MemoryBus(), storage=storage)
 
 
 async def _collector(
@@ -72,31 +105,121 @@ async def _collector(
     return row.id
 
 
-async def test_reconcile_starts_running(storage: BaseRepository) -> None:
+async def test_reconcile_spawns_and_runs(storage: BaseRepository) -> None:
     src = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
     )
     coll = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
-    await _supervisor(storage).reconcile_collectors()
+    sup = _supervisor(storage)
+    await sup.reconcile_collectors()
     row = await storage.get_collector(coll)
     assert row.observed_state is CollectorObservedState.RUNNING
+    assert sup.spawned == [coll]  # a child was actually launched
     events = [r.event for r in await storage.all_audit()]
     assert AuditSubject.COLLECTOR_RECONCILED.value in events
 
 
-async def test_reconcile_resumes_from_observed_state(storage: BaseRepository) -> None:
+async def test_reconcile_steady_state_no_respawn(storage: BaseRepository) -> None:
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    sup = _supervisor(storage)
+    await sup.reconcile_collectors()  # spawns once → RUNNING
+    before = len(await storage.all_audit())
+    await sup.reconcile_collectors()  # live handle exists → no respawn, no audit
+    assert len(sup.spawned) == 1
+    assert len(await storage.all_audit()) == before
+
+
+async def test_reconcile_stop_terminates_child(storage: BaseRepository) -> None:
     src = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
     )
     coll = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
-    # already reconciled (crash-recovery: observed persisted as RUNNING)
-    await storage.record_collector_observed_state(
-        collector_id=coll, observed_state=CollectorObservedState.RUNNING
+    sup = _supervisor(storage)
+    await sup.reconcile_collectors()  # running
+    proc = sup._procs[coll]
+    await storage.set_collector_desired_state(
+        collector_id=coll, desired_state=CollectorDesiredState.STOPPED
     )
-    before = len(await storage.all_audit())
-    await _supervisor(storage).reconcile_collectors()
-    # no spurious transition → no new audit row
-    assert len(await storage.all_audit()) == before
+    await sup.reconcile_collectors()
+    assert proc.terminated is True
+    assert coll not in sup._procs
+    row = await storage.get_collector(coll)
+    assert row.observed_state is CollectorObservedState.STOPPED
+
+
+async def test_reconcile_crash_cools_then_respawns(storage: BaseRepository) -> None:
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    sup = _supervisor(storage)
+    await sup.reconcile_collectors()  # running
+    # Child dies unexpectedly while the operator still wants it running.
+    sup._procs[coll].returncode = 1
+    await sup.reconcile_collectors()
+    row = await storage.get_collector(coll)
+    assert row.observed_state is CollectorObservedState.CRASHED
+    assert row.restart_count == 1
+    assert coll not in sup._procs  # handle reaped
+
+    # Still cooling → no respawn, reported COOLING.
+    await sup.reconcile_collectors()
+    assert coll not in sup._procs
+    assert (await storage.get_collector(coll)).observed_state is CollectorObservedState.COOLING
+
+    # Cooldown elapses → respawn.
+    sup.clock += _MAX_COOLING_S + 1
+    await sup.reconcile_collectors()
+    assert coll in sup._procs
+    assert (await storage.get_collector(coll)).observed_state is CollectorObservedState.RUNNING
+
+
+async def test_spawn_builds_collector_argv(
+    storage: BaseRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real _spawn resolves the identity name and launches the collector CLI
+    for the collector's source kind (exec monkeypatched — no real child)."""
+    import eyenet.services.collector_supervisor as mod
+
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll_id = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    collector = await storage.get_collector(coll_id)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_exec(*argv: str) -> _FakeProc:
+        captured["argv"] = argv
+        return _FakeProc()
+
+    monkeypatch.setattr(mod.asyncio, "create_subprocess_exec", _fake_exec)
+    sup = CollectorSupervisor(bus=MemoryBus(), storage=storage)
+    proc = await sup._spawn(collector)
+
+    assert proc is not None
+    argv = captured["argv"]
+    assert argv[1:] == ("-m", "eyenet.cli", "collector", "--identity", "id_a", "--type", "telegram")
+
+
+async def test_spawn_missing_identity_returns_none(
+    storage: BaseRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll_id = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    collector = await storage.get_collector(coll_id)
+
+    async def _no_identity(_identity_id: object) -> None:
+        return None
+
+    monkeypatch.setattr(storage, "get_identity", _no_identity)
+    sup = CollectorSupervisor(bus=MemoryBus(), storage=storage)
+    assert await sup._spawn(collector) is None
 
 
 async def _approved_candidate(storage: BaseRepository, src: UUID, collector_id: UUID) -> UUID:

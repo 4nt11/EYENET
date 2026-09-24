@@ -21,6 +21,9 @@ eligibility gate + scout lease + ``joining`` transition.
 
 from __future__ import annotations
 
+import asyncio
+import sys
+import time
 from typing import TYPE_CHECKING, cast
 
 from eyenet.contracts.audit_subjects import AuditSubject
@@ -39,13 +42,23 @@ from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from uuid import UUID
 
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
+    from eyenet.contracts.bus import Bus
+    from eyenet.contracts.collector import CollectorRow
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.source import SourceRow
+    from eyenet.storage.repository import BaseRepository
 
 _log = get_logger()
 _APPROVED_BATCH = 1000
+
+# Post-crash backoff: a crashed collector cools for min(2^restart_count, 600)s
+# before the supervisor respawns it (matches CollectorObservedState.COOLING's
+# documented semantics). This is the crash-loop guard that keeps a wedged
+# collector from hammering the platform (and getting the account banned).
+_MAX_COOLING_S = 600.0
 
 # Access-artifact selection preference (M9.E5.5): cheapest / lowest-OPSEC kind
 # first. Only kinds the collector can currently action are listed — an
@@ -87,7 +100,95 @@ def select_access_artifact(
 
 
 class CollectorSupervisor(ServiceBase):
-    """Tick-driven collector-state reconciler + approved-join dispatcher (M9.E3)."""
+    """Tick-driven collector-state reconciler + approved-join dispatcher (M9.E3).
+
+    ``reconcile_collectors`` now actually SPAWNS the collector process (control
+    plane meets data plane): when ``desired_state`` is RUNNING the supervisor
+    launches ``python -m eyenet.cli collector --identity ... --type ...`` as a
+    child, tracks the handle, and drives ``observed_state`` from real process
+    liveness (RUNNING while alive, CRASHED + COOLING on unexpected exit, STOPPED
+    when the operator stops it). The child inherits the supervisor's env
+    (EYENET_NATS_URL / EYENET_DATA_DIR / EYENET_IDENTITIES), so it must run in an
+    image that carries the collector deps + data volume (eyenet:base).
+
+    In-memory ``_procs`` is rebuilt lazily: a restarted supervisor finds no
+    handles, sees ``desired=RUNNING`` with no live child, and respawns — so
+    recovery stays crash-safe by construction.
+    """
+
+    def __init__(self, *, bus: Bus, storage: BaseRepository) -> None:
+        super().__init__(bus=bus, storage=storage)
+        # collector_id -> live child process.
+        self._procs: dict[UUID, asyncio.subprocess.Process] = {}
+        # collector_id -> monotonic deadline before a crashed collector respawns.
+        self._cooling_until: dict[UUID, float] = {}
+
+    def _monotonic(self) -> float:
+        """Wall-clock seam (overridable in tests) for the cooling backoff."""
+        return time.monotonic()
+
+    async def _spawn(self, collector: CollectorRow) -> asyncio.subprocess.Process | None:
+        """Launch the collector child process. Returns the handle, or None if the
+        identity is missing or the OS refused the spawn."""
+        ident = await self._storage.get_identity(collector.identity_id)
+        if ident is None:
+            _log.error("supervisor.spawn_no_identity", collector_id=str(collector.id))
+            return None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "eyenet.cli",
+                "collector",
+                "--identity",
+                ident.name,
+                "--type",
+                collector.kind.value,
+            )
+        except OSError as exc:
+            _log.error("supervisor.spawn_failed", collector_id=str(collector.id), error=str(exc))
+            return None
+        _log.info(
+            "supervisor.collector_spawned",
+            collector_id=str(collector.id),
+            pid=proc.pid,
+            identity=ident.name,
+            kind=collector.kind.value,
+        )
+        return proc
+
+    async def _set_observed(
+        self,
+        collector: CollectorRow,
+        new_state: CollectorObservedState,
+        *,
+        restart_count: int | None = None,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Write + audit an observed_state transition, but only when something
+        actually changed (no per-tick audit spam for a steady collector). A
+        CRASHED transition must carry an error breadcrumb pair (CHECK-enforced)."""
+        unchanged_count = restart_count is None or restart_count == collector.restart_count
+        if collector.observed_state is new_state and unchanged_count:
+            return
+        await self._storage.record_collector_observed_state(
+            collector_id=collector.id,
+            observed_state=new_state,
+            restart_count=restart_count,
+            last_error_type=error_type,
+            last_error_message=error_message,
+        )
+        await self.audit.emit(
+            event=AuditSubject.COLLECTOR_RECONCILED.value,
+            subject_kind="collector",
+            subject_id=collector.id,
+            payload={
+                "from": collector.observed_state.value,
+                "to": new_state.value,
+                "desired": collector.desired_state.value,
+            },
+        )
 
     @property
     def name(self) -> str:
@@ -107,36 +208,73 @@ class CollectorSupervisor(ServiceBase):
         await self.dispatch_approved()
 
     async def reconcile_collectors(self) -> None:
-        """Drive each collector's observed_state toward its desired_state."""
+        """Drive each collector toward its desired_state by spawning/terminating
+        the real child process, and report observed_state from actual liveness."""
+        now = self._monotonic()
         for collector in await self._storage.list_collectors():
-            target: CollectorObservedState | None = None
-            if (
-                collector.desired_state is CollectorDesiredState.RUNNING
-                and collector.observed_state is CollectorObservedState.STOPPED
+            cid = collector.id
+            proc = self._procs.get(cid)
+            alive = proc is not None and proc.returncode is None
+
+            # 1. A child we launched has exited. Reap the handle, then decide:
+            #    unexpected (operator still wants RUNNING) => CRASHED + cool;
+            #    expected (operator stopped it) => settle STOPPED.
+            if proc is not None and proc.returncode is not None:
+                del self._procs[cid]
+                alive = False
+                if collector.desired_state is CollectorDesiredState.RUNNING:
+                    rc = collector.restart_count + 1
+                    self._cooling_until[cid] = now + min(2.0**rc, _MAX_COOLING_S)
+                    _log.warning(
+                        "supervisor.collector_crashed",
+                        collector_id=str(cid),
+                        exit_code=proc.returncode,
+                        restart_count=rc,
+                    )
+                    await self._set_observed(
+                        collector,
+                        CollectorObservedState.CRASHED,
+                        restart_count=rc,
+                        error_type="process_exit",
+                        error_message=f"collector process exited with code {proc.returncode}",
+                    )
+                    continue
+
+            # 2. Operator wants it stopped/disabled: kill any live child, settle.
+            if collector.desired_state in (
+                CollectorDesiredState.STOPPED,
+                CollectorDesiredState.DISABLED,
             ):
-                target = CollectorObservedState.RUNNING
-            elif (
-                collector.desired_state
-                in (CollectorDesiredState.STOPPED, CollectorDesiredState.DISABLED)
-                and collector.observed_state is CollectorObservedState.RUNNING
-            ):
-                target = CollectorObservedState.STOPPED
-            if target is None:
+                if alive and proc is not None:
+                    proc.terminate()
+                    del self._procs[cid]
+                self._cooling_until.pop(cid, None)
+                await self._set_observed(collector, CollectorObservedState.STOPPED)
                 continue
-            await self._storage.record_collector_observed_state(
-                collector_id=collector.id,
-                observed_state=target,
-            )
-            await self.audit.emit(
-                event=AuditSubject.COLLECTOR_RECONCILED.value,
-                subject_kind="collector",
-                subject_id=collector.id,
-                payload={
-                    "from": collector.observed_state.value,
-                    "to": target.value,
-                    "desired": collector.desired_state.value,
-                },
-            )
+
+            # 3. Operator wants it running.
+            if alive:
+                await self._set_observed(collector, CollectorObservedState.RUNNING)
+                continue
+            cool = self._cooling_until.get(cid)
+            if cool is not None and now < cool:
+                await self._set_observed(collector, CollectorObservedState.COOLING)
+                continue
+            self._cooling_until.pop(cid, None)  # cooldown elapsed (or never set)
+            spawned = await self._spawn(collector)
+            if spawned is not None:
+                self._procs[cid] = spawned
+                await self._set_observed(collector, CollectorObservedState.RUNNING)
+            else:
+                rc = collector.restart_count + 1
+                self._cooling_until[cid] = now + min(2.0**rc, _MAX_COOLING_S)
+                await self._set_observed(
+                    collector,
+                    CollectorObservedState.CRASHED,
+                    restart_count=rc,
+                    error_type="spawn_failed",
+                    error_message="spawn failed: missing identity or OS refused the process",
+                )
 
     async def dispatch_approved(self) -> None:
         """Gate + lease + dispatch every approved candidate ready to join."""
