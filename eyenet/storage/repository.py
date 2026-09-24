@@ -934,6 +934,22 @@ class BaseRepository(ABC):
         oldest-first. Used by the Verifier window-corpus loader."""
 
     @abstractmethod
+    async def message_bodies_by_actor(self) -> dict[UUID, list[str]]:
+        """All non-empty message bodies grouped by author actor_id (batch read
+        for the shared-infrastructure linker)."""
+
+    @abstractmethod
+    async def detect_copypasta_templates(self) -> int:
+        """Batch-detect copypasta templates over stored messages: upsert
+        content_template rows, tag messages, flag templates crossing the
+        thresholds. Returns the flagged-template count (anti-spam §A)."""
+
+    @abstractmethod
+    async def flagged_copypasta_fingerprints(self) -> set[str]:
+        """Fingerprints of templates flagged as copypasta — the stylometric
+        sensor's skip-set."""
+
+    @abstractmethod
     async def messages_for_actor(
         self,
         actor_id: UUID,

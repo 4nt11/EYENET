@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
-from eyenet.api.v1.schemas.actors import ActorDetail, AliasEntry
+from eyenet.api.v1.schemas.actors import ActorDetail, AliasEntry, actor_primary_handle
 from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.attribution import PersonaRow
 from eyenet.contracts.source import SourceRow
@@ -44,7 +44,7 @@ async def actors_get(
     platforms = [source.kind.value] if source is not None else []
     return ActorDetail(
         actor_id=actor.id,
-        primary_handle=actor.current_handle or actor.platform_userid,
+        primary_handle=actor_primary_handle(actor),
         platforms=platforms,
         score=None,
         first_seen=actor.first_seen_at_source or actor.first_seen_at_ingest,

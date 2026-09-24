@@ -33,6 +33,7 @@ async def _seed_actor(
     *,
     actor_key: str,
     handle: str | None = "alice",
+    display: str | None = "Alice",
 ):
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
@@ -42,7 +43,7 @@ async def _seed_actor(
         actor_key=actor_key,
         platform_userid="42",
         handle=handle,
-        display_name="Alice",
+        display_name=display,
         seen_at=now,
     )
     return source_id, actor_id
@@ -72,7 +73,10 @@ async def test_actors_get_falls_back_to_platform_userid(
     client: TestClient, storage: BaseRepository, seed_user, now: datetime
 ) -> None:
     await seed_user(username="a", password="pw")
-    _, actor_id = await _seed_actor(storage, now, actor_key="actor:nohandle", handle=None)
+    # No @handle and no display name → last resort is the raw platform id.
+    _, actor_id = await _seed_actor(
+        storage, now, actor_key="actor:nohandle", handle=None, display=None
+    )
     token = _login(client, "a", "pw")
     body = client.get(f"/v1/actors/{actor_id}", headers=_auth(token)).json()
     assert body["primary_handle"] == "42"

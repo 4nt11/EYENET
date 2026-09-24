@@ -51,7 +51,7 @@ from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
 from .linkage_verifier_result import LinkageVerifierResultTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
-from .message import AttachmentTable, MessageTable
+from .message import AttachmentTable, ContentTemplateTable, MessageTable
 from .mfa import MfaChallengeTable
 from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
@@ -68,6 +68,7 @@ __all__ = [
     "ActorArtifactTable",
     "ActorTable",
     "AttachmentTable",
+    "ContentTemplateTable",
     "AuditAnchorTable",
     "AuditLogTable",
     "CaseCollaboratorTable",

@@ -49,6 +49,7 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "actor",
         "group_",
         "message",
+        "content_template",
         "attachment",
         "reaction",
         "actor_alias_history",
