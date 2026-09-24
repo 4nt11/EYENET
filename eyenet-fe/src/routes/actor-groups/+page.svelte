@@ -1,6 +1,8 @@
 <script>
   import { onMount } from 'svelte';
-  import EntityList from '$lib/components/EntityList.svelte';
+  import DossierLayout from '$lib/components/DossierLayout.svelte';
+  import Segmented from '$lib/components/Segmented.svelte';
+  import Dropdown from '$lib/components/Dropdown.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
@@ -11,13 +13,30 @@
   async function runSweep() { const n = await sweepCases(); if (n !== null) await loadActorGroups(); }
   async function rebuildCrews() { const r = await runInfra(); if (r !== null) await loadActorGroups(); }
 
-  // One merged list: manual crews (curated) first, then derived. The manual/derived
-  // label rides the EntityList chip slot (like actor tiers).
-  let selectedId = $state(null);
-  let listItems = $derived([
-    ...manualCrewCtx.list.map((m) => ({ id: m.id, primary: m.name, secondary: `${m.memberCount} members`, chip: 'manual', tone: 'high' })),
-    ...actorGroupCtx.list.map((d) => ({ id: d.id, primary: d.name, secondary: `${d.size} accounts`, chip: 'derived', tone: 'neutral' }))
+  // Filter/sort over the merged crew set (client-side — both lists are in memory).
+  let crewType = $state('all'); // all | manual | derived
+  let crewSort = $state('size'); // size | name | score
+  const SORT_OPTS = [{ v: 'size', l: 'Size' }, { v: 'name', l: 'Name' }, { v: 'score', l: 'Max score' }];
+
+  let allCrews = $derived([
+    ...manualCrewCtx.list.map((m) => ({ id: m.id, name: m.name, kind: 'manual', size: m.memberCount, score: -1 })),
+    ...actorGroupCtx.list.map((d) => ({ id: d.id, name: d.name, kind: 'derived', size: d.size, score: d.maxScore ?? 0 }))
   ]);
+  let shownCrews = $derived(
+    allCrews
+      .filter((c) => crewType === 'all' || c.kind === crewType)
+      .sort((a, b) =>
+        crewSort === 'name' ? a.name.localeCompare(b.name)
+          : crewSort === 'score' ? b.score - a.score
+          : b.size - a.size)
+  );
+  let listItems = $derived(shownCrews.map((c) => ({
+    id: c.id, primary: c.name,
+    secondary: c.kind === 'manual' ? `${c.size} members` : `${c.size} accounts`,
+    chip: c.kind, tone: c.kind === 'manual' ? 'high' : 'neutral'
+  })));
+
+  let selectedId = $state(null);
   let selKind = $derived(
     manualCrewCtx.list.some((m) => m.id === selectedId) ? 'manual'
       : actorGroupCtx.list.some((d) => d.id === selectedId) ? 'derived' : null
@@ -74,41 +93,38 @@
   {/if}
 {/snippet}
 
-<EntityList label="Crews" items={listItems} selectedId={selectedId} onSelect={(id) => { selectedId = id; creating = false; }} />
+<DossierLayout listLabel="Crews" items={listItems} selectedId={selectedId}
+  onSelect={(id) => { selectedId = id; creating = false; }}
+  selected={creating || selKind !== null} accent={creating || selKind === 'manual'}>
 
-<main>
-  {#if creating}
-    <div class="dossier-head accent">
-      <div class="head-top">
-        <span class="handle">New crew</span>
-        <div class="head-actions">
+  {#snippet title()}
+    <span class="handle">{creating ? 'New crew' : selKind ? (dc?.name ?? manualCrewView.detail?.name ?? '') : 'Actor groups'}</span>
+  {/snippet}
+
+  {#snippet filters()}
+    <span class="fcount">{shownCrews.length} crew{shownCrews.length === 1 ? '' : 's'}</span>
+    <button class="pbtn accent" onclick={startCreate}>+ New crew</button>
+    <Segmented options={[{ v: 'all', l: 'All' }, { v: 'manual', l: 'Manual' }, { v: 'derived', l: 'Derived' }]} bind:value={crewType} />
+    <Dropdown options={SORT_OPTS} bind:value={crewSort} minWidth="128px" />
+  {/snippet}
+
+  {#snippet head()}
+    {#if creating}
+      <div class="headrow">
+        <Badge tone="high" dot>manual</Badge>
+        <div class="ha">
           <Button variant="primary" size="sm" disabled={!newName.trim()} onclick={submitCreate}>Create{picked.length ? ` · ${picked.length}` : ''}</Button>
           <button class="pbtn" onclick={cancelCreate}>Cancel</button>
         </div>
       </div>
-      <div class="badges"><Badge tone="high" dot>manual</Badge></div>
-    </div>
-    <div class="body">
-      <Panel title="Name"><div class="pad"><input class="search" type="text" placeholder="Crew name…" bind:value={newName} /></div></Panel>
-      <Panel title={`Members${picked.length ? ` · ${picked.length}` : ''}`}>
-        <div class="pad">
-          {@render searchBox(cq, (v) => (cq = v), togglePick, picked.map((p) => p.id))}
-          {#if picked.length}<div class="chips">{#each picked as p}<button class="chip pick" onclick={() => togglePick(p)}>{p.handle} ✕</button>{/each}</div>{/if}
-        </div>
-      </Panel>
-    </div>
-
-  {:else if selKind === 'derived' && dc}
-    <div class="dossier-head">
-      <div class="head-top">
-        <span class="handle">{dc.name}</span>
-        <div class="head-actions">
-          <button class="pbtn" onclick={startCreate}>+ New crew</button>
+    {:else if selKind === 'derived' && dc}
+      <div class="headrow">
+        <Badge tone="neutral" dot>derived</Badge>
+        <div class="ha">
           {#if caseId}<a class="pbtn accent" href={`/cases/${caseId}`}>Open case →</a>
           {:else}<Button variant="primary" size="sm" disabled={crewCase.submitting} onclick={() => openCase(dc)}>Open case</Button>{/if}
         </div>
       </div>
-      <div class="badges"><Badge tone="neutral" dot>derived</Badge></div>
       <div class="ops">
         <button class="oplink" disabled={linkerRun.submitting} onclick={rebuildCrews}>{linkerRun.submitting ? 'rebuilding…' : 'rebuild crews'}</button>
         <button class="oplink" disabled={linkerRun.submitting} onclick={detectCopypasta}>detect copypasta</button>
@@ -117,77 +133,78 @@
         {#if crewSweep.opened !== null}<span class="opnote">opened {crewSweep.opened} case{crewSweep.opened === 1 ? '' : 's'}</span>{/if}
       </div>
       {#if crewCase.error}<div class="err">Could not open case: {crewCase.error}</div>{/if}
-    </div>
-    <div class="body">
-      <div class="tiles">
-        <StatTile label="Accounts" value={dc.size} />
-        <StatTile label="Links" value={dc.edgeCount} />
-        <StatTile label="Max score" value={dc.maxScore} tone="accent" />
+    {:else if selKind === 'manual' && manualCrewView.detail}
+      <div class="headrow">
+        <div class="hchips"><Badge tone="high" dot>manual</Badge>{#if manualCrewView.detail.createdAt}<span class="sub">created {manualCrewView.detail.createdAt}</span>{/if}</div>
+        <div class="ha"><button class="pbtn danger" onclick={onDelete}>Delete crew</button></div>
       </div>
-      <Panel title={`Shared infrastructure · ${dc.topInfra.length}`}>
-        {#if dc.topInfra.length}<div class="chips">{#each dc.topInfra as tok}<span class="chip">{prettyInfra(tok)}</span>{/each}</div>
-        {:else}<div class="rempty">No shared indicators recorded.</div>{/if}
-      </Panel>
-      <Panel title={`Links · ${dc.edgeCount}`}>
-        {#if dc.links.length}
-          {#each dc.links as l}<div class="lrow"><span class="lpair">{l.a} <span class="larrow">↔</span> {l.b}</span><span class="lshared">{l.shared.join(', ')}</span><span class="lscore">{l.score.toFixed(2)}</span></div>{/each}
-        {:else}<div class="rempty">No links recorded.</div>{/if}
-      </Panel>
-      <Panel title={`Members · ${dc.members.length}`}>
-        {#each dc.members as m}<div class="mrow"><span class="mlabel">{m.label}</span><span class="mid">{m.actor_id.slice(0, 8)}</span></div>{/each}
-      </Panel>
-    </div>
+    {/if}
+  {/snippet}
 
-  {:else if selKind === 'manual' && manualCrewView.detail}
-    {@const d = manualCrewView.detail}
-    <div class="dossier-head accent">
-      <div class="head-top">
-        <span class="handle">{d.name}</span>
-        <div class="head-actions">
-          <button class="pbtn" onclick={startCreate}>+ New crew</button>
-          <button class="pbtn danger" onclick={onDelete}>Delete crew</button>
-        </div>
+  {#snippet body()}
+    {#if creating}
+      <div class="stack">
+        <Panel title="Name"><div class="pad"><input class="search" type="text" placeholder="Crew name…" bind:value={newName} /></div></Panel>
+        <Panel title={`Members${picked.length ? ` · ${picked.length}` : ''}`}>
+          <div class="pad">
+            {@render searchBox(cq, (v) => (cq = v), togglePick, picked.map((p) => p.id))}
+            {#if picked.length}<div class="chips">{#each picked as p}<button class="chip pick" onclick={() => togglePick(p)}>{p.handle} ✕</button>{/each}</div>{/if}
+          </div>
+        </Panel>
       </div>
-      <div class="badges"><Badge tone="high" dot>manual</Badge>{#if d.createdAt}<span class="sub">created {d.createdAt}</span>{/if}</div>
-    </div>
-    <div class="body">
-      <div class="tiles"><StatTile label="Members" value={d.members.length} tone="accent" /></div>
-      <Panel title="Add member">
-        <div class="pad">
-          {@render searchBox(addQ, (v) => (addQ = v), addFromSearch, d.members.map((m) => m.actor_id))}
-          {#if manualCrewView.msg}<div class="err">{manualCrewView.msg}</div>{/if}
+    {:else if selKind === 'derived' && dc}
+      <div class="stack">
+        <div class="tiles">
+          <StatTile label="Accounts" value={dc.size} />
+          <StatTile label="Links" value={dc.edgeCount} />
+          <StatTile label="Max score" value={dc.maxScore} tone="accent" />
         </div>
-      </Panel>
-      <Panel title={`Members · ${d.members.length}`}>
-        {#each d.members as m}
-          <div class="mrow"><span class="mlabel">{m.handle}{#if m.displayName} · {m.displayName}{/if}</span><button class="rm" disabled={manualCrewView.busy} onclick={() => removeMember(selectedId, m.actor_id)}>remove</button></div>
-        {:else}<div class="rempty">No members yet. Search above to add.</div>{/each}
-      </Panel>
-    </div>
+        <Panel title={`Shared infrastructure · ${dc.topInfra.length}`}>
+          {#if dc.topInfra.length}<div class="chips">{#each dc.topInfra as tok}<span class="chip">{prettyInfra(tok)}</span>{/each}</div>
+          {:else}<div class="rempty">No shared indicators recorded.</div>{/if}
+        </Panel>
+        <Panel title={`Links · ${dc.edgeCount}`}>
+          {#if dc.links.length}
+            {#each dc.links as l}<div class="lrow"><span class="lpair">{l.a} <span class="larrow">↔</span> {l.b}</span><span class="lshared">{l.shared.join(', ')}</span><span class="lscore">{l.score.toFixed(2)}</span></div>{/each}
+          {:else}<div class="rempty">No links recorded.</div>{/if}
+        </Panel>
+        <Panel title={`Members · ${dc.members.length}`}>
+          {#each dc.members as m}<div class="mrow"><span class="mlabel">{m.label}</span><span class="mid">{m.actor_id.slice(0, 8)}</span></div>{/each}
+        </Panel>
+      </div>
+    {:else if selKind === 'manual' && manualCrewView.detail}
+      {@const d = manualCrewView.detail}
+      <div class="stack">
+        <div class="tiles"><StatTile label="Members" value={d.members.length} tone="accent" /></div>
+        <Panel title="Add member">
+          <div class="pad">
+            {@render searchBox(addQ, (v) => (addQ = v), addFromSearch, d.members.map((m) => m.actor_id))}
+            {#if manualCrewView.msg}<div class="err">{manualCrewView.msg}</div>{/if}
+          </div>
+        </Panel>
+        <Panel title={`Members · ${d.members.length}`}>
+          {#each d.members as m}
+            <div class="mrow"><span class="mlabel">{m.handle}{#if m.displayName} · {m.displayName}{/if}</span><button class="rm" disabled={manualCrewView.busy} onclick={() => removeMember(selectedId, m.actor_id)}>remove</button></div>
+          {:else}<div class="rempty">No members yet. Search above to add.</div>{/each}
+        </Panel>
+      </div>
+    {/if}
+  {/snippet}
 
-  {:else}
-    <div class="dossier-head">
-      <div class="head-top">
-        <span class="handle">Actor groups</span>
-        <div class="head-actions"><Button variant="primary" size="sm" onclick={startCreate}>+ New crew</Button></div>
-      </div>
-    </div>
-    <div class="body"><p class="pnote">
+  {#snippet empty()}
+    <p class="pnote">
       {#if !actorGroupCtx.loaded || !manualCrewCtx.loaded}Loading…
-      {:else}No crews yet. Rebuild the shared-infrastructure linker, or create one above.{/if}
-    </p></div>
-  {/if}
-</main>
+      {:else}No crews yet. Rebuild the shared-infrastructure linker, or create one with + New crew.{/if}
+    </p>
+  {/snippet}
+</DossierLayout>
 
 <style>
-  main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
-
-  .dossier-head { flex: 0 0 auto; padding: 16px 20px 16px 22px; border-bottom: 1px solid var(--border); border-left: 3px solid var(--border-strong); }
-  .dossier-head.accent { border-left-color: var(--accent); }
-  .head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .handle { font-family: var(--font-mono); font-size: var(--fs-22); font-weight: var(--fw-bold); letter-spacing: var(--tracking-data); color: var(--text); overflow: hidden; text-overflow: ellipsis; }
-  .head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-  .badges { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 0; }
+  .fcount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; margin-right: 2px; }
+  .headrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 10px 0 0; }
+  .hchips { display: flex; align-items: center; gap: 10px; }
+  .ha { display: flex; align-items: center; gap: 8px; }
   .sub { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
   .ops { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 10px 0 0; }
   .oplink { appearance: none; background: none; border: none; padding: 0; cursor: pointer; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--accent-text); text-decoration: underline; letter-spacing: var(--tracking-label); }
@@ -199,7 +216,8 @@
   .pbtn.accent { color: var(--accent-text); }
   .pbtn.danger { color: var(--red-text); border-color: var(--red-border, var(--border-strong)); }
 
-  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+  .stack > :global(.panel) { flex: 0 0 auto; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; }
 
   .pad { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -219,7 +237,7 @@
   .mid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
 
   .rempty, .pnote { padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
-  .err { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red-text); padding: 6px 0 0; }
+  .err { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red-text); padding: 4px 0; }
 
   .search { width: 100%; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 8px 10px; }
   .search:focus { outline: none; border-color: var(--accent); }
@@ -231,7 +249,6 @@
   .res.on { background: var(--accent-fill); }
   .reshandle { font-family: var(--font-mono); font-size: var(--fs-13); color: var(--text-body); }
   .resid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
-
   .rm { appearance: none; background: none; border: none; cursor: pointer; padding: 0; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--red-text); }
   .rm:disabled { opacity: 0.5; cursor: default; }
 </style>
