@@ -70,6 +70,13 @@ class ActorSummary(ApiSchema):
     observation_count: int = Field(default=0, ge=0)
 
 
+class ActorStats(ApiSchema):
+    """Roster-wide ceilings for the list filter sliders (GET /v1/actors/stats)."""
+
+    max_messages: int = Field(ge=0)
+    max_observations: int = Field(ge=0)
+
+
 class SetActorAssessmentRequest(ApiSchema):
     """Body for PUT /v1/actors/{id}/assessment — operator dossier note."""
 
@@ -317,6 +324,7 @@ class CursorPageActorSummary(CursorPage[ActorSummary]):
 
 __all__ = [
     "ActorDetail",
+    "ActorStats",
     "ActorSummary",
     "BelongsToPersonaAttrs",
     "BelongsToPersonaEdge",

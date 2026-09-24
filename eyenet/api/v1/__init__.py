@@ -25,6 +25,7 @@ from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
 from eyenet.api.v1.actors.api_get_neighbors import router as actors_neighbors_router
 from eyenet.api.v1.actors.api_get_relationships import router as actors_relationships_router
 from eyenet.api.v1.actors.api_get_timeline import router as actors_timeline_router
+from eyenet.api.v1.actors.api_actor_stats import router as actors_stats_router
 from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
 from eyenet.api.v1.actors.api_list_observations import router as actors_observations_router
 from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
@@ -241,6 +242,7 @@ v1_router.include_router(actor_groups_sweep_router)
 v1_router.include_router(crews_router)  # /crews (literal) before /crews/{id}
 v1_router.include_router(linker_run_router)
 v1_router.include_router(actors_list_router)  # /actors (literal) before /actors/{id}
+v1_router.include_router(actors_stats_router)  # /actors/stats before /actors/{id}
 v1_router.include_router(actors_get_router)
 v1_router.include_router(actors_set_assessment_router)
 v1_router.include_router(calibration_get_router)

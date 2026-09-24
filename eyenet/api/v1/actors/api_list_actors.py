@@ -39,6 +39,8 @@ async def actors_list(
     group_id: Annotated[UUID | None, Query()] = None,
     min_messages: Annotated[int | None, Query(ge=0)] = None,
     min_observations: Annotated[int | None, Query(ge=0)] = None,
+    max_messages: Annotated[int | None, Query(ge=0)] = None,
+    max_observations: Annotated[int | None, Query(ge=0)] = None,
     sort: Annotated[ActorSort, Query()] = "recent",
 ) -> CursorPageActorSummary:
     rows = cast(
@@ -51,6 +53,8 @@ async def actors_list(
             group_id=group_id,
             min_messages=min_messages,
             min_observations=min_observations,
+            max_messages=max_messages,
+            max_observations=max_observations,
         ),
     )
     estimated_total = (
@@ -59,6 +63,8 @@ async def actors_list(
             group_id=group_id,
             min_messages=min_messages,
             min_observations=min_observations,
+            max_messages=max_messages,
+            max_observations=max_observations,
         )
         if page.include_total
         else None

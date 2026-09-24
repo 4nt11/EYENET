@@ -8,14 +8,17 @@
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
+  import RangeSlider from '$lib/components/RangeSlider.svelte';
   import {
     actorCtx,
     actorView,
     actorFilters,
+    actorBounds,
     groupOptions,
     loadActors,
     loadMoreActors,
     loadGroupOptions,
+    loadActorBounds,
     applyFilters,
     loadActorDetail,
     saveAssessment,
@@ -66,7 +69,7 @@
 
   $effect(() => { if (a) loadActorDetail(a.id); });
 
-  onMount(() => { loadActors(); loadGroupOptions(); });
+  onMount(() => { loadActors(); loadGroupOptions(); loadActorBounds(); });
 
   const assessmentReady = $derived(
     assessmentDraft.trim().length > 0 && assessmentReason.trim().length > 0 && !actorView.submitting
@@ -242,8 +245,14 @@
     <option value="">All groups</option>
     {#each groupOptions.list as g}<option value={g.id}>{g.label}</option>{/each}
   </select>
-  <input class="fnum" type="number" min="0" placeholder="msgs ≥" bind:value={actorFilters.minMessages} oninput={applyFilters} />
-  <input class="fnum" type="number" min="0" placeholder="obs ≥" bind:value={actorFilters.minObservations} oninput={applyFilters} />
+  {#if actorBounds.maxMessages > 0}
+    <RangeSlider label="messages" max={actorBounds.maxMessages}
+      bind:low={actorFilters.minMessages} bind:high={actorFilters.maxMessages} onchange={applyFilters} />
+  {/if}
+  {#if actorBounds.maxObservations > 0}
+    <RangeSlider label="observations" max={actorBounds.maxObservations}
+      bind:low={actorFilters.minObservations} bind:high={actorFilters.maxObservations} onchange={applyFilters} />
+  {/if}
 {/snippet}
 
 <style>

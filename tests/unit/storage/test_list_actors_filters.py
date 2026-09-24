@@ -101,6 +101,15 @@ async def test_sort_by_messages_desc(storage: BaseRepository) -> None:
     assert ordered == [alice, bot]  # 3 msgs before 1
 
 
+async def test_max_messages_filter_and_bounds(storage: BaseRepository) -> None:
+    _, bot, _, _ = await _seed(storage)  # alice=3 msgs, bot=1 msg
+    # max_messages=1 keeps only the bot (3 > 1 excluded)
+    assert [a.id for a, _, _ in await storage.list_actors(limit=50, max_messages=1)] == [bot]
+    assert await storage.count_actors(max_messages=1) == 1
+    # bounds: the busiest actor has 3 messages, 0 observations
+    assert await storage.actor_stat_bounds() == (3, 0)
+
+
 async def test_sort_by_handle(storage: BaseRepository) -> None:
     await _seed(storage)
     ordered = [a.current_handle for a, _, _ in await storage.list_actors(limit=50, sort="handle")]
