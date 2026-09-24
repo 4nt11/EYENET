@@ -15,7 +15,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
-from eyenet.api.v1.schemas.actor_groups import ActorGroupList, ActorGroupSummary, CrewMember
+from eyenet.api.v1.schemas.actor_groups import (
+    ActorGroupList,
+    ActorGroupSummary,
+    CrewLink,
+    CrewMember,
+)
 from eyenet.api.v1.schemas.actors import actor_primary_handle
 from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.attribution import LinkageRow
@@ -57,6 +62,11 @@ async def actor_groups_list(
     ]
     crews = build_crews(edges)
 
+    # TODO(evidence-messages): a drill-down that, per crew link, surfaces the actual
+    # messages/posts from both actors carrying each shared indicator (the "here are
+    # the posts" view). Needs a messages_with_indicator(actor_ids, token) query +
+    # GET /v1/actor-groups/{crew_key}/evidence-messages. Deferred per operator.
+
     # Resolve labels for every member (bounded by crew membership — operator scale).
     member_ids: set[UUID] = {m for crew in crews for m in crew.members}
     labels: dict[UUID, str] = {}
@@ -71,6 +81,10 @@ async def actor_groups_list(
             top_infra=list(crew.top_infra),
             edge_count=crew.edge_count,
             max_score=crew.max_score,
+            links=[
+                CrewLink(actor_a_id=a, actor_b_id=b, score=s, shared=list(shared))
+                for a, b, s, shared in crew.links
+            ],
         )
         for crew in crews
     ]

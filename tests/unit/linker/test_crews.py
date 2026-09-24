@@ -17,6 +17,21 @@ E = UUID("00000000-0000-0000-0000-0000000000e5")
 
 
 @pytest.mark.unit
+def test_crew_carries_links_sorted_by_score() -> None:
+    edges = [
+        (A, B, 0.6, ["handle:wbpay"]),
+        (B, C, 0.95, ["handle:lv"]),
+        (A, C, 0.8, ["tme:x"]),
+    ]
+    crews = build_crews(edges)
+    assert len(crews) == 1
+    crew = crews[0]
+    assert crew.edge_count == 3
+    assert len(crew.links) == 3  # every pairwise link is retained, not just the count
+    assert [round(s, 2) for _, _, s, _ in crew.links] == [0.95, 0.8, 0.6]  # strongest first
+
+
+@pytest.mark.unit
 def test_two_disjoint_crews() -> None:
     edges = [
         (A, B, 0.9, ["handle:wbpay"]),

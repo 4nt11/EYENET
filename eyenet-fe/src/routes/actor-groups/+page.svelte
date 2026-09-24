@@ -83,6 +83,20 @@
           {/if}
         </Panel>
 
+        <Panel title={`Links · ${c.edgeCount}`}>
+          {#if c.links.length}
+            {#each c.links as l}
+              <div class="lrow">
+                <span class="lpair">{l.a} <span class="larrow">↔</span> {l.b}</span>
+                <span class="lshared">{l.shared.join(', ')}</span>
+                <span class="lscore">{l.score.toFixed(2)}</span>
+              </div>
+            {/each}
+          {:else}
+            <div class="empty">No links recorded.</div>
+          {/if}
+        </Panel>
+
         <Panel title={`Members · ${c.members.length}`}>
           {#each c.members as m}
             <div class="mrow"><span class="mlabel">{m.label}</span><span class="mid">{m.actor_id.slice(0, 8)}</span></div>
@@ -109,6 +123,12 @@
   .badges { display: flex; gap: 8px; flex-wrap: wrap; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; }
   .chip { font-family: var(--font-mono); font-size: var(--fs-12); padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-body); }
+  .lrow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 48px; gap: 10px; align-items: baseline; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+  .lrow:last-child { border-bottom: none; }
+  .lpair { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .larrow { color: var(--accent-text); }
+  .lshared { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lscore { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-align: right; }
   .mrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
   .mrow:last-child { border-bottom: none; }
   .mlabel { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); }
