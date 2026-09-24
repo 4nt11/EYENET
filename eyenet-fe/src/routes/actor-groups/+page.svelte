@@ -103,6 +103,10 @@
 
   {#snippet filters()}
     <span class="fcount">{shownCrews.length} crew{shownCrews.length === 1 ? '' : 's'}</span>
+    {#if selKind === 'derived' && dc}
+      {#if caseId}<a class="pbtn accent" href={`/cases/${caseId}`}>Open case →</a>
+      {:else}<Button variant="primary" size="sm" disabled={crewCase.submitting} onclick={() => openCase(dc)}>Open case</Button>{/if}
+    {/if}
     <button class="pbtn accent" onclick={startCreate}>+ New crew</button>
     <Segmented options={[{ v: 'all', l: 'All' }, { v: 'manual', l: 'Manual' }, { v: 'derived', l: 'Derived' }]} bind:value={crewType} />
     <Dropdown options={SORT_OPTS} bind:value={crewSort} minWidth="128px" />
@@ -118,13 +122,7 @@
         </div>
       </div>
     {:else if selKind === 'derived' && dc}
-      <div class="headrow">
-        <Badge tone="neutral" dot>derived</Badge>
-        <div class="ha">
-          {#if caseId}<a class="pbtn accent" href={`/cases/${caseId}`}>Open case →</a>
-          {:else}<Button variant="primary" size="sm" disabled={crewCase.submitting} onclick={() => openCase(dc)}>Open case</Button>{/if}
-        </div>
-      </div>
+      <div class="headrow"><Badge tone="neutral" dot>derived</Badge></div>
       <div class="ops">
         <button class="oplink" disabled={linkerRun.submitting} onclick={rebuildCrews}>{linkerRun.submitting ? 'rebuilding…' : 'rebuild crews'}</button>
         <button class="oplink" disabled={linkerRun.submitting} onclick={detectCopypasta}>detect copypasta</button>
