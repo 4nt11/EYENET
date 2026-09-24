@@ -4874,6 +4874,7 @@ components:
         instance_name: { type: string, nullable: true, minLength: 3, maxLength: 128 }
         notes: { type: string, nullable: true, maxLength: 1024 }
         desired_state: { $ref: '#/components/schemas/CollectorDesiredState', nullable: true }
+        backfill: { type: boolean, nullable: true }
     CursorPageCollectorSummary:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }
