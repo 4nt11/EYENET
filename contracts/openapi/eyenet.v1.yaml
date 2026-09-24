@@ -381,6 +381,27 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/actor-groups/case:
+    post:
+      tags: [actor-groups]
+      operationId: actor_groups_open_case
+      summary: Promote a crew to an investigation Case (idempotent on crew key).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenCrewCaseRequest' }
+      responses:
+        "200":
+          description: The case opened (or the existing one) for this crew.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenCrewCaseResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/actors:
     get:
       tags: [actors]
@@ -3345,6 +3366,26 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ActorGroupSummary' }
         count: { type: integer, minimum: 0 }
+    OpenCrewCaseRequest:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          minItems: 2
+          items: { type: string, format: uuid }
+        top_infra:
+          type: array
+          items: { type: string }
+        title: { type: string, maxLength: 256, nullable: true }
+    OpenCrewCaseResult:
+      type: object
+      additionalProperties: false
+      required: [case_id, crew_key]
+      properties:
+        case_id:  { type: string, format: uuid }
+        crew_key: { type: string }
     ActorDetail:
       allOf:
         - { $ref: '#/components/schemas/ActorSummary' }

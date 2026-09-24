@@ -45,4 +45,27 @@ class ActorGroupList(ApiSchema):
     count: int = Field(ge=0)
 
 
-__all__ = ["ActorGroupList", "ActorGroupSummary", "CrewMember"]
+class OpenCrewCaseRequest(ApiSchema):
+    """Body for POST /v1/actor-groups/case — promote a crew to an investigation."""
+
+    members: list[UUID] = Field(min_length=2, description="the crew's member actor ids")
+    top_infra: list[str] = Field(
+        default_factory=list, description="shared indicators (for title/key)"
+    )
+    title: str | None = Field(default=None, max_length=256)
+
+
+class OpenCrewCaseResult(ApiSchema):
+    """200 response for POST /v1/actor-groups/case."""
+
+    case_id: UUID
+    crew_key: str
+
+
+__all__ = [
+    "ActorGroupList",
+    "ActorGroupSummary",
+    "CrewMember",
+    "OpenCrewCaseRequest",
+    "OpenCrewCaseResult",
+]

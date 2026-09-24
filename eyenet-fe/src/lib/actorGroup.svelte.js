@@ -2,7 +2,7 @@
 // connected components of the shared-infrastructure linkage graph (accounts that
 // share contact handles / wallets / t.me links). Data-derived crews, not curated
 // named threat actors. Svelte 5 runes.
-import { apiGet } from './api.js';
+import { apiGet, apiPost } from './api.js';
 
 // Pretty-print an indicator token ("handle:wbpay" -> "@wbpay").
 export function prettyInfra(tok) {
@@ -29,6 +29,29 @@ function mapCrew(c, i) {
 }
 
 export const actorGroupCtx = $state({ list: [], loaded: false, error: null });
+
+// Promote a crew to a Case (POST /v1/actor-groups/case). Idempotent server-side
+// on the crew key, so re-opening returns the same case. Tracks per-crew result.
+export const crewCase = $state({ submitting: false, error: null, byId: {} });
+
+export async function openCase(crew) {
+  crewCase.submitting = true;
+  crewCase.error = null;
+  try {
+    const res = await apiPost(
+      '/v1/actor-groups/case',
+      { members: crew.members.map((m) => m.actor_id), top_infra: crew.topInfra },
+      { auth: true }
+    );
+    crewCase.byId = { ...crewCase.byId, [crew.id]: res.case_id };
+    return res.case_id;
+  } catch (e) {
+    crewCase.error = e.message ?? String(e);
+    return null;
+  } finally {
+    crewCase.submitting = false;
+  }
+}
 
 export async function loadActorGroups() {
   try {

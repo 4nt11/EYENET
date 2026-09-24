@@ -73,6 +73,15 @@ async def _require_case(session: AsyncSession, case_id: UUID) -> CaseTable:
 class CasesMixin:
     # -- lifecycle -------------------------------------------------------------
 
+    async def get_case_by_crew_key(self, crew_key: str) -> CaseRow | None:
+        """The case opened for a given crew (idempotency lookup), or None."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(CaseTable).where(col(CaseTable.crew_key) == crew_key)
+            )
+            table = result.first()
+        return _case_row(table) if table is not None else None
+
     async def create_case(
         self,
         *,
@@ -84,6 +93,7 @@ class CasesMixin:
         instance_id: str,
         trace_id: str | None = None,
         span_id: str | None = None,
+        crew_key: str | None = None,
     ) -> CaseRow:
         if len(title) < _MIN_TITLE_LEN:
             raise CaseError("title must be at least 3 characters")
@@ -95,6 +105,7 @@ class CasesMixin:
             effective_tier=SensitivityTier.NORMAL,
             created_by_user_id=opened_by_user_id,
             created_at=created_at,
+            crew_key=crew_key,
         )
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             session.add(table)
