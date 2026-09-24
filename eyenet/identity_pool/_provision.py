@@ -111,6 +111,75 @@ async def provision_identity(
     SQLite bytes). ``source_config`` holds the non-secret collector fields.
     """
     secret_string = _materialize_secret(source_kind, secret_blob)
+    return await _persist_identity(
+        storage=storage,
+        session_key=session_key,
+        data_dir=data_dir,
+        name=name,
+        source_id=source_id,
+        secret_string=secret_string,
+        source_config=source_config,
+        role=role,
+        cooldown_seconds=cooldown_seconds,
+        proxy_uri=proxy_uri,
+        notes=notes,
+    )
+
+
+async def provision_identity_from_session(
+    *,
+    storage: BaseRepository,
+    session_key: Fernet,
+    data_dir: Path,
+    name: str,
+    source_id: UUID,
+    session_string: str,
+    source_config: dict[str, object],
+    role: IdentityRole = IdentityRole.MONITOR,
+    cooldown_seconds: int = 21_600,
+    proxy_uri: str | None = None,
+    notes: str | None = None,
+) -> IdentityRow:
+    """Encrypt + persist an already-materialized session string.
+
+    The QR-login flow mints the StringSession live (``StringSession.save(
+    client.session)``) instead of converting an uploaded blob, so it feeds the
+    string straight in — reusing the same encrypt-at-rest + persist tail as the
+    upload path.
+    """
+    return await _persist_identity(
+        storage=storage,
+        session_key=session_key,
+        data_dir=data_dir,
+        name=name,
+        source_id=source_id,
+        secret_string=session_string,
+        source_config=source_config,
+        role=role,
+        cooldown_seconds=cooldown_seconds,
+        proxy_uri=proxy_uri,
+        notes=notes,
+    )
+
+
+async def _persist_identity(
+    *,
+    storage: BaseRepository,
+    session_key: Fernet,
+    data_dir: Path,
+    name: str,
+    source_id: UUID,
+    secret_string: str,
+    source_config: dict[str, object],
+    role: IdentityRole,
+    cooldown_seconds: int,
+    proxy_uri: str | None,
+    notes: str | None,
+) -> IdentityRow:
+    """Fernet-encrypt the secret string, write the 0600 blob, create the row.
+
+    The single at-rest-encryption + persist tail shared by both provisioning
+    entry points (upload blob path and QR-login string path)."""
     ciphertext = encrypt_session(session_key, secret_string)
     session_path = _write_encrypted_blob(data_dir, ciphertext)
     return await storage.create_identity(
@@ -125,4 +194,8 @@ async def provision_identity(
     )
 
 
-__all__ = ["SessionValidationError", "provision_identity"]
+__all__ = [
+    "SessionValidationError",
+    "provision_identity",
+    "provision_identity_from_session",
+]

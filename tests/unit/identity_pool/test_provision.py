@@ -11,7 +11,11 @@ from telethon.sessions import SQLiteSession, StringSession
 
 from eyenet.contracts.enums import SourceKind
 from eyenet.crypto import decrypt_session, load_session_key
-from eyenet.identity_pool._provision import SessionValidationError, provision_identity
+from eyenet.identity_pool._provision import (
+    SessionValidationError,
+    provision_identity,
+    provision_identity_from_session,
+)
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 
@@ -96,3 +100,27 @@ async def test_provision_rejects_unsupported_source(
             secret_blob=b"whatever",
             source_config={},
         )
+
+
+@pytest.mark.unit
+async def test_provision_from_session_string_encrypts_and_persists(
+    storage: BaseRepository, tmp_path: Path
+) -> None:
+    """The QR path hands in a live StringSession string, not a blob to convert."""
+    session_key = load_session_key(tmp_path)
+    string = StringSession.save(StringSession())  # any portable session string
+
+    row = await provision_identity_from_session(
+        storage=storage,
+        session_key=session_key,
+        data_dir=tmp_path,
+        name="tg_qr",
+        source_id=uuid.uuid4(),
+        session_string=string,
+        source_config={"telegram_api_id": 7, "telegram_api_hash": "h"},
+    )
+
+    assert row.source_config == {"telegram_api_id": 7, "telegram_api_hash": "h"}
+    on_disk = Path(row.session_path).read_bytes()
+    assert on_disk[:6] != b"SQLite"  # ciphertext, not a raw session
+    assert decrypt_session(session_key, on_disk) == string  # round-trips
