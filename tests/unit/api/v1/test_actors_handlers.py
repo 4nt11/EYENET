@@ -27,16 +27,23 @@ def _page(limit: int = 50, *, offset: int = 0, total: bool = True) -> CursorPara
     return CursorParams(offset=offset, limit=limit, include_total=total)
 
 
-async def _seed_actor(storage: BaseRepository, now: datetime, *, handle: str | None = "alice"):
+async def _seed_actor(
+    storage: BaseRepository,
+    now: datetime,
+    *,
+    handle: str | None = "alice",
+    display: str | None = "Alice",
+    uid: str = "42",
+):
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
     return await storage.upsert_actor(
         source_id=source_id,
-        actor_key="actor:u",
-        platform_userid="42",
+        actor_key=f"actor:u:{uid}",
+        platform_userid=uid,
         handle=handle,
-        display_name="Alice",
+        display_name=display,
         seen_at=now,
     )
 
@@ -76,9 +83,14 @@ async def test_actors_get_surfaces_aliases(
 async def test_actors_get_handle_fallback(
     storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
 ) -> None:
+    # No @handle → fall back to the display name (not the raw numeric id).
     actor_id = await _seed_actor(storage, now, handle=None)
     detail = await actors_get(actor_id, mkuser("read:actors"), storage)
-    assert detail.primary_handle == "42"
+    assert detail.primary_handle == "Alice"
+    # No handle AND no display name → last resort is the platform id.
+    bare_id = await _seed_actor(storage, now, handle=None, display=None, uid="99")
+    bare = await actors_get(bare_id, mkuser("read:actors"), storage)
+    assert bare.primary_handle == "99"
 
 
 async def test_actors_get_unknown_raises(
