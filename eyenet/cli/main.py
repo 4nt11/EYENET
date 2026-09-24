@@ -38,6 +38,7 @@ from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
 from eyenet.identity_pool import FileIdentityPool
 from eyenet.identity_pool.db import DbIdentityPool
+from eyenet.linker.infra_linker import run_infra_linker
 from eyenet.linker.linker import Linker
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
@@ -406,6 +407,30 @@ def linker_run(  # pragma: no cover
     cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
     linker_cfg = LinkerConfig()
     _run(lambda bus, storage: Linker(bus=bus, storage=storage, config=linker_cfg), cfg)
+
+
+@app.command("link-infra")
+def link_infra(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    max_df: int = typer.Option(
+        15, "--max-df", help="ignore indicators shared by more than N actors (ambient)"
+    ),
+    weight_floor: float = typer.Option(0.15, "--weight-floor", help="min edge score to propose"),
+) -> None:
+    """Batch-propose shared-infrastructure linkages over stored messages (anti-spam §B).
+
+    Links actors by the contact handles / t.me / wallets they share in message
+    bodies — high precision on templated-spam populations where stylometry fails.
+    """
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        n = await run_infra_linker(storage, max_df=max_df, weight_floor=weight_floor)
+        await storage.close()
+        typer.echo(f"proposed {n} shared_infra linkages")
+
+    asyncio.run(_main())
 
 
 @app.command("verifier")

@@ -101,6 +101,24 @@ class MessagesMixin:
         rows.reverse()
         return [str(b) for b in rows if b]
 
+    async def message_bodies_by_actor(self) -> dict[UUID, list[str]]:
+        """All non-empty message bodies grouped by author actor_id.
+
+        Generic (ANSI) SELECT; used by the shared-infrastructure linker's batch
+        pass. Small-operator scale — one query, grouped in Python.
+        """
+        out: dict[UUID, list[str]] = {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageTable.actor_id, MessageTable.body).where(
+                    col(MessageTable.body).is_not(None)
+                )
+            )
+            for actor_id, body in result.all():
+                if body:
+                    out.setdefault(actor_id, []).append(str(body))
+        return out
+
     async def messages_for_actor(
         self,
         actor_id: UUID,
