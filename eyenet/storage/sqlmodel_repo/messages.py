@@ -63,6 +63,24 @@ class MessagesMixin:
                 return None
             return UUID(str(row))
 
+    async def messages_by_evidence_refs(
+        self,
+        evidence_refs: list[str],
+    ) -> dict[str, tuple[UUID, str]]:
+        """Bulk-fetch (message_id, body) for many evidence_refs in ONE query — the
+        incident classifier's batch flush. Refs with no message row are omitted."""
+        if not evidence_refs:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(
+                    MessageTable.evidence_ref, MessageTable.id, MessageTable.body
+                ).where(col(MessageTable.evidence_ref).in_(evidence_refs))
+            )
+            return {
+                str(ref): (UUID(str(mid)), str(body)) for ref, mid, body in result.all()
+            }
+
     async def put_message(
         self,
         row: object,
