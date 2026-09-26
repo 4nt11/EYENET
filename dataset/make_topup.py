@@ -18,9 +18,9 @@ from pathlib import Path
 HERE = Path(__file__).parent
 LABELS = ["incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"]
 SEED = 77
-# Round 3: aim at the data-starved heads. access_sale/incident/infostealer are done.
-QUOTA = {"actor_ops": 35, "leak": 45, "tooling": 20}
-OUTFILE = "weakheads_sample.jsonl"
+# Round 4 (market): confirm the new tooling/access silver from the 21k market + more actor_ops.
+QUOTA = {"tooling": 50, "access_sale": 45, "actor_ops": 30}
+OUTFILE = "market_sample.jsonl"
 
 # access to a (usually named) target: shell/cpanel/rdp/vpn/smtp + a sale/offer cue.
 RE_ACCESS = re.compile(r"(?i)(?=.*\b(web ?shell|shell|cpanel|c-?panel|rdp|vpn|smtp|akses|acces|access|login)\b)"
@@ -63,22 +63,24 @@ def main() -> None:
     picked: list[dict] = []
     chosen: set[str] = set()
 
-    def take(pred, n):
+    def take(pred, n):  # pred takes the ROW dict
         got = 0
         for r in pool:
             if got >= n:
                 break
             if r["text"] in chosen:
                 continue
-            if pred(r["text"]):
+            if pred(r):
                 picked.append(r)
                 chosen.add(r["text"])
                 got += 1
         return got
 
-    n_o = take(lambda t: bool(RE_ACTOR.search(t)) and not RE_ATTACK_CMD.search(t), QUOTA["actor_ops"])
-    n_l = take(lambda t: bool(RE_LEAK.search(t)) and not RE_ATTACK_CMD.search(t), QUOTA["leak"])
-    n_t = take(lambda t: bool(RE_TOOL.search(t)) and not RE_ATTACK_CMD.search(t), QUOTA["tooling"])
+    # tooling/access_sale: confirm the actual SILVER fires (high-yield + precision check).
+    # actor_ops is silver-blind -> keyword-surface candidates.
+    n_t = take(lambda r: bool(r.get("tooling")), QUOTA["tooling"])
+    n_a = take(lambda r: bool(r.get("access_sale")), QUOTA["access_sale"])
+    n_o = take(lambda r: bool(RE_ACTOR.search(r["text"])) and not RE_ATTACK_CMD.search(r["text"]), QUOTA["actor_ops"])
 
     rng.shuffle(picked)
     out = HERE / OUTFILE
@@ -87,9 +89,9 @@ def main() -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     grp = Counter(r.get("group") for r in picked)
-    print(f"{len(picked)} rows -> {out.name}  (actor≈{n_o} leak≈{n_l} tooling≈{n_t}, overlap dedup'd)")
+    print(f"{len(picked)} rows -> {out.name}  (tooling≈{n_t} access≈{n_a} actor≈{n_o}, overlap dedup'd)")
     print("per group:", dict(grp.most_common()))
-    print("CANDIDATES — confirm/reject. leak=stolen data dump/dox; actor_ops=intent/plans/org; tooling=reusable tool/service sale.")
+    print("CANDIDATES — confirm/reject. tooling=reusable tool/service sale; access_sale=access to a NAMED target; actor_ops=intent/plans/org.")
 
 
 if __name__ == "__main__":

@@ -15,27 +15,17 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from eyenet.incidents.classifier import SIG2LABEL  # canonical signal->label map
 from eyenet.incidents.prefilter import scan
 
 HERE = Path(__file__).parent
 LABELS = ["incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"]
 
-# prefilter signal -> label. Only high-confidence mappings; weak/ambiguous signals
-# (institutional_target, tg_target, record_count, etc.) set nothing -> human decides.
-SIG2LABEL = {
-    "deface_banner": "incident", "ddos_command": "incident", "check_host": "incident",
-    "compromise_confirmed": "incident", "multi_target": "incident",
-    "leak_host": "leak", "leak_label": "leak", "target_dump_file": "leak",
-    "pii_schema": "leak", "hash_list": "leak", "cred_combo": "leak",
-    "cred_label": "leak", "onion_url": "leak",
-    "stealer_logs": "infostealer", "cloud_pass": "infostealer",
-    "access_material": "access_sale",
-    # NOTE: `sale_marker` deliberately maps to NOTHING. It's a paid-vs-free modifier
-    # ("for sale", "escrow", "WTB") that fires on cred/log/ddos-script sales and
-    # chatter, none of which is IAB access. It was mislabeling ~165 rows as
-    # access_sale. IAB access-sale is thin-to-absent in this corpus (no IAB channels
-    # monitored) — hand-label the ~74 access_material (webshell/root) fires instead.
-}
+# SIG2LABEL is imported from eyenet.incidents.classifier (single source of truth, shared
+# with the classifier's prefilter fusion). Only high-confidence mappings live there;
+# weak/ambiguous signals (sale_marker, tg_target, record_count, ...) map to nothing so a
+# human decides. `sale_marker` deliberately maps to NOTHING (a paid-vs-free modifier that
+# was mislabeling ~165 chatter/cred/ddos rows as access_sale).
 
 
 def main() -> None:
@@ -68,7 +58,7 @@ def main() -> None:
     print(f"  none (no silver label): {counts['none']} ({100*counts['none']//n}%)")
     for k in LABELS:
         print(f"  {k:<12}: {counts[k]}")
-    print("  (actor_ops + tooling are 0 in silver by design — no prefilter signal, set by hand)")
+    print("  (actor_ops is 0 in silver by design — semantic, no prefilter signal, set by hand)")
 
 
 if __name__ == "__main__":

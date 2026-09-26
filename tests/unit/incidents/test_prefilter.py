@@ -127,6 +127,51 @@ _NEGATIVE = [
 ]
 
 
+# (label, text) — the tool_sale signal must fire (crimeware tool/service for sale).
+# Grounded in confirmed tooling gold; -> tooling in bootstrap_silver.
+_TOOL_SALE = [
+    ("ddos_script_sale", "FOR SALE ALL MY DDOS SCRIPT FOR A CHEAP PRICE DM @seller"),
+    ("selling_ddos", "still selling ddos script"),
+    ("stresser_layers", "NoLimitStresser - Layer 7 / Layer 4, dominate the application layer"),
+    ("wormgpt_sale", "Sell File WormGpt List WormGPT Linux WormGPT Windows Price $4 DM @s"),
+    ("service_drop", "New Service Drop! Now offering custom setups, build your own API CNC Panel"),
+    ("wallet_scanner", "BeeChecker - Crypto Wallet Scanner, points at any folder, finds wallets"),
+    ("buy_ddos", "To buy DD0S, contact @seller to purchase"),
+    ("ddos_rps", "IM STILL SELLING DDOS SCRIPT WITH MILLION RPS USING SMALL PROXY DM @k"),
+]
+
+# (label, text) — tool_sale must STAY QUIET: hacktivist tool USE, or benign tool words.
+_NOT_TOOL_SALE = [
+    ("hacktivist_use", "we ddos'd the ministry site today, tango down 🇹🇭"),
+    ("benign_loader_script", "reboot the server, the image loader script is stuck again"),
+    ("benign_check", "can someone check the logs, the app crashed"),
+    # crypter buyer-demand / chatter must NOT read as a tool SALE:
+    ("crypter_demand", "i need crypter"),
+    ("crypter_chatter", "Not crypter"),
+]
+
+# crypter WITH a sale/offer cue SHOULD fire (seller side, not buyer demand).
+_CRYPTER_SALE = [
+    ("crypter_fud_offer", "i got FUD Crypter if anyone's interested, dm me"),
+    ("crypter_selling", "selling private crypter, fully undetected, price in dm"),
+]
+
+
+@pytest.mark.parametrize(("label", "text"), _TOOL_SALE, ids=[p[0] for p in _TOOL_SALE])
+def test_tool_sale_fires(label: str, text: str) -> None:
+    assert "tool_sale" in scan(text).signals, f"{label}: got {scan(text).signals}"
+
+
+@pytest.mark.parametrize(("label", "text"), _NOT_TOOL_SALE, ids=[n[0] for n in _NOT_TOOL_SALE])
+def test_tool_sale_stays_quiet(label: str, text: str) -> None:
+    assert "tool_sale" not in scan(text).signals, f"{label}: got {scan(text).signals}"
+
+
+@pytest.mark.parametrize(("label", "text"), _CRYPTER_SALE, ids=[p[0] for p in _CRYPTER_SALE])
+def test_crypter_with_cue_fires(label: str, text: str) -> None:
+    assert "tool_sale" in scan(text).signals, f"{label}: got {scan(text).signals}"
+
+
 @pytest.mark.parametrize(("label", "text"), _POSITIVE, ids=[p[0] for p in _POSITIVE])
 def test_positive_adjudicates(label: str, text: str) -> None:
     res = scan(text)

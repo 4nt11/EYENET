@@ -183,6 +183,28 @@ SIGNALS: Final[tuple[Signal, ...]] = (
         r"(?i)\b(?:webshell|web\s?shell|rce|reverse\s?shell|shell\s?access"
         r"|rdp|smtp|cpanel|(?:root|admin|full)\s?access|c99|r57|wso)\b",
     ),
+    #   Crimeware TOOL/SERVICE for sale (-> tooling): distinct product nouns
+    #   (booter/stresser/wormgpt/crypter/scampage/botnet) fire on sight; ambiguous
+    #   ones (ddos/L7/L4) require a sale/product cue so hacktivist USE ("we ddos'd X")
+    #   stays quiet. Grounded in the confirmed tooling gold (DDoS scripts, stressers,
+    #   WormGPT, checkers, "service drop / build your own", CNC panels).
+    _sig(
+        "tool_sale",
+        _MEDIUM,
+        r"(?i)(?:"
+        r"booter|stress?er|wormgpt|scam\s?page|scampage"
+        r"|\bkeylogger\b|\bbotnet\b|\botp\s?bot\b|\bstealer\s?(?:builder|source)\b"
+        r"|\bloader\s?builder\b"
+        # crypter is buyer-demand-prone in this market ("i need crypter") -> require a sale/offer cue.
+        r"|\bcrypter\b[^\n]{0,40}?\b(?:sell\w*|for\s?sale|fud|cracked|price|rent|sub\w*|stock|promo|interested|offer\w*)\b"
+        r"|\b(?:sell\w*|for\s?sale|fud|cracked|price|stock|promo|interested|offer\w*)\b[^\n]{0,40}?\bcrypter\b"
+        r"|\b(?:dd[o0]s|dstat|l7|l4|layer\s?[47])\b[^\n]{0,45}?\b(?:script|setup|service|panel|method|rps|plan|subscription|for\s?sale|selling|sell|buy|purchase|rent|cloudflare)\b"
+        r"|\b(?:for\s?sale|selling|sell|buy|purchase|updated)\b[^\n]{0,45}?\b(?:dd[o0]s|l7|l4)\b"
+        r"|\b(?:selling|for\s?sale|jual|rent|buy)\b[^\n]{0,45}?\b(?:script|software|tool|method|checker|scanner|builder|source|course|config)\b"
+        r"|\bservice\s?drop\b|\bcnc\s?panel\b|\bwallet\s?scanner\b|\baccount\s?recovery\b"
+        r"|\bbuild\s?your\s?own\b[^\n]{0,30}?\b(?:cnc|api|panel|setup|booter|stress?er)\b"
+        r")",
+    ),
     #   3+ distinct targets in one post (URL list or IP list) = an attack target dump.
     _sig(
         "multi_target",
