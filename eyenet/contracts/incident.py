@@ -1,0 +1,31 @@
+"""Incident contract — the persisted twin of a multi-label classification result,
+plus the bus subject the classifier service publishes fired incidents on.
+
+`IncidentRow` mirrors `eyenet.models.incident.IncidentTable`. Append-only: one row per
+(message, classification run). See development/incident-taxonomy.md and
+eyenet/incidents/classifier.py.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from ._base import DbRowBase
+
+INCIDENT_SUBJECT: str = "incident.detected"
+"""Bus subject the classifier service publishes a fired incident on (operator triage
+feed / SSE). Only messages with >=1 fired label are emitted; `none` is not published."""
+
+
+class IncidentRow(DbRowBase):
+    """Persisted multi-label classification result for one message."""
+
+    message_id: UUID
+    labels: list[str]
+    scores: dict[str, float]
+    model_version: str
+    classified_at: datetime
+
+
+__all__ = ["INCIDENT_SUBJECT", "IncidentRow"]

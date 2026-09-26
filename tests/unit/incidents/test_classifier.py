@@ -25,9 +25,13 @@ def test_apply_calibration_fires_above_threshold() -> None:
 
 def test_calibration_shifts_boundary() -> None:
     # A compressed logit (-2) sits below 0.5 raw, but a>1/b>0 can lift it past thr.
-    raw = apply_calibration([-2.0] + [-9] * 5, _LABELS, {k: {"a": 1.0, "b": 0.0, "thr": 0.5} for k in _LABELS})
+    raw = apply_calibration(
+        [-2.0] + [-9] * 5, _LABELS, {k: {"a": 1.0, "b": 0.0, "thr": 0.5} for k in _LABELS}
+    )
     assert not raw[0].fired  # sigmoid(-2) ~ 0.12 < 0.5
-    cal = apply_calibration([-2.0] + [-9] * 5, _LABELS, {"incident": {"a": 1.0, "b": 3.0, "thr": 0.5}})
+    cal = apply_calibration(
+        [-2.0] + [-9] * 5, _LABELS, {"incident": {"a": 1.0, "b": 3.0, "thr": 0.5}}
+    )
     assert cal[0].fired  # sigmoid(-2+3)=sigmoid(1) ~ 0.73 >= 0.5
 
 
@@ -51,7 +55,7 @@ def test_prefilter_fusion_quiet_on_benign() -> None:
     not (model_dir() / "calibration.json").exists(), reason="no local trained model"
 )
 def test_classify_end_to_end_when_model_present() -> None:
-    from eyenet.incidents.classifier import fired_labels  # noqa: PLC0415
+    from eyenet.incidents.classifier import fired_labels
 
     labels = fired_labels("selling my private FUD crypter, fully undetectable, DM for price")
     assert "tooling" in labels
