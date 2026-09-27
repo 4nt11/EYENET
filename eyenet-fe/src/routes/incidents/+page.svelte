@@ -24,14 +24,17 @@
 
   // Relabel editor: a local draft label-set + reason, seeded from the current
   // correction (or the model's labels if none), reset whenever the selection moves.
+  const REASON_PRESETS = ['False positive', 'Incorrectly tagged', 'Missing label', 'Partially correct'];
   let editing = $state(false);
   let draft = $state(new Set());
   let reason = $state('');
+  let customReason = $state(false); // true = free-text; false = a preset is (or will be) chosen
   $effect(() => {
     // depend on sel.id so switching rows re-seeds the draft
     const base = sel?.correctedLabels ?? sel?.labels ?? [];
     draft = new Set(base);
     reason = '';
+    customReason = false;
     editing = false;
     void sel?.id;
   });
@@ -97,11 +100,21 @@
             <button type="button" class="chip" class:on={draft.has(l)} onclick={() => toggle(l)}>{l}</button>
           {/each}
         </div>
-        <input class="fin" type="text" bind:value={reason} placeholder="Reason (recorded to the audit chain)" />
+        <div class="reasons">
+          {#each REASON_PRESETS as r}
+            <button type="button" class="chip" class:on={!customReason && reason === r}
+              onclick={() => { reason = r; customReason = false; }}>{r}</button>
+          {/each}
+          <button type="button" class="chip" class:on={customReason}
+            onclick={() => { customReason = true; reason = ''; }}>Custom…</button>
+        </div>
+        {#if customReason}
+          <input class="fin" type="text" bind:value={reason} placeholder="Custom reason (recorded to the audit chain)" />
+        {/if}
         <div class="ra">
           <Button variant="primary" size="sm" disabled={!canSave} onclick={save}>Save correction</Button>
           <Button variant="ghost" size="sm" onclick={() => (editing = false)}>Cancel</Button>
-          <span class="hint">empty = false positive</span>
+          <span class="hint">reason required · empty labels = false positive</span>
         </div>
       {:else}
         <button class="editlink" onclick={() => (editing = true)}>{sel.correctedLabels ? 'edit correction' : 'correct labels'}</button>
@@ -168,7 +181,7 @@
   .meta { margin: 8px 0 0; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 
   .relabel { margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips, .reasons { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { appearance: none; padding: 3px 9px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); cursor: pointer; }
   .chip:hover { background: var(--panel-2); }
   .chip.on { background: var(--accent-fill); border-color: var(--accent); color: var(--text); }
