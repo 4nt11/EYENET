@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from ._base import DbRowBase
+from ._base import BusEnvelope, DbRowBase
 
 INCIDENT_SUBJECT: str = "incident.detected"
 """Bus subject the classifier service publishes a fired incident on (operator triage
@@ -28,4 +28,16 @@ class IncidentRow(DbRowBase):
     classified_at: datetime
 
 
-__all__ = ["INCIDENT_SUBJECT", "IncidentRow"]
+class IncidentEnvelope(BusEnvelope):
+    """Fired-incident bus event (published on INCIDENT_SUBJECT) — the triage feed payload.
+    Carries the dereferenceable evidence_ref, not the body (operator-grade)."""
+
+    message_id: UUID
+    evidence_ref: str
+    labels: list[str]
+    scores: dict[str, float]
+    model_version: str
+    classified_at: datetime
+
+
+__all__ = ["INCIDENT_SUBJECT", "IncidentEnvelope", "IncidentRow"]

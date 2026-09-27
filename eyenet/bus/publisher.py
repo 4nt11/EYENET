@@ -36,6 +36,7 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "attribution.persona.split",
     "classify.document.uploaded",
     "classify.attachment.stored",
+    "incident.detected",
     "eyenet.audit.",
     "eyenet.control.",
     "eyenet.identity.",

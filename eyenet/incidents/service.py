@@ -23,11 +23,13 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
-from eyenet.contracts.incident import IncidentRow
+from eyenet.contracts._base import TraceContext
+from eyenet.contracts.incident import INCIDENT_SUBJECT, IncidentEnvelope, IncidentRow
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.incidents import classifier
 from eyenet.service.base import ServiceBase
 from eyenet.telemetry import get_logger
+from eyenet.telemetry.propagation import ZERO_TRACEPARENT, current_traceparent
 
 _log = get_logger()
 _DEFAULT_BATCH = 32
@@ -106,20 +108,19 @@ class IncidentClassifierService(ServiceBase):
         scored = await loop.run_in_executor(self._infer_pool, classifier.classify_batch, texts)
 
         now = datetime.now(UTC)
-        rows: list[object] = []
+        fired_rows: list[tuple[str, IncidentRow]] = []
         for (ref, (mid, _body)), scores, text in zip(ordered, scored, texts, strict=True):
             fired = {s.label for s in scores if s.fired} | classifier.prefilter_labels(text)
             if not fired:
                 continue
-            rows.append(
-                IncidentRow(
-                    message_id=mid,
-                    labels=[s.label for s in scores if s.label in fired],  # head order
-                    scores={s.label: s.prob for s in scores},
-                    model_version=self._model_version,
-                    classified_at=now,
-                )
+            row = IncidentRow(
+                message_id=mid,
+                labels=[s.label for s in scores if s.label in fired],  # head order
+                scores={s.label: s.prob for s in scores},
+                model_version=self._model_version,
+                classified_at=now,
             )
+            fired_rows.append((ref, row))
             await self.audit.emit(
                 event="incident_detected",
                 subject_kind="evidence",
@@ -130,9 +131,31 @@ class IncidentClassifierService(ServiceBase):
                 },
             )
 
-        if rows:
-            await self._storage.put_incidents_bulk(rows)
-        _log.info("incident.flush", scanned=len(ordered), fired=len(rows))
+        if fired_rows:
+            await self._storage.put_incidents_bulk([r for _, r in fired_rows])
+            for ref, row in fired_rows:
+                await self._publish_incident(ref, row)
+        _log.info("incident.flush", scanned=len(ordered), fired=len(fired_rows))
+
+    async def _publish_incident(self, evidence_ref: str, row: IncidentRow) -> None:
+        """Emit a fired incident on the bus (triage feed / SSE). Best-effort: a publish
+        failure must not lose the stored incident, so it is logged, not raised."""
+        try:
+            tc = TraceContext(traceparent=current_traceparent() or ZERO_TRACEPARENT)
+            await self._publisher.publish(
+                INCIDENT_SUBJECT,
+                IncidentEnvelope(
+                    trace_context=tc,
+                    message_id=row.message_id,
+                    evidence_ref=evidence_ref,
+                    labels=row.labels,
+                    scores=row.scores,
+                    model_version=row.model_version,
+                    classified_at=row.classified_at,
+                ),
+            )
+        except Exception as exc:  # incident is already persisted; feed emit is best-effort
+            _log.warning("incident.publish_failed", evidence_ref=evidence_ref, error=str(exc))
 
 
 __all__ = ["IncidentClassifierService"]
