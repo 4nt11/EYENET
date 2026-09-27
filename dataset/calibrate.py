@@ -50,10 +50,10 @@ def fit_platt(logit: np.ndarray, y: np.ndarray, iters: int = 4000, lr: float = 0
     return a / sd, b - a * mu / sd  # convert to raw-logit scale
 
 
-def main() -> None:
+def main(model_dir: str = OUT) -> None:
     texts, y = gold_test()
-    tok = AutoTokenizer.from_pretrained(OUT)
-    model = AutoModelForSequenceClassification.from_pretrained(OUT).to(DEV).eval()
+    tok = AutoTokenizer.from_pretrained(model_dir)
+    model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(DEV).eval()
     logits = []
     for i in range(0, len(texts), 64):
         x = tok(texts[i:i + 64], return_tensors="pt", truncation=True, max_length=128, padding=True).to(DEV)
@@ -79,10 +79,14 @@ def main() -> None:
         note = "" if sup >= MIN_SUP else " (sup<MIN, identity)"
         print(f"{k:<12} {sup:>4} {aus} | {a:6.2f} {b:7.2f} {thr:5.2f} {pr:5.2f} {rc:5.2f} {f1:5.2f}{note}")
 
-    (Path(OUT) / "calibration.json").write_text(json.dumps(calib, indent=2), encoding="utf-8")
-    print(f"\nsaved -> {OUT}/calibration.json   (apply: p = sigmoid(a*logit + b); flag if p >= thr)")
+    (Path(model_dir) / "calibration.json").write_text(json.dumps(calib, indent=2), encoding="utf-8")
+    print(f"\nsaved -> {model_dir}/calibration.json   (apply: p = sigmoid(a*logit + b); flag if p >= thr)")
     print("NOTE: fit on gold-test -> re-run after next labels to confirm thresholds land sanely (~0.5).")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model-dir", default=OUT, help="model dir to calibrate (default: deployed)")
+    main(ap.parse_args().model_dir)
