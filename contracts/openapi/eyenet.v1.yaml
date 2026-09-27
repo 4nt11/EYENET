@@ -1554,6 +1554,26 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  # ── Incidents (triage feed) ─────────────────────────────────────────────
+  /v1/incidents:
+    get:
+      tags: [incidents]
+      operationId: list_incidents
+      summary: Operator triage feed — recent classified incidents, newest first. Requires `read:incidents`.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+        - { name: label, in: query, required: false, schema: { type: string, nullable: true } }
+      responses:
+        "200":
+          description: Recent incidents.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
   /v1/attachments:
     get:
@@ -4354,6 +4374,18 @@ components:
         uptime_seconds: { type: number }
         version:        { type: string }
         components:     { $ref: '#/components/schemas/ComponentDetail' }
+
+    IncidentOut:
+      description: One classified incident on the operator triage feed (`/v1/incidents`).
+      type: object
+      additionalProperties: false
+      required: [message_id, labels, scores, model_version, classified_at]
+      properties:
+        message_id:    { type: string, format: uuid }
+        labels:        { type: array, items: { type: string } }
+        scores:        { type: object, additionalProperties: { type: number } }
+        model_version: { type: string }
+        classified_at: { type: string, format: date-time }
 
     # ── Sensitivity / redaction (API_PLAN §4.7) ───────────────────────────
     SensitivityTier:
