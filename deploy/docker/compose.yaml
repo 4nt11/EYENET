@@ -151,12 +151,19 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.incidents
+      args:
+        # GPU by default (CUDA 12.8 wheels — measured ~12x faster batched than CPU).
+        # CPU fallback:  EYENET_TORCH_INDEX=https://download.pytorch.org/whl/cpu
+        TORCH_INDEX: ${EYENET_TORCH_INDEX:-https://download.pytorch.org/whl/cu128}
     image: eyenet:incidents
     restart: unless-stopped
     command: ["incident-classifier", "--batch-size", "32", "--flush-interval", "1"]
     environment:
       <<: *eyenet-env
       EYENET_INCIDENT_MODEL_DIR: /opt/eyenet/incident-model
+      # Empty = auto (CUDA when present). CPU fallback: set EYENET_INCIDENT_DEVICE=cpu
+      # (also drop the GPU reservation below, else compose requires the nvidia runtime).
+      EYENET_INCIDENT_DEVICE: ${EYENET_INCIDENT_DEVICE:-}
     volumes:
       - eyenet-data:/var/lib/eyenet
       # Operator-provided trained model (not baked into the image). :Z relabels for SELinux.
@@ -164,13 +171,13 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    # GPU (recommended for throughput; in dev the model + ollama share one card). Requires
-    # the nvidia container runtime. Uncomment to pass a GPU through:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - { driver: nvidia, count: 1, capabilities: [gpu] }
+    # GPU primary (needs the nvidia container runtime). For CPU-only hosts, comment this
+    # block out and set EYENET_INCIDENT_DEVICE=cpu + EYENET_TORCH_INDEX=.../cpu.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - { driver: nvidia, count: 1, capabilities: [gpu] }
 
   # ---- collectors (the data plane) -------------------------------------------
   # NOT a static compose service. The CollectorSupervisor spawns one collector
