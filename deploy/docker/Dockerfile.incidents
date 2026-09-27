@@ -1,0 +1,24 @@
+# EYENET incident-classifier image — extends the base with the ML runtime
+# (torch + transformers) for eyenet/incidents/.
+#
+# SCAFFOLD (cf. Dockerfile.classifier): torch is heavy and card-specific. This installs
+# CPU torch by default so the image builds anywhere; for the GPU path (recommended — the
+# mmBERT model wants a CUDA device) build with a matching CUDA wheel index and run the
+# container under the nvidia runtime (see the compose `incident-classifier` service).
+#
+#   # CPU (portable):
+#   docker build -f deploy/docker/Dockerfile.incidents -t eyenet:incidents ../..
+#   # GPU (e.g. CUDA 12.8, matching the dev RTX 5060 / sm_120):
+#   docker build -f deploy/docker/Dockerfile.incidents \
+#     --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 -t eyenet:incidents ../..
+#
+# The trained model is NOT baked in (~1.2GB, operator-provided, sensitive): bind-mount it
+# and set EYENET_INCIDENT_MODEL_DIR (see compose). The model dir is self-contained, so the
+# runtime loads fully offline (classifier._load forces HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE).
+FROM eyenet:base
+
+USER root
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+RUN /opt/venv/bin/pip install --no-cache-dir --index-url ${TORCH_INDEX} torch \
+ && /opt/venv/bin/pip install --no-cache-dir 'transformers>=4.44'
+USER eyenet
