@@ -101,6 +101,12 @@ def _load() -> tuple[list[str], dict[str, Any], Any, Any, Any]:
     # forced above: no Hub download happens, so revision pinning is not applicable.
     tok = AutoTokenizer.from_pretrained(str(d))  # nosec B615
     model = AutoModelForSequenceClassification.from_pretrained(str(d)).eval()  # nosec B615
+    # Device: EYENET_INCIDENT_DEVICE overrides (set "cpu" to keep the GPU free for the
+    # stage-3 LLM); otherwise CUDA when available, else CPU.
+    device = os.environ.get("EYENET_INCIDENT_DEVICE") or (
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
+    model = model.to(device)
     return labels, calib, tok, model, torch
 
 
@@ -117,6 +123,7 @@ def classify_batch(texts: list[str]) -> list[list[HeadScore]]:
     for i in range(0, len(texts), _INFER_BATCH):
         chunk = texts[i : i + _INFER_BATCH]
         x = tok(chunk, return_tensors="pt", truncation=True, max_length=128, padding=True)
+        x = x.to(model.device)
         with torch.no_grad():
             logits = model(**x).logits.tolist()
         out.extend(apply_calibration(row, labels, calib) for row in logits)
