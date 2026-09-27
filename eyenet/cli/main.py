@@ -505,6 +505,32 @@ def incidents_backfill(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("incidents-export-labels")
+def incidents_export_labels(  # pragma: no cover
+    out: Path = typer.Option(
+        Path("dataset/operator_corrections.mllabels.jsonl"),
+        "--out",
+        help="output JSONL (keep the .mllabels.jsonl suffix so the trainer picks it up)",
+    ),
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+) -> None:
+    """Export operator label corrections as gold training data (closes the retraining loop).
+
+    Writes {text, labels} JSONL that dataset/train_mmbert_ml.py consumes as human truth.
+    Re-run after operators relabel, then retrain to fold the corrections in.
+    """
+    from eyenet.incidents.export import export_operator_labels  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        n = await export_operator_labels(storage, out)
+        await storage.close()
+        typer.echo(f"exported {n} operator corrections -> {out}")
+
+    asyncio.run(_main())
+
+
 @app.command("crew-cases")
 def crew_cases(  # pragma: no cover
     as_user: str = typer.Option(..., "--as", help="username to own the auto-opened cases"),
