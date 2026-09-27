@@ -44,6 +44,19 @@ class IncidentRuleRow(DbRowBase):
     created_at: datetime
 
 
+class IncidentLabelRow(DbRowBase):
+    """Operator ground-truth label correction for a message (twin of IncidentLabelTable).
+
+    ``labels`` is the operator-asserted TRUE label set (may be empty = false positive).
+    Distinct from IncidentRow, which is the model's immutable prediction."""
+
+    message_id: UUID
+    labels: list[str]
+    reason: str | None = None
+    decided_by: str
+    decided_at: datetime
+
+
 class IncidentEnvelope(BusEnvelope):
     """Fired-incident bus event (published on INCIDENT_SUBJECT) — the triage feed payload.
     Carries the dereferenceable evidence_ref, not the body (operator-grade)."""

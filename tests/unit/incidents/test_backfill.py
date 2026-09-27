@@ -63,6 +63,29 @@ def test_messages_without_incidents_skips_classified_and_keysets(storage) -> Non
     asyncio.run(_run())
 
 
+@pytest.mark.integration
+def test_incident_label_upsert_and_bulk(storage) -> None:
+    from datetime import datetime as _dt
+
+    async def _run() -> None:
+        mid = UUID(int=42)
+        now = _dt.now(UTC)
+        r1 = await storage.set_incident_label(
+            mid, ["leak"], decided_by="op", reason="a", decided_at=now
+        )
+        assert r1.labels == ["leak"]
+        # upsert: second call replaces, one row per message
+        r2 = await storage.set_incident_label(
+            mid, ["incident"], decided_by="op2", reason="b", decided_at=now
+        )
+        assert r2.labels == ["incident"] and r2.decided_by == "op2"
+        got = await storage.incident_labels_by_message_ids([mid, UUID(int=99)])
+        assert set(got) == {mid} and got[mid].labels == ["incident"]  # unknown omitted
+        assert len(await storage.all_incident_labels()) == 1  # still one row
+
+    asyncio.run(_run())
+
+
 class _FakeStorage:
     """In-list message store honoring the keyset contract run_backfill relies on."""
 

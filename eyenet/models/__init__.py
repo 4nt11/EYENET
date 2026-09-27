@@ -48,6 +48,7 @@ from .identity import (
     IdentityTable,
 )
 from .incident import IncidentTable
+from .incident_label import IncidentLabelTable
 from .incident_rule import IncidentRuleTable
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
@@ -101,6 +102,7 @@ __all__ = [
     "IdentityEventLogTable",
     "IdentityLabelTable",
     "IdentityTable",
+    "IncidentLabelTable",
     "IncidentRuleTable",
     "IncidentTable",
     "InfrastructureArtifactTable",

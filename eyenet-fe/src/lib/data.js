@@ -371,6 +371,13 @@ export const PERSONAS = [
   }
 ];
 
+// ── Incidents (classifier detections) ────────────────────────────────────────
+// Taxonomy heads (dataset/mmbert-incident-ml/labels.json). Data-loss categories
+// (leak/infostealer) are the red tone; the rest scale down by operational weight.
+const INCIDENT_TONE = { leak: 'critical', infostealer: 'critical', incident: 'high', access_sale: 'warn', actor_ops: 'medium', tooling: 'medium' };
+export const incidentTone = (l) => INCIDENT_TONE[l] ?? 'neutral';
+export const INCIDENT_LABELS = ['incident', 'leak', 'infostealer', 'access_sale', 'actor_ops', 'tooling'];
+
 // ── Linkages (attribution decisions) ─────────────────────────────────────────
 // LinkageState: proposed | suspected | confirmed | rejected | superseded.
 // Persona aggregation fires ONLY on transition into confirmed.

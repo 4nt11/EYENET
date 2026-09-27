@@ -8,15 +8,26 @@ eyenet/models/incident.py and CLAUDE.md §2.3 (Rule 1: no dialect leak in mixins
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import cast
 from uuid import UUID
 
 from sqlmodel import col, select
 
-from eyenet.contracts.incident import IncidentRow, IncidentRuleRow
-from eyenet.models import IncidentRuleTable, IncidentTable, MessageTable
+from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRuleRow
+from eyenet.models import IncidentLabelTable, IncidentRuleTable, IncidentTable, MessageTable
 
 from ._helpers import safe_session
+
+
+def _label_row(t: IncidentLabelTable) -> IncidentLabelRow:
+    return IncidentLabelRow(
+        message_id=t.message_id,
+        labels=list(t.labels),
+        reason=t.reason,
+        decided_by=t.decided_by,
+        decided_at=t.decided_at,
+    )
 
 
 class IncidentsMixin:
@@ -67,6 +78,58 @@ class IncidentsMixin:
             stmt = stmt.order_by(col(MessageTable.id)).limit(limit)
             result = await session.exec(stmt)
             return [(mid, body) for mid, body in result]
+
+    # ── operator ground-truth label corrections (retraining signal) ──────────
+    async def set_incident_label(
+        self,
+        message_id: UUID,
+        labels: list[str],
+        *,
+        decided_by: str,
+        reason: str | None,
+        decided_at: datetime,
+    ) -> object:
+        """Upsert the operator's true label set for a message (SELECT-then-update-or-insert,
+        generic ANSI — one current correction per message). ``labels`` may be empty."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(IncidentLabelTable).where(IncidentLabelTable.message_id == message_id)
+            )
+            row = result.first()
+            if row is None:
+                row = IncidentLabelTable(
+                    message_id=message_id,
+                    labels=labels,
+                    reason=reason,
+                    decided_by=decided_by,
+                    decided_at=decided_at,
+                )
+            else:
+                row.labels = labels
+                row.reason = reason
+                row.decided_by = decided_by
+                row.decided_at = decided_at
+            session.add(row)
+            await session.commit()
+            return _label_row(row)
+
+    async def incident_labels_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, object]:
+        """Bulk {message_id: IncidentLabelRow} for the current corrections (feed enrichment)."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(IncidentLabelTable).where(
+                    col(IncidentLabelTable.message_id).in_(message_ids)
+                )
+            )
+            return {t.message_id: _label_row(t) for t in result.all()}
+
+    async def all_incident_labels(self) -> list[object]:
+        """Every operator correction (the retraining ground-truth export)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(select(IncidentLabelTable))
+            return [_label_row(t) for t in result.all()]
 
     # ── operator-defined detection rules (CRUD) ──────────────────────────────
     async def create_incident_rule(self, rule_row: object) -> None:
