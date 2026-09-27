@@ -13,8 +13,8 @@ from uuid import UUID
 
 from sqlmodel import col, select
 
-from eyenet.contracts.incident import IncidentRow
-from eyenet.models import IncidentTable
+from eyenet.contracts.incident import IncidentRow, IncidentRuleRow
+from eyenet.models import IncidentRuleTable, IncidentTable
 
 from ._helpers import safe_session
 
@@ -51,3 +51,53 @@ class IncidentsMixin:
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    # ── operator-defined detection rules (CRUD) ──────────────────────────────
+    async def create_incident_rule(self, rule_row: object) -> None:
+        row = cast("IncidentRuleRow", rule_row)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            session.add(IncidentRuleTable(**row.model_dump()))
+            await session.commit()
+
+    async def list_incident_rules(self, *, enabled_only: bool = False) -> list[object]:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(IncidentRuleTable)
+            if enabled_only:
+                stmt = stmt.where(IncidentRuleTable.enabled == True)  # noqa: E712 — SQL boolean
+            stmt = stmt.order_by(col(IncidentRuleTable.name))
+            result = await session.exec(stmt)
+            return list(result.all())
+
+    async def get_incident_rule(self, rule_id: UUID) -> object | None:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(IncidentRuleTable).where(IncidentRuleTable.id == rule_id)
+            )
+            return result.first()
+
+    async def update_incident_rule(self, rule_id: UUID, fields: dict[str, object]) -> bool:
+        """SELECT-then-update (generic ANSI). Returns False if the rule doesn't exist."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(IncidentRuleTable).where(IncidentRuleTable.id == rule_id)
+            )
+            row = result.first()
+            if row is None:
+                return False
+            for k, v in fields.items():
+                setattr(row, k, v)
+            session.add(row)
+            await session.commit()
+            return True
+
+    async def delete_incident_rule(self, rule_id: UUID) -> bool:
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(IncidentRuleTable).where(IncidentRuleTable.id == rule_id)
+            )
+            row = result.first()
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True

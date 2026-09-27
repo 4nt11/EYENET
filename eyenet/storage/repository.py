@@ -697,6 +697,26 @@ class BaseRepository(ABC):
         """Most recently classified incidents (operator triage feed)."""
 
     @abstractmethod
+    async def create_incident_rule(self, rule_row: object) -> None:
+        """Persist an operator-defined :class:`IncidentRuleRow`."""
+
+    @abstractmethod
+    async def list_incident_rules(self, *, enabled_only: bool = False) -> list[object]:
+        """List operator detection rules (all, or only enabled)."""
+
+    @abstractmethod
+    async def get_incident_rule(self, rule_id: UUID) -> object | None:
+        """One operator rule by id, or None."""
+
+    @abstractmethod
+    async def update_incident_rule(self, rule_id: UUID, fields: dict[str, object]) -> bool:
+        """Patch fields on a rule; False if it doesn't exist."""
+
+    @abstractmethod
+    async def delete_incident_rule(self, rule_id: UUID) -> bool:
+        """Delete a rule; False if it doesn't exist."""
+
+    @abstractmethod
     async def put_observations_bulk(self, observation_rows: list[object]) -> None:
         """Persist many observation rows in one session."""
 

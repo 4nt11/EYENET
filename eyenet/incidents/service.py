@@ -20,13 +20,14 @@ Design notes / v1 simplifications (see development/incident-classifier-bus-integ
 from __future__ import annotations
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.incident import INCIDENT_SUBJECT, IncidentEnvelope, IncidentRow
 from eyenet.contracts.raw_message import RawMessageEnvelope
-from eyenet.incidents import classifier
+from eyenet.incidents import classifier, rules
 from eyenet.service.base import ServiceBase
 from eyenet.telemetry import get_logger
 from eyenet.telemetry.propagation import ZERO_TRACEPARENT, current_traceparent
@@ -34,6 +35,7 @@ from eyenet.telemetry.propagation import ZERO_TRACEPARENT, current_traceparent
 _log = get_logger()
 _DEFAULT_BATCH = 32
 _DEFAULT_FLUSH_S = 1.0
+_RULE_REFRESH_S = 30.0  # how often to reload operator rules from storage
 
 
 class IncidentClassifierService(ServiceBase):
@@ -57,6 +59,10 @@ class IncidentClassifierService(ServiceBase):
         # the GIL during compute so the bus handler keeps buffering, and max_workers=1
         # serializes inference so concurrent flushes never race the one CUDA model.
         self._infer_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="incident-infer")
+        # Operator-defined rules (rules.py), compiled from storage, fired alongside the
+        # built-in prefilter. Refreshed periodically so edits go live without a restart.
+        self._rules: list[rules.CompiledRule] = []
+        self._rules_loaded_at = 0.0
 
     @property
     def name(self) -> str:
@@ -66,7 +72,22 @@ class IncidentClassifierService(ServiceBase):
     def instance_id(self) -> str:
         return f"{self.name}_1"
 
+    async def _refresh_rules(self) -> None:
+        """Reload + compile enabled operator rules from storage."""
+        try:
+            rows = await self._storage.list_incident_rules(enabled_only=True)
+            self._rules = rules.compile_rules(rows)
+            self._rules_loaded_at = time.monotonic()
+        except Exception as exc:  # keep the current ruleset on a transient storage error
+            _log.warning("incident.rules_refresh_failed", error=str(exc))
+
+    async def _maybe_refresh_rules(self) -> None:
+        if time.monotonic() - self._rules_loaded_at >= _RULE_REFRESH_S:
+            await self._refresh_rules()
+
     async def on_subscribe(self) -> None:
+        await self._refresh_rules()
+
         async def _handler(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
             try:
                 env = RawMessageEnvelope.model_validate_json(payload)
@@ -82,7 +103,9 @@ class IncidentClassifierService(ServiceBase):
         await self._bus.subscribe("raw.message.>", _handler, queue_group="incident")
 
     async def tick(self) -> None:
-        """Time-based flush so low-traffic messages don't wait for a full batch."""
+        """Refresh operator rules if stale, then time-flush so low-traffic messages
+        don't wait for a full batch."""
+        await self._maybe_refresh_rules()
         await self._flush()
 
     async def shutdown(self) -> None:
@@ -110,7 +133,11 @@ class IncidentClassifierService(ServiceBase):
         now = datetime.now(UTC)
         fired_rows: list[tuple[str, IncidentRow]] = []
         for (ref, (mid, _body)), scores, text in zip(ordered, scored, texts, strict=True):
-            fired = {s.label for s in scores if s.fired} | classifier.prefilter_labels(text)
+            fired = (
+                {s.label for s in scores if s.fired}
+                | classifier.prefilter_labels(text)  # built-in prefilter
+                | rules.match_labels(text, self._rules)  # operator rules
+            )
             if not fired:
                 continue
             row = IncidentRow(

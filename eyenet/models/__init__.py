@@ -43,6 +43,7 @@ from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from .group import GroupSnapshotTable, GroupTable
 from .idempotency import IdempotencyRecordTable
 from .incident import IncidentTable
+from .incident_rule import IncidentRuleTable
 from .identity import (
     EngagementAuthorizationTable,
     IdentityLabelTable,
@@ -100,6 +101,7 @@ __all__ = [
     "IdentityEventLogTable",
     "IdentityLabelTable",
     "IdentityTable",
+    "IncidentRuleTable",
     "IncidentTable",
     "InfrastructureArtifactTable",
     "JwtDenylistTable",
