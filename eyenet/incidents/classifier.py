@@ -41,7 +41,7 @@ SIG2LABEL: dict[str, str] = {
     "cred_label": "leak",
     "onion_url": "leak",
     "stealer_logs": "infostealer",
-    "cloud_pass": "infostealer",
+    "cloud_pass": "infostealer",  # nosec B105 — signal name, not a password
     "access_material": "access_sale",
     "tool_sale": "tooling",
 }
@@ -97,8 +97,10 @@ def _load() -> tuple[list[str], dict[str, Any], Any, Any, Any]:
     d = model_dir()
     labels = json.loads((d / "labels.json").read_text(encoding="utf-8"))
     calib = json.loads((d / "calibration.json").read_text(encoding="utf-8"))
-    tok = AutoTokenizer.from_pretrained(str(d))
-    model = AutoModelForSequenceClassification.from_pretrained(str(d)).eval()
+    # nosec B615 — loads from a LOCAL, operator-provided dir (str(d)) with HF offline
+    # forced above: no Hub download happens, so revision pinning is not applicable.
+    tok = AutoTokenizer.from_pretrained(str(d))  # nosec B615
+    model = AutoModelForSequenceClassification.from_pretrained(str(d)).eval()  # nosec B615
     return labels, calib, tok, model, torch
 
 
