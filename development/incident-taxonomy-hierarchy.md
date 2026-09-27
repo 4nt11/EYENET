@@ -1,93 +1,95 @@
-# Hierarchical incident taxonomy (proposal)
+# Hierarchical incident taxonomy (v2, locked leaf set)
 
-Status: proposal / sketch. The live taxonomy is still the flat 6 heads
-(`development/incident-taxonomy.md`, `dataset/mmbert-incident-ml/labels.json`).
-This documents the target structure and the interim steps toward it.
+Status: agreed leaf set, pre-implementation. The live model is still the flat 6 heads
+(`dataset/mmbert-incident-ml/labels.json`). This is the target the data work builds toward.
 
-## Why
+## Organizing principle
 
-The flat 6 heads conflate distinct threat-actor **business models**. The most acute
-case: `access_sale` bundles true **Initial Access Brokerage** (selling footholds into
-victim orgs: RDP/VPN/webshell/cpanel/domain-admin) with **fraud-enablement services**
-(SIP trunking, bulk SMS, caller-ID spoofing, SMTP senders). An analyst would never call
-a SIP-trunk seller an initial access broker. Selling "access to routes/numbers" is a
-*consequence* of the telecom-abuse business model, not initial access brokerage.
+Group by **threat-actor business model / criminal purpose**, NOT by technical medium.
+The flat 6 heads conflate distinct businesses (e.g. `access_sale` bundled real Initial
+Access Brokerage with SIP/SMS fraud services). Medium-based tagging smears one activity
+across markets; purpose-based tagging keeps them separate and reads true to an analyst.
 
-A head is cheap in params but expensive in labels (see the head-count analysis: a head
-with <~30 positives is theater). A flat layer of many rare heads starves them. A
-hierarchy lets rare leaves borrow strength from a high-support parent.
+The canonical illustration is **DDoS**, which is three different things by business model:
 
-## Level 1 — business model (what is being transacted or done)
+| what | leaf |
+|---|---|
+| "we took down X" (a brag) | OFFENSIVE_EVENT.ddos_attack |
+| selling an L7 script / dstat tool to run yourself | SERVICE_MARKET.crimeware_tooling |
+| a booter subscription / managed stresser | SERVICE_MARKET.crime_aas |
 
-1. **OFFENSIVE_EVENT** — an action / brag, not a sale.
-2. **DATA_MARKET** — stolen data as the product.
-3. **ACCESS_MARKET** — footholds into victim orgs as the product (true IAB).
-4. **SERVICE_MARKET** — capabilities / tools / services for rent (not data, not a foothold).
-5. **ACTOR_OPS** — the org's meta-business (recruiting, alliances, crews).
-
-## Level 2 — market leaves
+## The leaf set
 
 ```
-OFFENSIVE_EVENT
-├── defacement          (HACKED BY, Greetz, mass-deface)
-├── ddos                (attack claims / brags)
-└── intrusion_claim     (shell uploaded, got root, breached)
+OFFENSIVE_EVENT            (an action / brag, not a sale)
+├── defacement            HACKED BY, Greetz, mass-deface
+├── ddos_attack           attack claims / brags ("took down X")
+└── intrusion             breach claim, shell uploaded, got root
 
-DATA_MARKET
-├── breach_dump         (DB dumps, PII, victim.zip)        ← was: leak
-├── credentials         (combos, User:/Pw:, hash lists)
-└── stealer_logs        (infostealer output, log clouds)   ← was: infostealer
+DATA_MARKET               (stolen data as the product)
+├── breach_dump           DB dumps, PII, victim.zip            (was: leak)
+├── credentials           combos, User:/Pw:, hash lists
+└── stealer_logs          infostealer output, log clouds       (was: infostealer)
 
-ACCESS_MARKET
-└── iab_corporate       (RDP/VPN/webshell/cpanel/domain-admin access to an org)
-                        ← the TRUE meaning of access_sale
+ACCESS_MARKET             (footholds into victim orgs as the product)
+└── iab_corporate         RDP/VPN/webshell/cpanel/domain-admin  ← the TRUE access_sale
 
-SERVICE_MARKET
-├── crimeware_tooling   (booters, stealer-builders, crypters, botnets, panels)  ← was: tooling
-├── telecom_abuse       (SIP/VoIP trunking, bulk SMS, caller-ID spoofing,
-│                        SMTP/SendGrid senders, sender-ID)   ← was mis-bucketed as access_sale
-└── fraud_service       (OTP bots, cashout, muling, bank-log services)
+SERVICE_MARKET            (capabilities / services for rent)
+├── crimeware_tooling     COMMODITY weapons you run yourself: crypters/FUD, stealer-
+│                         builders, RATs, loaders, DDoS scripts, L7/dstat tools,
+│                         checkers/scanners, panels ("some dude selling FUDs")
+├── crime_aas             AS-A-SERVICE / affiliate: RaaS, DDoSaaS (booter subs), MaaS.
+│                         Higher intel value than commodity tooling — its own leaf.
+├── telecom_abuse         voice/SMS channel: SIP/VoIP trunks, caller-ID spoofing, bulk SMS
+├── phishing_delivery     email/phishing infra: SMTP senders, webmailers, SendGrid,
+│                         mass mailers, scampages / phishing kits   (was mis-bucketed access_sale)
+└── fraud_ops            OTP bots, cashout, muling, bank-drops, card shops
 
-ACTOR_OPS
+ACTOR_OPS                 (the org's meta-business)
 ├── recruiting
 ├── alliance
 └── crew_ops
 ```
 
-## Mapping the current 6 heads onto the hierarchy
+## Multi-label rulings (a message can carry several leaves)
 
-| current head | hierarchy destination |
-|---|---|
-| incident | OFFENSIVE_EVENT (all leaves) |
-| leak | DATA_MARKET.breach_dump (+ credentials) |
-| infostealer | DATA_MARKET.stealer_logs |
-| access_sale | **SPLIT** → ACCESS_MARKET.iab_corporate (keep) **+** SERVICE_MARKET.telecom_abuse (extract) |
-| tooling | SERVICE_MARKET.crimeware_tooling |
-| actor_ops | ACTOR_OPS |
+- **bulk SMS → telecom_abuse AND fraud_ops** — it is the channel (telecom) and its purpose
+  is smishing (fraud). Both fire.
+- **OTP bots → fraud_ops only** — rides the phone channel but exists to defeat 2FA; a fraud
+  operation, not a channel sale.
+- **DDoS**: script/tool → crimeware_tooling; booter subscription/DDoSaaS → crime_aas;
+  "we took X down" → ddos_attack. Split by delivery model, not by the word "ddos".
+- **PhaaS** (phishing-as-a-service kits): default phishing_delivery; revisit if volume
+  justifies pulling it into crime_aas.
 
-The one structural change is splitting `access_sale`. Everything else is a rename plus a
-parent grouping.
+## Mapping the current 6 heads onto the leaves
 
-## Why the hierarchy earns its keep here
+| current head | destination(s) | mechanical? |
+|---|---|---|
+| incident | OFFENSIVE_EVENT.{defacement, ddos_attack, intrusion} | NO — needs sub-classification |
+| leak | DATA_MARKET.breach_dump (+ credentials) | mostly |
+| infostealer | DATA_MARKET.stealer_logs | yes |
+| access_sale | ACCESS_MARKET.iab_corporate OR telecom_abuse OR phishing_delivery OR fraud_ops | NO — needs re-inspection/split |
+| tooling | crimeware_tooling OR crime_aas | NO — needs commodity-vs-aaS split |
+| actor_ops | ACTOR_OPS.{recruiting, alliance, crew_ops} | mostly |
 
-- **Coarse heads are high-support and easy** (SERVICE_MARKET fires on lots of data → good
-  AUROC), so the model is confident about the parent even when a leaf is rare.
-- **Rare leaves refine only within a confident parent**, so `telecom_abuse` and
-  `fraud_service` are not data-starved flat heads competing against `incident`.
-- **The label reads true to an analyst**: `SERVICE_MARKET > telecom_abuse` says "fraud
-  service", not "someone is brokering access to a company".
+The three NO rows are the bulk of the human labeling work: the old flat heads bundled
+sub-markets that now split. The operator relabel + export loop is the mechanism.
 
-## Interim steps (before the model gets new heads)
+## Model shape
 
-1. **[DONE]** Prefilter `telecom_abuse` signal → maps to `tooling` today (the closest
-   existing head) in `SIG2LABEL`. When the `telecom_abuse` leaf lands, remap the signal to
-   it — no prefilter rewrite needed.
-2. **[KNOWN RESIDUAL]** `access_material` in the prefilter still contains bare `smtp`, so
-   SMTP-sender ads still fire `access_sale`. This is the same conflation. Resolve when the
-   `telecom_abuse` head lands: move SMTP-*sender* context to `telecom_abuse` and keep
-   SMTP-*shell/relay access* under `iab_corporate`. Not changed now to avoid a behavior +
-   recalibration change out of scope for the prefilter addition.
-3. Implementation order when heads land: relabel gold under the new leaves (the operator
-   relabel + export loop already does this) → retrain with the split labels → recalibrate.
-   Empirically, a novel subclass like `telecom_abuse` needs real labeled volume before the
-   model learns it; until then the prefilter signal is the reliable catch.
+Start **flat multi-label over the ~16 leaves** (one sigmoid per leaf, same architecture),
+and derive the coarse business-model label by OR-ing a parent's children. Only move to a
+true conditional hierarchy (coarse head gating per-parent fine heads) if flat-over-leaves
+underperforms on the rare leaves. Rare leaves that stay data-starved keep their deterministic
+prefilter/rule catch (the SIP lesson) rather than a stillborn model head.
+
+## Data work sequence (what "work the data" means)
+
+1. **Lock `labels_v2`** = this leaf set (the contract every layer keys off).
+2. **Update the label surface**: `labels.json` head order, `SIG2LABEL` (prefilter signal →
+   leaf), FE relabel chips (`INCIDENT_LABELS`) + endpoint taxonomy validation.
+3. **Remap existing gold** (`*.mllabels.jsonl`): mechanical renames where 1:1; queue the
+   `incident` / `access_sale` / `tooling` rows for human re-inspection (they split).
+4. **Rebootstrap silver** via `bootstrap_silver.py` with the new `SIG2LABEL`.
+5. **Train + calibrate** on the leaf labels; roll up to coarse for reporting.
