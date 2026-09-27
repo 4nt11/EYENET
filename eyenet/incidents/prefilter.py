@@ -205,6 +205,24 @@ SIGNALS: Final[tuple[Signal, ...]] = (
         r"|\bbuild\s?your\s?own\b[^\n]{0,30}?\b(?:cnc|api|panel|setup|booter|stress?er)\b"
         r")",
     ),
+    #   Telecom / delivery-abuse SERVICE (-> tooling today; a telecom_abuse leaf later,
+    #   see development/incident-taxonomy-hierarchy.md). SIP/VoIP trunking, bulk-SMS
+    #   senders, caller-ID spoofing, SMTP/SendGrid senders — a fraud-enablement service,
+    #   NOT initial access brokerage. Bare "sms"/"sip"/"smtp" are anchored to an abuse
+    #   noun so benign chatter ("sip your coffee", "SMS you got a code") stays quiet.
+    _sig(
+        "telecom_abuse",
+        _MEDIUM,
+        r"(?i)(?:"
+        r"\b(?:cid|caller[\s-]?id)\s?spoof\w*|\bspoof(?:ed|ing)?\b[^\n]{0,20}?\b(?:call|caller|cid|number)\b"
+        r"|\bunlimited\s+spoofing\b|\bspoofing\s+power\b"
+        r"|\b(?:voip|sip)\b[^\n]{0,20}?\b(?:trunk|setup|route|provider|gateway|panel|dialer|dial|access)\w*"
+        r"|\bbulk\s?sms\b|\bsms\s?(?:sender|blast|route|gateway|marketing|deliver\w*|spam)\b"
+        r"|\bmass\s?(?:sms|text)\b|\bsender\s?id\b"
+        r"|\bsendgrid\b|\bweb\s?mailer\b|\bmass\s?mail\w*"
+        r"|\bsmtp\s?(?:sender|blast|cracked|combo|inbox|spam)\b"
+        r")",
+    ),
     #   3+ distinct targets in one post (URL list or IP list) = an attack target dump.
     _sig(
         "multi_target",
