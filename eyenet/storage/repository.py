@@ -684,6 +684,39 @@ class BaseRepository(ABC):
     # =================================================================
 
     @abstractmethod
+    async def put_incidents_bulk(self, incident_rows: list[object]) -> None:
+        """Persist many :class:`IncidentRow` results in one session (classifier batch
+        flush). Type-erased to avoid contract-layer coupling at the ABC."""
+
+    @abstractmethod
+    async def incidents_for_message(self, message_id: UUID, limit: int = 10) -> list[object]:
+        """Classification history for one message, latest run first."""
+
+    @abstractmethod
+    async def recent_incidents(self, limit: int = 50) -> list[object]:
+        """Most recently classified incidents (operator triage feed)."""
+
+    @abstractmethod
+    async def create_incident_rule(self, rule_row: object) -> None:
+        """Persist an operator-defined :class:`IncidentRuleRow`."""
+
+    @abstractmethod
+    async def list_incident_rules(self, *, enabled_only: bool = False) -> list[object]:
+        """List operator detection rules (all, or only enabled)."""
+
+    @abstractmethod
+    async def get_incident_rule(self, rule_id: UUID) -> object | None:
+        """One operator rule by id, or None."""
+
+    @abstractmethod
+    async def update_incident_rule(self, rule_id: UUID, fields: dict[str, object]) -> bool:
+        """Patch fields on a rule; False if it doesn't exist."""
+
+    @abstractmethod
+    async def delete_incident_rule(self, rule_id: UUID) -> bool:
+        """Delete a rule; False if it doesn't exist."""
+
+    @abstractmethod
     async def put_observations_bulk(self, observation_rows: list[object]) -> None:
         """Persist many observation rows in one session."""
 
@@ -801,6 +834,22 @@ class BaseRepository(ABC):
     @abstractmethod
     async def count_attachments(self, *, mime: str | None = None) -> int:
         """Count attachments matching the same filter as :meth:`list_attachments`."""
+
+    @abstractmethod
+    async def list_attachments_for_case(
+        self,
+        case_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AttachmentRow]:
+        """Attachments that are direct members of a case, newest-first
+        (``subject_kind=attachment`` in ``case_member``, not removed)."""
+
+    @abstractmethod
+    async def count_attachments_for_case(self, case_id: UUID) -> int:
+        """Count active attachment members of a case (same filter as
+        :meth:`list_attachments_for_case`)."""
 
     @abstractmethod
     async def set_attachment_classification(
@@ -921,6 +970,13 @@ class BaseRepository(ABC):
         self,
         evidence_ref: str,
     ) -> UUID | None: ...
+
+    @abstractmethod
+    async def messages_by_evidence_refs(
+        self,
+        evidence_refs: list[str],
+    ) -> dict[str, tuple[UUID, str]]:
+        """Bulk (message_id, body) by evidence_ref in one query (classifier batch)."""
 
     @abstractmethod
     async def put_message(

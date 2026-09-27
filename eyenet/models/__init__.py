@@ -47,10 +47,12 @@ from .identity import (
     IdentityLabelTable,
     IdentityTable,
 )
+from .incident import IncidentTable
+from .incident_rule import IncidentRuleTable
 from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
 from .linkage import LinkageTable
-from .manual_crew import ManualCrewMemberTable, ManualCrewTable
 from .linkage_verifier_result import LinkageVerifierResultTable
+from .manual_crew import ManualCrewMemberTable, ManualCrewTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .message import AttachmentTable, ContentTemplateTable, MessageTable
 from .mfa import MfaChallengeTable
@@ -71,7 +73,6 @@ __all__ = [
     "ActorRelationTable",
     "ActorTable",
     "AttachmentTable",
-    "ContentTemplateTable",
     "AuditAnchorTable",
     "AuditLogTable",
     "CaseCollaboratorTable",
@@ -79,6 +80,7 @@ __all__ = [
     "CaseTable",
     "CollectorGroupMembershipTable",
     "CollectorTable",
+    "ContentTemplateTable",
     "CorpusCursorTable",
     "DocumentTable",
     "EngagementAuthorizationTable",
@@ -99,6 +101,8 @@ __all__ = [
     "IdentityEventLogTable",
     "IdentityLabelTable",
     "IdentityTable",
+    "IncidentRuleTable",
+    "IncidentTable",
     "InfrastructureArtifactTable",
     "JwtDenylistTable",
     "LinkageEventLogTable",

@@ -70,6 +70,10 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "observation",
         # M10 — uploaded documents (classifier)
         "document",
+        # incident detection — per-message multi-label classification results
+        "incident",
+        # operator-defined incident detection rules
+        "incident_rule",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

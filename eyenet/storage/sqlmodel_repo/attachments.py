@@ -12,8 +12,9 @@ from sqlmodel import col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from eyenet.contracts.audit_subjects import AuditSubject
-from eyenet.contracts.enums import SensitivityTier
+from eyenet.contracts.enums import CaseSubjectKind, SensitivityTier
 from eyenet.contracts.message import AttachmentRow
+from eyenet.models.case import CaseMemberTable
 from eyenet.models.message import AttachmentTable
 from eyenet.storage.errors import ReclassifyDemotionError
 from eyenet.storage.reclassify import ReclassifyOutcome
@@ -71,6 +72,55 @@ class AttachmentsMixin:
         """Count attachments matching the same filter as :meth:`list_attachments`."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             inner = self._attachments_filtered_stmt(mime=mime).subquery()
+            result = await session.exec(select(func.count()).select_from(inner))
+            return int(result.one())
+
+    def _case_attachments_stmt(self, case_id: UUID) -> SelectOfScalar[AttachmentTable]:
+        """Attachments that are ACTIVE direct members of ``case_id``.
+
+        Direct-membership semantics (API_PLAN §4.10.1): an attachment is case
+        evidence only when explicitly added via ``case_member``
+        (``subject_kind=attachment``, not removed) — mirrors
+        ``ObservationsMixin._case_observations_stmt``. The effective-tier
+        recompute in ``CasesMixin`` already walks the same rows. Generic ORM
+        JOIN — no dialect leak ([[feedback_no_dialect_leak_in_mixins]])."""
+        return (
+            select(AttachmentTable)
+            .join(CaseMemberTable, col(CaseMemberTable.subject_id) == col(AttachmentTable.id))
+            .where(
+                col(CaseMemberTable.case_id) == case_id,
+                col(CaseMemberTable.subject_kind) == CaseSubjectKind.ATTACHMENT,
+                col(CaseMemberTable.removed_at).is_(None),
+            )
+        )
+
+    async def list_attachments_for_case(
+        self,
+        case_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AttachmentRow]:
+        """Attachments that are direct members of a case, newest-first.
+
+        Attachments carry no own timestamp (the parent message does), and ``id``
+        is uuid7 = time-ordered, so ``id DESC`` is the newest-first sort (same as
+        :meth:`list_attachments`)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                self._case_attachments_stmt(case_id)
+                .order_by(col(AttachmentTable.id).desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
+
+    async def count_attachments_for_case(self, case_id: UUID) -> int:
+        """Count active attachment members of a case (same filter as
+        :meth:`list_attachments_for_case`)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            inner = self._case_attachments_stmt(case_id).subquery()
             result = await session.exec(select(func.count()).select_from(inner))
             return int(result.one())
 

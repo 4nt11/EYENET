@@ -10,7 +10,8 @@ container deployments; the systemd/native templates in `../` remain for bare-met
 |------|---------|
 | `Dockerfile` | base runtime image — all core services |
 | `Dockerfile.classifier` | base + M10 extraction toolchain (nsjail/tesseract) — **REQUIRES TUNING** |
-| `compose.yaml` | the stack (core services + `classifier`/`collectors` profiles) |
+| `Dockerfile.incidents` | base + ML runtime (torch/transformers) for the incident classifier |
+| `compose.yaml` | the stack (core services + `classifier`/`incidents`/`collectors` profiles) |
 | `env.example` | copy to `.env` and edit |
 | `../../.dockerignore` | trims the build context (repo root) |
 
@@ -18,7 +19,7 @@ container deployments; the systemd/native templates in `../` remain for bare-met
 
 Core (start by default): `nats`, `api` (published, owns first-boot schema),
 `graph`, `supervisor`, `anchor`, `sensor`, `engine`, `linker`, `verifier`.
-Opt-in profiles: `classifier`, `collectors`.
+Opt-in profiles: `classifier`, `incidents` (see setup below), `collectors`.
 
 Workers `depends_on` the API being **healthy** — the API creates the SQLite
 schema on first boot (`create_all`), so nothing races an empty DB.
@@ -86,6 +87,56 @@ host; tighten later). Before it classifies for real:
 
 The core stack is fully functional without the classifier — it's an opt-in profile
 on purpose.
+
+## Incident classifier setup (the one step beyond `up -d`)
+
+The incident classifier detects threat-actor incidents (breach/leak/infostealer/
+access-sale/actor-ops/tooling) on monitored-channel messages, batched off the bus. It's
+the only service that needs more than `docker compose up -d`, because two things are
+**not** in the image and **not** in git:
+
+1. **The trained model** (~1.2GB — weights + tokenizer + `calibration.json`). It's
+   sensitive (trained on real threat-actor data) and gitignored, so you provide it:
+
+   ```bash
+   # from the repo root — copy the trained model dir the bind-mount expects:
+   cp -r dataset/mmbert-incident-ml deploy/docker/incident-model
+   ```
+
+   The dir is self-contained; the runtime loads it fully **offline** (no Hub download).
+
+2. **The ML runtime** (torch/transformers) — a separate image (`Dockerfile.incidents`),
+   GPU by default.
+
+```bash
+cd deploy/docker
+# GPU (default — CUDA 12.8; ~12x faster batched than CPU on an RTX 5060):
+docker compose build incident-classifier
+docker compose --profile incidents up -d incident-classifier
+```
+
+Then it subscribes `raw.message.>`, stores incidents, and serves the triage feed:
+`GET /v1/incidents` (poll), `GET /v1/stream/incidents` (SSE), and it publishes
+`incident.detected` on the bus. Operators tune detection live via
+`/v1/incident-rules` (RE2 → label; picked up within 30s, no redeploy).
+
+**GPU vs CPU.** GPU is the default and is ~12x faster batched (≈590 vs ≈48 msgs/s on a
+5060). The model shares the card with the stage-3 ollama LLM (8GB); if CUDA is present but
+runs out of memory at load, the service **auto-falls-back to CPU** (logs
+`incident.cuda_unavailable_fallback_cpu`) instead of crashing — no config needed. To run
+CPU-only *proactively* (frees the GPU entirely; enough for small-operator live volume):
+
+```bash
+# CPU fallback: comment out the `deploy:` GPU block in compose.yaml, then:
+EYENET_INCIDENT_DEVICE=cpu \
+EYENET_TORCH_INDEX=https://download.pytorch.org/whl/cpu \
+    docker compose build incident-classifier
+EYENET_INCIDENT_DEVICE=cpu docker compose --profile incidents up -d incident-classifier
+```
+
+GPU requires the **nvidia container runtime** on the host. Scopes: users need
+`read:incidents` (feed), `stream:incidents` (SSE), `admin:incident_rules` (manage rules)
+— all in the admin baseline; analysts get read+stream, viewers get read.
 
 ## Notes
 

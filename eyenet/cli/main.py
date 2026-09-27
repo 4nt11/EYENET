@@ -38,6 +38,7 @@ from eyenet.engine.engine import Engine
 from eyenet.graph.graph import Graph
 from eyenet.identity_pool import FileIdentityPool
 from eyenet.identity_pool.db import DbIdentityPool
+from eyenet.incidents.service import IncidentClassifierService
 from eyenet.linker.infra_linker import run_infra_linker
 from eyenet.linker.linker import Linker
 from eyenet.models import MessageTable
@@ -374,6 +375,32 @@ def sensor_run(  # pragma: no cover
         _run(lambda bus, storage: SensorSkeleton(bus=bus, storage=storage), cfg)
 
 
+@app.command("incident-classifier")
+def incident_classifier_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    batch_size: int = typer.Option(32, "--batch-size", help="messages per inference batch"),
+    flush_interval: float = typer.Option(
+        1.0, "--flush-interval", help="max seconds a message waits before a partial batch flushes"
+    ),
+) -> None:
+    """Run the incident classifier: batched multi-label detection off the bus.
+
+    Set the model directory via EYENET_INCIDENT_MODEL_DIR (default dataset/mmbert-incident-ml).
+    Flushes a batch at --batch-size messages OR every --flush-interval seconds.
+    """
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(
+        lambda bus, storage: IncidentClassifierService(
+            bus=bus, storage=storage, batch_size=batch_size, flush_interval=flush_interval
+        ),
+        cfg,
+        tick=flush_interval,
+    )
+
+
 @app.command("engine")
 def engine_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
@@ -560,10 +587,10 @@ def api_run(  # pragma: no cover
 ) -> None:
     """Serve the operator HTTP API over Hypercorn (h2, optional h3; never h1)."""
 
-    from hypercorn.asyncio import serve
+    from hypercorn.asyncio import serve  # noqa: PLC0415
 
-    from eyenet.api._serve import build_config
-    from eyenet.api.app import create_app
+    from eyenet.api._serve import build_config  # noqa: PLC0415
+    from eyenet.api.app import create_app  # noqa: PLC0415
 
     cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
     hcfg = build_config(

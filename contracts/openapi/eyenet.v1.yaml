@@ -1386,6 +1386,28 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /v1/stream/incidents:
+    get:
+      tags: [stream]
+      operationId: stream_incidents
+      summary: SSE live stream of fired incidents (operator triage feed; live-tail only).
+      parameters:
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      x-eyenet-sse-events:
+        - subject: incident.detected
+          payload_schema: '#/components/schemas/IncidentOut'
+        - subject: stream.gap
+          payload_schema: '#/components/schemas/StreamGapEvent'
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /v1/stream/personas:
     get:
       tags: [stream]
@@ -1553,6 +1575,93 @@ paths:
               schema: { $ref: '#/components/schemas/SystemStats' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  # ── Incidents (triage feed) ─────────────────────────────────────────────
+  /v1/incidents:
+    get:
+      tags: [incidents]
+      operationId: list_incidents
+      summary: Operator triage feed — recent classified incidents, newest first. Requires `read:incidents`.
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+        - { name: label, in: query, required: false, schema: { type: string, nullable: true } }
+      responses:
+        "200":
+          description: Recent incidents.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+  /v1/incident-rules:
+    get:
+      tags: [incidents]
+      operationId: list_incident_rules
+      summary: List operator detection rules. Requires `read:incidents`.
+      parameters:
+        - { name: enabled_only, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Operator detection rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [incidents]
+      operationId: create_incident_rule
+      summary: Add an operator detection rule (RE2 pattern to taxonomy label). Requires `admin:incident_rules`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentRuleCreate' }
+      responses:
+        "201":
+          description: Rule created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+  /v1/incident-rules/{rule_id}:
+    patch:
+      tags: [incidents]
+      operationId: update_incident_rule
+      summary: Edit an operator detection rule (partial). Requires `admin:incident_rules`.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentRuleUpdate' }
+      responses:
+        "200":
+          description: Rule updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [incidents]
+      operationId: delete_incident_rule
+      summary: Delete an operator detection rule. Requires `admin:incident_rules`.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Rule deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
   /v1/attachments:
@@ -2044,6 +2153,28 @@ paths:
         "409": { $ref: '#/components/responses/Conflict' }
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/attachments:
+    get:
+      tags: [cases]
+      operationId: cases_list_attachments
+      summary: |
+        Case-scoped evidence attachments (metadata only; direct-membership, §4.10.1).
+        Requires `read:cases` AND case visibility (404, no existence oracle, otherwise).
+      parameters:
+        - { name: case_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of case attachments.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageAttachmentSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   /v1/cases/{case_id}/members:
     get:
@@ -4354,6 +4485,56 @@ components:
         uptime_seconds: { type: number }
         version:        { type: string }
         components:     { $ref: '#/components/schemas/ComponentDetail' }
+
+    IncidentOut:
+      description: One classified incident on the operator triage feed (`/v1/incidents`).
+      type: object
+      additionalProperties: false
+      required: [message_id, labels, scores, model_version, classified_at]
+      properties:
+        message_id:    { type: string, format: uuid }
+        labels:        { type: array, items: { type: string } }
+        scores:        { type: object, additionalProperties: { type: number } }
+        model_version: { type: string }
+        classified_at: { type: string, format: date-time }
+
+    IncidentRuleOut:
+      description: An operator-defined incident detection rule.
+      type: object
+      additionalProperties: false
+      required: [id, name, pattern, label, weight, enabled, description, created_by, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string }
+        pattern:     { type: string }
+        label:       { type: string }
+        weight:      { type: integer }
+        enabled:     { type: boolean }
+        description: { type: string, nullable: true }
+        created_by:  { type: string, nullable: true }
+        created_at:  { type: string, format: date-time }
+    IncidentRuleCreate:
+      description: Create an operator detection rule (RE2 pattern to taxonomy label).
+      type: object
+      additionalProperties: false
+      required: [name, pattern, label]
+      properties:
+        name:        { type: string, minLength: 1, maxLength: 64 }
+        pattern:     { type: string, minLength: 1, maxLength: 4096 }
+        label:       { type: string }
+        weight:      { type: integer, default: 2 }
+        enabled:     { type: boolean, default: true }
+        description: { type: string, nullable: true }
+    IncidentRuleUpdate:
+      description: Patch an operator detection rule (only provided fields change).
+      type: object
+      additionalProperties: false
+      properties:
+        pattern:     { type: string, minLength: 1, maxLength: 4096, nullable: true }
+        label:       { type: string, nullable: true }
+        weight:      { type: integer, nullable: true }
+        enabled:     { type: boolean, nullable: true }
+        description: { type: string, nullable: true }
 
     # ── Sensitivity / redaction (API_PLAN §4.7) ───────────────────────────
     SensitivityTier:

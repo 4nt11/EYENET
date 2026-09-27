@@ -35,6 +35,7 @@ from .graph import GraphMixin
 from .health import HealthMixin
 from .idempotency import IdempotencyMixin
 from .identities import IdentitiesMixin
+from .incidents import IncidentsMixin
 from .linkages import LinkagesMixin
 from .manual_crews import ManualCrewsMixin
 from .memberships import MembershipsMixin
@@ -75,6 +76,7 @@ class SQLModelRepository(
     HealthMixin,
     IdempotencyMixin,
     IdentitiesMixin,
+    IncidentsMixin,
     LinkagesMixin,
     ManualCrewsMixin,
     MembershipsMixin,
