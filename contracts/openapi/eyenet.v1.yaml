@@ -1573,6 +1573,73 @@ paths:
                 items: { $ref: '#/components/schemas/IncidentOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+  /v1/incident-rules:
+    get:
+      tags: [incidents]
+      operationId: list_incident_rules
+      summary: List operator detection rules. Requires `read:incidents`.
+      parameters:
+        - { name: enabled_only, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Operator detection rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [incidents]
+      operationId: create_incident_rule
+      summary: Add an operator detection rule (RE2 pattern to taxonomy label). Requires `admin:incident_rules`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentRuleCreate' }
+      responses:
+        "201":
+          description: Rule created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+  /v1/incident-rules/{rule_id}:
+    patch:
+      tags: [incidents]
+      operationId: update_incident_rule
+      summary: Edit an operator detection rule (partial). Requires `admin:incident_rules`.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentRuleUpdate' }
+      responses:
+        "200":
+          description: Rule updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [incidents]
+      operationId: delete_incident_rule
+      summary: Delete an operator detection rule. Requires `admin:incident_rules`.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Rule deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
 
   # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
   /v1/attachments:
@@ -4386,6 +4453,44 @@ components:
         scores:        { type: object, additionalProperties: { type: number } }
         model_version: { type: string }
         classified_at: { type: string, format: date-time }
+
+    IncidentRuleOut:
+      description: An operator-defined incident detection rule.
+      type: object
+      additionalProperties: false
+      required: [id, name, pattern, label, weight, enabled, description, created_by, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string }
+        pattern:     { type: string }
+        label:       { type: string }
+        weight:      { type: integer }
+        enabled:     { type: boolean }
+        description: { type: string, nullable: true }
+        created_by:  { type: string, nullable: true }
+        created_at:  { type: string, format: date-time }
+    IncidentRuleCreate:
+      description: Create an operator detection rule (RE2 pattern to taxonomy label).
+      type: object
+      additionalProperties: false
+      required: [name, pattern, label]
+      properties:
+        name:        { type: string, minLength: 1, maxLength: 64 }
+        pattern:     { type: string, minLength: 1, maxLength: 4096 }
+        label:       { type: string }
+        weight:      { type: integer, default: 2 }
+        enabled:     { type: boolean, default: true }
+        description: { type: string, nullable: true }
+    IncidentRuleUpdate:
+      description: Patch an operator detection rule (only provided fields change).
+      type: object
+      additionalProperties: false
+      properties:
+        pattern:     { type: string, minLength: 1, maxLength: 4096, nullable: true }
+        label:       { type: string, nullable: true }
+        weight:      { type: integer, nullable: true }
+        enabled:     { type: boolean, nullable: true }
+        description: { type: string, nullable: true }
 
     # ── Sensitivity / redaction (API_PLAN §4.7) ───────────────────────────
     SensitivityTier:

@@ -139,7 +139,11 @@ from eyenet.api.v1.health.api_healthz import router as health_live_router
 from eyenet.api.v1.health.api_readyz import router as health_ready_router
 
 # === identities ===
+from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
+from eyenet.api.v1.incidents.api_delete_incident_rule import router as incident_rule_delete_router
+from eyenet.api.v1.incidents.api_list_incident_rules import router as incident_rules_list_router
 from eyenet.api.v1.incidents.api_list_incidents import router as incidents_list_router
+from eyenet.api.v1.incidents.api_update_incident_rule import router as incident_rule_update_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
@@ -276,8 +280,12 @@ v1_router.include_router(documents_upload_router)
 v1_router.include_router(documents_manifest_router)
 v1_router.include_router(documents_access_router)
 
-# incidents (triage feed)
+# incidents (triage feed) + operator detection rules
 v1_router.include_router(incidents_list_router)
+v1_router.include_router(incident_rules_list_router)
+v1_router.include_router(incident_rule_create_router)
+v1_router.include_router(incident_rule_update_router)
+v1_router.include_router(incident_rule_delete_router)
 
 # graph
 v1_router.include_router(graph_stats_router)
