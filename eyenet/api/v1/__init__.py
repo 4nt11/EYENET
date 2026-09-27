@@ -81,6 +81,9 @@ from eyenet.api.v1.cases.api_close_case import router as cases_close_router
 from eyenet.api.v1.cases.api_create_case import router as cases_create_router
 from eyenet.api.v1.cases.api_get_case import router as cases_get_router
 from eyenet.api.v1.cases.api_get_seed_roots import router as cases_get_seed_roots_router
+from eyenet.api.v1.cases.api_list_case_attachments import (
+    router as cases_list_attachments_router,
+)
 from eyenet.api.v1.cases.api_list_case_observations import (
     router as cases_list_observations_router,
 )
@@ -136,6 +139,7 @@ from eyenet.api.v1.health.api_healthz import router as health_live_router
 from eyenet.api.v1.health.api_readyz import router as health_ready_router
 
 # === identities ===
+from eyenet.api.v1.incidents.api_list_incidents import router as incidents_list_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
@@ -272,6 +276,9 @@ v1_router.include_router(documents_upload_router)
 v1_router.include_router(documents_manifest_router)
 v1_router.include_router(documents_access_router)
 
+# incidents (triage feed)
+v1_router.include_router(incidents_list_router)
+
 # graph
 v1_router.include_router(graph_stats_router)
 v1_router.include_router(graph_search_router)
@@ -303,6 +310,7 @@ v1_router.include_router(cases_reopen_router)
 v1_router.include_router(cases_archive_router)
 v1_router.include_router(cases_list_members_router)
 v1_router.include_router(cases_list_observations_router)
+v1_router.include_router(cases_list_attachments_router)
 v1_router.include_router(cases_add_member_router)
 v1_router.include_router(cases_bulk_add_members_router)
 v1_router.include_router(cases_bulk_remove_members_router)
