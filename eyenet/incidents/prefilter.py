@@ -195,7 +195,7 @@ SIGNALS: Final[tuple[Signal, ...]] = (
         r"booter|stress?er|wormgpt|scam\s?page|scampage"
         r"|\bkeylogger\b|\bbotnet\b|\botp\s?bot\b|\bstealer\s?(?:builder|source)\b"
         r"|\bloader\s?builder\b"
-        # crypter is buyer-demand-prone in this market ("i need crypter") -> require a sale/offer cue.
+        # crypter is buyer-demand-prone ("i need crypter") -> require a sale/offer cue.
         r"|\bcrypter\b[^\n]{0,40}?\b(?:sell\w*|for\s?sale|fud|cracked|price|rent|sub\w*|stock|promo|interested|offer\w*)\b"
         r"|\b(?:sell\w*|for\s?sale|fud|cracked|price|stock|promo|interested|offer\w*)\b[^\n]{0,40}?\bcrypter\b"
         r"|\b(?:dd[o0]s|dstat|l7|l4|layer\s?[47])\b[^\n]{0,45}?\b(?:script|setup|service|panel|method|rps|plan|subscription|for\s?sale|selling|sell|buy|purchase|rent|cloudflare)\b"
