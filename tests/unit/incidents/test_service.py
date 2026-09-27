@@ -36,11 +36,14 @@ class _FakeAudit:
 
 
 class _FakeBus:
+    def __init__(self) -> None:
+        self.published: list[tuple[str, bytes]] = []
+
     async def subscribe(self, *a, **k):  # pragma: no cover
         pass
 
-    async def publish(self, *a, **k):  # pragma: no cover
-        pass
+    async def publish(self, subject, payload, headers=None):
+        self.published.append((subject, payload))
 
 
 def _service(storage) -> IncidentClassifierService:
@@ -73,6 +76,11 @@ def test_flush_stores_only_fired_and_audits(monkeypatch):
     assert row.scores == {"tooling": 0.9, "leak": 0.05}  # all heads scored
     assert len(s._audit.events) == 1  # one detection audited
     assert s._audit.events[0]["event"] == "incident_detected"
+    # the fired incident is published on the bus for the triage feed
+    assert len(s._bus.published) == 1
+    subject, payload = s._bus.published[0]
+    assert subject == "incident.detected"
+    assert b"tooling" in payload
 
 
 def test_flush_fuses_prefilter(monkeypatch):
