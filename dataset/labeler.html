@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EYENET Labeler</title>
+<style>
+  :root{
+    --black:#0a0a0c; --panel:#141419; --panel2:#1c1c24; --line:#2a2a35;
+    --text:#e8e8ef; --muted:#9a9aa8; --faint:#6a6a78;
+    --purple:#743093; --purple-lo:#4a1f5e; --purple-hi:#a24fca;
+    --mono:ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--black);color:var(--text);font-family:var(--sans);
+       height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  header{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--line);
+         background:var(--panel);flex-wrap:wrap}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.08em;color:var(--purple-hi)}
+  .brand small{color:var(--faint);font-weight:400}
+  header .sp{flex:1}
+  label.file{background:var(--purple-lo);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px}
+  label.file input{display:none}
+  select,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:6px 10px;font-size:13px;font-family:var(--sans);cursor:pointer}
+  button:hover,select:hover{border-color:var(--purple)}
+  .counts{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .counts b{color:var(--text)}
+  .prog{height:3px;background:var(--panel2)}
+  .prog>i{display:block;height:100%;background:var(--purple);width:0;transition:width .15s}
+  main{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:min(900px,100%);max-height:100%;display:flex;flex-direction:column;gap:14px}
+  .meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:12px}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--muted)}
+  .chip.grp{color:var(--purple-hi);border-color:var(--purple-lo)}
+  .sig{color:#c9a227}
+  .msg{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--purple);
+       border-radius:8px;padding:20px;font-size:16px;line-height:1.5;white-space:pre-wrap;word-break:break-word;
+       overflow:auto;max-height:46vh;font-family:var(--mono)}
+  .labels{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .lab{flex:1;min-width:130px;max-width:180px;padding:12px 10px;border-radius:8px;border:1px solid var(--line);
+       background:var(--panel2);text-align:center;cursor:pointer;user-select:none;transition:.1s}
+  .lab .nm{font-weight:600;font-size:14px}
+  .lab kbd{display:block;font-family:var(--mono);font-size:11px;opacity:.6;margin-top:2px}
+  .lab.on{background:var(--purple-lo);border-color:var(--purple-hi);color:#fff;box-shadow:0 0 0 1px var(--purple-hi)}
+  .lab.none{max-width:120px}
+  .lab.none.on{background:#2a3a2f;border-color:#3fb37f;box-shadow:0 0 0 1px #3fb37f}
+  .commit{display:flex;gap:10px;justify-content:center;align-items:center}
+  .commit button{padding:12px 26px;font-size:15px;font-weight:600}
+  .commit .go{background:var(--purple);border-color:var(--purple-hi);color:#fff}
+  .legend{text-align:center;color:var(--faint);font-size:12px;font-family:var(--mono);line-height:1.7}
+  .empty{color:var(--muted);text-align:center;font-family:var(--mono);line-height:1.9}
+  .empty b{color:var(--purple-hi)}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">EYENET<small>·multilabel</small></span>
+  <label class="file">load jsonl<input id="file" type="file" accept=".jsonl,.json,.txt"/></label>
+  <select id="order">
+    <option value="sequential">order: sequential</option>
+    <option value="random">order: random</option>
+    <option value="uncertainty">order: uncertainty (if scores)</option>
+  </select>
+  <select id="chan"><option value="">all channels</option></select>
+  <span class="sp"></span>
+  <span class="counts" id="counts">no data</span>
+  <button id="export">export</button>
+</header>
+<div class="prog"><i id="pbar"></i></div>
+<main id="main">
+  <div class="empty" id="empty">
+    <p><b>Load a jsonl</b> with a <code>text</code> field (decision_log.jsonl or eval_sample.jsonl).</p>
+    <p>Toggle labels: <b>1</b> incident · <b>2</b> leak · <b>3</b> infostealer · <b>4</b> access-sale · <b>5</b> actor-ops · <b>6</b> tooling</p>
+    <p><b>0</b>/N = none (benign) · <b>Enter</b>/Space = save + next · <b>Z</b> = undo</p>
+    <p>Multi-label: a message can have several. Autosaves locally; nothing leaves your machine.</p>
+  </div>
+</main>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const LABELS=[["incident","1"],["leak","2"],["infostealer","3"],["access_sale","4"],["actor_ops","5"],["tooling","6"]];
+const KEY="eyenet_labeler_ml_v1";
+let items=[], order=[], pos=0, store={}, cur=new Set(), fileName="labels";
+try{ store=JSON.parse(localStorage.getItem(KEY)||"{}"); }catch(e){ store={}; }
+
+const hash=s=>{let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return "h"+(h>>>0);};
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(store));}catch(e){}};
+const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+$("#file").addEventListener("change",e=>{
+  const f=e.target.files[0]; if(!f)return; fileName=f.name.replace(/\.[^.]+$/,"");
+  const r=new FileReader();
+  r.onload=()=>{
+    items=r.result.split("\n").filter(l=>l.trim()).map(l=>{try{return JSON.parse(l);}catch(e){return null;}})
+      .filter(o=>o&&typeof o.text==="string"&&o.text.trim());
+    const seen=new Set(); items=items.filter(o=>{const h=hash(o.text);if(seen.has(h))return false;seen.add(h);return true;});
+    const chans=[...new Set(items.map(o=>o.group).filter(Boolean))].sort();
+    $("#chan").innerHTML='<option value="">all channels ('+items.length+')</option>'+
+      chans.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
+    rebuild();
+  };
+  r.readAsText(f);
+});
+$("#order").addEventListener("change",rebuild);
+$("#chan").addEventListener("change",rebuild);
+$("#export").addEventListener("click",exportLabels);
+
+function rebuild(){
+  const ord=$("#order").value, ch=$("#chan").value;
+  let list=items.filter(o=>!ch||o.group===ch);
+  const p=o=>typeof o.mmbert_p==="number"?o.mmbert_p:(typeof o.laya_p==="number"?o.laya_p:0.5);
+  if(ord==="random") list.sort(()=>Math.random()-0.5);
+  else if(ord==="uncertainty") list.sort((a,b)=>Math.abs(p(a)-0.5)-Math.abs(p(b)-0.5));
+  order=list; pos=0;
+  while(pos<order.length&&store[hash(order[pos].text)]!==undefined) pos++;
+  loadCur(); render();
+}
+function loadCur(){
+  const o=order[pos]; if(!o){cur=new Set();return;}
+  const e=store[hash(o.text)];
+  if(Array.isArray(e)) cur=new Set(e);              // human already labeled it
+  else cur=new Set(LABELS.map(([k])=>k).filter(k=>o[k]===1));  // else seed from silver
+}
+
+function render(){
+  const done=Object.keys(store).length;
+  const per=Object.fromEntries(LABELS.map(([k])=>[k,0]));
+  let noneN=0;
+  Object.values(store).forEach(v=>{ if(Array.isArray(v)){ if(!v.length)noneN++; v.forEach(k=>per[k]!==undefined&&per[k]++);} });
+  $("#counts").innerHTML=`<b>${done}</b> done · ${LABELS.map(([k])=>`${k.split("_")[0]} <b>${per[k]}</b>`).join(" · ")} · none <b>${noneN}</b>`;
+  if(!order.length){ $("#main").innerHTML='<div class="empty">No messages loaded.</div>'; $("#pbar").style.width="0"; return; }
+  if(pos>=order.length){
+    $("#main").innerHTML=`<div class="empty"><p><b>✓ Done with this view.</b></p><p>${done} labeled. Hit <b>export</b>.</p><p>Switch channel/order for more.</p></div>`;
+    $("#pbar").style.width="100%"; return;
+  }
+  const o=order[pos];
+  const sig=(o.prefilter&&o.prefilter.length)?o.prefilter.join(", "):"—";
+  const mp=typeof o.mmbert_p==="number"?` · model ${o.mmbert_p.toFixed(2)}`:"";
+  $("#main").innerHTML=`
+    <div class="card">
+      <div class="meta">
+        ${o.group?`<span class="chip grp">${esc(o.group)}</span>`:""}
+        <span class="chip">prefilter: <span class="sig">${esc(sig)}</span>${mp}</span>
+      </div>
+      <div class="msg">${esc(o.text)}</div>
+      <div class="labels">
+        ${LABELS.map(([k,n])=>`<div class="lab ${cur.has(k)?"on":""}" data-k="${k}" onclick="tog('${k}')">
+            <div class="nm">${k.replace("_","-")}</div><kbd>${n}</kbd></div>`).join("")}
+        <div class="lab none ${cur.size===0?"on":""}" onclick="none()"><div class="nm">none</div><kbd>0 / N</kbd></div>
+      </div>
+      <div class="commit">
+        <button class="go" onclick="commit()">save + next ⏎</button>
+      </div>
+      <div class="legend">1-5 toggle · 0/N none · Enter save+next · Z undo · S skip &nbsp;|&nbsp; ${pos+1} / ${order.length}</div>
+    </div>`;
+  $("#pbar").style.width=(100*pos/order.length)+"%";
+}
+window.tog=k=>{ if(cur.has(k))cur.delete(k); else cur.add(k); render(); };
+window.none=()=>{ cur.clear(); render(); };
+window.commit=()=>{ if(pos>=order.length)return; store[hash(order[pos].text)]=[...cur]; save(); pos++; loadCur(); render(); };
+window.skip=()=>{ if(pos<order.length){pos++; loadCur(); render();} };
+function undo(){ if(pos>0){pos--; delete store[hash(order[pos].text)]; save(); loadCur(); render();} }
+
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="SELECT")return;
+  const k=e.key.toLowerCase();
+  const hit=LABELS.find(([,n])=>n===k);
+  if(hit){ tog(hit[0]); e.preventDefault(); }
+  else if(k==="0"||k==="n"){ none(); e.preventDefault(); }
+  else if(k==="enter"||k===" "){ commit(); e.preventDefault(); }
+  else if(k==="z"){ undo(); e.preventDefault(); }
+  else if(k==="s"){ skip(); e.preventDefault(); }
+});
+
+function exportLabels(){
+  const out=[];
+  for(const o of items){ const v=store[hash(o.text)]; if(v===undefined)continue;
+    const row={group:o.group||null,text:o.text};
+    for(const [k] of LABELS) row[k]=v.includes(k)?1:0;
+    out.push(JSON.stringify(row));
+  }
+  if(!out.length){alert("No labels yet.");return;}
+  const blob=new Blob([out.join("\n")+"\n"],{type:"application/x-ndjson"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fileName+".mllabels.jsonl";a.click();
+}
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Real threat-actor / victim data + trained models — KEEP LOCAL, never track.
+# NOTE: .gitignore does NOT delete these files; it keeps them on disk but out of git,
+# so the sensitive corpus/labels/models/notes never reach git history or GitHub.
+# Blocklist of every data-carrying extension in this dir (code is .py/.sh/.html).
+*.jsonl
+*.md
+*.png
+*.jpg
+*.jpeg
+*.log
+*.err
+*.out
+*.csv
+*.db
+mmbert-incident/
+mmbert-incident-ml/
+__pycache__/
+# To intentionally track a doc here despite the *.md rule: git add -f dataset/FOO.md

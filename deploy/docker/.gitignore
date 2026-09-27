@@ -3,3 +3,5 @@ tls/
 .env
 # vendored nsjail binary (see Dockerfile.classifier) — provide out of band.
 nsjail
+# operator-provided trained model (sensitive, large) — never commit
+incident-model/

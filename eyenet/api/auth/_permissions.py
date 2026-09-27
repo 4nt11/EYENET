@@ -48,6 +48,9 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "stream:personas",
             "stream:audit",
             "stream:control",
+            "read:incidents",
+            "stream:incidents",
+            "admin:incident_rules",
             "admin:users",
             "admin:tokens",
         },
@@ -77,6 +80,8 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "write:groups",
             "stream:linkages",
             "stream:personas",
+            "read:incidents",
+            "stream:incidents",
         },
     ),
     SystemUserRole.VIEWER: frozenset(
@@ -85,6 +90,7 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "read:personas",
             "read:linkages",
             "read:graph",
+            "read:incidents",
         },
     ),
 }
