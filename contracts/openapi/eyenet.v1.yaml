@@ -2154,6 +2154,28 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/cases/{case_id}/attachments:
+    get:
+      tags: [cases]
+      operationId: cases_list_attachments
+      summary: |
+        Case-scoped evidence attachments (metadata only; direct-membership, §4.10.1).
+        Requires `read:cases` AND case visibility (404, no existence oracle, otherwise).
+      parameters:
+        - { name: case_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of case attachments.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageAttachmentSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /v1/cases/{case_id}/members:
     get:
       tags: [cases]

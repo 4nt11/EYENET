@@ -137,6 +137,41 @@ services:
     cap_add:
       - SYS_ADMIN
 
+  # ---- opt-in: incident classifier (batched multi-label detection, M-incidents) ----
+  # Subscribes raw.message.>, classifies in batches (mmBERT + prefilter + operator rules),
+  # stores incidents, publishes incident.detected for the triage feed (HTTP + SSE).
+  # Needs the ML image (torch/transformers) AND the trained model bind-mounted — neither
+  # is in eyenet:base. Enable with:  docker compose --profile incidents up -d
+  #   1. put the trained model dir in ./incident-model/ (weights + tokenizer +
+  #      calibration.json); it is NOT committed (sensitive, ~1.2GB).
+  #   2. build the image (CPU or GPU — see Dockerfile.incidents):
+  #        docker compose -f deploy/docker/compose.yaml build incident-classifier
+  incident-classifier:
+    profiles: ["incidents"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.incidents
+    image: eyenet:incidents
+    restart: unless-stopped
+    command: ["incident-classifier", "--batch-size", "32", "--flush-interval", "1"]
+    environment:
+      <<: *eyenet-env
+      EYENET_INCIDENT_MODEL_DIR: /opt/eyenet/incident-model
+    volumes:
+      - eyenet-data:/var/lib/eyenet
+      # Operator-provided trained model (not baked into the image). :Z relabels for SELinux.
+      - ./incident-model:/opt/eyenet/incident-model:ro,Z
+    depends_on:
+      api:
+        condition: service_healthy
+    # GPU (recommended for throughput; in dev the model + ollama share one card). Requires
+    # the nvidia container runtime. Uncomment to pass a GPU through:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - { driver: nvidia, count: 1, capabilities: [gpu] }
+
   # ---- collectors (the data plane) -------------------------------------------
   # NOT a static compose service. The CollectorSupervisor spawns one collector
   # child process per CollectorTable row whose desired_state is RUNNING (created

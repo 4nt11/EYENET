@@ -151,6 +151,21 @@ extract = [
   "Pillow>=10.0,<12.0",           # M10 slice 7 — image EXIF (local header parse only)
 ]
 
+# Incident detection — the fine-tuned mmBERT classifier (eyenet/incidents/). Heavy ML
+# runtime, DELIBERATELY optional: only the `incident-classifier` worker imports torch;
+# the API and every other service stay torch-free (classifier._load is lazy). Install:
+#   pip install 'eyenet[incidents]'
+# GPU (recommended — the model wants a CUDA device): install a torch CUDA wheel matching
+# your card FIRST, then this extra, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+#   pip install 'eyenet[incidents]'
+# CPU works but is materially slower per message. The trained model dir is provided at
+# runtime (EYENET_INCIDENT_MODEL_DIR), never baked into the image.
+incidents = [
+  "torch>=2.4",
+  "transformers>=4.44",
+]
+
 [project.scripts]
 eyenet = "eyenet.cli.main:app"
 

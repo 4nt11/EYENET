@@ -17,6 +17,9 @@ INCIDENT_SUBJECT: str = "incident.detected"
 """Bus subject the classifier service publishes a fired incident on (operator triage
 feed / SSE). Only messages with >=1 fired label are emitted; `none` is not published."""
 
+# Canonical surface-gate name (bus modules export a SUBJECT* constant).
+SUBJECT: str = INCIDENT_SUBJECT
+
 
 class IncidentRow(DbRowBase):
     """Persisted multi-label classification result for one message."""
@@ -53,4 +56,4 @@ class IncidentEnvelope(BusEnvelope):
     classified_at: datetime
 
 
-__all__ = ["INCIDENT_SUBJECT", "IncidentEnvelope", "IncidentRow", "IncidentRuleRow"]
+__all__ = ["INCIDENT_SUBJECT", "SUBJECT", "IncidentEnvelope", "IncidentRow", "IncidentRuleRow"]

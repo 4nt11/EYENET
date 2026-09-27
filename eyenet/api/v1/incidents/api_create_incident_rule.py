@@ -8,7 +8,7 @@ and the name (409 if it collides with a built-in signal or an existing rule).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends
 
@@ -39,7 +39,7 @@ async def create_incident_rule(
 ) -> IncidentRuleOut:
     validate_pattern_and_label(body.pattern, body.label)
     validate_name(body.name)
-    existing = await storage.list_incident_rules()
+    existing = cast("list[IncidentRuleRow]", await storage.list_incident_rules())
     if any(r.name == body.name for r in existing):
         raise ConflictError(f"rule name {body.name!r} already exists")
     row = IncidentRuleRow(
