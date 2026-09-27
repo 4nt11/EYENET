@@ -206,6 +206,7 @@ from eyenet.api.v1.sources.api_update_source_domain import router as sources_upd
 from eyenet.api.v1.stream.api_stream_all import router as stream_all_router
 from eyenet.api.v1.stream.api_stream_audit import router as stream_audit_router
 from eyenet.api.v1.stream.api_stream_control import router as stream_control_router
+from eyenet.api.v1.stream.api_stream_incidents import router as stream_incidents_router
 from eyenet.api.v1.stream.api_stream_linkages import router as stream_linkages_router
 from eyenet.api.v1.stream.api_stream_personas import router as stream_personas_router
 from eyenet.api.v1.system.api_get_system import router as system_stats_router
@@ -393,6 +394,7 @@ v1_router.include_router(stream_linkages_router)
 v1_router.include_router(stream_personas_router)
 v1_router.include_router(stream_audit_router)
 v1_router.include_router(stream_control_router)
+v1_router.include_router(stream_incidents_router)
 v1_router.include_router(stream_all_router)
 
 # health + metrics
