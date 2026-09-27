@@ -34,6 +34,7 @@ class StreamTopic(StrEnum):
     ATTRIBUTION_PERSONA = "attribution.persona"
     EYENET_AUDIT = "eyenet.audit"
     EYENET_CONTROL = "eyenet.control"
+    INCIDENT = "incident.detected"
 
 
 __all__ = [

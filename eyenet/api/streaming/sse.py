@@ -65,6 +65,7 @@ TOPIC_SUBJECTS: dict[str, tuple[str, ...]] = {
         "eyenet.identity.freeze_all",
         "eyenet.identity.released",
     ),
+    "incident.detected": ("incident.detected",),
 }
 
 _SSE_HEADERS = {

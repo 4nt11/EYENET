@@ -21,6 +21,7 @@ STREAM_TOPIC_SCOPE: Mapping[StreamTopic, str] = {
     StreamTopic.ATTRIBUTION_PERSONA: "stream:personas",
     StreamTopic.EYENET_AUDIT: "stream:audit",
     StreamTopic.EYENET_CONTROL: "stream:control",
+    StreamTopic.INCIDENT: "stream:incidents",
 }
 
 __all__ = ["STREAM_TOPIC_SCOPE"]

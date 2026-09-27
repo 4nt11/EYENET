@@ -1386,6 +1386,28 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /v1/stream/incidents:
+    get:
+      tags: [stream]
+      operationId: stream_incidents
+      summary: SSE live stream of fired incidents (operator triage feed; live-tail only).
+      parameters:
+        - { $ref: '#/components/parameters/LastEventId' }
+        - { $ref: '#/components/parameters/StreamTokenQuery' }
+      x-eyenet-sse-events:
+        - subject: incident.detected
+          payload_schema: '#/components/schemas/IncidentOut'
+        - subject: stream.gap
+          payload_schema: '#/components/schemas/StreamGapEvent'
+      responses:
+        "200":
+          description: SSE stream (`text/event-stream`).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
   /v1/stream/personas:
     get:
       tags: [stream]
