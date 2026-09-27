@@ -28,6 +28,19 @@ class IncidentRow(DbRowBase):
     classified_at: datetime
 
 
+class IncidentRuleRow(DbRowBase):
+    """Operator-defined incident detection rule (persisted twin of IncidentRuleTable)."""
+
+    name: str
+    pattern: str
+    label: str
+    weight: int = 2
+    enabled: bool = True
+    description: str | None = None
+    created_by: str | None = None
+    created_at: datetime
+
+
 class IncidentEnvelope(BusEnvelope):
     """Fired-incident bus event (published on INCIDENT_SUBJECT) — the triage feed payload.
     Carries the dereferenceable evidence_ref, not the body (operator-grade)."""
@@ -40,4 +53,4 @@ class IncidentEnvelope(BusEnvelope):
     classified_at: datetime
 
 
-__all__ = ["INCIDENT_SUBJECT", "IncidentEnvelope", "IncidentRow"]
+__all__ = ["INCIDENT_SUBJECT", "IncidentEnvelope", "IncidentRow", "IncidentRuleRow"]
