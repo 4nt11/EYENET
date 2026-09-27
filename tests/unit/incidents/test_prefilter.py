@@ -172,6 +172,32 @@ def test_crypter_with_cue_fires(label: str, text: str) -> None:
     assert "tool_sale" in scan(text).signals, f"{label}: got {scan(text).signals}"
 
 
+# Telecom / delivery-abuse service (-> tooling). Real operator-labeled samples plus variants.
+_TELECOM = [
+    ("bulk_sms", "WORLDWIDE BULK SMS SENDER. Faster routes for SMS deliveries 100% tested"),
+    ("spoof_power", "UNLEASH UNLIMITED SPOOFING POWER, global coverage, any caller id"),
+    ("voip_sip_setup", "DM @voipcxx for VoIP and SIP Setups, installation services"),
+    ("cid_spoof", "caller id spoofing service, choose any number"),
+    ("smtp_sender", "fresh SMTP sender + WEBMAILER + SENDGRID, customized Sender ID"),
+    ("sip_trunk", "cheap sip trunk provider, unlimited routes"),
+]
+_NOT_TELECOM = [
+    ("benign_sip", "let me sip my coffee and read this"),
+    ("benign_otp", "you got an SMS with your login code, enter it to continue"),
+    ("benign_smtp", "configure your smtp server host and port in settings"),
+]
+
+
+@pytest.mark.parametrize(("label", "text"), _TELECOM, ids=[p[0] for p in _TELECOM])
+def test_telecom_abuse_fires(label: str, text: str) -> None:
+    assert "telecom_abuse" in scan(text).signals, f"{label}: got {scan(text).signals}"
+
+
+@pytest.mark.parametrize(("label", "text"), _NOT_TELECOM, ids=[n[0] for n in _NOT_TELECOM])
+def test_telecom_abuse_stays_quiet(label: str, text: str) -> None:
+    assert "telecom_abuse" not in scan(text).signals, f"{label}: got {scan(text).signals}"
+
+
 @pytest.mark.parametrize(("label", "text"), _POSITIVE, ids=[p[0] for p in _POSITIVE])
 def test_positive_adjudicates(label: str, text: str) -> None:
     res = scan(text)

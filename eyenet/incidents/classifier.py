@@ -48,6 +48,10 @@ SIG2LABEL: dict[str, str] = {
     "cloud_pass": "infostealer",  # nosec B105 — signal name, not a password
     "access_material": "access_sale",
     "tool_sale": "tooling",
+    # Telecom/delivery-abuse service (SIP, bulk SMS, spoofing, SMTP senders): a fraud
+    # SERVICE, not initial access brokerage. Maps to tooling until a dedicated
+    # telecom_abuse head lands. See development/incident-taxonomy-hierarchy.md.
+    "telecom_abuse": "tooling",
 }
 
 
