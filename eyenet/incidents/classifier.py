@@ -11,6 +11,7 @@ this module — e.g. for :func:`apply_calibration` — stays cheap and torch-fre
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -19,6 +20,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from eyenet.telemetry import get_logger
+
+_log = get_logger()
 _DEFAULT_DIR = Path("dataset/mmbert-incident-ml")
 
 # Canonical prefilter-signal -> taxonomy-label map (development/incident-taxonomy.md).
@@ -101,12 +105,28 @@ def _load() -> tuple[list[str], dict[str, Any], Any, Any, Any]:
     # forced above: no Hub download happens, so revision pinning is not applicable.
     tok = AutoTokenizer.from_pretrained(str(d))  # nosec B615
     model = AutoModelForSequenceClassification.from_pretrained(str(d)).eval()  # nosec B615
-    # Device: EYENET_INCIDENT_DEVICE overrides (set "cpu" to keep the GPU free for the
-    # stage-3 LLM); otherwise CUDA when available, else CPU.
+    # Device selection with automatic CPU fallback:
+    #   - EYENET_INCIDENT_DEVICE overrides ("cpu" keeps the GPU free for the stage-3 LLM);
+    #   - else CUDA when available, else CPU.
+    # If CUDA is chosen but unusable at load (OOM from sharing the card with ollama, a
+    # driver fault), we warm it up once to surface the failure NOW and fall back to CPU
+    # rather than crashing mid-flush. Explicit EYENET_INCIDENT_DEVICE=cpu never touches CUDA.
     device = os.environ.get("EYENET_INCIDENT_DEVICE") or (
         "cuda" if torch.cuda.is_available() else "cpu"
     )
-    model = model.to(device)
+    if device == "cuda":
+        try:
+            model = model.to("cuda")
+            with torch.no_grad():  # touch the GPU to surface OOM at load, not mid-batch
+                model(**tok("warmup", return_tensors="pt").to("cuda"))
+        except Exception as exc:
+            _log.warning("incident.cuda_unavailable_fallback_cpu", error=str(exc))
+            device = "cpu"
+            model = model.to("cpu")
+            with contextlib.suppress(Exception):
+                torch.cuda.empty_cache()
+    else:
+        model = model.to(device)
     return labels, calib, tok, model, torch
 
 
