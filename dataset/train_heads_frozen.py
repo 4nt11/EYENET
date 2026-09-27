@@ -83,22 +83,34 @@ def build_splits() -> tuple[list[dict], list[dict]]:
     return tr, te
 
 
-def report(probs: np.ndarray, y: np.ndarray) -> None:
-    print("\n" + "=" * 64)
-    print("HONEST eval: held-out HUMAN gold only (never trained)")
-    print(f"{'label':<12} {'sup':>4} {'AUROC':>6} {'P@.5':>6} {'R@.5':>6}")
+def _aurocs(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
+    out: dict[str, float] = {}
     for i, k in enumerate(base.LABELS):
         p_i, y_i = probs[:, i], y[:, i]
-        pos = [float(v) for v, t in zip(p_i, y_i) if t == 1]
-        neg = [float(v) for v, t in zip(p_i, y_i) if t == 0]
-        pred_pos = p_i >= 0.5
-        tp = int((pred_pos & (y_i == 1)).sum())
-        prec = tp / max(1, int(pred_pos.sum()))
-        rec = tp / max(1, int((y_i == 1).sum()))
-        au = base.auroc(pos, neg)
-        aus = "  n/a" if au != au else f"{au:6.3f}"
-        print(f"{k:<12} {int(y_i.sum()):>4} {aus} {prec:6.2f} {rec:6.2f}")
-    print("=" * 64)
+        out[k] = base.auroc(
+            [float(v) for v, t in zip(p_i, y_i) if t == 1],
+            [float(v) for v, t in zip(p_i, y_i) if t == 0],
+        )
+    return out
+
+
+def report_delta(before: np.ndarray, after: np.ndarray, y: np.ndarray) -> None:
+    """AUROC is the honest metric here (threshold-free; raw probs are compressed so P/R@.5
+    reads ~0 for weak heads until calibrate.py runs). Show per-head BEFORE -> AFTER + delta."""
+    b, a = _aurocs(before, y), _aurocs(after, y)
+    print("\n" + "=" * 60)
+    print("HONEST eval: held-out HUMAN gold (AUROC, threshold-free)")
+    print(f"{'label':<12} {'sup':>4} {'BEFORE':>8} {'AFTER':>8} {'Δ':>8}")
+    for i, k in enumerate(base.LABELS):
+        sup = int(y[:, i].sum())
+        bv, av = b[k], a[k]
+        bs = " n/a" if bv != bv else f"{bv:8.3f}"
+        as_ = " n/a" if av != av else f"{av:8.3f}"
+        dv = (av - bv) if (bv == bv and av == av) else float("nan")
+        ds = "  n/a" if dv != dv else f"{dv:+8.3f}"
+        print(f"{k:<12} {sup:>4} {bs} {as_} {ds}")
+    print("=" * 60)
+    print("sup = gold-test positives; small sup = noisy (LABEL MORE). n/a = no gold-test positives.")
 
 
 def main(start: str, out: str, epochs: int, lr: float) -> None:
@@ -130,13 +142,14 @@ def main(start: str, out: str, epochs: int, lr: float) -> None:
         report_to=[],
     )
     trainer = Trainer(model=model, args=args, train_dataset=ds_tr, processing_class=tok)
-    trainer.train()
 
-    model.eval()
-    pred = trainer.predict(ds_te)
-    probs = torch.sigmoid(torch.tensor(pred.predictions)).numpy()
     y = np.array([r["labels"] for r in te])
-    report(probs, y)
+    # BEFORE: the deployed model's gold-test predictions (head untouched).
+    before = torch.sigmoid(torch.tensor(trainer.predict(ds_te).predictions)).numpy()
+    trainer.train()
+    # AFTER: same gold-test, head fine-tuned on silver + operator gold.
+    after = torch.sigmoid(torch.tensor(trainer.predict(ds_te).predictions)).numpy()
+    report_delta(before, after, y)
 
     trainer.save_model(out)
     tok.save_pretrained(out)
