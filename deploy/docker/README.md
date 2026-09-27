@@ -121,8 +121,10 @@ Then it subscribes `raw.message.>`, stores incidents, and serves the triage feed
 `/v1/incident-rules` (RE2 → label; picked up within 30s, no redeploy).
 
 **GPU vs CPU.** GPU is the default and is ~12x faster batched (≈590 vs ≈48 msgs/s on a
-5060). The model shares the card with the stage-3 ollama LLM (8GB), so if they contend,
-fall back to CPU — enough for small-operator live volume, and it frees the GPU:
+5060). The model shares the card with the stage-3 ollama LLM (8GB); if CUDA is present but
+runs out of memory at load, the service **auto-falls-back to CPU** (logs
+`incident.cuda_unavailable_fallback_cpu`) instead of crashing — no config needed. To run
+CPU-only *proactively* (frees the GPU entirely; enough for small-operator live volume):
 
 ```bash
 # CPU fallback: comment out the `deploy:` GPU block in compose.yaml, then:
