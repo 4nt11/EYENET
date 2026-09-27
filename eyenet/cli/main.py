@@ -481,6 +481,30 @@ def detect_copypasta(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("incidents-backfill")
+def incidents_backfill(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    batch_size: int = typer.Option(64, "--batch-size", help="messages per inference batch"),
+    limit: int | None = typer.Option(None, "--limit", help="cap total messages scanned"),
+) -> None:
+    """Classify stored messages that predate the classifier service (history backfill).
+
+    Runs the same cascade as the live service (calibrated model + prefilter + operator
+    rules) over messages with no incident row yet. Re-runnable; already-classified
+    messages are skipped. Set EYENET_INCIDENT_MODEL_DIR to pick the model directory.
+    """
+    from eyenet.incidents.backfill import run_backfill  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        scanned, fired = await run_backfill(storage, batch_size=batch_size, limit=limit)
+        await storage.close()
+        typer.echo(f"scanned {scanned} messages, stored {fired} incidents")
+
+    asyncio.run(_main())
+
+
 @app.command("crew-cases")
 def crew_cases(  # pragma: no cover
     as_user: str = typer.Option(..., "--as", help="username to own the auto-opened cases"),

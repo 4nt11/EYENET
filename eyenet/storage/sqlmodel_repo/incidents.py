@@ -14,7 +14,7 @@ from uuid import UUID
 from sqlmodel import col, select
 
 from eyenet.contracts.incident import IncidentRow, IncidentRuleRow
-from eyenet.models import IncidentRuleTable, IncidentTable
+from eyenet.models import IncidentRuleTable, IncidentTable, MessageTable
 
 from ._helpers import safe_session
 
@@ -51,6 +51,22 @@ class IncidentsMixin:
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    async def messages_without_incidents(
+        self, *, limit: int = 500, after_id: UUID | None = None
+    ) -> list[tuple[UUID, str]]:
+        """(message_id, body) for messages with no incident row, oldest first (keyset
+        by id). Generic ANSI: NOT IN a subquery over the append-only incident table."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            classified = select(IncidentTable.message_id)
+            stmt = select(MessageTable.id, MessageTable.body).where(
+                col(MessageTable.id).not_in(classified)
+            )
+            if after_id is not None:
+                stmt = stmt.where(col(MessageTable.id) > after_id)
+            stmt = stmt.order_by(col(MessageTable.id)).limit(limit)
+            result = await session.exec(stmt)
+            return [(mid, body) for mid, body in result]
 
     # ── operator-defined detection rules (CRUD) ──────────────────────────────
     async def create_incident_rule(self, rule_row: object) -> None:

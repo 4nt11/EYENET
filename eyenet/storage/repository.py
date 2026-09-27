@@ -697,6 +697,16 @@ class BaseRepository(ABC):
         """Most recently classified incidents (operator triage feed)."""
 
     @abstractmethod
+    async def messages_without_incidents(
+        self, *, limit: int = 500, after_id: UUID | None = None
+    ) -> list[tuple[UUID, str]]:
+        """(message_id, body) for messages that have NO incident row yet, oldest first.
+
+        The backfill query: classify pre-existing messages that arrived before the
+        classifier service was running. Keyset-paginated by ``id`` (UUID7 is time-
+        ordered), so pass the last returned id as ``after_id`` for the next page."""
+
+    @abstractmethod
     async def create_incident_rule(self, rule_row: object) -> None:
         """Persist an operator-defined :class:`IncidentRuleRow`."""
 
