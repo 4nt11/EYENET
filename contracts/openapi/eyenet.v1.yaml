@@ -1595,6 +1595,27 @@ paths:
                 items: { $ref: '#/components/schemas/IncidentOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+  /v1/incidents/{message_id}/labels:
+    put:
+      tags: [incidents]
+      operationId: set_incident_label
+      summary: Operator relabel of a classified message (ground truth for retraining). Requires `write:incidents`.
+      parameters:
+        - { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentLabelUpdate' }
+      responses:
+        "200":
+          description: Correction stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentLabelOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
   /v1/incident-rules:
     get:
       tags: [incidents]
@@ -4493,10 +4514,35 @@ components:
       required: [message_id, labels, scores, model_version, classified_at]
       properties:
         message_id:    { type: string, format: uuid }
+        body:          { type: string, nullable: true, description: 'Classified message text; null if the row is gone.' }
         labels:        { type: array, items: { type: string } }
         scores:        { type: object, additionalProperties: { type: number } }
         model_version: { type: string }
         classified_at: { type: string, format: date-time }
+        corrected_labels: { type: array, nullable: true, items: { type: string }, description: 'Operator ground-truth label set, when corrected.' }
+        corrected_by:     { type: string, nullable: true }
+        corrected_at:     { type: string, format: date-time, nullable: true }
+
+    IncidentLabelUpdate:
+      description: Operator relabel of a classified message (`PUT /v1/incidents/{message_id}/labels`).
+      type: object
+      additionalProperties: false
+      required: [labels]
+      properties:
+        labels: { type: array, items: { type: string }, description: 'True taxonomy heads; empty = false positive.' }
+        reason: { type: string, nullable: true }
+
+    IncidentLabelOut:
+      description: A stored operator label correction (retraining ground truth).
+      type: object
+      additionalProperties: false
+      required: [message_id, labels, reason, decided_by, decided_at]
+      properties:
+        message_id: { type: string, format: uuid }
+        labels:     { type: array, items: { type: string } }
+        reason:     { type: string, nullable: true }
+        decided_by: { type: string }
+        decided_at: { type: string, format: date-time }
 
     IncidentRuleOut:
       description: An operator-defined incident detection rule.

@@ -143,6 +143,7 @@ from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_
 from eyenet.api.v1.incidents.api_delete_incident_rule import router as incident_rule_delete_router
 from eyenet.api.v1.incidents.api_list_incident_rules import router as incident_rules_list_router
 from eyenet.api.v1.incidents.api_list_incidents import router as incidents_list_router
+from eyenet.api.v1.incidents.api_set_incident_label import router as incident_relabel_router
 from eyenet.api.v1.incidents.api_update_incident_rule import router as incident_rule_update_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
@@ -283,6 +284,7 @@ v1_router.include_router(documents_access_router)
 
 # incidents (triage feed) + operator detection rules
 v1_router.include_router(incidents_list_router)
+v1_router.include_router(incident_relabel_router)
 v1_router.include_router(incident_rules_list_router)
 v1_router.include_router(incident_rule_create_router)
 v1_router.include_router(incident_rule_update_router)

@@ -87,6 +87,19 @@ async def test_get_by_evidence_ref_after_put(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_bodies_by_message_ids(
+    storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
+) -> None:
+    source_id, group_id, actor_id = fk_ids
+    row = _make_row(source_id, group_id, actor_id)
+    await storage.put_message(row)
+    missing = new_uuid7()
+    bodies = await storage.bodies_by_message_ids([row.id, missing])
+    assert bodies == {row.id: "hello world"}  # unknown ids omitted
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_put_duplicate_returns_false(
     storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
 ) -> None:

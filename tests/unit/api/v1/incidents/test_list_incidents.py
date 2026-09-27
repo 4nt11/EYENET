@@ -22,6 +22,12 @@ class _FakeStorage:
     async def recent_incidents(self, limit: int) -> list:
         return self._rows[:limit]
 
+    async def bodies_by_message_ids(self, message_ids: list) -> dict:
+        return {mid: f"body {mid}" for mid in message_ids}
+
+    async def incident_labels_by_message_ids(self, message_ids: list) -> dict:
+        return {}
+
 
 def _row(labels: list[str]):
     return SimpleNamespace(
@@ -38,6 +44,7 @@ def test_list_incidents_maps_all() -> None:
     out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, label=None))
     assert len(out) == 3
     assert out[0].scores == {"tooling": 0.9}
+    assert all(o.body == f"body {o.message_id}" for o in out)  # body enrichment
 
 
 def test_list_incidents_label_filter() -> None:

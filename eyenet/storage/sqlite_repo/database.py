@@ -74,6 +74,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "incident",
         # operator-defined incident detection rules
         "incident_rule",
+        # operator ground-truth label corrections (retraining signal)
+        "incident_label",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

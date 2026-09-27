@@ -707,6 +707,27 @@ class BaseRepository(ABC):
         ordered), so pass the last returned id as ``after_id`` for the next page."""
 
     @abstractmethod
+    async def set_incident_label(
+        self,
+        message_id: UUID,
+        labels: list[str],
+        *,
+        decided_by: str,
+        reason: str | None,
+        decided_at: datetime,
+    ) -> object:
+        """Upsert the operator's ground-truth label set for a message (one per message).
+        Returns the stored :class:`IncidentLabelRow`. ``labels`` may be empty (false positive)."""
+
+    @abstractmethod
+    async def incident_labels_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, object]:
+        """Bulk {message_id: IncidentLabelRow} of current corrections (feed enrichment)."""
+
+    @abstractmethod
+    async def all_incident_labels(self) -> list[object]:
+        """Every operator correction — the retraining ground-truth export."""
+
+    @abstractmethod
     async def create_incident_rule(self, rule_row: object) -> None:
         """Persist an operator-defined :class:`IncidentRuleRow`."""
 
@@ -987,6 +1008,10 @@ class BaseRepository(ABC):
         evidence_refs: list[str],
     ) -> dict[str, tuple[UUID, str]]:
         """Bulk (message_id, body) by evidence_ref in one query (classifier batch)."""
+
+    @abstractmethod
+    async def bodies_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, str]:
+        """Bulk {message_id: body} in one query (enriches the incident triage feed)."""
 
     @abstractmethod
     async def put_message(

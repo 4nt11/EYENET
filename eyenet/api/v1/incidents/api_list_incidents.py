@@ -9,12 +9,13 @@ live view is the SSE stream, and each incident is also emitted on the bus as it 
 from __future__ import annotations
 
 from typing import Annotated, cast
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.v1.schemas.incidents import IncidentOut
-from eyenet.contracts.incident import IncidentRow
+from eyenet.contracts.incident import IncidentLabelRow, IncidentRow
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["incidents"])
@@ -28,13 +29,22 @@ async def list_incidents(
     label: Annotated[str | None, Query()] = None,
 ) -> list[IncidentOut]:
     rows = cast("list[IncidentRow]", await storage.recent_incidents(limit=limit))
+    ids = [r.message_id for r in rows]
+    bodies = await storage.bodies_by_message_ids(ids)
+    corrections = cast(
+        "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
+    )
     out = [
         IncidentOut(
             message_id=r.message_id,
+            body=bodies.get(r.message_id),
             labels=r.labels,
             scores=r.scores,
             model_version=r.model_version,
             classified_at=r.classified_at,
+            corrected_labels=c.labels if (c := corrections.get(r.message_id)) else None,
+            corrected_by=c.decided_by if c else None,
+            corrected_at=c.decided_at if c else None,
         )
         for r in rows
     ]

@@ -81,6 +81,19 @@ class MessagesMixin:
                 str(ref): (UUID(str(mid)), str(body)) for ref, mid, body in result.all()
             }
 
+    async def bodies_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, str]:
+        """Bulk-fetch {message_id: body} for many ids in ONE query — enriches the
+        incident triage feed with message text. Ids with no row are omitted."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageTable.id, MessageTable.body).where(
+                    col(MessageTable.id).in_(message_ids)
+                )
+            )
+            return {UUID(str(mid)): str(body) for mid, body in result.all()}
+
     async def put_message(
         self,
         row: object,
