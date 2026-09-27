@@ -1,14 +1,14 @@
 <script>
-  import { onMount } from 'svelte';
   import SectionHeader from '$lib/components/SectionHeader.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import TierBadge from '$lib/components/TierBadge.svelte';
   import Button from '$lib/components/Button.svelte';
+  import { caseCtx } from '$lib/case.svelte.js';
   import {
     attachmentCtx, attachmentView, tierTone,
-    loadAttachments, loadAttachmentManifest
+    loadCaseAttachments, loadAttachmentManifest
   } from '$lib/attachment.svelte.js';
 
   const COLUMNS = [
@@ -48,7 +48,11 @@
     if (a) loadAttachmentManifest(a.id);
   });
 
-  onMount(loadAttachments);
+  // Reload whenever the active case changes (caseCtx.active is set by the case
+  // switcher). No active case → honest empty state, no global firehose.
+  $effect(() => {
+    loadCaseAttachments(caseCtx.active?.caseId ?? null);
+  });
 </script>
 
 <main>
@@ -61,7 +65,7 @@
           selectedId={a?.id} onRowClick={(r) => (selectedId = r.id)} />
       {:else}
         <p class="pnote">
-          {#if !attachmentCtx.loaded}Loading…{:else if attachmentCtx.error}Could not load attachments: {attachmentCtx.error}{:else}No attachments collected yet.{/if}
+          {#if !attachmentCtx.loaded}Loading…{:else if attachmentCtx.error}Could not load attachments: {attachmentCtx.error}{:else if !attachmentCtx.caseId}Select a case to view its attachments.{:else}No attachments are members of this case.{/if}
         </p>
       {/if}
     </div>

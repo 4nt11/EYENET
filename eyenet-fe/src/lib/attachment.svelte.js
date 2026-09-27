@@ -28,18 +28,34 @@ function mapAttachment(a) {
   };
 }
 
-export const attachmentCtx = $state({ list: [], loaded: false, error: null });
+export const attachmentCtx = $state({ list: [], loaded: false, error: null, caseId: null });
 
-export async function loadAttachments() {
+let seq = 0;
+
+// Case-scoped: direct attachment members of the active case
+// (GET /v1/cases/{caseId}/attachments). No active case → honest empty state,
+// not the old everything-in-storage firehose. Keyed on caseCtx.active.
+export async function loadCaseAttachments(caseId) {
+  const mine = ++seq;
+  attachmentCtx.loaded = false;
+  attachmentCtx.caseId = caseId ?? null;
+  attachmentCtx.list = [];
+  attachmentCtx.error = null;
+  if (!caseId) {
+    attachmentCtx.loaded = true;
+    return;
+  }
   try {
-    const page = await apiGet('/v1/attachments?limit=200', { auth: true });
+    const page = await apiGet(`/v1/cases/${caseId}/attachments?limit=200`, { auth: true });
+    if (mine !== seq) return;
     attachmentCtx.list = page.items.map(mapAttachment);
     attachmentCtx.error = null;
   } catch (e) {
+    if (mine !== seq) return;
     attachmentCtx.error = e.message ?? String(e);
     attachmentCtx.list = [];
   } finally {
-    attachmentCtx.loaded = true;
+    if (mine === seq) attachmentCtx.loaded = true;
   }
 }
 
