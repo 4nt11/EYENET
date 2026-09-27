@@ -31,7 +31,7 @@ MECHANICAL = {"leak": "breach_dump", "infostealer": "stealer_logs", "actor_ops":
 # These SPLIT into multiple leaves -> a human must pick which. (See the taxonomy doc.)
 SPLIT = {
     "incident": ["defacement", "ddos_attack", "intrusion"],
-    "access_sale": ["iab_corporate", "telecom_abuse", "phishing_delivery", "fraud_ops"],
+    "access_sale": ["iab_corporate", "telecom_abuse", "phishing_delivery", "fraud_ops", "infra_resale"],
     "tooling": ["crimeware_tooling", "crime_aas"],
 }
 

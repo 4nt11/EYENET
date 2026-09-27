@@ -43,7 +43,10 @@ SERVICE_MARKET            (capabilities / services for rent)
 ├── telecom_abuse         voice/SMS channel: SIP/VoIP trunks, caller-ID spoofing, bulk SMS
 ├── phishing_delivery     email/phishing infra: SMTP senders, webmailers, SendGrid,
 │                         mass mailers, scampages / phishing kits   (was mis-bucketed access_sale)
-└── fraud_ops            OTP bots, cashout, muling, bank-drops, card shops
+├── fraud_ops            OTP bots, cashout, muling, bank-drops, card shops
+└── infra_resale         the HOSTING layer: VPS/RDP/bulletproof-hosting resale, proxies,
+                          domains sold as commodity infra. NOT a foothold into a victim
+                          org (that is iab_corporate) — the actor is renting you the pipe.
 
 ACTOR_OPS                 (the org's meta-business)
 ├── recruiting
@@ -69,7 +72,7 @@ ACTOR_OPS                 (the org's meta-business)
 | incident | OFFENSIVE_EVENT.{defacement, ddos_attack, intrusion} | NO — needs sub-classification |
 | leak | DATA_MARKET.breach_dump (+ credentials) | mostly |
 | infostealer | DATA_MARKET.stealer_logs | yes |
-| access_sale | ACCESS_MARKET.iab_corporate OR telecom_abuse OR phishing_delivery OR fraud_ops | NO — needs re-inspection/split |
+| access_sale | ACCESS_MARKET.iab_corporate OR telecom_abuse OR phishing_delivery OR fraud_ops OR infra_resale | NO — needs re-inspection/split |
 | tooling | crimeware_tooling OR crime_aas | NO — needs commodity-vs-aaS split |
 | actor_ops | ACTOR_OPS.{recruiting, alliance, crew_ops} | mostly |
 
