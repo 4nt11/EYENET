@@ -101,6 +101,9 @@ the only service that needs more than `docker compose up -d`, because two things
    ```bash
    # from the repo root — copy the trained model dir the bind-mount expects:
    cp -r dataset/mmbert-incident-ml deploy/docker/incident-model
+   # the trained model.safetensors is owner-only (0600); make it readable by the
+   # container's non-root user (uid 10001), else the load fails FileNotFound:
+   chmod -R a+rX deploy/docker/incident-model
    ```
 
    The dir is self-contained; the runtime loads it fully **offline** (no Hub download).
