@@ -82,6 +82,12 @@ def apply_calibration(
 
 @lru_cache(maxsize=1)
 def _load() -> tuple[list[str], dict[str, Any], Any, Any, Any]:
+    # The model dir is fully self-contained (weights + tokenizer + config), so nothing
+    # is ever fetched. Force offline anyway so transformers/HF cannot phone home for
+    # version/etag checks — guarantees a network-free load (operator posture). setdefault
+    # lets an operator opt back into online if they ever need to.
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     import torch  # noqa: PLC0415  (lazy — keep module import torch-free)
     from transformers import (  # noqa: PLC0415
         AutoModelForSequenceClassification,

@@ -10,8 +10,9 @@ Design notes / v1 simplifications (see development/incident-classifier-bus-integ
   - Trace: batching decouples arrival from processing, so the per-message
     ``attach_from_headers`` span model does not hold across a flush. Per-message span
     links are future work; the flush audits each fired detection individually.
-  - The model forward pass is a blocking call on the event loop. At small-operator
-    volume this is fine; move to ``run_in_executor`` if it becomes a latency issue.
+  - Inference runs off the event loop in a dedicated single-thread executor, so a flush
+    never blocks the bus handler; the pool's one worker serializes inference so
+    concurrent flushes cannot race the single CUDA model.
   - Audit: a detection (a fired incident) is the operator-relevant event and is audited;
     routine non-firing scans are not (mass-scan != targeted evidence access).
 """
@@ -19,6 +20,7 @@ Design notes / v1 simplifications (see development/incident-classifier-bus-integ
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from eyenet.contracts.incident import IncidentRow
@@ -49,6 +51,10 @@ class IncidentClassifierService(ServiceBase):
         self._buffer: list[str] = []  # evidence_refs awaiting classification
         self._lock = asyncio.Lock()
         self._model_version = classifier.model_dir().name
+        # Inference runs OFF the event loop in a single dedicated thread: torch releases
+        # the GIL during compute so the bus handler keeps buffering, and max_workers=1
+        # serializes inference so concurrent flushes never race the one CUDA model.
+        self._infer_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="incident-infer")
 
     @property
     def name(self) -> str:
@@ -77,6 +83,12 @@ class IncidentClassifierService(ServiceBase):
         """Time-based flush so low-traffic messages don't wait for a full batch."""
         await self._flush()
 
+    async def shutdown(self) -> None:
+        """Flush any buffered messages, then tear down the inference pool."""
+        await self._flush()
+        await super().shutdown()
+        self._infer_pool.shutdown(wait=False, cancel_futures=True)
+
     async def _flush(self) -> None:
         async with self._lock:
             if not self._buffer:
@@ -90,7 +102,8 @@ class IncidentClassifierService(ServiceBase):
         if not ordered:
             return
         texts = [body for _, (_mid, body) in ordered]
-        scored = classifier.classify_batch(texts)
+        loop = asyncio.get_running_loop()
+        scored = await loop.run_in_executor(self._infer_pool, classifier.classify_batch, texts)
 
         now = datetime.now(UTC)
         rows: list[object] = []
