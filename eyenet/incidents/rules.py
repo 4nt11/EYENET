@@ -18,6 +18,9 @@ from typing import Any
 import re2
 
 from eyenet.incidents.prefilter import _CONFUSABLES, _RE2_OPTIONS, SIGNALS
+from eyenet.telemetry import get_logger
+
+_log = get_logger()
 
 TAXONOMY_LABELS: frozenset[str] = frozenset(
     {"incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"}
@@ -54,7 +57,12 @@ def compile_rules(rows: list[Any]) -> list[CompiledRule]:
             continue
         try:
             pat = re2.compile(r.pattern, _RE2_OPTIONS)
-        except Exception:  # noqa: S112 — skip a corrupt rule, don't crash the service
+        except Exception as exc:  # nosec B112 — logged skip; one corrupt rule must not crash the service
+            _log.warning(
+                "incident.rule_compile_failed",
+                name=getattr(r, "name", "?"),
+                error=str(exc),
+            )
             continue
         out.append(CompiledRule(name=r.name, pattern=pat, label=r.label))
     return out
