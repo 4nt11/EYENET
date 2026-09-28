@@ -16,6 +16,9 @@ class IncidentOut(ApiSchema):
 
     message_id: UUID
     body: str | None = None  # the classified message text (None if the row is gone)
+    group: str | None = None  # WHERE: the channel/group title
+    actor_id: UUID | None = None  # WHO: sender actor (for dossier click-through)
+    actor_handle: str | None = None
     labels: list[str]
     scores: dict[str, float]
     model_version: str

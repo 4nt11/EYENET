@@ -18,7 +18,13 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
-from eyenet.models import AttachmentTable, ContentTemplateTable, MessageTable
+from eyenet.models import (
+    ActorTable,
+    AttachmentTable,
+    ContentTemplateTable,
+    GroupTable,
+    MessageTable,
+)
 
 from ._helpers import safe_session
 
@@ -113,6 +119,32 @@ class MessagesMixin:
                 if fn:
                     out.setdefault(UUID(str(mid)), []).append(str(fn))
             return out
+
+    async def message_context_by_ids(
+        self, message_ids: list[UUID]
+    ) -> dict[UUID, tuple[str | None, UUID | None, str | None]]:
+        """Bulk {message_id: (group_title, actor_id, actor_handle)} in ONE join — the WHERE
+        and WHO for the incident triage feed (channel + sender, actor_id for dossier
+        click-through). Outer joins so a missing group/actor yields None, not a dropped row."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(
+                    MessageTable.id,
+                    GroupTable.current_title,
+                    ActorTable.id,
+                    ActorTable.current_handle,
+                )
+                .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id), isouter=True)
+                .join(ActorTable, col(MessageTable.actor_id) == col(ActorTable.id), isouter=True)
+                .where(col(MessageTable.id).in_(message_ids))
+            )
+            result = await session.exec(stmt)
+            return {
+                UUID(str(mid)): (title, UUID(str(aid)) if aid else None, handle)
+                for mid, title, aid, handle in result.all()
+            }
 
     async def put_message(
         self,

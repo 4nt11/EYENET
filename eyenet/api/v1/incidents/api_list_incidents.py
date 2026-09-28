@@ -35,6 +35,7 @@ async def list_incidents(
     )
     ids = [r.message_id for r in rows]
     bodies = await storage.bodies_by_message_ids(ids)
+    ctx = await storage.message_context_by_ids(ids)  # (group_title, actor_id, actor_handle)
     corrections = cast(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
@@ -42,6 +43,9 @@ async def list_incidents(
         IncidentOut(
             message_id=r.message_id,
             body=bodies.get(r.message_id),
+            group=(mc := ctx.get(r.message_id, (None, None, None)))[0],
+            actor_id=mc[1],
+            actor_handle=mc[2],
             labels=r.labels,
             scores=r.scores,
             model_version=r.model_version,
