@@ -17,6 +17,7 @@ from eyenet.bus import MemoryBus, NATSBus
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.classifier.service import ClassifierService
 from eyenet.cli.config import LinkerConfig, RuntimeConfig, VerifierConfig
+from eyenet.collectors.forum.real import MyBBForumCollector
 from eyenet.collectors.matrix.real import MatrixCollector
 from eyenet.collectors.matrix.stub import MatrixCollectorStub
 from eyenet.collectors.telegram.real import TelegramCollector
@@ -251,7 +252,7 @@ def _make_trace_context() -> TraceContext:
 # -- service commands -------------------------------------------------------
 
 
-_COLLECTOR_TYPES = ("telegram-stub", "telegram", "matrix-stub", "matrix", "stub")
+_COLLECTOR_TYPES = ("telegram-stub", "telegram", "matrix-stub", "matrix", "forum", "stub")
 # `stub` is the legacy alias for `telegram-stub` — kept for one release to
 # avoid breaking operator scripts written against M1/M2 docs.
 _LEGACY_TELEGRAM_STUB_ALIAS = "stub"
@@ -345,6 +346,21 @@ def collector_run(  # pragma: no cover
             )
 
         _run(_factory, cfg, tick=tick)
+    elif collector == "forum":
+        # Poll-based collector: cookies come from the file pool's plaintext
+        # cookies.txt (session_key=None). Default to a 60s poll so it doesn't
+        # busy-loop when the operator omits --tick.
+        # ponytail: DB-backed encrypted cookie jar reuses the telegram
+        # load_session_key + DbIdentityPool seam when in-UI upload lands.
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
+            return MyBBForumCollector(
+                bus=bus,
+                storage=storage,
+                pool=pool,
+                identity_name=identity,
+            )
+
+        _run(_factory, cfg, tick=tick or 60.0)
     else:  # telegram-stub
 
         def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
@@ -638,6 +654,7 @@ def api_run(  # pragma: no cover
     """Serve the operator HTTP API over Hypercorn (h2, optional h3; never h1)."""
 
     from hypercorn.asyncio import serve  # noqa: PLC0415
+    from hypercorn.typing import ASGIFramework  # noqa: PLC0415
 
     from eyenet.api._serve import build_config  # noqa: PLC0415
     from eyenet.api.app import create_app  # noqa: PLC0415
@@ -662,7 +679,9 @@ def api_run(  # pragma: no cover
                 data_dir=cfg.data_dir,
                 publisher=BusEnvelopePublisher(bus),
             )
-            await serve(fastapi_app, hcfg)
+            # FastAPI is a valid ASGI3 app; hypercorn's ASGIFramework Protocol is
+            # narrower than what create_app returns, so bridge the two explicitly.
+            await serve(cast("ASGIFramework", fastapi_app), hcfg)
         finally:
             await bus.close()
             await storage.close()

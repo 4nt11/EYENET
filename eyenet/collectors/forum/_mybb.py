@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
@@ -128,4 +129,22 @@ def parse_thread(html: str) -> list[ParsedPost]:
     return posts
 
 
-__all__ = ["ParsedPost", "parse_thread"]
+def thread_page_count(html: str) -> int:
+    """Highest ``?page=N`` in a MyBB thread's pagination block (>= 1).
+
+    The collector walks pages 1..N. Reads the pagination anchors via the DOM and
+    the ``page`` query param via urllib (URL parsing, not markup regex). A thread
+    with no pagination block is a single page.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    max_page = 1
+    for anchor in soup.select("a.pagination_page, a.pagination_next, a.pagination_last"):
+        href = str(anchor.get("href", ""))
+        pages = parse_qs(urlparse(href).query).get("page", [])
+        for value in pages:
+            if value.isdigit():
+                max_page = max(max_page, int(value))
+    return max_page
+
+
+__all__ = ["ParsedPost", "parse_thread", "thread_page_count"]

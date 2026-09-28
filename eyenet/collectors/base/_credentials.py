@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
 from telethon.sessions import StringSession
 
 from eyenet.crypto import decrypt_session
@@ -43,4 +44,51 @@ def materialize_telegram_session(
     return StringSession(decrypt_session(session_key, ciphertext))
 
 
-__all__ = ["materialize_telegram_session"]
+# Netscape cookies.txt columns: domain, flag, path, secure, expiry, name, value.
+_NETSCAPE_COOKIE_FIELDS = 7
+
+
+def _parse_netscape_cookies(text: str) -> httpx.Cookies:
+    """Parse a browser-exported Netscape ``cookies.txt`` into ``httpx.Cookies``.
+
+    The operator logs into the forum in a real browser (solving the captcha by
+    hand, once) and exports the session cookies with any "cookies.txt" extension.
+    That standard 7-column tab-separated format is stdlib-parseable; no external
+    cookie library. The ``#HttpOnly_`` domain prefix some exporters emit is
+    stripped and treated as a normal cookie.
+    """
+    jar = httpx.Cookies()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_") :]
+        elif not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if len(fields) != _NETSCAPE_COOKIE_FIELDS:
+            continue
+        domain, _flag, path, _secure, _expiry, name, value = fields
+        jar.set(name, value, domain=domain, path=path)
+    return jar
+
+
+def materialize_forum_session(
+    entry: IdentityFileEntry,
+    session_key: Fernet | None,
+) -> httpx.Cookies:
+    """Return the cookie jar to hand to the forum ``httpx.AsyncClient``.
+
+    - ``session_key`` set (DB-backed pool): decrypt the Fernet blob at
+      ``forum_cookie_path`` in memory; the plaintext cookies never touch disk.
+    - ``session_key`` is ``None`` (file pool): read the plaintext
+      ``cookies.txt`` at ``forum_cookie_path`` directly.
+    """
+    if not entry.forum_cookie_path:
+        raise ValueError(f"identity {entry.name!r} missing forum_cookie_path in identities.toml")
+    path = Path(entry.forum_cookie_path)
+    if session_key is None:
+        return _parse_netscape_cookies(path.read_text(encoding="utf-8"))
+    return _parse_netscape_cookies(decrypt_session(session_key, path.read_bytes()))
+
+
+__all__ = ["materialize_forum_session", "materialize_telegram_session"]
