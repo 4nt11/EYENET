@@ -654,6 +654,7 @@ def api_run(  # pragma: no cover
     """Serve the operator HTTP API over Hypercorn (h2, optional h3; never h1)."""
 
     from hypercorn.asyncio import serve  # noqa: PLC0415
+    from hypercorn.typing import ASGIFramework  # noqa: PLC0415
 
     from eyenet.api._serve import build_config  # noqa: PLC0415
     from eyenet.api.app import create_app  # noqa: PLC0415
@@ -678,7 +679,9 @@ def api_run(  # pragma: no cover
                 data_dir=cfg.data_dir,
                 publisher=BusEnvelopePublisher(bus),
             )
-            await serve(fastapi_app, hcfg)
+            # FastAPI is a valid ASGI3 app; hypercorn's ASGIFramework Protocol is
+            # narrower than what create_app returns, so bridge the two explicitly.
+            await serve(cast("ASGIFramework", fastapi_app), hcfg)
         finally:
             await bus.close()
             await storage.close()
