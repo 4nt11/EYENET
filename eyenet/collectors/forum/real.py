@@ -16,17 +16,26 @@ Session lifecycle:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import random
+import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
 
 from eyenet.collectors.base._credentials import materialize_forum_session
-from eyenet.collectors.base.skeleton import CollectorSkeleton
-from eyenet.collectors.forum import ParsedPost, parse_thread, thread_page_count
+from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
+from eyenet.collectors.forum import (
+    ParsedPost,
+    parse_forum_links,
+    parse_thread,
+    parse_thread_links,
+    thread_page_count,
+)
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.actor import actor_key
 from eyenet.contracts.bus import Bus
@@ -51,14 +60,30 @@ _log = get_logger()
 # canary goes falsely-dead - upgrade to a stable per-board element then.
 _LOGGED_IN_MARKERS = ("action=logout", "usercp")
 
+# Not-stupid pacing defaults (seconds). Every request waits a jittered delay in
+# [min, max]; requests are strictly sequential. A live board bans an account that
+# rips flat-out, so these are deliberately browsing-speed, tunable per identity.
+_DEFAULT_DELAY_MIN = 4.0
+_DEFAULT_DELAY_MAX = 12.0
+# One paced discovery sweep, then rest. Re-enumerating 500-page categories every
+# minute would be its own DoS; a category rarely gains threads that fast.
+_DEFAULT_DISCOVERY_INTERVAL = 21_600  # 6h
+# 0 = walk every page of a category (full backfill). MyBB sorts threads by last
+# post desc, so a positive cap gets the most recently active threads first.
+_DEFAULT_MAX_CATEGORY_PAGES = 0
+
 
 def _zero_traceparent() -> str:
     return "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
 
 
+def _last_segment(url: str) -> str:
+    return urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+
+
 def _thread_id_from_url(url: str) -> str:
     """MyBB ``Thread-<slug>--<tid>`` -> ``<tid>``; fall back to the slug."""
-    slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    slug = _last_segment(url)
     if "--" in slug:
         tail = slug.rsplit("--", 1)[-1]
         if tail.isdigit():
@@ -93,14 +118,31 @@ class MyBBForumCollector(CollectorSkeleton):
         self._client = http_client
         self._owns_client = http_client is None
         self._source_uuid: UUID | None = None
+        self._collector_id: UUID | None = None
         self._board = ""
         self._thread_urls: list[str] = []
+        # Pacing / discovery (overridden from the identity in on_subscribe).
+        self._delay_min = _DEFAULT_DELAY_MIN
+        self._delay_max = _DEFAULT_DELAY_MAX
+        self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
+        self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
+        # Discovered thread set + when we last swept (monotonic).
+        self._known_threads: list[str] = []
+        self._last_discovery = 0.0
 
     async def on_subscribe(self) -> None:
         await super().on_subscribe()
         entry = cast("IdentityFileEntry", self._claimed)
         self._board = urlparse(entry.forum_base_url or "").netloc or (entry.forum_base_url or "")
         self._thread_urls = list(entry.forum_thread_urls)
+        self._delay_min = float(getattr(entry, "forum_delay_min", _DEFAULT_DELAY_MIN))
+        self._delay_max = float(getattr(entry, "forum_delay_max", _DEFAULT_DELAY_MAX))
+        self._discovery_interval = float(
+            getattr(entry, "forum_discovery_interval", _DEFAULT_DISCOVERY_INTERVAL)
+        )
+        self._max_category_pages = int(
+            getattr(entry, "forum_max_category_pages", _DEFAULT_MAX_CATEGORY_PAGES)
+        )
 
         if self._client is None:
             cookies = materialize_forum_session(entry, self._session_key)
@@ -117,19 +159,59 @@ class MyBBForumCollector(CollectorSkeleton):
             display_name=f"forum:{entry.name}",
             created_at=datetime.now(tz=UTC),
         )
-        await self._check_session()
+        # Our own collector row: the operator's monitored-category memberships are
+        # keyed to it (list_active_memberships). Without it the monitor set stays
+        # empty and we crawl nothing (fail-closed).
+        collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
+        self._collector_id = collector.id if collector is not None else None
+        # Populate /monitored-groups with the board's categories so the operator
+        # can pick which to monitor. Read-only page fetch, nothing joined.
+        if await self._check_session():
+            await self.scan_visible_groups(source_id=self._source_uuid)
 
     async def stop(self) -> None:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
         await super().stop()
 
+    async def _get(self, url: str, **kw: Any) -> httpx.Response:
+        """Every board request funnels through here: sequential + jittered delay.
+
+        This is the single choke point that keeps the collector browsing-speed.
+        There is deliberately no un-throttled request path.
+        """
+        if self._client is None:  # pragma: no cover - guarded by callers
+            raise RuntimeError("forum collector http client not initialized")
+        await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
+        return await self._client.get(url, **kw)
+
+    async def enumerate_visible_groups(self) -> list[VisibleGroup]:
+        """The board's categories (GroupKind.FORUM_CATEGORY) from the index.
+
+        Read-only: fetches the index and lists forums. Monitoring one is a
+        purely internal membership the operator opens by hand; nothing here (or
+        anywhere in this collector) performs a forum-side join.
+        """
+        index = await self._get("/")
+        out: list[VisibleGroup] = []
+        for url in parse_forum_links(index.text):
+            slug = _last_segment(url)
+            out.append(
+                VisibleGroup(
+                    platform_groupid=slug,
+                    kind=GroupKind.FORUM_CATEGORY,
+                    title=slug.replace("Forum-", "").replace("-", " "),
+                    is_member=True,
+                )
+            )
+        return out
+
     async def _check_session(self) -> bool:
         """Boot canary: is the imported cookie jar still logged in?"""
         if self._client is None:
             return False
         try:
-            resp = await self._client.get("/")
+            resp = await self._get("/")
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
@@ -153,20 +235,78 @@ class MyBBForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
-        for url in self._thread_urls:
+        # One paced discovery sweep per interval; poll the discovered set every
+        # tick (put_message is idempotent, so re-polls store only new posts).
+        now = time.monotonic()
+        if not self._known_threads or (now - self._last_discovery) >= self._discovery_interval:
+            self._known_threads = await self._discover_threads()
+            self._last_discovery = now
+        for url in self._known_threads:
             await self._poll_thread(url)
 
+    async def _monitored_categories(self) -> list[str]:
+        """Category slugs the operator chose to monitor (fail-closed if none).
+
+        Purely a DB read of this collector's memberships; opening one is a
+        manual operator action, never automatic.
+        """
+        if self._collector_id is None:
+            return []
+        slugs: list[str] = []
+        for m in await self._storage.list_active_memberships(collector_id=self._collector_id):
+            grp = await self._storage.get_group(m.group_id)
+            if grp is not None and grp.kind == GroupKind.FORUM_CATEGORY:
+                slugs.append(grp.platform_groupid)
+        return slugs
+
+    async def _discover_threads(self) -> list[str]:
+        """Walk each MONITORED category's pages -> its thread URLs (+ manual pins).
+
+        Reads only. Categories the operator did not pick are never fetched.
+        """
+        threads: list[str] = list(self._thread_urls)
+        seen: set[str] = set(threads)
+        cats = await self._monitored_categories()
+        for slug in cats:
+            page = 1
+            last = 1
+            while True:
+                try:
+                    resp = await self._get(slug, params={"page": page} if page > 1 else None)
+                except httpx.HTTPError as exc:
+                    await self.syslog(
+                        level=SystemLogLevel.WARN,
+                        event="forum.category_fetch_failed",
+                        message=f"{self._identity_name}: {slug} p{page} failed ({exc!r})",
+                    )
+                    break
+                if page == 1:
+                    last = thread_page_count(resp.text)
+                    if self._max_category_pages > 0:
+                        last = min(last, self._max_category_pages)
+                for tl in parse_thread_links(resp.text):
+                    if tl not in seen:
+                        seen.add(tl)
+                        threads.append(tl)
+                if page >= last:
+                    break
+                page += 1
+        _log.info(
+            "forum.discovered",
+            identity=self._identity_name,
+            categories=len(cats),
+            threads=len(threads),
+        )
+        return threads
+
     async def _poll_thread(self, url: str) -> None:
-        client = self._client
-        if client is None:
-            return
         tid = _thread_id_from_url(url)
         try:
-            first = await client.get(url)
+            first = await self._get(url)
             pages = thread_page_count(first.text)
             await self._ingest_page(tid, first.text)
             for page in range(2, pages + 1):
-                resp = await client.get(url, params={"page": page})
+                resp = await self._get(url, params={"page": page})
                 await self._ingest_page(tid, resp.text)
         except httpx.HTTPError as exc:
             await self.syslog(
