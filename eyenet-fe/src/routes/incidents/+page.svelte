@@ -11,6 +11,8 @@
 
   const LABEL_OPTS = [{ v: '', l: 'All labels' }, ...INCIDENT_LABELS.map((l) => ({ v: l, l }))];
   let labelFilter = $state('');
+  let search = $state('');
+  let searchTimer;
 
   let selectedId = $state(null);
   let sel = $derived(incidentCtx.list.find((x) => x.id === selectedId) ?? incidentCtx.list[0] ?? null);
@@ -19,7 +21,13 @@
 
   function applyFilter() {
     selectedId = null;
-    loadIncidents(labelFilter || null);
+    loadIncidents(labelFilter || null, search.trim());
+  }
+
+  // Debounce keystrokes: one request 250ms after the operator stops typing.
+  function onSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(applyFilter, 250);
   }
 
   // Relabel editor: a local draft label-set + reason, seeded from the current
@@ -70,6 +78,7 @@
 
   {#snippet filters()}
     <div class="fcount">{incidentCtx.list.length} detection{incidentCtx.list.length === 1 ? '' : 's'}</div>
+    <input class="search" type="search" placeholder="Search message body…" bind:value={search} oninput={onSearch} aria-label="Search incident message bodies" />
     <Dropdown options={LABEL_OPTS} bind:value={labelFilter} onchange={applyFilter} minWidth="150px" />
   {/snippet}
 
@@ -179,6 +188,8 @@
   .mid { font-family: var(--font-mono); font-size: var(--fs-22); font-weight: var(--fw-bold); letter-spacing: var(--tracking-data); color: var(--text); }
   .mid.muted { color: var(--text-faint); }
   .fcount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; margin-right: 2px; }
+  .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; min-width: 200px; }
+  .search:focus { outline: none; border-color: var(--accent); }
   .badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .lrow { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 0; }
   .lk { font-family: var(--font-mono); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); min-width: 62px; }

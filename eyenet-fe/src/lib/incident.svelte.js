@@ -29,13 +29,16 @@ function mapIncident(r) {
   };
 }
 
-export const incidentCtx = $state({ list: [], loaded: false, error: null, label: null });
+export const incidentCtx = $state({ list: [], loaded: false, error: null, label: null, q: '' });
 
-export async function loadIncidents(label = null) {
+export async function loadIncidents(label = null, q = '') {
   incidentCtx.label = label;
-  const q = label ? `?limit=200&label=${encodeURIComponent(label)}` : '?limit=200';
+  incidentCtx.q = q;
+  const params = new URLSearchParams({ limit: '200' });
+  if (label) params.set('label', label);
+  if (q) params.set('q', q); // free-text over message body (FTS5 on the backend)
   try {
-    const rows = await apiGet(`/v1/incidents${q}`, { auth: true });
+    const rows = await apiGet(`/v1/incidents?${params}`, { auth: true });
     incidentCtx.list = rows.map(mapIncident);
     incidentCtx.error = null;
   } catch (e) {
