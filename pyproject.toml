@@ -31,6 +31,12 @@ dependencies = [
   # decryption + persistent device store. Operator must have libolm
   # installed system-wide (apt: libolm-dev, dnf: libolm-devel, brew: libolm).
   "matrix-nio[e2e]>=0.24",
+  # Forum collectors (MyBB/phpBB). html5lib is the WHATWG-spec HTML5 parser
+  # (browser-faithful tree construction on the malformed markup threat-actor
+  # forums emit); beautifulsoup4 rides on top for the selector API. Evidence-
+  # grade parsing of adversarial HTML, so a core dep, not jail-only.
+  "beautifulsoup4>=4.15.0",
+  "html5lib>=1.1",
 
   # http api (graph query + operator surface)
   "fastapi>=0.115",
