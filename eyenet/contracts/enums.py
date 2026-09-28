@@ -28,7 +28,8 @@ class GroupKind(StrEnum):
     CHAT = "chat"
     CHANNEL = "channel"
     DM = "dm"
-    FORUM_THREAD = "forum_thread"
+    FORUM_CATEGORY = "forum_category"  # a board forum/section; the operator-monitorable unit
+    FORUM_THREAD = "forum_thread"  # a single thread inside a category; holds posts
     IRC_CHANNEL = "irc_channel"
     MATRIX_ROOM = "matrix_room"
 
