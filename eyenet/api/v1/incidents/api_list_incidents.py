@@ -26,15 +26,19 @@ async def list_incidents(
     _: Annotated[CurrentUser, Depends(RequireScope("read:incidents"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     label: Annotated[str | None, Query()] = None,
 ) -> list[IncidentOut]:
-    rows = cast("list[IncidentRow]", await storage.recent_incidents(limit=limit))
+    rows = cast(
+        "list[IncidentRow]",
+        await storage.recent_incidents(limit=limit, label=label, offset=offset),
+    )
     ids = [r.message_id for r in rows]
     bodies = await storage.bodies_by_message_ids(ids)
     corrections = cast(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
-    out = [
+    return [
         IncidentOut(
             message_id=r.message_id,
             body=bodies.get(r.message_id),
@@ -48,6 +52,3 @@ async def list_incidents(
         )
         for r in rows
     ]
-    if label is not None:
-        out = [i for i in out if label in i.labels]
-    return out

@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
+from sqlalchemy import String, cast as sql_cast
 from sqlmodel import col, select
 
 from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRuleRow
@@ -54,11 +55,20 @@ class IncidentsMixin:
             result = await session.exec(stmt)
             return list(result.all())
 
-    async def recent_incidents(self, limit: int = 50) -> list[object]:
-        """Most recently classified incidents (operator triage feed backing query)."""
+    async def recent_incidents(
+        self, limit: int = 50, *, label: str | None = None, offset: int = 0
+    ) -> list[object]:
+        """Most recently classified incidents (operator triage feed). ``label`` filters IN
+        the query so a rare leaf is found regardless of overall recency (the old post-fetch
+        filter hid rare labels below the limit); ``offset`` pages. Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(IncidentTable)
+            if label is not None:
+                # labels is a JSON array of clean identifiers; match the quoted token in its
+                # text form. cast + LIKE are ANSI; the pattern is a bound param (no injection).
+                stmt = stmt.where(sql_cast(col(IncidentTable.labels), String).like(f'%"{label}"%'))
             stmt = (
-                select(IncidentTable).order_by(col(IncidentTable.classified_at).desc()).limit(limit)
+                stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )
             result = await session.exec(stmt)
             return list(result.all())
