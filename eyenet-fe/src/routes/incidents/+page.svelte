@@ -15,7 +15,7 @@
   } from '$lib/incident.svelte.js';
 
   let selectedLabels = $state(new Set()); // OR include-filter over taxonomy leaves
-  let excludedGroups = $state(new Set()); // group ids the operator has muted
+  let selectedGroups = $state(new Set()); // group ids to show (empty = all groups)
   let search = $state('');
   let searchTimer;
 
@@ -24,7 +24,7 @@
 
   onMount(() => {
     loadIncidents();
-    loadIncidentGroups(); // the full group set for the mute filter (not the feed window)
+    loadIncidentGroups(); // the full group set for the group filter (not the feed window)
   });
 
   // Close any open filter popover when clicking outside it.
@@ -44,7 +44,7 @@
 
   function applyFilter() {
     selectedId = null;
-    loadIncidents([...selectedLabels], search.trim(), [...excludedGroups]);
+    loadIncidents([...selectedLabels], search.trim(), [...selectedGroups]);
   }
 
   function toggleLabel(l) {
@@ -55,9 +55,9 @@
   }
 
   function toggleGroup(id) {
-    const n = new Set(excludedGroups);
+    const n = new Set(selectedGroups);
     n.has(id) ? n.delete(id) : n.add(id);
-    excludedGroups = n;
+    selectedGroups = n;
     applyFilter();
   }
 
@@ -127,13 +127,13 @@
     </details>
 
     <details class="pop">
-      <summary>{excludedGroups.size ? `${excludedGroups.size} muted` : 'Groups'}</summary>
+      <summary>{selectedGroups.size ? `${selectedGroups.size} group${selectedGroups.size > 1 ? 's' : ''}` : 'Groups'}</summary>
       <div class="pmenu">
-        <span class="phint">check to mute a group</span>
+        <span class="phint">show only checked groups</span>
         {#if groupOpts.length === 0}<span class="pnone">no groups yet</span>{/if}
         {#each groupOpts as g (g.id)}
           <label class="popt">
-            <input type="checkbox" checked={excludedGroups.has(g.id)} onchange={() => toggleGroup(g.id)} />
+            <input type="checkbox" checked={selectedGroups.has(g.id)} onchange={() => toggleGroup(g.id)} />
             <span class="ptitle">{g.title}</span>
             <span class="pcount">{g.count}</span>
           </label>

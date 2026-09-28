@@ -31,13 +31,13 @@ async def list_incidents(
     offset: Annotated[int, Query(ge=0)] = 0,
     label: Annotated[list[str] | None, Query()] = None,
     q: Annotated[str | None, Query(max_length=256)] = None,
-    exclude_group_id: Annotated[list[UUID] | None, Query()] = None,
+    group_id: Annotated[list[UUID] | None, Query()] = None,
 ) -> list[IncidentOut]:
-    # ?label= repeats for multi-select (OR); ?exclude_group_id= repeats to mute groups.
+    # ?label= repeats for multi-select (OR); ?group_id= repeats to show only those groups.
     rows = cast(
         "list[IncidentRow]",
         await storage.recent_incidents(
-            limit=limit, labels=label, offset=offset, q=q, exclude_group_ids=exclude_group_id
+            limit=limit, labels=label, offset=offset, q=q, group_ids=group_id
         ),
     )
     ids = [r.message_id for r in rows]
@@ -76,6 +76,6 @@ async def list_incident_groups(
     storage: Annotated[BaseRepository, Depends(get_storage)],
 ) -> list[IncidentGroupOut]:
     """Every group that has incidents, noisiest first — the full option set for the feed's
-    group-mute filter (independent of the ``/incidents`` window)."""
+    group filter (independent of the ``/incidents`` window)."""
     rows = await storage.incident_groups()
     return [IncidentGroupOut(group_id=gid, title=title, count=n) for gid, title, n in rows]

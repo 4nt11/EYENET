@@ -97,20 +97,20 @@ def test_recent_incidents_label_filter_finds_rare_regardless_of_recency(storage)
 
 
 @pytest.mark.integration
-def test_recent_incidents_group_exclude_mutes_noisy_channel(storage) -> None:
+def test_recent_incidents_group_filter_shows_only_selected(storage) -> None:
     from eyenet.contracts.incident import IncidentRow
     from tests._seed import seed_telegram_fixture
 
     async def _run() -> None:
         now = datetime.now(UTC)
         # two groups under one source; classify one message in each
-        _s, g_noisy, _a = await seed_telegram_fixture(
+        _s, g_a, _a = await seed_telegram_fixture(
             storage, [{"actor_key": "a", "platform_msgid": "1", "body": "spam"}], now,
-            platform_groupid="-100", group_title="Noisy",
+            platform_groupid="-100", group_title="Alpha",
         )
-        _s2, g_quiet, _b = await seed_telegram_fixture(
+        _s2, g_b, _b = await seed_telegram_fixture(
             storage, [{"actor_key": "a", "platform_msgid": "2", "body": "signal"}], now,
-            platform_groupid="-200", group_title="Quiet",
+            platform_groupid="-200", group_title="Beta",
         )
         page = {b: mid for mid, b in await storage.messages_without_incidents(limit=10)}
         await storage.put_incidents_bulk([
@@ -119,14 +119,14 @@ def test_recent_incidents_group_exclude_mutes_noisy_channel(storage) -> None:
             IncidentRow(message_id=page["signal"], labels=["x"], scores={},
                         model_version="v", classified_at=now),
         ])
-        assert len(await storage.recent_incidents(limit=10)) == 2  # both by default
-        kept = await storage.recent_incidents(limit=10, exclude_group_ids=[g_noisy])
-        assert {r.message_id for r in kept} == {page["signal"]}  # noisy group hidden
+        assert len(await storage.recent_incidents(limit=10)) == 2  # all by default
+        only_b = await storage.recent_incidents(limit=10, group_ids=[g_b])
+        assert {r.message_id for r in only_b} == {page["signal"]}  # show-only the chosen group
 
         # incident_groups lists BOTH groups (full set, window-independent) with counts
         groups = await storage.incident_groups()
-        assert {gid for gid, _t, _n in groups} == {g_noisy, g_quiet}
-        assert {t: n for _g, t, n in groups} == {"Noisy": 1, "Quiet": 1}
+        assert {gid for gid, _t, _n in groups} == {g_a, g_b}
+        assert {t: n for _g, t, n in groups} == {"Alpha": 1, "Beta": 1}
 
     asyncio.run(_run())
 

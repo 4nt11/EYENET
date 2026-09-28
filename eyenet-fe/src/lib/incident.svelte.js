@@ -36,8 +36,8 @@ export const incidentCtx = $state({
   error: null,
   labels: [],
   q: '',
-  excludeGroupIds: [],
-  groups: [] // {id, title, count} for the group-mute filter (full set, not window-limited)
+  groupIds: [],
+  groups: [] // {id, title, count} for the group filter (full set, not window-limited)
 });
 
 // The complete set of groups that have incidents (noisiest first) — populates the group
@@ -58,15 +58,15 @@ export async function loadIncidentGroups() {
   }
 }
 
-// labels: taxonomy leaves (OR filter, repeated ?label=). excludeGroupIds: group ids to
-// mute (repeated ?exclude_group_id=), so the window refills with other channels.
-export async function loadIncidents(labels = [], q = '', excludeGroupIds = []) {
+// labels: taxonomy leaves (OR filter, repeated ?label=). groupIds: show ONLY these groups
+// (repeated ?group_id=); empty = all groups.
+export async function loadIncidents(labels = [], q = '', groupIds = []) {
   incidentCtx.labels = labels;
   incidentCtx.q = q;
-  incidentCtx.excludeGroupIds = excludeGroupIds;
+  incidentCtx.groupIds = groupIds;
   const params = new URLSearchParams({ limit: '200' });
   for (const l of labels) params.append('label', l); // repeated ?label=a&label=b (OR)
-  for (const g of excludeGroupIds) params.append('exclude_group_id', g);
+  for (const g of groupIds) params.append('group_id', g); // show-only ?group_id=a&group_id=b
   if (q) params.set('q', q); // free-text over message body (FTS5 on the backend)
   try {
     const rows = await apiGet(`/v1/incidents?${params}`, { auth: true });
