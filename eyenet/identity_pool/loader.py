@@ -59,6 +59,16 @@ class IdentityFileEntry(BaseModel):
     # state; do NOT include in any future `eyenet purge`.
     matrix_device_store_path: str | None = None
 
+    # Forum-specific (required when source=forum). The session is a browser-
+    # exported cookies.txt (Netscape format): the operator logs in by hand once,
+    # solving the captcha, and exports the cookies. Fernet-encrypted at rest on
+    # the DB pool, same seam as the telegram session blob. forum_thread_urls
+    # lists the threads this identity polls (page-1 URLs; the collector walks
+    # ?page=N to the last page).
+    forum_base_url: str | None = None
+    forum_cookie_path: str | None = None
+    forum_thread_urls: list[str] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
         if not self.session_path:
@@ -135,6 +145,7 @@ def dump(model: IdentityFile, path: Path) -> None:
             groups_str = ", ".join(f'"{g}"' for g in entry.monitor_groups)
             lines.append(f"monitor_groups = [{groups_str}]")
         lines.extend(_matrix_lines(entry))
+        lines.extend(_forum_lines(entry))
         lines.append("")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -154,6 +165,18 @@ def _matrix_lines(entry: IdentityFileEntry) -> list[str]:
         out.append(f"matrix_monitor_rooms = [{rooms_str}]")
     if entry.matrix_device_store_path is not None:
         out.append(f"matrix_device_store_path = {_q(entry.matrix_device_store_path)}")
+    return out
+
+
+def _forum_lines(entry: IdentityFileEntry) -> list[str]:
+    out: list[str] = []
+    if entry.forum_base_url is not None:
+        out.append(f"forum_base_url = {_q(entry.forum_base_url)}")
+    if entry.forum_cookie_path is not None:
+        out.append(f"forum_cookie_path = {_q(entry.forum_cookie_path)}")
+    if entry.forum_thread_urls:
+        urls_str = ", ".join(f'"{u}"' for u in entry.forum_thread_urls)
+        out.append(f"forum_thread_urls = [{urls_str}]")
     return out
 
 

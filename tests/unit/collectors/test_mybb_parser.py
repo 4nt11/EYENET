@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from eyenet.collectors.forum import parse_thread
+from eyenet.collectors.forum import parse_thread, thread_page_count
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +51,19 @@ def test_body_text_strips_tags_but_keeps_content(posts: list) -> None:
 
 def test_body_html_is_evidence_faithful(posts: list) -> None:
     assert "<strong>world</strong>" in posts[0].body_html
+
+
+def test_thread_page_count() -> None:
+    # no pagination block -> single page
+    assert thread_page_count("<html><body><div class='post'></div></body></html>") == 1
+    paged = (
+        '<div class="pagination">'
+        '<a class="pagination_page" href="Thread-x--9?page=2">2</a>'
+        '<a class="pagination_page" href="Thread-x--9?page=7">7</a>'
+        '<a class="pagination_next" href="Thread-x--9?page=3">next</a>'
+        "</div>"
+    )
+    assert thread_page_count(paged) == 7
 
 
 def test_unparseable_date_yields_none_not_crash() -> None:
