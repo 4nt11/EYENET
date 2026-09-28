@@ -156,6 +156,33 @@ _SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX = (
     "WHERE retired_at IS NULL"
 )
 
+# Full-text search over message bodies — the incident triage ``?q=`` feed. FTS5 is a
+# SQLite extension (dialect-specific → backend layer, CLAUDE.md §2.3 Rule 1); the mixin
+# keeps a generic LIKE fallback and a future Postgres backend uses tsvector/GIN. The
+# external-content table mirrors ``message.body`` by rowid (no duplicated storage); the
+# three triggers keep the index in sync (bodies ARE edited — e.g. Matrix edits — so an
+# UPDATE trigger is required, not just INSERT/DELETE).
+_MESSAGE_FTS_DDL: tuple[str, ...] = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS message_fts "
+    "USING fts5(body, content='message', content_rowid='rowid')",
+    "CREATE TRIGGER IF NOT EXISTS message_fts_ai AFTER INSERT ON message BEGIN "
+    "INSERT INTO message_fts(rowid, body) VALUES (new.rowid, new.body); END",
+    "CREATE TRIGGER IF NOT EXISTS message_fts_ad AFTER DELETE ON message BEGIN "
+    "INSERT INTO message_fts(message_fts, rowid, body) VALUES('delete', old.rowid, old.body); "
+    "END",
+    "CREATE TRIGGER IF NOT EXISTS message_fts_au AFTER UPDATE ON message BEGIN "
+    "INSERT INTO message_fts(message_fts, rowid, body) VALUES('delete', old.rowid, old.body); "
+    "INSERT INTO message_fts(rowid, body) VALUES (new.rowid, new.body); END",
+)
+# 'rebuild' backfills rows that existed BEFORE the index (additive upgrade on a populated
+# DB — create_all adds new tables without a wipe); triggers maintain it thereafter. A
+# fresh (wipe-workflow) DB is empty here, so this is a no-op. Idempotent.
+# ponytail: unconditional rebuild is O(corpus) each boot on SQLite; external-content FTS5
+# has no cheap "is the index empty" probe (count() reports the CONTENT table). Fine at
+# small-operator scale; the fleet-scale prod path is the Postgres tsvector override, not
+# this. Gate it (e.g. a sentinel row) only if SQLite boot time ever bites.
+_MESSAGE_FTS_REBUILD = "INSERT INTO message_fts(message_fts) VALUES('rebuild')"
+
 
 def _hamming64(a: int | None, b: int | None) -> int:
     if a is None or b is None:
@@ -299,6 +326,9 @@ def init_main_db(sync_engine: Engine) -> None:
     with sync_engine.begin() as conn:
         conn.execute(text(_VECTOR_SIGNATURE_DDL))
         conn.execute(text(_VECTOR_SIGNATURE_INDEX))
+        for stmt in _MESSAGE_FTS_DDL:
+            conn.execute(text(stmt))
+        conn.execute(text(_MESSAGE_FTS_REBUILD))
 
 
 def init_audit_db(sync_engine: Engine) -> None:
@@ -334,6 +364,9 @@ async def init_main_db_async(engine: AsyncEngine) -> None:
             )
         await conn.execute(text(_VECTOR_SIGNATURE_DDL))
         await conn.execute(text(_VECTOR_SIGNATURE_INDEX))
+        for stmt in _MESSAGE_FTS_DDL:
+            await conn.execute(text(stmt))
+        await conn.execute(text(_MESSAGE_FTS_REBUILD))
 
 
 async def init_audit_db_async(engine: AsyncEngine) -> None:

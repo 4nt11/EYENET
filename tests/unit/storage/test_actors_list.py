@@ -44,7 +44,8 @@ async def test_list_newest_activity_first(storage: BaseRepository) -> None:
     await _seed(storage, "tg:new", _NOW)
     rows = await storage.list_actors(limit=50, offset=0)
     assert len(rows) == 2
-    assert rows[0].actor_key == "tg:new"  # type: ignore[attr-defined]
+    # list_actors returns (ActorTable, message_count, observation_count) tuples
+    assert rows[0][0].actor_key == "tg:new"  # type: ignore[index,attr-defined]
     assert await storage.count_actors() == 2
 
 

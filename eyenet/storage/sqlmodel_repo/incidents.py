@@ -9,7 +9,7 @@ eyenet/models/incident.py and CLAUDE.md §2.3 (Rule 1: no dialect leak in mixins
 from __future__ import annotations
 
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import String, cast as sql_cast
@@ -19,6 +19,11 @@ from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRul
 from eyenet.models import IncidentLabelTable, IncidentRuleTable, IncidentTable, MessageTable
 
 from ._helpers import safe_session
+
+
+def _escape_like(term: str) -> str:
+    """Escape LIKE wildcards so ``q`` matches literally (used with escape='\\')."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _label_row(t: IncidentLabelTable) -> IncidentLabelRow:
@@ -56,22 +61,37 @@ class IncidentsMixin:
             return list(result.all())
 
     async def recent_incidents(
-        self, limit: int = 50, *, label: str | None = None, offset: int = 0
+        self, limit: int = 50, *, label: str | None = None, offset: int = 0, q: str | None = None
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``label`` filters IN
         the query so a rare leaf is found regardless of overall recency (the old post-fetch
-        filter hid rare labels below the limit); ``offset`` pages. Newest first."""
+        filter hid rare labels below the limit); ``q`` free-text-matches the message body;
+        ``offset`` pages. Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = select(IncidentTable)
             if label is not None:
                 # labels is a JSON array of clean identifiers; match the quoted token in its
                 # text form. cast + LIKE are ANSI; the pattern is a bound param (no injection).
                 stmt = stmt.where(sql_cast(col(IncidentTable.labels), String).like(f'%"{label}"%'))
+            if q:
+                # incident → message join; the free-text predicate itself is the dialect
+                # seam (_body_match): generic LIKE here, FTS5 MATCH on the SQLite backend,
+                # tsvector on a future Postgres backend. Body only for now.
+                stmt = stmt.join(
+                    MessageTable, col(IncidentTable.message_id) == col(MessageTable.id)
+                ).where(self._body_match(q))
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    def _body_match(self, q: str) -> Any:
+        """Free-text predicate over the joined ``message.body``. Generic ANSI ``LIKE`` —
+        full-scans bodies, correct on any backend and the fallback when a backend has no
+        native FTS. Concrete backends override with dialect full-text search (SQLite →
+        FTS5 MATCH, Postgres → tsvector @@ to_tsquery; CLAUDE.md §2.3 Rule 1)."""
+        return col(MessageTable.body).like(f"%{_escape_like(q)}%", escape="\\")
 
     async def messages_without_incidents(
         self, *, limit: int = 500, after_id: UUID | None = None
