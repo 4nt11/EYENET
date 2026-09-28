@@ -126,17 +126,23 @@ class IncidentClassifierService(ServiceBase):
         ordered = [(ref, by_ref[ref]) for ref in refs if ref in by_ref]
         if not ordered:
             return
-        texts = [body for _, (_mid, body) in ordered]
+        # Attachment presence + filename is model input (enrich_text): fetch per message
+        # and build the SAME text the model was trained on. The prefilter/rules stay on
+        # the raw body (their signals are calibrated on message content, not filenames).
+        att = await self._storage.attachment_files_by_message_ids([mid for _, (mid, _b) in ordered])
+        enriched = [
+            classifier.enrich_text(body, att.get(mid)) for (_ref, (mid, body)) in ordered
+        ]
         loop = asyncio.get_running_loop()
-        scored = await loop.run_in_executor(self._infer_pool, classifier.classify_batch, texts)
+        scored = await loop.run_in_executor(self._infer_pool, classifier.classify_batch, enriched)
 
         now = datetime.now(UTC)
         fired_rows: list[tuple[str, IncidentRow]] = []
-        for (ref, (mid, _body)), scores, text in zip(ordered, scored, texts, strict=True):
+        for (ref, (mid, body)), scores in zip(ordered, scored, strict=True):
             fired = (
                 {s.label for s in scores if s.fired}
-                | classifier.prefilter_labels(text)  # built-in prefilter
-                | rules.match_labels(text, self._rules)  # operator rules
+                | classifier.prefilter_labels(body)  # built-in prefilter (raw body)
+                | rules.match_labels(body, self._rules)  # operator rules (raw body)
             )
             if not fired:
                 continue

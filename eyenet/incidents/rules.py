@@ -22,8 +22,18 @@ from eyenet.telemetry import get_logger
 
 _log = get_logger()
 
+# v2 hierarchical leaf set (development/incident-taxonomy-hierarchy.md). Business-model
+# leaves, not the flat legacy 6. The model's labels.json is the runtime head order; this
+# frozenset is the validation surface for operator rules + relabels.
 TAXONOMY_LABELS: frozenset[str] = frozenset(
-    {"incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"}
+    {
+        "defacement", "ddos_attack", "intrusion",
+        "breach_dump", "credentials", "stealer_logs",
+        "iab_corporate",
+        "crimeware_tooling", "crime_aas", "telecom_abuse",
+        "phishing_delivery", "fraud_ops", "infra_resale",
+        "recruiting", "alliance", "crew_ops",
+    }
 )
 BUILTIN_SIGNAL_NAMES: frozenset[str] = frozenset(s.name for s in SIGNALS)
 

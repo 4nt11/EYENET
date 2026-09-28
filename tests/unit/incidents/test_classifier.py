@@ -69,7 +69,7 @@ def test_unknown_head_defaults_to_identity() -> None:
 def test_prefilter_fusion_catches_structural_infostealer() -> None:
     # The model-only classifier missed this (scored under threshold); the prefilter's
     # cloud_pass signal catches it via fusion. Pure, no model needed.
-    assert "infostealer" in prefilter_labels("fresh cloud logs daily, pass: t.me/logschan")
+    assert "stealer_logs" in prefilter_labels("fresh cloud logs daily, pass: t.me/logschan")
 
 
 def test_prefilter_fusion_quiet_on_benign() -> None:
