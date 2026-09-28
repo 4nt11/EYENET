@@ -73,13 +73,13 @@ class IncidentsMixin:
         labels: list[str] | None = None,
         offset: int = 0,
         q: str | None = None,
-        exclude_group_ids: list[UUID] | None = None,
+        group_ids: list[UUID] | None = None,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters IN
         the query (OR: an incident matches if it carries ANY of the given leaves) so rare
         leaves are found regardless of overall recency (the old post-fetch filter hid rare
-        labels below the limit); ``q`` free-text-matches the message body;
-        ``exclude_group_ids`` hides incidents whose message is in a given group (mute noisy
+        labels below the limit); ``q`` free-text-matches the message body; ``group_ids``
+        restricts to incidents whose message is in ONE of the given groups (show-only
         channels); ``offset`` pages. Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = select(IncidentTable)
@@ -95,8 +95,8 @@ class IncidentsMixin:
                         )
                     )
                 )
-            # q and exclude_group_ids both need the message; join ONCE.
-            if q or exclude_group_ids:
+            # q and group_ids both need the message; join ONCE.
+            if q or group_ids:
                 stmt = stmt.join(
                     MessageTable, col(IncidentTable.message_id) == col(MessageTable.id)
                 )
@@ -104,8 +104,8 @@ class IncidentsMixin:
                 # the free-text predicate is the dialect seam (_body_match): generic LIKE
                 # here, FTS5 MATCH on SQLite, tsvector on a future Postgres backend.
                 stmt = stmt.where(self._body_match(q))
-            if exclude_group_ids:
-                stmt = stmt.where(col(MessageTable.group_id).not_in(exclude_group_ids))
+            if group_ids:
+                stmt = stmt.where(col(MessageTable.group_id).in_(group_ids))
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )
@@ -114,7 +114,7 @@ class IncidentsMixin:
 
     async def incident_groups(self) -> list[tuple[UUID, str | None, int]]:
         """Distinct groups with at least one incident, as (group_id, title, incident_count),
-        noisiest first — the source for the feed's group-mute filter, independent of the
+        noisiest first — the source for the feed's group filter, independent of the
         200-row feed window. Generic ANSI: incident → message → group, GROUP BY + COUNT."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             count = func.count()

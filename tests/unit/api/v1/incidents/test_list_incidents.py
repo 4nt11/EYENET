@@ -20,15 +20,15 @@ class _FakeStorage:
         self._rows = rows
 
     async def recent_incidents(
-        self, limit: int, *, labels=None, offset: int = 0, q=None, exclude_group_ids=None
+        self, limit: int, *, labels=None, offset: int = 0, q=None, group_ids=None
     ) -> list:
         # q/FTS semantics are covered at the storage layer (test_incident_search_sqlite);
-        # this fake only exercises response mapping + the label(OR)/group-exclude wiring.
+        # this fake only exercises response mapping + the label(OR)/group-filter wiring.
         rows = self._rows
         if labels:
             rows = [r for r in rows if any(lbl in r.labels for lbl in labels)]
-        if exclude_group_ids:
-            rows = [r for r in rows if r.group_id not in exclude_group_ids]
+        if group_ids:
+            rows = [r for r in rows if r.group_id in group_ids]
         return rows[offset : offset + limit]
 
     async def bodies_by_message_ids(self, message_ids: list) -> dict:
@@ -74,13 +74,13 @@ def test_list_incidents_label_filter_multi() -> None:
     assert all(set(o.labels) & {"tooling", "leak"} for o in out)
 
 
-def test_list_incidents_group_exclude() -> None:
-    noisy = uuid4()
-    storage = _FakeStorage([_row(["tooling"], group_id=noisy), _row(["leak"])])
+def test_list_incidents_group_filter() -> None:
+    keep = uuid4()
+    storage = _FakeStorage([_row(["tooling"], group_id=keep), _row(["leak"])])
     out = asyncio.run(
-        list_incidents(_=None, storage=storage, limit=50, label=None, exclude_group_id=[noisy])
+        list_incidents(_=None, storage=storage, limit=50, label=None, group_id=[keep])
     )
-    assert len(out) == 1 and out[0].labels == ["leak"]  # noisy group muted
+    assert len(out) == 1 and out[0].labels == ["tooling"]  # only the chosen group shown
 
 
 def test_list_incident_groups() -> None:

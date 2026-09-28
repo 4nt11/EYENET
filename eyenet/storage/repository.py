@@ -700,17 +700,17 @@ class BaseRepository(ABC):
         labels: list[str] | None = None,
         offset: int = 0,
         q: str | None = None,
-        exclude_group_ids: list[UUID] | None = None,
+        group_ids: list[UUID] | None = None,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters in
         the query (OR across the given leaves; rare leaves found regardless of recency);
-        ``q`` free-text-matches the message body; ``exclude_group_ids`` hides incidents from
-        the given groups (mute noisy channels); ``offset`` pages."""
+        ``q`` free-text-matches the message body; ``group_ids`` restricts to incidents in the
+        given groups (show-only channels); ``offset`` pages."""
 
     @abstractmethod
     async def incident_groups(self) -> list[tuple[UUID, str | None, int]]:
         """Distinct groups with at least one incident as (group_id, title, count), noisiest
-        first — the full source for the feed's group-mute filter (not window-limited)."""
+        first — the full source for the feed's group filter (not window-limited)."""
 
     @abstractmethod
     async def messages_without_incidents(
