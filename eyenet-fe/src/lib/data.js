@@ -391,6 +391,30 @@ export const INCIDENT_LABELS = [
   'recruiting', 'alliance', 'crew_ops',
 ];
 
+// Human display names for the taxonomy leaves — the UI never shows raw slugs. Names track
+// development/incident-taxonomy-hierarchy.md (business-model leaf set).
+export const INCIDENT_LABEL_NAMES = {
+  defacement: 'Defacement',
+  ddos_attack: 'DDoS Attack',
+  intrusion: 'Intrusion',
+  breach_dump: 'Breach Dump',
+  credentials: 'Credentials',
+  stealer_logs: 'Stealer Logs',
+  iab_corporate: 'Initial Access Broker',
+  crimeware_tooling: 'Crimeware Tooling',
+  crime_aas: 'Crime-as-a-Service',
+  telecom_abuse: 'Telecom Abuse',
+  phishing_delivery: 'Phishing Delivery',
+  fraud_ops: 'Fraud Operations',
+  infra_resale: 'Infrastructure Resale',
+  recruiting: 'Recruiting',
+  alliance: 'Alliance',
+  crew_ops: 'Crew Operations'
+};
+// Fallback: title-case an unknown slug so a newly added leaf never renders blank or raw.
+export const incidentLabelName = (l) =>
+  INCIDENT_LABEL_NAMES[l] ?? (l ? l.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : l);
+
 // ── Linkages (attribution decisions) ─────────────────────────────────────────
 // LinkageState: proposed | suspected | confirmed | rejected | superseded.
 // Persona aggregation fires ONLY on transition into confirmed.
