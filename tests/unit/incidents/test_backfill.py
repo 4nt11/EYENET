@@ -64,6 +64,35 @@ def test_messages_without_incidents_skips_classified_and_keysets(storage) -> Non
 
 
 @pytest.mark.integration
+def test_recent_incidents_label_filter_finds_rare_regardless_of_recency(storage) -> None:
+    from datetime import timedelta
+
+    from eyenet.contracts.incident import IncidentRow
+
+    async def _run() -> None:
+        base = datetime.now(UTC)
+        rows = []
+        # one OLD rare 'alliance' incident, then many newer 'fraud_ops' ones on top of it
+        rows.append(IncidentRow(message_id=UUID(int=1), labels=["alliance"], scores={},
+                                model_version="v2", classified_at=base))
+        for i in range(2, 12):
+            rows.append(IncidentRow(message_id=UUID(int=i), labels=["fraud_ops"], scores={},
+                                    model_version="v2", classified_at=base + timedelta(minutes=i)))
+        await storage.put_incidents_bulk(rows)
+        # recent 3 (no filter) are all fraud_ops — the old alliance one is buried
+        top = await storage.recent_incidents(limit=3)
+        assert all("fraud_ops" in r.labels for r in top)
+        # but filtering by the rare label finds it despite being oldest (the bug fix)
+        found = await storage.recent_incidents(limit=3, label="alliance")
+        assert len(found) == 1 and found[0].labels == ["alliance"]
+        # offset paging
+        page2 = await storage.recent_incidents(limit=3, offset=3)
+        assert len(page2) == 3
+
+    asyncio.run(_run())
+
+
+@pytest.mark.integration
 def test_incident_label_upsert_and_bulk(storage) -> None:
     from datetime import datetime as _dt
 

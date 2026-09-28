@@ -19,8 +19,9 @@ class _FakeStorage:
     def __init__(self, rows: list) -> None:
         self._rows = rows
 
-    async def recent_incidents(self, limit: int) -> list:
-        return self._rows[:limit]
+    async def recent_incidents(self, limit: int, *, label=None, offset: int = 0) -> list:
+        rows = self._rows if label is None else [r for r in self._rows if label in r.labels]
+        return rows[offset : offset + limit]
 
     async def bodies_by_message_ids(self, message_ids: list) -> dict:
         return {mid: f"body {mid}" for mid in message_ids}
@@ -49,6 +50,12 @@ def test_list_incidents_maps_all() -> None:
 
 def test_list_incidents_label_filter() -> None:
     storage = _FakeStorage([_row(["tooling"]), _row(["leak"]), _row(["tooling", "leak"])])
-    out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, label="tooling"))
+    out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, offset=0, label="tooling"))
     assert len(out) == 2
     assert all("tooling" in o.labels for o in out)
+
+
+def test_list_incidents_offset_pages() -> None:
+    storage = _FakeStorage([_row(["a"]), _row(["b"]), _row(["c"])])
+    out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, offset=1, label=None))
+    assert len(out) == 2  # first row skipped by offset

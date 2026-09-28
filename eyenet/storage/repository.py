@@ -693,8 +693,11 @@ class BaseRepository(ABC):
         """Classification history for one message, latest run first."""
 
     @abstractmethod
-    async def recent_incidents(self, limit: int = 50) -> list[object]:
-        """Most recently classified incidents (operator triage feed)."""
+    async def recent_incidents(
+        self, limit: int = 50, *, label: str | None = None, offset: int = 0
+    ) -> list[object]:
+        """Most recently classified incidents (operator triage feed). ``label`` filters in
+        the query (rare leaves found regardless of recency); ``offset`` pages."""
 
     @abstractmethod
     async def messages_without_incidents(
