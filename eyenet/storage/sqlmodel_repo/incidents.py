@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import String, cast as sql_cast
+from sqlalchemy import String, cast as sql_cast, or_
 from sqlmodel import col, select
 
 from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRuleRow
@@ -61,25 +61,45 @@ class IncidentsMixin:
             return list(result.all())
 
     async def recent_incidents(
-        self, limit: int = 50, *, label: str | None = None, offset: int = 0, q: str | None = None
+        self,
+        limit: int = 50,
+        *,
+        labels: list[str] | None = None,
+        offset: int = 0,
+        q: str | None = None,
+        exclude_group_ids: list[UUID] | None = None,
     ) -> list[object]:
-        """Most recently classified incidents (operator triage feed). ``label`` filters IN
-        the query so a rare leaf is found regardless of overall recency (the old post-fetch
-        filter hid rare labels below the limit); ``q`` free-text-matches the message body;
-        ``offset`` pages. Newest first."""
+        """Most recently classified incidents (operator triage feed). ``labels`` filters IN
+        the query (OR: an incident matches if it carries ANY of the given leaves) so rare
+        leaves are found regardless of overall recency (the old post-fetch filter hid rare
+        labels below the limit); ``q`` free-text-matches the message body;
+        ``exclude_group_ids`` hides incidents whose message is in a given group (mute noisy
+        channels); ``offset`` pages. Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = select(IncidentTable)
-            if label is not None:
+            if labels:
                 # labels is a JSON array of clean identifiers; match the quoted token in its
-                # text form. cast + LIKE are ANSI; the pattern is a bound param (no injection).
-                stmt = stmt.where(sql_cast(col(IncidentTable.labels), String).like(f'%"{label}"%'))
-            if q:
-                # incident → message join; the free-text predicate itself is the dialect
-                # seam (_body_match): generic LIKE here, FTS5 MATCH on the SQLite backend,
-                # tsvector on a future Postgres backend. Body only for now.
+                # text form. cast + LIKE are ANSI; each pattern is a bound param (no
+                # injection). OR across the selected leaves (checkbox multi-select).
+                stmt = stmt.where(
+                    or_(
+                        *(
+                            sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
+                            for lbl in labels
+                        )
+                    )
+                )
+            # q and exclude_group_ids both need the message; join ONCE.
+            if q or exclude_group_ids:
                 stmt = stmt.join(
                     MessageTable, col(IncidentTable.message_id) == col(MessageTable.id)
-                ).where(self._body_match(q))
+                )
+            if q:
+                # the free-text predicate is the dialect seam (_body_match): generic LIKE
+                # here, FTS5 MATCH on SQLite, tsvector on a future Postgres backend.
+                stmt = stmt.where(self._body_match(q))
+            if exclude_group_ids:
+                stmt = stmt.where(col(MessageTable.group_id).not_in(exclude_group_ids))
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )

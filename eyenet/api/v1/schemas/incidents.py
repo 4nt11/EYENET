@@ -17,6 +17,7 @@ class IncidentOut(ApiSchema):
     message_id: UUID
     body: str | None = None  # the classified message text (None if the row is gone)
     group: str | None = None  # WHERE: the channel/group title
+    group_id: UUID | None = None  # the group's id (for the feed's group filter)
     actor_id: UUID | None = None  # WHO: sender actor (for dossier click-through)
     actor_handle: str | None = None
     labels: list[str]

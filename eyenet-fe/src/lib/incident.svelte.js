@@ -15,6 +15,7 @@ function mapIncident(r) {
     idShort: short(r.message_id),
     body: r.body ?? null,
     group: r.group ?? null, // WHERE: channel/group title
+    groupId: r.group_id ?? null, // group id (drives the group filter)
     actorId: r.actor_id ?? null, // WHO: sender actor (dossier link)
     actorHandle: r.actor_handle ?? null,
     labels: r.labels ?? [],
@@ -29,13 +30,24 @@ function mapIncident(r) {
   };
 }
 
-export const incidentCtx = $state({ list: [], loaded: false, error: null, label: null, q: '' });
+export const incidentCtx = $state({
+  list: [],
+  loaded: false,
+  error: null,
+  labels: [],
+  q: '',
+  excludeGroupIds: []
+});
 
-export async function loadIncidents(label = null, q = '') {
-  incidentCtx.label = label;
+// labels: taxonomy leaves (OR filter, repeated ?label=). excludeGroupIds: group ids to
+// mute (repeated ?exclude_group_id=), so the window refills with other channels.
+export async function loadIncidents(labels = [], q = '', excludeGroupIds = []) {
+  incidentCtx.labels = labels;
   incidentCtx.q = q;
+  incidentCtx.excludeGroupIds = excludeGroupIds;
   const params = new URLSearchParams({ limit: '200' });
-  if (label) params.set('label', label);
+  for (const l of labels) params.append('label', l); // repeated ?label=a&label=b (OR)
+  for (const g of excludeGroupIds) params.append('exclude_group_id', g);
   if (q) params.set('q', q); // free-text over message body (FTS5 on the backend)
   try {
     const rows = await apiGet(`/v1/incidents?${params}`, { auth: true });

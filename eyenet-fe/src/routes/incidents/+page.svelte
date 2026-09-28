@@ -4,13 +4,12 @@
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
-  import Dropdown from '$lib/components/Dropdown.svelte';
   import Button from '$lib/components/Button.svelte';
   import { incidentTone, INCIDENT_LABELS } from '$lib/data.js';
   import { incidentCtx, incidentEdit, loadIncidents, relabelIncident } from '$lib/incident.svelte.js';
 
-  const LABEL_OPTS = [{ v: '', l: 'All labels' }, ...INCIDENT_LABELS.map((l) => ({ v: l, l }))];
-  let labelFilter = $state('');
+  let selectedLabels = $state(new Set()); // OR include-filter over taxonomy leaves
+  let excludedGroups = $state(new Map()); // id -> title, groups the operator has muted
   let search = $state('');
   let searchTimer;
 
@@ -19,9 +18,32 @@
 
   onMount(() => loadIncidents());
 
+  // Group options = the distinct groups in the current feed, unioned with any currently
+  // muted ones (so a muted group that's now filtered out of the window is still un-mutable).
+  const groupOpts = $derived.by(() => {
+    const m = new Map();
+    for (const x of incidentCtx.list) if (x.groupId) m.set(x.groupId, x.group ?? x.groupId.slice(0, 8));
+    for (const [id, title] of excludedGroups) m.set(id, title);
+    return [...m].sort((a, b) => a[1].localeCompare(b[1]));
+  });
+
   function applyFilter() {
     selectedId = null;
-    loadIncidents(labelFilter || null, search.trim());
+    loadIncidents([...selectedLabels], search.trim(), [...excludedGroups.keys()]);
+  }
+
+  function toggleLabel(l) {
+    const n = new Set(selectedLabels);
+    n.has(l) ? n.delete(l) : n.add(l);
+    selectedLabels = n;
+    applyFilter();
+  }
+
+  function toggleGroup(id, title) {
+    const n = new Map(excludedGroups);
+    n.has(id) ? n.delete(id) : n.set(id, title);
+    excludedGroups = n;
+    applyFilter();
   }
 
   // Debounce keystrokes: one request 250ms after the operator stops typing.
@@ -79,7 +101,26 @@
   {#snippet filters()}
     <div class="fcount">{incidentCtx.list.length} detection{incidentCtx.list.length === 1 ? '' : 's'}</div>
     <input class="search" type="search" placeholder="Search message body…" bind:value={search} oninput={onSearch} aria-label="Search incident message bodies" />
-    <Dropdown options={LABEL_OPTS} bind:value={labelFilter} onchange={applyFilter} minWidth="150px" />
+
+    <details class="pop">
+      <summary>{selectedLabels.size ? `${selectedLabels.size} label${selectedLabels.size > 1 ? 's' : ''}` : 'Labels'}</summary>
+      <div class="pmenu">
+        {#each INCIDENT_LABELS as l}
+          <label class="popt"><input type="checkbox" checked={selectedLabels.has(l)} onchange={() => toggleLabel(l)} /> {l}</label>
+        {/each}
+      </div>
+    </details>
+
+    <details class="pop">
+      <summary>{excludedGroups.size ? `${excludedGroups.size} muted` : 'Groups'}</summary>
+      <div class="pmenu">
+        <span class="phint">check to mute a group</span>
+        {#if groupOpts.length === 0}<span class="pnone">no groups in view</span>{/if}
+        {#each groupOpts as [id, title] (id)}
+          <label class="popt"><input type="checkbox" checked={excludedGroups.has(id)} onchange={() => toggleGroup(id, title)} /> {title}</label>
+        {/each}
+      </div>
+    </details>
   {/snippet}
 
   {#snippet head()}
@@ -190,6 +231,18 @@
   .fcount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; margin-right: 2px; }
   .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; min-width: 200px; }
   .search:focus { outline: none; border-color: var(--accent); }
+
+  /* native <details> checkbox popover: zero-JS open/close, multi-select stays open */
+  .pop { position: relative; }
+  .pop > summary { list-style: none; cursor: pointer; user-select: none; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); padding: 6px 12px; white-space: nowrap; }
+  .pop > summary::-webkit-details-marker { display: none; }
+  .pop[open] > summary { border-color: var(--accent); }
+  .pmenu { position: absolute; z-index: 40; top: calc(100% + 4px); right: 0; min-width: 200px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 8px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-2, 0 8px 24px rgba(0,0,0,0.4)); }
+  .popt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--radius); font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); cursor: pointer; white-space: nowrap; }
+  .popt:hover { background: var(--panel-2); }
+  .popt input { accent-color: var(--accent); }
+  .phint { padding: 2px 6px 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .pnone { padding: 4px 6px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
   .badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .lrow { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 0; }
   .lk { font-family: var(--font-mono); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); min-width: 62px; }
