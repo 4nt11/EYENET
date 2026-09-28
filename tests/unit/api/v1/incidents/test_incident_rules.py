@@ -48,7 +48,7 @@ class _FakeStore:
 
 def _create(store, **kw):
     body = IncidentRuleCreate(
-        **{"name": "op_x", "pattern": r"\bmybooter\b", "label": "tooling", **kw}
+        **{"name": "op_x", "pattern": r"\bmybooter\b", "label": "crimeware_tooling", **kw}
     )
     return asyncio.run(create_incident_rule(body=body, current_user=_USER, storage=store))
 
@@ -57,7 +57,7 @@ def test_create_happy_path() -> None:
     store = _FakeStore()
     out = _create(store)
     assert out.name == "op_x"
-    assert out.label == "tooling"
+    assert out.label == "crimeware_tooling"
     assert out.created_by == "op"
     assert len(store.rules) == 1
 

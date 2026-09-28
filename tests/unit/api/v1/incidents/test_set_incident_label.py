@@ -48,11 +48,11 @@ def test_relabel_stores_dedups_and_audits() -> None:
     out = asyncio.run(
         set_incident_label(
             message_id=mid,
-            body=IncidentLabelUpdate(labels=["leak", "leak", "incident"], reason="misfire"),
+            body=IncidentLabelUpdate(labels=["breach_dump", "breach_dump", "intrusion"], reason="misfire"),
             current_user=_user(), storage=storage, audit=audit,
         )
     )
-    assert out.labels == ["leak", "incident"]  # deduped, order preserved
+    assert out.labels == ["breach_dump", "intrusion"]  # deduped, order preserved
     assert out.decided_by == "op.anti"
     assert audit.events[0]["event"] == "eyenet.audit.incident.relabeled"
     assert audit.events[0]["subject_id"] == mid

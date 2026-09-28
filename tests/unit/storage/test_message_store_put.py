@@ -131,3 +131,28 @@ async def test_put_message_with_attachment(
     )
     result = await storage.put_message(row, [att])
     assert result is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_attachment_files_by_message_ids(
+    storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
+) -> None:
+    source_id, group_id, actor_id = fk_ids
+    row = _make_row(source_id, group_id, actor_id, ref="telegram:-100:9")
+    row.has_attachment = True
+    att = AttachmentTable(
+        id=new_uuid7(),
+        message_id=row.id,
+        kind=AttachmentKind.DOCUMENT,
+        mime="application/x-rar",
+        size_bytes=2048,
+        sha256="b" * 64,
+        filename="HESOYAM CLOUD.rar",
+        storage_uri=None,
+    )
+    await storage.put_message(row, [att])
+    no_att = _make_row(source_id, group_id, actor_id, ref="telegram:-100:10")
+    await storage.put_message(no_att)
+    files = await storage.attachment_files_by_message_ids([row.id, no_att.id])
+    assert files == {row.id: ["HESOYAM CLOUD.rar"]}  # message with no attachment omitted

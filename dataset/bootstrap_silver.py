@@ -19,7 +19,18 @@ from eyenet.incidents.classifier import SIG2LABEL  # canonical signal->label map
 from eyenet.incidents.prefilter import scan
 
 HERE = Path(__file__).parent
-LABELS = ["incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"]
+# v2 hierarchical leaves (development/incident-taxonomy-hierarchy.md). SIG2LABEL (imported)
+# maps prefilter signals onto these; leaves with no structural signal
+# (crime_aas/phishing_delivery/fraud_ops/infra_resale/recruiting/alliance/crew_ops) stay 0
+# in silver and are set by hand / the model learns them from gold.
+LABELS = [
+    "defacement", "ddos_attack", "intrusion",
+    "breach_dump", "credentials", "stealer_logs",
+    "iab_corporate",
+    "crimeware_tooling", "crime_aas", "telecom_abuse",
+    "phishing_delivery", "fraud_ops", "infra_resale",
+    "recruiting", "alliance", "crew_ops",
+]
 
 # SIG2LABEL is imported from eyenet.incidents.classifier (single source of truth, shared
 # with the classifier's prefilter fusion). Only high-confidence mappings live there;
@@ -46,7 +57,9 @@ def main() -> None:
                 if t:
                     lab[t] = 1
             out = {"group": r.get("group"), "text": r["text"],
-                   "prefilter": signals, "mmbert_p": r.get("mmbert_p")}
+                   "prefilter": signals, "mmbert_p": r.get("mmbert_p"),
+                   # carry attachment presence/names through for enrich_text at train time
+                   "att_files": r.get("att_files")}
             out.update(lab)
             f.write(json.dumps(out, ensure_ascii=False) + "\n")
             fired = [k for k in LABELS if lab[k]]
@@ -57,8 +70,8 @@ def main() -> None:
     print(f"silver-tagged {n} -> silver_multilabel.jsonl")
     print(f"  none (no silver label): {counts['none']} ({100*counts['none']//n}%)")
     for k in LABELS:
-        print(f"  {k:<12}: {counts[k]}")
-    print("  (actor_ops is 0 in silver by design — semantic, no prefilter signal, set by hand)")
+        print(f"  {k:<18}: {counts[k]}")
+    print("  (leaves with no prefilter signal stay 0 in silver — set by gold/hand)")
 
 
 if __name__ == "__main__":

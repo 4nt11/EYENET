@@ -32,13 +32,36 @@ from transformers import (  # noqa: E402
 
 import build_dataset as bd  # noqa: E402  (redact)
 
+from eyenet.incidents.classifier import enrich_text  # noqa: E402  (train/serve-parity input)
+
 HERE = Path(__file__).parent
 BASE = "jhu-clsp/mmBERT-base"
-OUT = str(HERE / "mmbert-incident-ml")
+OUT = str(HERE / "mmbert-incident-ml-v2")  # v2 candidate; never clobbers the deployed model
 # order is the head order; persisted to OUT/labels.json for inference.
-LABELS = ["incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"]
+LABELS = [
+    "defacement", "ddos_attack", "intrusion",
+    "breach_dump", "credentials", "stealer_logs",
+    "iab_corporate",
+    "crimeware_tooling", "crime_aas", "telecom_abuse",
+    "phishing_delivery", "fraud_ops", "infra_resale",
+    "recruiting", "alliance", "crew_ops",
+]
+GOLD_FILE = "gold_v2.mllabels.jsonl"  # the assembled v2 gold (only this, not old *.mllabels)
 GOLD_TEST_FRAC = 0.30   # fraction of HUMAN gold held out for honest eval (never trained)
 SEED = 1337
+
+
+def _attmap() -> dict[str, list[str]]:
+    """{redacted body -> attachment filenames} from the corpus, to enrich gold rows that
+    lack an att_files field. Built once; empty if the corpus isn't present."""
+    src = HERE / "eyenet_messages.jsonl"
+    if not src.exists():
+        return {}
+    m: dict[str, list[str]] = {}
+    for r in load_jsonl(src):
+        if r.get("att_files"):
+            m[bd.redact(r["text"])] = r["att_files"]
+    return m
 
 
 def load_jsonl(p: Path) -> list[dict]:
@@ -66,15 +89,22 @@ def auroc(pos: list[float], neg: list[float]) -> float:
 
 
 def load_silver() -> dict[str, list[float]]:
-    return {bd.redact(r["text"]): label_vec(r) for r in load_jsonl(HERE / "silver_multilabel.jsonl")}
+    """{enriched text -> label vec}. Text = enrich_text(redact(body), att_files) so the
+    attachment marker the model learns is identical to what the live service builds."""
+    out: dict[str, list[float]] = {}
+    for r in load_jsonl(HERE / "silver_multilabel.jsonl"):
+        out[enrich_text(bd.redact(r["text"]), r.get("att_files"))] = label_vec(r)
+    return out
 
 
 def load_gold() -> dict[str, list[float]]:
-    """Every *.mllabels.jsonl, keyed by redacted text (dups collapse, later file wins)."""
+    """The assembled v2 gold (GOLD_FILE only, NOT old-taxonomy *.mllabels), keyed by
+    enriched text. Attachment filenames joined from the corpus (gold rows carry only body)."""
+    attmap = _attmap()
     gold: dict[str, list[float]] = {}
-    for gp in sorted(HERE.glob("*.mllabels.jsonl")):
-        for r in load_jsonl(gp):
-            gold[bd.redact(r["text"])] = label_vec(r)
+    for r in load_jsonl(HERE / GOLD_FILE):
+        atts = attmap.get(bd.redact(r["text"]))
+        gold[enrich_text(bd.redact(r["text"]), atts)] = label_vec(r)
     return gold
 
 
@@ -117,7 +147,9 @@ def main() -> None:
     args = TrainingArguments(
         output_dir=OUT,
         num_train_epochs=4,
-        per_device_train_batch_size=8,
+        # Full-speed config (dedicated GPU): batch 8 x accum 2 = effective 16, AdamW.
+        # Drops to EYENET_TRAIN_BS + adafactor if you must share VRAM with a live service.
+        per_device_train_batch_size=int(os.environ.get("EYENET_TRAIN_BS", "8")),
         gradient_accumulation_steps=2,
         learning_rate=2e-5,
         warmup_steps=40,
@@ -160,11 +192,16 @@ def main() -> None:
 
 
 def _selfcheck() -> None:
-    assert label_vec({"incident": 1, "leak": 0, "access_sale": 1}) == [1, 0, 0, 1, 0, 0]
-    assert label_vec({"labels": {"actor_ops": 1}}) == [0, 0, 0, 0, 1, 0]
-    assert label_vec({"labels": ["leak", "tooling"]}) == [0, 1, 0, 0, 0, 1]
+    n = len(LABELS)
+    di = LABELS.index("defacement")
+    v = label_vec({"labels": ["defacement"]})
+    assert len(v) == n and v[di] == 1.0 and sum(v) == 1.0
+    assert label_vec({"labels": []}) == [0.0] * n  # false positive / none
+    two = label_vec({"labels": ["breach_dump", "credentials"]})
+    assert two[LABELS.index("breach_dump")] == 1.0 and two[LABELS.index("credentials")] == 1.0
+    assert enrich_text("body", None) == "body"
+    assert "x.rar" in enrich_text("body", ["x.rar"])
     assert auroc([0.9, 0.8], [0.1, 0.2]) == 1.0
-    assert auroc([], [0.1]) != auroc([], [0.1]) is False or True  # nan, no crash
     print("selfcheck ok")
 
 
