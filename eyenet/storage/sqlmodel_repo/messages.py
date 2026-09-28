@@ -18,7 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
-from eyenet.models import ContentTemplateTable, MessageTable
+from eyenet.models import AttachmentTable, ContentTemplateTable, MessageTable
 
 from ._helpers import safe_session
 
@@ -93,6 +93,26 @@ class MessagesMixin:
                 )
             )
             return {UUID(str(mid)): str(body) for mid, body in result.all()}
+
+    async def attachment_files_by_message_ids(
+        self, message_ids: list[UUID]
+    ) -> dict[UUID, list[str]]:
+        """Bulk {message_id: [filename, ...]} for many ids in ONE query — feeds the
+        classifier's attachment-aware input (see incidents.classifier.enrich_text).
+        Messages with no attachment (or null filenames) are omitted."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(AttachmentTable.message_id, AttachmentTable.filename).where(
+                    col(AttachmentTable.message_id).in_(message_ids)
+                )
+            )
+            out: dict[UUID, list[str]] = {}
+            for mid, fn in result.all():
+                if fn:
+                    out.setdefault(UUID(str(mid)), []).append(str(fn))
+            return out
 
     async def put_message(
         self,
