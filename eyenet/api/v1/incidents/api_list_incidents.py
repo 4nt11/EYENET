@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
-from eyenet.api.v1.schemas.incidents import IncidentOut
+from eyenet.api.v1.schemas.incidents import IncidentGroupOut, IncidentOut
 from eyenet.contracts.incident import IncidentLabelRow, IncidentRow
 from eyenet.storage.repository import BaseRepository
 
@@ -64,3 +64,18 @@ async def list_incidents(
         )
         for r in rows
     ]
+
+
+@router.get(
+    "/incidents/groups",
+    operation_id="list_incident_groups",
+    response_model=list[IncidentGroupOut],
+)
+async def list_incident_groups(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:incidents"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+) -> list[IncidentGroupOut]:
+    """Every group that has incidents, noisiest first — the full option set for the feed's
+    group-mute filter (independent of the ``/incidents`` window)."""
+    rows = await storage.incident_groups()
+    return [IncidentGroupOut(group_id=gid, title=title, count=n) for gid, title, n in rows]

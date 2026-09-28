@@ -12,11 +12,17 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import String, cast as sql_cast, or_
+from sqlalchemy import String, cast as sql_cast, func, or_
 from sqlmodel import col, select
 
 from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRuleRow
-from eyenet.models import IncidentLabelTable, IncidentRuleTable, IncidentTable, MessageTable
+from eyenet.models import (
+    GroupTable,
+    IncidentLabelTable,
+    IncidentRuleTable,
+    IncidentTable,
+    MessageTable,
+)
 
 from ._helpers import safe_session
 
@@ -105,6 +111,23 @@ class IncidentsMixin:
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    async def incident_groups(self) -> list[tuple[UUID, str | None, int]]:
+        """Distinct groups with at least one incident, as (group_id, title, incident_count),
+        noisiest first — the source for the feed's group-mute filter, independent of the
+        200-row feed window. Generic ANSI: incident → message → group, GROUP BY + COUNT."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            count = func.count()
+            stmt = (
+                select(GroupTable.id, GroupTable.current_title, count)
+                .select_from(IncidentTable)
+                .join(MessageTable, col(IncidentTable.message_id) == col(MessageTable.id))
+                .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id))
+                .group_by(col(GroupTable.id), col(GroupTable.current_title))
+                .order_by(count.desc())
+            )
+            result = await session.exec(stmt)
+            return [(UUID(str(gid)), title, int(n)) for gid, title, n in result.all()]
 
     def _body_match(self, q: str) -> Any:
         """Free-text predicate over the joined ``message.body``. Generic ANSI ``LIKE`` —

@@ -6,30 +6,45 @@
   import StatTile from '$lib/components/StatTile.svelte';
   import Button from '$lib/components/Button.svelte';
   import { incidentTone, INCIDENT_LABELS } from '$lib/data.js';
-  import { incidentCtx, incidentEdit, loadIncidents, relabelIncident } from '$lib/incident.svelte.js';
+  import {
+    incidentCtx,
+    incidentEdit,
+    loadIncidents,
+    loadIncidentGroups,
+    relabelIncident
+  } from '$lib/incident.svelte.js';
 
   let selectedLabels = $state(new Set()); // OR include-filter over taxonomy leaves
-  let excludedGroups = $state(new Map()); // id -> title, groups the operator has muted
+  let excludedGroups = $state(new Set()); // group ids the operator has muted
   let search = $state('');
   let searchTimer;
 
   let selectedId = $state(null);
   let sel = $derived(incidentCtx.list.find((x) => x.id === selectedId) ?? incidentCtx.list[0] ?? null);
 
-  onMount(() => loadIncidents());
-
-  // Group options = the distinct groups in the current feed, unioned with any currently
-  // muted ones (so a muted group that's now filtered out of the window is still un-mutable).
-  const groupOpts = $derived.by(() => {
-    const m = new Map();
-    for (const x of incidentCtx.list) if (x.groupId) m.set(x.groupId, x.group ?? x.groupId.slice(0, 8));
-    for (const [id, title] of excludedGroups) m.set(id, title);
-    return [...m].sort((a, b) => a[1].localeCompare(b[1]));
+  onMount(() => {
+    loadIncidents();
+    loadIncidentGroups(); // the full group set for the mute filter (not the feed window)
   });
+
+  // Close any open filter popover when clicking outside it.
+  $effect(() => {
+    function onDocClick(e) {
+      for (const d of document.querySelectorAll('details.pop[open]')) {
+        if (!d.contains(e.target)) d.open = false;
+      }
+    }
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  });
+
+  // The group popover lists the full server set (noisiest first), so groups outside the
+  // current 200-row window are still mutable.
+  const groupOpts = $derived(incidentCtx.groups);
 
   function applyFilter() {
     selectedId = null;
-    loadIncidents([...selectedLabels], search.trim(), [...excludedGroups.keys()]);
+    loadIncidents([...selectedLabels], search.trim(), [...excludedGroups]);
   }
 
   function toggleLabel(l) {
@@ -39,9 +54,9 @@
     applyFilter();
   }
 
-  function toggleGroup(id, title) {
-    const n = new Map(excludedGroups);
-    n.has(id) ? n.delete(id) : n.set(id, title);
+  function toggleGroup(id) {
+    const n = new Set(excludedGroups);
+    n.has(id) ? n.delete(id) : n.add(id);
     excludedGroups = n;
     applyFilter();
   }
@@ -115,9 +130,13 @@
       <summary>{excludedGroups.size ? `${excludedGroups.size} muted` : 'Groups'}</summary>
       <div class="pmenu">
         <span class="phint">check to mute a group</span>
-        {#if groupOpts.length === 0}<span class="pnone">no groups in view</span>{/if}
-        {#each groupOpts as [id, title] (id)}
-          <label class="popt"><input type="checkbox" checked={excludedGroups.has(id)} onchange={() => toggleGroup(id, title)} /> {title}</label>
+        {#if groupOpts.length === 0}<span class="pnone">no groups yet</span>{/if}
+        {#each groupOpts as g (g.id)}
+          <label class="popt">
+            <input type="checkbox" checked={excludedGroups.has(g.id)} onchange={() => toggleGroup(g.id)} />
+            <span class="ptitle">{g.title}</span>
+            <span class="pcount">{g.count}</span>
+          </label>
         {/each}
       </div>
     </details>
@@ -241,6 +260,8 @@
   .popt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--radius); font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); cursor: pointer; white-space: nowrap; }
   .popt:hover { background: var(--panel-2); }
   .popt input { accent-color: var(--accent); }
+  .ptitle { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .pcount { color: var(--text-faint); font-size: var(--fs-11); }
   .phint { padding: 2px 6px 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
   .pnone { padding: 4px 6px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
   .badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

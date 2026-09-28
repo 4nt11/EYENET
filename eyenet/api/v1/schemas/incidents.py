@@ -30,6 +30,15 @@ class IncidentOut(ApiSchema):
     corrected_at: datetime | None = None
 
 
+class IncidentGroupOut(ApiSchema):
+    """A group appearing in the incident feed, with its incident count — populates the
+    triage feed's group-mute filter (the full set, not the current feed window)."""
+
+    group_id: UUID
+    title: str | None = None
+    count: int
+
+
 class IncidentLabelUpdate(ApiSchema):
     """Operator relabel of a classified message: the true label set + an audit reason."""
 

@@ -708,6 +708,11 @@ class BaseRepository(ABC):
         the given groups (mute noisy channels); ``offset`` pages."""
 
     @abstractmethod
+    async def incident_groups(self) -> list[tuple[UUID, str | None, int]]:
+        """Distinct groups with at least one incident as (group_id, title, count), noisiest
+        first — the full source for the feed's group-mute filter (not window-limited)."""
+
+    @abstractmethod
     async def messages_without_incidents(
         self, *, limit: int = 500, after_id: UUID | None = None
     ) -> list[tuple[UUID, str]]:
