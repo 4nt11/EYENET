@@ -59,12 +59,18 @@ async def identities_create(
     audit: Annotated[AuditEmitter, Depends(get_audit)],
     data_dir: Annotated[Path, Depends(get_data_dir)],
     session_key: Annotated[object, Depends(get_session_key)],
-    session: Annotated[UploadFile, File(description="the credential file (Telegram .session)")],
+    session: Annotated[
+        UploadFile, File(description="the credential file (Telegram .session or forum cookies.txt)")
+    ],
     name: Annotated[str, Form(min_length=1, max_length=128)],
     source_id: Annotated[UUID, Form()],
     telegram_api_id: Annotated[int | None, Form()] = None,
     telegram_api_hash: Annotated[str | None, Form(max_length=256)] = None,
     monitor_groups: Annotated[str | None, Form(description="comma-separated")] = None,
+    forum_base_url: Annotated[str | None, Form(max_length=1024)] = None,
+    forum_thread_urls: Annotated[
+        str | None, Form(description="comma-separated thread URLs")
+    ] = None,
     cooldown_seconds: Annotated[int, Form(ge=0)] = 21_600,
     proxy_uri: Annotated[str | None, Form(max_length=1024)] = None,
     role: Annotated[IdentityRole, Form()] = IdentityRole.MONITOR,
@@ -87,6 +93,8 @@ async def identities_create(
         telegram_api_id=telegram_api_id,
         telegram_api_hash=telegram_api_hash,
         monitor_groups=monitor_groups,
+        forum_base_url=forum_base_url,
+        forum_thread_urls=forum_thread_urls,
     )
 
     try:
@@ -130,6 +138,8 @@ def _build_source_config(
     telegram_api_id: int | None,
     telegram_api_hash: str | None,
     monitor_groups: str | None,
+    forum_base_url: str | None = None,
+    forum_thread_urls: str | None = None,
 ) -> dict[str, object]:
     """Assemble the non-secret per-source config, keyed by IdentityFileEntry field
     names so the pool can splat it back into an entry. New sources add a branch."""
@@ -150,6 +160,19 @@ def _build_source_config(
             "telegram_api_hash": telegram_api_hash,
             "monitor_groups": groups,
         }
+    if source_kind == SourceKind.FORUM:
+        if not forum_base_url:
+            raise RequestValidationError(
+                [
+                    {
+                        "loc": ("body", "forum_base_url"),
+                        "msg": "forum_base_url is required for Forum",
+                        "type": "value_error",
+                    }
+                ]
+            )
+        urls = [u.strip() for u in (forum_thread_urls or "").split(",") if u.strip()]
+        return {"forum_base_url": forum_base_url, "forum_thread_urls": urls}
     raise RequestValidationError(
         [
             {

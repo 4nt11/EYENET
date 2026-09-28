@@ -63,14 +63,44 @@ def _telegram_string_from_blob(blob: bytes) -> str:
             session.close()
 
 
+# Netscape cookies.txt: domain, flag, path, secure, expiry, name, value.
+_NETSCAPE_COOKIE_FIELDS = 7
+
+
+def _forum_cookiejar_from_blob(secret_blob: bytes) -> str:
+    """Validate an uploaded browser cookies.txt (Netscape format) -> its text.
+
+    The operator logs into the board by hand once (solving the captcha) and
+    exports the session cookies. We store the file text verbatim (encrypted at
+    rest); the collector parses it into an httpx cookie jar at boot. Validation
+    is a shape check: at least one 7-column cookie line must be present, so an
+    empty or non-cookies file is rejected as operator error (422), not stored.
+    """
+    try:
+        text = secret_blob.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SessionValidationError("cookies_file_not_utf8") from exc
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_") :]
+        elif not line or line.startswith("#"):
+            continue
+        if len(line.split("\t")) == _NETSCAPE_COOKIE_FIELDS:
+            return text
+    raise SessionValidationError("no_cookies_in_file")
+
+
 def _materialize_secret(source_kind: SourceKind, secret_blob: bytes) -> str:
     """Source-dispatched: uploaded bytes -> the secret string we encrypt at rest.
 
-    Telegram is the only source with a file-based secret today. New sources add
-    a branch here (e.g. Matrix: decode the access token) — no other change.
+    Telegram: a ``.session`` SQLite blob -> StringSession. Forum: a browser
+    cookies.txt -> its text. New sources add a branch here — no other change.
     """
     if source_kind == SourceKind.TELEGRAM:
         return _telegram_string_from_blob(secret_blob)
+    if source_kind == SourceKind.FORUM:
+        return _forum_cookiejar_from_blob(secret_blob)
     raise SessionValidationError(f"identity upload not supported for source: {source_kind.value}")
 
 
