@@ -4,29 +4,44 @@
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
   import { provisionCtx, provisionIdentity } from '$lib/identity.svelte.js';
 
-  // Provision a new identity from an uploaded .session file (POST /v1/identities,
-  // admin-only). Telegram is the only source with a file-based credential today;
-  // the source dropdown is filtered to Telegram sources. The .session is
-  // encrypted at rest server-side; it never comes back over the wire.
+  // Provision a new identity from an uploaded credential (POST /v1/identities,
+  // admin-only). Telegram takes a .session file + API creds; Forum takes a
+  // browser session as Netscape cookies — pasted as text OR uploaded as a
+  // cookies.txt file. The credential is encrypted at rest server-side; it never
+  // comes back over the wire. Matrix uses QR/token, not this form.
   let name = $state('');
   let sourceId = $state('');
+  // telegram
   let apiId = $state('');
   let apiHash = $state('');
   let monitorGroups = $state('');
+  // forum
+  let forumBaseUrl = $state('');
+  let forumThreadUrls = $state('');
+  let cookiesText = $state('');
+  // shared
   let cooldown = $state('21600');
   let proxyUri = $state('');
   let notes = $state('');
   let files = $state(null);
 
-  const tgSources = $derived(sourceCtx.list.filter((s) => s.platform === 'telegram'));
+  const fileSources = $derived(
+    sourceCtx.list.filter((s) => s.platform === 'telegram' || s.platform === 'forum')
+  );
+  const selected = $derived(sourceCtx.list.find((s) => s.id === sourceId));
+  const kind = $derived(selected?.platform ?? '');
   const hasFile = $derived(!!files && files.length > 0);
+  // Forum credential is present if pasted OR uploaded.
+  const hasCookies = $derived(cookiesText.trim() !== '' || hasFile);
   const ready = $derived(
     name.trim().length >= 1 &&
       !!sourceId &&
-      hasFile &&
-      apiId.trim() !== '' &&
-      apiHash.trim() !== '' &&
-      !provisionCtx.submitting
+      !provisionCtx.submitting &&
+      (kind === 'telegram'
+        ? hasFile && apiId.trim() !== '' && apiHash.trim() !== ''
+        : kind === 'forum'
+          ? hasCookies && forumBaseUrl.trim() !== ''
+          : false)
   );
 
   onMount(loadSources);
@@ -35,12 +50,25 @@
     e.preventDefault();
     if (!ready) return;
     const fd = new FormData();
-    fd.append('session', files[0]);
     fd.append('name', name.trim());
     fd.append('source_id', sourceId);
-    fd.append('telegram_api_id', apiId.trim());
-    fd.append('telegram_api_hash', apiHash.trim());
-    if (monitorGroups.trim()) fd.append('monitor_groups', monitorGroups.trim());
+
+    if (kind === 'telegram') {
+      fd.append('session', files[0]);
+      fd.append('telegram_api_id', apiId.trim());
+      fd.append('telegram_api_hash', apiHash.trim());
+      if (monitorGroups.trim()) fd.append('monitor_groups', monitorGroups.trim());
+    } else if (kind === 'forum') {
+      // Pasted text wins; else the uploaded cookies.txt. Either way it goes up as
+      // the `session` file part the backend expects and validates (Netscape).
+      const blob = cookiesText.trim()
+        ? new File([cookiesText], 'cookies.txt', { type: 'text/plain' })
+        : files[0];
+      fd.append('session', blob);
+      fd.append('forum_base_url', forumBaseUrl.trim());
+      if (forumThreadUrls.trim()) fd.append('forum_thread_urls', forumThreadUrls.trim());
+    }
+
     if (cooldown.trim()) fd.append('cooldown_seconds', cooldown.trim());
     if (proxyUri.trim()) fd.append('proxy_uri', proxyUri.trim());
     if (notes.trim()) fd.append('notes', notes.trim());
@@ -51,6 +79,9 @@
       apiId = '';
       apiHash = '';
       monitorGroups = '';
+      forumBaseUrl = '';
+      forumThreadUrls = '';
+      cookiesText = '';
       proxyUri = '';
       notes = '';
       files = null;
@@ -72,36 +103,56 @@
   </div>
 
   <p class="lede">
-    Upload a Telegram <code>.session</code> file and its API credentials. The session is
-    encrypted at rest; it is never returned or shown again. Mint the session out of band
-    (your own machine) before uploading.
+    Telegram takes a <code>.session</code> file and API credentials. Forum takes a browser
+    session as Netscape cookies — paste them or upload a <code>cookies.txt</code>. The
+    credential is encrypted at rest; it is never returned or shown again. Mint it out of band
+    (log in on your own machine) before uploading.
   </p>
 
   <form class="card" onsubmit={submit}>
     <label class="fld"><span class="flabel">Source</span>
       <select class="fin" bind:value={sourceId}>
-        <option value="" disabled>Select a Telegram source…</option>
-        {#each tgSources as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
+        <option value="" disabled>Select a source…</option>
+        {#each fileSources as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
       </select>
-      {#if sourceCtx.loaded && !tgSources.length}<span class="hint">No Telegram sources yet — create one first.</span>{/if}
+      {#if sourceCtx.loaded && !fileSources.length}<span class="hint">No Telegram or Forum sources yet — create one first.</span>{/if}
     </label>
 
     <label class="fld"><span class="flabel">Identity name</span>
-      <input class="fin" type="text" bind:value={name} placeholder="tg_alpha" /></label>
+      <input class="fin" type="text" bind:value={name} placeholder="alpha" /></label>
 
-    <label class="fld"><span class="flabel">Session file (.session)</span>
-      <input class="fin file" type="file" accept=".session" onchange={(e) => (files = e.currentTarget.files)} />
-    </label>
+    {#if kind === 'telegram'}
+      <label class="fld"><span class="flabel">Session file (.session)</span>
+        <input class="fin file" type="file" accept=".session" onchange={(e) => (files = e.currentTarget.files)} />
+      </label>
 
-    <div class="two">
-      <label class="fld"><span class="flabel">Telegram API ID</span>
-        <input class="fin" type="number" bind:value={apiId} placeholder="123456" /></label>
-      <label class="fld"><span class="flabel">Telegram API hash</span>
-        <input class="fin" type="text" bind:value={apiHash} placeholder="0123abcd…" /></label>
-    </div>
+      <div class="two">
+        <label class="fld"><span class="flabel">Telegram API ID</span>
+          <input class="fin" type="number" bind:value={apiId} placeholder="123456" /></label>
+        <label class="fld"><span class="flabel">Telegram API hash</span>
+          <input class="fin" type="text" bind:value={apiHash} placeholder="0123abcd…" /></label>
+      </div>
 
-    <label class="fld"><span class="flabel">Monitor groups (optional, comma-separated)</span>
-      <input class="fin" type="text" bind:value={monitorGroups} placeholder="@group_one, @group_two" /></label>
+      <label class="fld"><span class="flabel">Monitor groups (optional, comma-separated)</span>
+        <input class="fin" type="text" bind:value={monitorGroups} placeholder="@group_one, @group_two" /></label>
+    {:else if kind === 'forum'}
+      <label class="fld"><span class="flabel">Cookies (Netscape format — paste)</span>
+        <textarea class="fin mono" rows="5" bind:value={cookiesText} placeholder="# Netscape HTTP Cookie File&#10;forum.example	FALSE	/	TRUE	9999999999	sid	abc123"></textarea>
+        <span class="hint">Or upload a cookies.txt below. Pasted text takes priority.</span>
+      </label>
+
+      <label class="fld"><span class="flabel">Cookies file (cookies.txt, optional)</span>
+        <input class="fin file" type="file" accept=".txt" onchange={(e) => (files = e.currentTarget.files)} />
+      </label>
+
+      <label class="fld"><span class="flabel">Forum base URL</span>
+        <input class="fin" type="text" bind:value={forumBaseUrl} placeholder="https://forum.example" /></label>
+
+      <label class="fld"><span class="flabel">Thread URLs (optional, comma-separated)</span>
+        <input class="fin" type="text" bind:value={forumThreadUrls} placeholder="Thread-slug--123, Thread-other--456" /></label>
+    {:else if sourceId}
+      <p class="hint">This source kind can't be provisioned from this form.</p>
+    {/if}
 
     <div class="two">
       <label class="fld"><span class="flabel">Cooldown seconds</span>
@@ -141,6 +192,7 @@
   .fin:focus { outline: none; border-color: var(--accent); }
   .fin::placeholder { color: var(--text-faint); }
   .fin.file { padding: 6px 8px; }
+  .fin.mono { font-family: var(--font-mono); font-size: var(--fs-12); resize: vertical; }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .hint.err { color: var(--red-text); }
   .hint.ok { color: var(--accent); }
