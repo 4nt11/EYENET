@@ -8,6 +8,6 @@ distinct SourceKind: every forum is ``SourceKind.FORUM``.
 
 from __future__ import annotations
 
-from eyenet.collectors.forum._mybb import ParsedPost, parse_thread
+from eyenet.collectors.forum._mybb import ParsedPost, parse_thread, thread_page_count
 
-__all__ = ["ParsedPost", "parse_thread"]
+__all__ = ["ParsedPost", "parse_thread", "thread_page_count"]
