@@ -88,6 +88,29 @@ def apply_calibration(
     return out
 
 
+# Attachment marker delimiters — kept as module constants so the exact wire format is
+# defined once (train and serve must agree byte-for-byte).
+_ATT_OPEN = "\n⟨att: "  # ⟨att:
+_ATT_SEP = " · "  # ·
+_ATT_CLOSE = "⟩"  # ⟩
+
+
+def enrich_text(body: str, att_files: list[str] | None) -> str:
+    """The model's input representation for ONE message: its body plus an attachment
+    marker when files are present.
+
+    Attachment PRESENCE + filename is a strong incident signal (a bare "Pass: @x" next to
+    ``HESOYAM CLOUD.rar`` is a stealer-log cloud; contents are irrelevant to this
+    subsystem, only presence/name). This function is the SINGLE definition of the model's
+    input text — the training data prep AND the live classifier service must both call it,
+    or train/serve skew makes every attachment message misfire. Pure and torch-free.
+    """
+    names = [f for f in (att_files or []) if f and f.strip()]
+    if not names:
+        return body
+    return f"{body}{_ATT_OPEN}{_ATT_SEP.join(names)}{_ATT_CLOSE}"
+
+
 @lru_cache(maxsize=1)
 def _load() -> tuple[list[str], dict[str, Any], Any, Any, Any]:
     # The model dir is fully self-contained (weights + tokenizer + config), so nothing

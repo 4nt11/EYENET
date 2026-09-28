@@ -5,11 +5,36 @@ from __future__ import annotations
 
 import pytest
 
-from eyenet.incidents.classifier import apply_calibration, model_dir, prefilter_labels
+from eyenet.incidents.classifier import (
+    apply_calibration,
+    enrich_text,
+    model_dir,
+    prefilter_labels,
+)
 
 pytestmark = pytest.mark.unit
 
 _LABELS = ["incident", "leak", "infostealer", "access_sale", "actor_ops", "tooling"]
+
+
+def test_enrich_text_no_attachment_is_identity() -> None:
+    assert enrich_text("selling rdp access", None) == "selling rdp access"
+    assert enrich_text("selling rdp access", []) == "selling rdp access"
+    assert enrich_text("body", [""]) == "body"  # blank filenames dropped
+
+
+def test_enrich_text_appends_attachment_marker() -> None:
+    out = enrich_text("Pass: @x", ["HESOYAM CLOUD.rar"])
+    assert out.startswith("Pass: @x")
+    assert "HESOYAM CLOUD.rar" in out
+    assert out != "Pass: @x"  # marker actually added
+
+
+def test_enrich_text_is_deterministic_and_joins_multiple() -> None:
+    # train/serve MUST produce identical bytes for the same input
+    a = enrich_text("b", ["a.zip", "c.rar"])
+    assert a == enrich_text("b", ["a.zip", "c.rar"])
+    assert "a.zip" in a and "c.rar" in a
 
 
 def test_apply_calibration_fires_above_threshold() -> None:
