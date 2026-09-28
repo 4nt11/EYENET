@@ -23,6 +23,9 @@ class _FakeStorage:
     async def messages_by_evidence_refs(self, refs):
         return {r: self._msgs[r] for r in refs if r in self._msgs}
 
+    async def attachment_files_by_message_ids(self, message_ids):
+        return {}
+
     async def put_incidents_bulk(self, rows):
         self.saved.extend(rows)
 

@@ -105,6 +105,9 @@ class _FakeStorage:
         ]
         return out[:limit]
 
+    async def attachment_files_by_message_ids(self, message_ids):
+        return {}
+
     async def put_incidents_bulk(self, rows) -> None:
         self.saved.extend(rows)
 
