@@ -147,18 +147,15 @@ def main() -> None:
     args = TrainingArguments(
         output_dir=OUT,
         num_train_epochs=4,
-        # batch 4 x accum 4 = effective 16 (was 8x2); smaller micro-batch fits alongside
-        # the live incident-classifier container's VRAM. Override via EYENET_TRAIN_BS.
-        per_device_train_batch_size=int(os.environ.get("EYENET_TRAIN_BS", "2")),
-        gradient_accumulation_steps=8,
+        # Full-speed config (dedicated GPU): batch 8 x accum 2 = effective 16, AdamW.
+        # Drops to EYENET_TRAIN_BS + adafactor if you must share VRAM with a live service.
+        per_device_train_batch_size=int(os.environ.get("EYENET_TRAIN_BS", "8")),
+        gradient_accumulation_steps=2,
         learning_rate=2e-5,
         warmup_steps=40,
         weight_decay=0.01,
         bf16=torch.cuda.is_available(),
         gradient_checkpointing=True,
-        # Adafactor keeps ~half AdamW's optimizer state — fits alongside the live
-        # incident-classifier container's VRAM (full AdamW fine-tune OOMs on 8GB shared).
-        optim="adafactor",
         logging_steps=25,
         save_strategy="no",
         report_to=[],
