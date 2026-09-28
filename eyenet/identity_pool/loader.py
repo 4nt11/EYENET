@@ -61,12 +61,12 @@ class IdentityFileEntry(BaseModel):
 
     # Forum-specific (required when source=forum). The session is a browser-
     # exported cookies.txt (Netscape format): the operator logs in by hand once,
-    # solving the captcha, and exports the cookies. Fernet-encrypted at rest on
-    # the DB pool, same seam as the telegram session blob. forum_thread_urls
+    # solving the captcha, and exports the cookies. It is stored at the generic
+    # `session_path` slot (Fernet-encrypted at rest on the DB pool, same seam as
+    # the telegram session blob), NOT a forum-specific field. forum_thread_urls
     # lists the threads this identity polls (page-1 URLs; the collector walks
     # ?page=N to the last page).
     forum_base_url: str | None = None
-    forum_cookie_path: str | None = None
     forum_thread_urls: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -172,8 +172,6 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
     out: list[str] = []
     if entry.forum_base_url is not None:
         out.append(f"forum_base_url = {_q(entry.forum_base_url)}")
-    if entry.forum_cookie_path is not None:
-        out.append(f"forum_cookie_path = {_q(entry.forum_cookie_path)}")
     if entry.forum_thread_urls:
         urls_str = ", ".join(f'"{u}"' for u in entry.forum_thread_urls)
         out.append(f"forum_thread_urls = [{urls_str}]")

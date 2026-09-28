@@ -316,6 +316,24 @@ def collector_run(  # pragma: no cover
         _run(_factory, cfg, tick=0.0)
         return
 
+    # Forum is DB-backed too: the encrypted cookies.txt lives in the IdentityTable
+    # (provisioned via POST /v1/identities), decrypted into an in-memory cookie
+    # jar at boot. Poll-based, so default to 60s when --tick is omitted.
+    if collector == "forum":
+        session_key = load_session_key(cfg.data_dir)
+
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
+            return MyBBForumCollector(
+                bus=bus,
+                storage=storage,
+                pool=DbIdentityPool(storage),
+                identity_name=identity,
+                session_key=session_key,
+            )
+
+        _run(_factory, cfg, tick=tick or 60.0)
+        return
+
     # Matrix + stub collectors still read the file-backed pool (Matrix auth is
     # not encrypted yet; the generic seam extends to it when it is).
     if cfg.identities_path is None:
@@ -346,21 +364,6 @@ def collector_run(  # pragma: no cover
             )
 
         _run(_factory, cfg, tick=tick)
-    elif collector == "forum":
-        # Poll-based collector: cookies come from the file pool's plaintext
-        # cookies.txt (session_key=None). Default to a 60s poll so it doesn't
-        # busy-loop when the operator omits --tick.
-        # ponytail: DB-backed encrypted cookie jar reuses the telegram
-        # load_session_key + DbIdentityPool seam when in-UI upload lands.
-        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
-            return MyBBForumCollector(
-                bus=bus,
-                storage=storage,
-                pool=pool,
-                identity_name=identity,
-            )
-
-        _run(_factory, cfg, tick=tick or 60.0)
     else:  # telegram-stub
 
         def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:

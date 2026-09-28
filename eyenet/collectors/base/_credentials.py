@@ -78,14 +78,16 @@ def materialize_forum_session(
 ) -> httpx.Cookies:
     """Return the cookie jar to hand to the forum ``httpx.AsyncClient``.
 
+    The exported browser cookies.txt is stored at ``session_path`` — the same
+    generic secret slot the telegram StringSession uses — so both pools share one
+    decrypt-on-boot seam:
+
     - ``session_key`` set (DB-backed pool): decrypt the Fernet blob at
-      ``forum_cookie_path`` in memory; the plaintext cookies never touch disk.
-    - ``session_key`` is ``None`` (file pool): read the plaintext
-      ``cookies.txt`` at ``forum_cookie_path`` directly.
+      ``session_path`` in memory; the plaintext cookies never touch disk.
+    - ``session_key`` is ``None`` (legacy file pool): read the plaintext
+      cookies.txt at ``session_path`` directly.
     """
-    if not entry.forum_cookie_path:
-        raise ValueError(f"identity {entry.name!r} missing forum_cookie_path in identities.toml")
-    path = Path(entry.forum_cookie_path)
+    path = Path(entry.session_path)
     if session_key is None:
         return _parse_netscape_cookies(path.read_text(encoding="utf-8"))
     return _parse_netscape_cookies(decrypt_session(session_key, path.read_bytes()))
