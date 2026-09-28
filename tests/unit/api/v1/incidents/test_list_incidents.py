@@ -19,7 +19,11 @@ class _FakeStorage:
     def __init__(self, rows: list) -> None:
         self._rows = rows
 
-    async def recent_incidents(self, limit: int, *, label=None, offset: int = 0) -> list:
+    async def recent_incidents(
+        self, limit: int, *, label=None, offset: int = 0, q=None
+    ) -> list:
+        # q accepted for signature parity; free-text semantics are covered at the storage
+        # layer (test_incident_search_sqlite), this fake only exercises response mapping.
         rows = self._rows if label is None else [r for r in self._rows if label in r.labels]
         return rows[offset : offset + limit]
 

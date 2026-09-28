@@ -2,7 +2,8 @@
 """GET /v1/incidents — the operator triage feed (recent classified incidents).
 
 Gated behind ``read:incidents``. Returns the most recently classified incidents, newest
-first; optional ``label`` filters to one taxonomy head. This is the polling view; the
+first; optional ``label`` filters to one taxonomy head and ``q`` free-text-matches the
+message body (FTS5 on SQLite, LIKE fallback elsewhere). This is the polling view; the
 live view is the SSE stream, and each incident is also emitted on the bus as it fires.
 """
 
@@ -28,10 +29,11 @@ async def list_incidents(
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     label: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query(max_length=256)] = None,
 ) -> list[IncidentOut]:
     rows = cast(
         "list[IncidentRow]",
-        await storage.recent_incidents(limit=limit, label=label, offset=offset),
+        await storage.recent_incidents(limit=limit, label=label, offset=offset, q=q),
     )
     ids = [r.message_id for r in rows]
     bodies = await storage.bodies_by_message_ids(ids)

@@ -694,10 +694,11 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def recent_incidents(
-        self, limit: int = 50, *, label: str | None = None, offset: int = 0
+        self, limit: int = 50, *, label: str | None = None, offset: int = 0, q: str | None = None
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``label`` filters in
-        the query (rare leaves found regardless of recency); ``offset`` pages."""
+        the query (rare leaves found regardless of recency); ``q`` free-text-matches the
+        message body; ``offset`` pages."""
 
     @abstractmethod
     async def messages_without_incidents(

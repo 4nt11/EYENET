@@ -383,6 +383,25 @@ class SQLiteRepository(SQLModelRepository):
             await session.exec(stmt)
             await session.commit()
 
+    @staticmethod
+    def _fts_query(q: str) -> str:
+        """Wrap operator input as ONE FTS5 phrase so it can never be a MATCH syntax error
+        or a hidden boolean (``OR``/``NEAR``/``*``/``-`` are neutralised). Internal double
+        quotes are doubled per FTS5 quoting. Phrase-substring search is the analyst mental
+        model ("bulk sms", a @handle); prefix/boolean is a future knob."""
+        return '"' + q.replace('"', '""') + '"'
+
+    def _body_match(self, q: str) -> Any:
+        """SQLite override: FTS5 MATCH over ``message_fts`` (mirrors ``message.body``),
+        mapped back through the fts rowid to the ``message`` row the mixin already joined.
+        Replaces the generic LIKE full-scan. The FTS table + sync triggers are created in
+        sqlite_repo/database.py."""
+        from sqlalchemy import text  # noqa: PLC0415
+
+        return text(
+            "message.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH :fts_q)"
+        ).bindparams(fts_q=self._fts_query(q))
+
     async def close(self) -> None:
         await self.engine.dispose()
         await self.audit_engine.dispose()
