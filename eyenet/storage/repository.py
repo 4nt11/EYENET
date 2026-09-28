@@ -1014,6 +1014,13 @@ class BaseRepository(ABC):
         """Bulk {message_id: body} in one query (enriches the incident triage feed)."""
 
     @abstractmethod
+    async def attachment_files_by_message_ids(
+        self, message_ids: list[UUID]
+    ) -> dict[UUID, list[str]]:
+        """Bulk {message_id: [filename, ...]} in one query. Feeds the classifier's
+        attachment-aware input (incidents.classifier.enrich_text); ids with none omitted."""
+
+    @abstractmethod
     async def put_message(
         self,
         row: object,

@@ -371,12 +371,25 @@ export const PERSONAS = [
   }
 ];
 
-// ── Incidents (classifier detections) ────────────────────────────────────────
-// Taxonomy heads (dataset/mmbert-incident-ml/labels.json). Data-loss categories
-// (leak/infostealer) are the red tone; the rest scale down by operational weight.
-const INCIDENT_TONE = { leak: 'critical', infostealer: 'critical', incident: 'high', access_sale: 'warn', actor_ops: 'medium', tooling: 'medium' };
+// ── Incidents (classifier detections) — v2 hierarchical leaves ───────────────
+// development/incident-taxonomy-hierarchy.md. Data-loss / access markets are red;
+// services scale by operational weight; offensive events high; actor-ops neutral.
+const INCIDENT_TONE = {
+  breach_dump: 'critical', credentials: 'critical', stealer_logs: 'critical',
+  iab_corporate: 'critical',
+  intrusion: 'high', defacement: 'high', ddos_attack: 'high',
+  fraud_ops: 'warn', crime_aas: 'warn', phishing_delivery: 'warn',
+  telecom_abuse: 'medium', crimeware_tooling: 'medium', infra_resale: 'medium',
+  recruiting: 'neutral', alliance: 'neutral', crew_ops: 'neutral',
+};
 export const incidentTone = (l) => INCIDENT_TONE[l] ?? 'neutral';
-export const INCIDENT_LABELS = ['incident', 'leak', 'infostealer', 'access_sale', 'actor_ops', 'tooling'];
+export const INCIDENT_LABELS = [
+  'defacement', 'ddos_attack', 'intrusion',
+  'breach_dump', 'credentials', 'stealer_logs',
+  'iab_corporate',
+  'crimeware_tooling', 'crime_aas', 'telecom_abuse', 'phishing_delivery', 'fraud_ops', 'infra_resale',
+  'recruiting', 'alliance', 'crew_ops',
+];
 
 // ── Linkages (attribution decisions) ─────────────────────────────────────────
 // LinkageState: proposed | suspected | confirmed | rejected | superseded.

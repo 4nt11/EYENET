@@ -31,27 +31,25 @@ _DEFAULT_DIR = Path("dataset/mmbert-incident-ml")
 # categories the model tends to under-recall (stealer clouds, dump hosts, webshells,
 # tool sales) are caught here regardless of the model's score.
 SIG2LABEL: dict[str, str] = {
-    "deface_banner": "incident",
-    "ddos_command": "incident",
-    "check_host": "incident",
-    "compromise_confirmed": "incident",
-    "multi_target": "incident",
-    "leak_host": "leak",
-    "leak_label": "leak",
-    "target_dump_file": "leak",
-    "pii_schema": "leak",
-    "hash_list": "leak",
-    "cred_combo": "leak",
-    "cred_label": "leak",
-    "onion_url": "leak",
-    "stealer_logs": "infostealer",
-    "cloud_pass": "infostealer",  # nosec B105 — signal name, not a password
-    "access_material": "access_sale",
-    "tool_sale": "tooling",
-    # Telecom/delivery-abuse service (SIP, bulk SMS, spoofing, SMTP senders): a fraud
-    # SERVICE, not initial access brokerage. Maps to tooling until a dedicated
-    # telecom_abuse head lands. See development/incident-taxonomy-hierarchy.md.
-    "telecom_abuse": "tooling",
+    "deface_banner": "defacement",
+    "ddos_command": "ddos_attack",
+    "check_host": "ddos_attack",
+    "compromise_confirmed": "intrusion",
+    "multi_target": "ddos_attack",
+    "leak_host": "breach_dump",
+    "leak_label": "breach_dump",
+    "target_dump_file": "breach_dump",
+    "pii_schema": "breach_dump",
+    "hash_list": "credentials",
+    "cred_combo": "credentials",
+    "cred_label": "credentials",
+    "onion_url": "breach_dump",
+    "stealer_logs": "stealer_logs",
+    "cloud_pass": "stealer_logs",  # nosec B105 — signal name, not a password
+    "access_material": "iab_corporate",
+    "tool_sale": "crimeware_tooling",
+    # Telecom/delivery-abuse service (SIP, bulk SMS, spoofing) — its own v2 leaf now.
+    "telecom_abuse": "telecom_abuse",
 }
 
 
@@ -86,6 +84,29 @@ def apply_calibration(
         p = _sigmoid(c["a"] * logits[i] + c["b"])
         out.append(HeadScore(label=k, prob=round(p, 4), fired=p >= c["thr"]))
     return out
+
+
+# Attachment marker delimiters — kept as module constants so the exact wire format is
+# defined once (train and serve must agree byte-for-byte).
+_ATT_OPEN = "\n⟨att: "  # ⟨att:
+_ATT_SEP = " · "  # ·
+_ATT_CLOSE = "⟩"  # ⟩
+
+
+def enrich_text(body: str, att_files: list[str] | None) -> str:
+    """The model's input representation for ONE message: its body plus an attachment
+    marker when files are present.
+
+    Attachment PRESENCE + filename is a strong incident signal (a bare "Pass: @x" next to
+    ``HESOYAM CLOUD.rar`` is a stealer-log cloud; contents are irrelevant to this
+    subsystem, only presence/name). This function is the SINGLE definition of the model's
+    input text — the training data prep AND the live classifier service must both call it,
+    or train/serve skew makes every attachment message misfire. Pure and torch-free.
+    """
+    names = [f for f in (att_files or []) if f and f.strip()]
+    if not names:
+        return body
+    return f"{body}{_ATT_OPEN}{_ATT_SEP.join(names)}{_ATT_CLOSE}"
 
 
 @lru_cache(maxsize=1)

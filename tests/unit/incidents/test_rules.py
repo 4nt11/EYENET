@@ -41,5 +41,5 @@ def test_match_runs_on_normalized_text() -> None:
 
 def test_builtin_names_and_labels() -> None:
     assert "tool_sale" in rules.BUILTIN_SIGNAL_NAMES  # collision guard source
-    assert "tooling" in rules.TAXONOMY_LABELS
+    assert "crimeware_tooling" in rules.TAXONOMY_LABELS
     assert rules.match_labels("x", []) == set()  # empty ruleset short-circuits

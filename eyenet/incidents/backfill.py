@@ -48,8 +48,10 @@ async def run_backfill(
         after_id = rows[-1][0]
         scanned += len(rows)
 
-        texts = [body for _mid, body in rows]
-        scored = classifier.classify_batch(texts)
+        # Model sees enrich_text(body, attachment filenames); prefilter/rules see raw body.
+        att = await storage.attachment_files_by_message_ids([mid for mid, _b in rows])
+        enriched = [classifier.enrich_text(body, att.get(mid)) for mid, body in rows]
+        scored = classifier.classify_batch(enriched)
         now = datetime.now(UTC)
         incidents: list[object] = []  # ABC put_incidents_bulk is type-erased
         for (mid, text), scores in zip(rows, scored, strict=True):
