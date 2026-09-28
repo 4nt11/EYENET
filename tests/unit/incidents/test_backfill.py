@@ -83,11 +83,45 @@ def test_recent_incidents_label_filter_finds_rare_regardless_of_recency(storage)
         top = await storage.recent_incidents(limit=3)
         assert all("fraud_ops" in r.labels for r in top)
         # but filtering by the rare label finds it despite being oldest (the bug fix)
-        found = await storage.recent_incidents(limit=3, label="alliance")
+        found = await storage.recent_incidents(limit=3, labels=["alliance"])
         assert len(found) == 1 and found[0].labels == ["alliance"]
+        # multi-label OR: alliance OR fraud_ops returns both kinds
+        multi = await storage.recent_incidents(limit=20, labels=["alliance", "fraud_ops"])
+        assert len(multi) == 11
+        assert any(r.labels == ["alliance"] for r in multi)
         # offset paging
         page2 = await storage.recent_incidents(limit=3, offset=3)
         assert len(page2) == 3
+
+    asyncio.run(_run())
+
+
+@pytest.mark.integration
+def test_recent_incidents_group_exclude_mutes_noisy_channel(storage) -> None:
+    from eyenet.contracts.incident import IncidentRow
+    from tests._seed import seed_telegram_fixture
+
+    async def _run() -> None:
+        now = datetime.now(UTC)
+        # two groups under one source; classify one message in each
+        _s, g_noisy, _a = await seed_telegram_fixture(
+            storage, [{"actor_key": "a", "platform_msgid": "1", "body": "spam"}], now,
+            platform_groupid="-100", group_title="Noisy",
+        )
+        _s2, _g_quiet, _b = await seed_telegram_fixture(
+            storage, [{"actor_key": "a", "platform_msgid": "2", "body": "signal"}], now,
+            platform_groupid="-200", group_title="Quiet",
+        )
+        page = {b: mid for mid, b in await storage.messages_without_incidents(limit=10)}
+        await storage.put_incidents_bulk([
+            IncidentRow(message_id=page["spam"], labels=["x"], scores={},
+                        model_version="v", classified_at=now),
+            IncidentRow(message_id=page["signal"], labels=["x"], scores={},
+                        model_version="v", classified_at=now),
+        ])
+        assert len(await storage.recent_incidents(limit=10)) == 2  # both by default
+        kept = await storage.recent_incidents(limit=10, exclude_group_ids=[g_noisy])
+        assert {r.message_id for r in kept} == {page["signal"]}  # noisy group hidden
 
     asyncio.run(_run())
 

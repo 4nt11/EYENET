@@ -694,11 +694,18 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def recent_incidents(
-        self, limit: int = 50, *, label: str | None = None, offset: int = 0, q: str | None = None
+        self,
+        limit: int = 50,
+        *,
+        labels: list[str] | None = None,
+        offset: int = 0,
+        q: str | None = None,
+        exclude_group_ids: list[UUID] | None = None,
     ) -> list[object]:
-        """Most recently classified incidents (operator triage feed). ``label`` filters in
-        the query (rare leaves found regardless of recency); ``q`` free-text-matches the
-        message body; ``offset`` pages."""
+        """Most recently classified incidents (operator triage feed). ``labels`` filters in
+        the query (OR across the given leaves; rare leaves found regardless of recency);
+        ``q`` free-text-matches the message body; ``exclude_group_ids`` hides incidents from
+        the given groups (mute noisy channels); ``offset`` pages."""
 
     @abstractmethod
     async def messages_without_incidents(
@@ -1027,9 +1034,10 @@ class BaseRepository(ABC):
     @abstractmethod
     async def message_context_by_ids(
         self, message_ids: list[UUID]
-    ) -> dict[UUID, tuple[str | None, UUID | None, str | None]]:
-        """Bulk {message_id: (group_title, actor_id, actor_handle)} — WHERE + WHO for the
-        incident feed (channel + sender + actor_id for dossier click-through)."""
+    ) -> dict[UUID, tuple[str | None, UUID | None, UUID | None, str | None]]:
+        """Bulk {message_id: (group_title, group_id, actor_id, actor_handle)} — WHERE + WHO
+        for the incident feed (channel + group_id for the group filter + sender + actor_id
+        for dossier click-through)."""
 
     @abstractmethod
     async def put_message(

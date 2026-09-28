@@ -122,17 +122,19 @@ class MessagesMixin:
 
     async def message_context_by_ids(
         self, message_ids: list[UUID]
-    ) -> dict[UUID, tuple[str | None, UUID | None, str | None]]:
-        """Bulk {message_id: (group_title, actor_id, actor_handle)} in ONE join — the WHERE
-        and WHO for the incident triage feed (channel + sender, actor_id for dossier
-        click-through). Outer joins so a missing group/actor yields None, not a dropped row."""
+    ) -> dict[UUID, tuple[str | None, UUID | None, UUID | None, str | None]]:
+        """Bulk {message_id: (group_title, group_id, actor_id, actor_handle)} in ONE join —
+        the WHERE and WHO for the incident triage feed (channel + sender; group_id for the
+        feed's group filter, actor_id for dossier click-through). Outer joins so a missing
+        group/actor yields None, not a dropped row."""
         if not message_ids:
             return {}
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
-                select(
+                select(  # type: ignore[call-overload]  # 5 cols exceeds typed select overloads
                     MessageTable.id,
                     GroupTable.current_title,
+                    GroupTable.id,
                     ActorTable.id,
                     ActorTable.current_handle,
                 )
@@ -142,8 +144,13 @@ class MessagesMixin:
             )
             result = await session.exec(stmt)
             return {
-                UUID(str(mid)): (title, UUID(str(aid)) if aid else None, handle)
-                for mid, title, aid, handle in result.all()
+                UUID(str(mid)): (
+                    title,
+                    UUID(str(gid)) if gid else None,
+                    UUID(str(aid)) if aid else None,
+                    handle,
+                )
+                for mid, title, gid, aid, handle in result.all()
             }
 
     async def put_message(

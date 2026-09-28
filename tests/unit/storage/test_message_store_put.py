@@ -142,8 +142,9 @@ async def test_message_context_by_ids_joins_group_and_actor(
     row = _make_row(source_id, group_id, actor_id)
     await storage.put_message(row)
     ctx = await storage.message_context_by_ids([row.id, new_uuid7()])
-    title, aid, _handle = ctx[row.id]
+    title, gid, aid, _handle = ctx[row.id]
     assert title == "Test"  # group current_title joined in
+    assert gid == group_id  # group id for the feed's group filter
     assert aid == actor_id  # sender actor for dossier click-through
     assert new_uuid7() not in ctx  # unknown id omitted (well-formed)
 
