@@ -36,8 +36,27 @@ export const incidentCtx = $state({
   error: null,
   labels: [],
   q: '',
-  excludeGroupIds: []
+  excludeGroupIds: [],
+  groups: [] // {id, title, count} for the group-mute filter (full set, not window-limited)
 });
+
+// The complete set of groups that have incidents (noisiest first) — populates the group
+// filter independently of the 200-row feed window. Load once; it grows slowly.
+export async function loadIncidentGroups() {
+  try {
+    const rows = await apiGet('/v1/incidents/groups', { auth: true });
+    if (Array.isArray(rows)) {
+      incidentCtx.groups = rows.map((g) => ({
+        id: g.group_id,
+        title: g.title ?? g.group_id.slice(0, 8),
+        count: g.count
+      }));
+    }
+  } catch {
+    // Non-critical: a blocked/failed fetch (e.g. not logged in) just leaves the group
+    // filter empty; the feed and other filters are unaffected (quiet-degrade like loadIncidents).
+  }
+}
 
 // labels: taxonomy leaves (OR filter, repeated ?label=). excludeGroupIds: group ids to
 // mute (repeated ?exclude_group_id=), so the window refills with other channels.

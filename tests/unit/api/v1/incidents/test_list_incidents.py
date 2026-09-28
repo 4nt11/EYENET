@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from eyenet.api.v1.incidents.api_list_incidents import list_incidents
+from eyenet.api.v1.incidents.api_list_incidents import list_incident_groups, list_incidents
 
 pytestmark = pytest.mark.unit
 
@@ -40,6 +40,9 @@ class _FakeStorage:
     async def message_context_by_ids(self, message_ids: list) -> dict:
         # fields returned: group_title, group_id, actor_id, actor_handle
         return {mid: ("Cash Network", uuid4(), uuid4(), "@scammer") for mid in message_ids}
+
+    async def incident_groups(self) -> list:
+        return [(uuid4(), "Noisy Market", 42), (uuid4(), "Quiet Chan", 3)]
 
 
 def _row(labels: list[str], group_id=None):
@@ -78,6 +81,13 @@ def test_list_incidents_group_exclude() -> None:
         list_incidents(_=None, storage=storage, limit=50, label=None, exclude_group_id=[noisy])
     )
     assert len(out) == 1 and out[0].labels == ["leak"]  # noisy group muted
+
+
+def test_list_incident_groups() -> None:
+    storage = _FakeStorage([])
+    out = asyncio.run(list_incident_groups(_=None, storage=storage))
+    assert [g.title for g in out] == ["Noisy Market", "Quiet Chan"]  # noisiest first
+    assert out[0].count == 42 and out[0].group_id is not None
 
 
 def test_list_incidents_offset_pages() -> None:
