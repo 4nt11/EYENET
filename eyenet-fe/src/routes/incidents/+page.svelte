@@ -56,7 +56,7 @@
 </script>
 
 <DossierLayout listLabel="Incidents"
-  items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.join(' · ') || x.idShort, secondary: (x.body ?? '').slice(0, 64) || x.idShort }))}
+  items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.join(' · ') || x.idShort, secondary: (x.group ? x.group + ' · ' : '') + ((x.body ?? '').slice(0, 56) || x.idShort) }))}
   selectedId={sel?.id} onSelect={(id) => (selectedId = id)}
   selected={!!sel}>
 
@@ -91,6 +91,14 @@
         </div>
       </div>
     {/if}
+    <div class="ctx">
+      {#if sel.group}<span class="cwhere">in {sel.group}</span>{/if}
+      {#if sel.actorHandle || sel.actorId}
+        <span class="cwho">from
+          {#if sel.actorId}<a class="alink" href={`/actors?id=${sel.actorId}`}>{sel.actorHandle || sel.actorId.slice(0, 8)}</a>{:else}{sel.actorHandle}{/if}
+        </span>
+      {/if}
+    </div>
     <p class="meta">model {sel.modelVersion} · classified {sel.classifiedAt}</p>
 
     <div class="relabel">
@@ -179,6 +187,11 @@
   .none.fp { color: var(--warn-text); }
   .by { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
   .meta { margin: 8px 0 0; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
+  .ctx { margin: 8px 0 0; display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--fs-12); }
+  .cwhere { color: var(--text-body); }
+  .cwho { color: var(--text-muted); }
+  .alink { color: var(--accent-text); text-decoration: none; }
+  .alink:hover { text-decoration: underline; }
 
   .relabel { margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
   .chips, .reasons { display: flex; flex-wrap: wrap; gap: 6px; }

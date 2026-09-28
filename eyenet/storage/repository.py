@@ -1024,6 +1024,13 @@ class BaseRepository(ABC):
         attachment-aware input (incidents.classifier.enrich_text); ids with none omitted."""
 
     @abstractmethod
+    async def message_context_by_ids(
+        self, message_ids: list[UUID]
+    ) -> dict[UUID, tuple[str | None, UUID | None, str | None]]:
+        """Bulk {message_id: (group_title, actor_id, actor_handle)} — WHERE + WHO for the
+        incident feed (channel + sender + actor_id for dossier click-through)."""
+
+    @abstractmethod
     async def put_message(
         self,
         row: object,

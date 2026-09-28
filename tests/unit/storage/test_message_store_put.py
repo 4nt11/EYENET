@@ -135,6 +135,21 @@ async def test_put_message_with_attachment(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_message_context_by_ids_joins_group_and_actor(
+    storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
+) -> None:
+    source_id, group_id, actor_id = fk_ids
+    row = _make_row(source_id, group_id, actor_id)
+    await storage.put_message(row)
+    ctx = await storage.message_context_by_ids([row.id, new_uuid7()])
+    title, aid, _handle = ctx[row.id]
+    assert title == "Test"  # group current_title joined in
+    assert aid == actor_id  # sender actor for dossier click-through
+    assert new_uuid7() not in ctx  # unknown id omitted (well-formed)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_attachment_files_by_message_ids(
     storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
 ) -> None:

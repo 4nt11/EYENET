@@ -14,6 +14,9 @@ function mapIncident(r) {
     id: r.message_id,
     idShort: short(r.message_id),
     body: r.body ?? null,
+    group: r.group ?? null, // WHERE: channel/group title
+    actorId: r.actor_id ?? null, // WHO: sender actor (dossier link)
+    actorHandle: r.actor_handle ?? null,
     labels: r.labels ?? [],
     // per-head scores as [label, prob] rows, highest first (for the detail pane)
     scoreRows: Object.entries(scores).sort((a, b) => b[1] - a[1]),

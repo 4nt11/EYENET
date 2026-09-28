@@ -29,6 +29,9 @@ class _FakeStorage:
     async def incident_labels_by_message_ids(self, message_ids: list) -> dict:
         return {}
 
+    async def message_context_by_ids(self, message_ids: list) -> dict:
+        return {mid: ("Cash Network", uuid4(), "@scammer") for mid in message_ids}
+
 
 def _row(labels: list[str]):
     return SimpleNamespace(
@@ -46,6 +49,7 @@ def test_list_incidents_maps_all() -> None:
     assert len(out) == 3
     assert out[0].scores == {"tooling": 0.9}
     assert all(o.body == f"body {o.message_id}" for o in out)  # body enrichment
+    assert out[0].group == "Cash Network" and out[0].actor_handle == "@scammer"  # who/where
 
 
 def test_list_incidents_label_filter() -> None:
