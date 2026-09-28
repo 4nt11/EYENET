@@ -126,9 +126,12 @@ class MyBBForumCollector(CollectorSkeleton):
         self._delay_max = _DEFAULT_DELAY_MAX
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
-        # Discovered thread set + when we last swept (monotonic).
+        # Discovered thread set + when we last swept (monotonic) + the monitored
+        # set that sweep was for (so a newly-monitored category triggers a
+        # re-sweep next tick instead of waiting out the interval).
         self._known_threads: list[str] = []
         self._last_discovery = 0.0
+        self._last_monitored: frozenset[str] = frozenset()
 
     async def on_subscribe(self) -> None:
         await super().on_subscribe()
@@ -235,11 +238,19 @@ class MyBBForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
-        # One paced discovery sweep per interval; poll the discovered set every
-        # tick (put_message is idempotent, so re-polls store only new posts).
+        # Re-sweep only when there is a reason to: first run, the monitored set
+        # changed, or the interval elapsed. Reading the monitored set is a cheap
+        # DB read; the HTTP sweep (and its pacing cost) is gated behind it, so an
+        # idle collector with nothing monitored makes ZERO board requests.
         now = time.monotonic()
-        if not self._known_threads or (now - self._last_discovery) >= self._discovery_interval:
-            self._known_threads = await self._discover_threads()
+        monitored = frozenset(await self._monitored_categories())
+        if (
+            self._last_discovery == 0.0
+            or monitored != self._last_monitored
+            or (now - self._last_discovery) >= self._discovery_interval
+        ):
+            self._known_threads = await self._discover_threads(monitored)
+            self._last_monitored = monitored
             self._last_discovery = now
         for url in self._known_threads:
             await self._poll_thread(url)
@@ -259,14 +270,14 @@ class MyBBForumCollector(CollectorSkeleton):
                 slugs.append(grp.platform_groupid)
         return slugs
 
-    async def _discover_threads(self) -> list[str]:
+    async def _discover_threads(self, monitored: frozenset[str]) -> list[str]:
         """Walk each MONITORED category's pages -> its thread URLs (+ manual pins).
 
         Reads only. Categories the operator did not pick are never fetched.
         """
         threads: list[str] = list(self._thread_urls)
         seen: set[str] = set(threads)
-        cats = await self._monitored_categories()
+        cats = sorted(monitored)
         for slug in cats:
             page = 1
             last = 1
