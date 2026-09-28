@@ -126,10 +126,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._delay_max = _DEFAULT_DELAY_MAX
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
-        # Discovered thread set + when we last swept (monotonic) + the monitored
-        # set that sweep was for (so a newly-monitored category triggers a
-        # re-sweep next tick instead of waiting out the interval).
-        self._known_threads: list[str] = []
+        # When we last swept (monotonic) + the monitored set that sweep was for
+        # (so a newly-monitored category triggers a re-sweep next tick instead of
+        # waiting out the interval).
         self._last_discovery = 0.0
         self._last_monitored: frozenset[str] = frozenset()
 
@@ -240,20 +239,26 @@ class MyBBForumCollector(CollectorSkeleton):
             return
         # Re-sweep only when there is a reason to: first run, the monitored set
         # changed, or the interval elapsed. Reading the monitored set is a cheap
-        # DB read; the HTTP sweep (and its pacing cost) is gated behind it, so an
-        # idle collector with nothing monitored makes ZERO board requests.
+        # DB read; the paced HTTP sweep is gated behind it, so an idle collector
+        # with nothing monitored makes ZERO board requests.
         now = time.monotonic()
         monitored = frozenset(await self._monitored_categories())
-        if (
+        if not (
             self._last_discovery == 0.0
             or monitored != self._last_monitored
             or (now - self._last_discovery) >= self._discovery_interval
         ):
-            self._known_threads = await self._discover_threads(monitored)
-            self._last_monitored = monitored
-            self._last_discovery = now
-        for url in self._known_threads:
+            return
+        self._last_monitored = monitored
+        self._last_discovery = now
+        # Manual thread pins first (few, fast).
+        for url in self._thread_urls:
             await self._poll_thread(url)
+        # Then each monitored category, INTERLEAVED: scrape each page's threads
+        # as we discover them (newest-first on MyBB) so posts flow from the first
+        # minute instead of after a full multi-hour enumeration.
+        for slug in sorted(monitored):
+            await self._crawl_category(slug)
 
     async def _monitored_categories(self) -> list[str]:
         """Category slugs the operator chose to monitor (fail-closed if none).
@@ -270,45 +275,44 @@ class MyBBForumCollector(CollectorSkeleton):
                 slugs.append(grp.platform_groupid)
         return slugs
 
-    async def _discover_threads(self, monitored: frozenset[str]) -> list[str]:
-        """Walk each MONITORED category's pages -> its thread URLs (+ manual pins).
+    async def _crawl_category(self, slug: str) -> None:
+        """Walk one MONITORED category newest-page-first, scraping as we go.
 
-        Reads only. Categories the operator did not pick are never fetched.
+        Read-only. Each page's threads are polled immediately (interleaved), so
+        the most recently active threads surface first and a huge category still
+        streams posts from the start instead of after a full enumeration.
         """
-        threads: list[str] = list(self._thread_urls)
-        seen: set[str] = set(threads)
-        cats = sorted(monitored)
-        for slug in cats:
-            page = 1
-            last = 1
-            while True:
-                try:
-                    resp = await self._get(slug, params={"page": page} if page > 1 else None)
-                except httpx.HTTPError as exc:
-                    await self.syslog(
-                        level=SystemLogLevel.WARN,
-                        event="forum.category_fetch_failed",
-                        message=f"{self._identity_name}: {slug} p{page} failed ({exc!r})",
-                    )
-                    break
-                if page == 1:
-                    last = thread_page_count(resp.text)
-                    if self._max_category_pages > 0:
-                        last = min(last, self._max_category_pages)
-                for tl in parse_thread_links(resp.text):
-                    if tl not in seen:
-                        seen.add(tl)
-                        threads.append(tl)
-                if page >= last:
-                    break
-                page += 1
+        _log.info("forum.category_sweep_start", identity=self._identity_name, category=slug)
+        page = 1
+        last = 1
+        threads = 0
+        while True:
+            try:
+                resp = await self._get(slug, params={"page": page} if page > 1 else None)
+            except httpx.HTTPError as exc:
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.category_fetch_failed",
+                    message=f"{self._identity_name}: {slug} p{page} failed ({exc!r})",
+                )
+                return
+            if page == 1:
+                last = thread_page_count(resp.text)
+                if self._max_category_pages > 0:
+                    last = min(last, self._max_category_pages)
+            for thread_url in parse_thread_links(resp.text):
+                await self._poll_thread(thread_url)
+                threads += 1
+            if page >= last:
+                break
+            page += 1
         _log.info(
-            "forum.discovered",
+            "forum.category_sweep_done",
             identity=self._identity_name,
-            categories=len(cats),
-            threads=len(threads),
+            category=slug,
+            threads=threads,
+            pages=last,
         )
-        return threads
 
     async def _poll_thread(self, url: str) -> None:
         tid = _thread_id_from_url(url)
