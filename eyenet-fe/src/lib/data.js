@@ -415,6 +415,19 @@ export const INCIDENT_LABEL_NAMES = {
 export const incidentLabelName = (l) =>
   INCIDENT_LABEL_NAMES[l] ?? (l ? l.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : l);
 
+// Parent business-model buckets — groups the label filter under readable headers
+// (development/incident-taxonomy-hierarchy.md). Leaf order mirrors INCIDENT_LABELS.
+export const INCIDENT_LABEL_GROUPS = [
+  { name: 'Offensive Event', leaves: ['defacement', 'ddos_attack', 'intrusion'] },
+  { name: 'Data Market', leaves: ['breach_dump', 'credentials', 'stealer_logs'] },
+  { name: 'Access Market', leaves: ['iab_corporate'] },
+  {
+    name: 'Service Market',
+    leaves: ['crimeware_tooling', 'crime_aas', 'telecom_abuse', 'phishing_delivery', 'fraud_ops', 'infra_resale']
+  },
+  { name: 'Actor Ops', leaves: ['recruiting', 'alliance', 'crew_ops'] }
+];
+
 // ── Linkages (attribution decisions) ─────────────────────────────────────────
 // LinkageState: proposed | suspected | confirmed | rejected | superseded.
 // Persona aggregation fires ONLY on transition into confirmed.

@@ -5,7 +5,7 @@
   import Badge from '$lib/components/Badge.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { incidentTone, incidentLabelName, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentTone, incidentLabelName, INCIDENT_LABELS, INCIDENT_LABEL_GROUPS } from '$lib/data.js';
   import {
     incidentCtx,
     incidentEdit,
@@ -120,8 +120,11 @@
     <details class="pop">
       <summary>{selectedLabels.size ? `${selectedLabels.size} label${selectedLabels.size > 1 ? 's' : ''}` : 'Labels'}</summary>
       <div class="pmenu">
-        {#each INCIDENT_LABELS as l}
-          <label class="popt"><input type="checkbox" checked={selectedLabels.has(l)} onchange={() => toggleLabel(l)} /> {incidentLabelName(l)}</label>
+        {#each INCIDENT_LABEL_GROUPS as grp (grp.name)}
+          <span class="pgroup">{grp.name}</span>
+          {#each grp.leaves as l (l)}
+            <label class="popt"><input type="checkbox" checked={selectedLabels.has(l)} onchange={() => toggleLabel(l)} /> {incidentLabelName(l)}</label>
+          {/each}
         {/each}
       </div>
     </details>
@@ -263,6 +266,8 @@
   .ptitle { flex: 1; overflow: hidden; text-overflow: ellipsis; }
   .pcount { color: var(--text-faint); font-size: var(--fs-11); }
   .phint { padding: 2px 6px 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .pgroup { padding: 8px 6px 2px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .pgroup:first-child { padding-top: 2px; }
   .pnone { padding: 4px 6px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
   .badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .lrow { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 0; }
