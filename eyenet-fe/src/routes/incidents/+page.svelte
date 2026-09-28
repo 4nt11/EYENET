@@ -5,7 +5,7 @@
   import Badge from '$lib/components/Badge.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { incidentTone, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentTone, incidentLabelName, INCIDENT_LABELS } from '$lib/data.js';
   import {
     incidentCtx,
     incidentEdit,
@@ -101,7 +101,7 @@
 </script>
 
 <DossierLayout listLabel="Incidents"
-  items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.join(' · ') || x.idShort, secondary: (x.group ? x.group + ' · ' : '') + ((x.body ?? '').slice(0, 56) || x.idShort) }))}
+  items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.map(incidentLabelName).join(' · ') || x.idShort, secondary: (x.group ? x.group + ' · ' : '') + ((x.body ?? '').slice(0, 56) || x.idShort) }))}
   selectedId={sel?.id} onSelect={(id) => (selectedId = id)}
   selected={!!sel}>
 
@@ -121,7 +121,7 @@
       <summary>{selectedLabels.size ? `${selectedLabels.size} label${selectedLabels.size > 1 ? 's' : ''}` : 'Labels'}</summary>
       <div class="pmenu">
         {#each INCIDENT_LABELS as l}
-          <label class="popt"><input type="checkbox" checked={selectedLabels.has(l)} onchange={() => toggleLabel(l)} /> {l}</label>
+          <label class="popt"><input type="checkbox" checked={selectedLabels.has(l)} onchange={() => toggleLabel(l)} /> {incidentLabelName(l)}</label>
         {/each}
       </div>
     </details>
@@ -146,7 +146,7 @@
     <div class="lrow">
       <span class="lk">model</span>
       <div class="badges">
-        {#each sel.labels as l}<Badge tone={incidentTone(l)}>{l}</Badge>{/each}
+        {#each sel.labels as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
         {#if !sel.labels.length}<span class="none">none</span>{/if}
       </div>
     </div>
@@ -154,7 +154,7 @@
       <div class="lrow">
         <span class="lk truth">operator</span>
         <div class="badges">
-          {#each sel.correctedLabels as l}<Badge tone={incidentTone(l)} dot>{l}</Badge>{/each}
+          {#each sel.correctedLabels as l}<Badge tone={incidentTone(l)} dot>{incidentLabelName(l)}</Badge>{/each}
           {#if !sel.correctedLabels.length}<span class="none fp">false positive</span>{/if}
           <span class="by">by {sel.correctedBy} · {sel.correctedAt}</span>
         </div>
@@ -174,7 +174,7 @@
       {#if editing}
         <div class="chips">
           {#each INCIDENT_LABELS as l}
-            <button type="button" class="chip" class:on={draft.has(l)} onclick={() => toggle(l)}>{l}</button>
+            <button type="button" class="chip" class:on={draft.has(l)} onclick={() => toggle(l)}>{incidentLabelName(l)}</button>
           {/each}
         </div>
         <div class="reasons">
@@ -221,7 +221,7 @@
         {#each sel.scoreRows as [label, prob]}
           {@const fired = sel.labels.includes(label)}
           <div class="srow" class:fired>
-            <span class="slabel">{label}</span>
+            <span class="slabel">{incidentLabelName(label)}</span>
             <span class="sbar"><span class="sfill" class:fired style="width:{Math.round(prob * 100)}%"></span></span>
             <span class="sval">{prob.toFixed(3)}</span>
             {#if fired}<Badge tone={incidentTone(label)} dot>fired</Badge>{/if}
