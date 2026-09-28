@@ -32,6 +32,8 @@ def _pool(tmp_path: Path, name: str) -> FileIdentityPool:
         cooldown_seconds=0,
         forum_base_url="https://forum.test",
         forum_thread_urls=[_THREAD_URL],
+        forum_delay_min=0.0,  # no throttle sleep in tests
+        forum_delay_max=0.0,
     )
     cfg = tmp_path / "identities.toml"
     dump(IdentityFile(identities=[entry]), cfg)

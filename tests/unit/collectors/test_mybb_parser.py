@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from eyenet.collectors.forum import parse_thread, thread_page_count
+from eyenet.collectors.forum import (
+    parse_forum_links,
+    parse_thread,
+    parse_thread_links,
+    thread_page_count,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +56,26 @@ def test_body_text_strips_tags_but_keeps_content(posts: list) -> None:
 
 def test_body_html_is_evidence_faithful(posts: list) -> None:
     assert "<strong>world</strong>" in posts[0].body_html
+
+
+def test_parse_forum_links_dedupes_and_orders() -> None:
+    html = (
+        "<a href='Forum-Databases'>db</a>"
+        "<a href='https://b.test/Forum-Leaks--3'>leaks</a>"
+        "<a href='Forum-Databases?foo=1'>db again</a>"  # same path, deduped
+        "<a href='Thread-x--1'>not a forum</a>"
+    )
+    assert parse_forum_links(html) == ["Forum-Databases", "https://b.test/Forum-Leaks--3"]
+
+
+def test_parse_thread_links_strips_query_and_dedupes() -> None:
+    html = (
+        "<a href='Thread-a--1?pid=5#pid5'>a</a>"
+        "<a href='Thread-a--1'>a again</a>"  # dedupes to the same canonical path
+        "<a href='Thread-b--2?action=lastpost'>b</a>"
+        "<a href='Forum-X'>not a thread</a>"
+    )
+    assert parse_thread_links(html) == ["Thread-a--1", "Thread-b--2"]
 
 
 def test_thread_page_count() -> None:

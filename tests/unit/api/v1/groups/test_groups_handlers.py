@@ -226,3 +226,56 @@ async def test_join_unknown_candidate_404(storage: BaseRepository) -> None:
             storage=storage,
             audit=_audit(storage),
         )
+
+
+async def _seed_forum_collector(storage: BaseRepository, source_id):
+    now = datetime.now(tz=UTC)
+    ident = await storage.create_identity(
+        name=f"fid{uuid4().hex[:6]}", source_id=source_id, session_path="/x"
+    )
+    return await storage.create_collector(
+        instance_name=f"cf{uuid4().hex[:6]}",
+        kind=SourceKind.FORUM,
+        source_id=source_id,
+        identity_id=ident.id,
+        config={},
+        created_at=now,
+        created_by_user_id=uuid4(),
+    )
+
+
+@pytest.mark.unit
+async def test_monitor_forum_category_opens_internal_membership(storage: BaseRepository) -> None:
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    coll = await _seed_forum_collector(storage, sid)
+    cand = await storage.ensure_candidate(
+        source_id=sid,
+        platform_groupid="Forum-Databases",
+        seen_at=now,
+        kind=GroupKind.FORUM_CATEGORY,
+    )
+
+    result = await groups_join(
+        body=JoinGroupRequest(collector_id=coll.id, candidate_id=cand.id),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+    )
+    assert result.status == "monitored"  # completed synchronously, not "approving"
+
+    row = await storage.get_candidate(cand.id)
+    assert row is not None and row.state is CandidateState.JOINED
+    assert row.resulting_group_id is not None
+    memberships = await storage.list_active_memberships(collector_id=coll.id)
+    assert len(memberships) == 1
+    assert memberships[0].joined_via is JoinedVia.CANDIDATE
+
+    # Idempotent: monitoring an already-JOINED category does not double-open.
+    await groups_join(
+        body=JoinGroupRequest(collector_id=coll.id, candidate_id=cand.id),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+    )
+    assert len(await storage.list_active_memberships(collector_id=coll.id)) == 1

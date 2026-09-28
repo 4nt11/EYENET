@@ -129,6 +129,56 @@ def parse_thread(html: str) -> list[ParsedPost]:
     return posts
 
 
+def _canonical(href: str) -> str:
+    """Strip query + fragment: ``Thread-x--9?pid=3#pid3`` -> ``Thread-x--9``.
+
+    Keeps scheme/host/path so relative and absolute links dedupe to one form.
+    """
+    p = urlparse(href)
+    base = f"{p.scheme}://{p.netloc}" if p.netloc else ""
+    return f"{base}{p.path}"
+
+
+def parse_forum_links(html: str) -> list[str]:
+    """Category (forum) URLs from a MyBB board index, in order, deduped.
+
+    ``<a href="Forum-<name>">`` / ``Forum-<name>--<fid>``. These are the
+    operator-monitorable units (GroupKind.FORUM_CATEGORY).
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    out: list[str] = []
+    seen: set[str] = set()
+    for anchor in soup.select('a[href*="Forum-"]'):
+        href = str(anchor.get("href", ""))
+        if "Forum-" not in href:
+            continue
+        canon = _canonical(href)
+        if canon and canon not in seen:
+            seen.add(canon)
+            out.append(canon)
+    return out
+
+
+def parse_thread_links(html: str) -> list[str]:
+    """Thread URLs from a MyBB forum/category page, in order, deduped.
+
+    ``<a href="Thread-<slug>--<tid>">``. Query/fragment stripped so a thread
+    linked as both ``?action=lastpost`` and plain dedupe to one.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    out: list[str] = []
+    seen: set[str] = set()
+    for anchor in soup.select('a[href*="Thread-"]'):
+        href = str(anchor.get("href", ""))
+        if "Thread-" not in href:
+            continue
+        canon = _canonical(href)
+        if canon and canon not in seen:
+            seen.add(canon)
+            out.append(canon)
+    return out
+
+
 def thread_page_count(html: str) -> int:
     """Highest ``?page=N`` in a MyBB thread's pagination block (>= 1).
 
