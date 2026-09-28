@@ -115,6 +115,80 @@ The compose `collector` service (pinned `--identity=scout01`) is now redundant
 with supervisor-spawning and will double-claim — remove it from the compose stack;
 the supervisor is the launcher.
 
+## M9 HTTP API — unfinished endpoints (was the pre-incident-detection backlog)
+
+Captured from the old NEXT_SESSION handoff (2026-09-22) before it was rewritten for
+the incident-detection work. This is real, live, unfinished API surface.
+
+### 5 live `501 NotImplementedError` stub handlers
+Grep to confirm current state: `grep -rn "raise NotImplementedError" eyenet/api/`.
+Schemas already exist (`ClearanceGrantSummary`, `CursorPageClearanceGrantSummary` in
+`api/v1/schemas/clearance.py`); opIds pinned → no OpenAPI change, just fill the body.
+
+| Endpoint | Handler | Storage status |
+|---|---|---|
+| `GET /v1/clearance/grants` (list) | `clearance/api_list_grants.py` | needs `list_clearance_grants`+`count_` (filters: user_id, scope, active_only) |
+| `GET /v1/clearance/grants/{id}` | `clearance/api_get_grant.py` | needs `get_clearance_grant(grant_id)` |
+| `POST /v1/clearance/grants` (grant) | `clearance/api_grant_clearance.py` | `storage.grant_clearance(...)` EXISTS — wire handler + audit |
+| `POST /v1/clearance/grants/{id}/revoke` | `clearance/api_revoke_grant.py` | `storage.revoke_clearance(...)` EXISTS — wire handler + audit |
+| `GET /v1/audit/anchors` | `audit/api_list_anchors.py` | **likely DONE** now (see the audit-anchor TODO above says it serves) — VERIFY, drop if shipped |
+
+Gotchas: clearance handlers use raw `Query()` (not shared `cursor_params`);
+`include_total`/`active_only` are **int 0/1, not bool**. Storage reads = per-domain
+mixin `list_/count_` + ABC twins in `repository.py`, ANSI-only. New test dir needs
+`__init__.py`. (Also: `admin:clearance` is grant-only → page 403s until self-granted,
+see the "Clearance bootstrap" TODO above.)
+
+### Auth surface — only 4 of 14 endpoints wired (login/verify/logout/me)
+Not wired (verify each isn't also a 501 before building FE):
+- **PAT tokens** `GET/POST/DELETE /v1/auth/tokens` — simple CRUD + account/settings UI.
+- **MFA self-enroll** `POST /v1/auth/mfa/enroll` + `verify-enroll` + `DELETE` — secret/QR + verify.
+- **token refresh** `POST /v1/auth/refresh` — client auto-refresh on 401, no page.
+- **stream-token** `POST /v1/auth/stream-token` — mints the SSE JWT (blocks SSE below).
+- **signing-key** `POST /v1/auth/signing-key/challenge` + `/signing-key` — the **M9.B2
+  keystone** (client-side Ed25519). NOT simple. Unlocks reclassify signed bodies, signed
+  document/attachment byte access, and the file-access journal reader.
+
+### SSE live streams — 0 of 5 wired
+`/v1/stream/{linkages,personas,audit,control,all}`. No EventSource in FE (unbuilt
+`stream` nav slug). Needs stream-token first.
+
+### Backend gated on M9.B2 signing
+`/v1/audit/file-access` + `/by-user` journal reader; reclassify signed flows; signed
+byte access — all DISABLED affordances in the UI today until signing lands.
+
+**Recommended order when resuming API work:** finish clearance (4 handlers; 2 have
+storage) → PAT tokens → M9.B2 signing (unlocks the rest incl. SSE via stream-token).
+
+## Incidents free-text search — `GET /v1/incidents?q=`
+
+**Vision:** search the incident triage feed by message content, alongside the
+label filter + offset paging already shipped (`recent_incidents(limit, label,
+offset)`). An analyst types "bulk sms" or a @handle and gets matching incidents.
+
+**Shape:** add a `q` query param to `list_incidents`. The incident table holds
+only `message_id` (no body), so search means an **incident → message join** with
+`LIKE '%q%'` on `message.body` (and optionally `group.current_title` /
+`actor.current_handle`, since the feed now surfaces those — see the actor-
+correlation feature, `message_context_by_ids`). Push it into `recent_incidents`
+(a new `q` arg) so it composes with `label`/`offset` in one query, newest-first.
+
+**Why deferred / build with eyes open:**
+- **Scale:** a bare `LIKE '%q%'` scans every message body (155k+ rows) per query —
+  fine at small-operator scale, ugly as the corpus grows. The real fix is an
+  **FTS5 virtual table** over message bodies (SQLite full-text; dialect-specific →
+  belongs in the SQLite backend override per CLAUDE.md §2.3 Rule 1, with a generic
+  `LIKE` fallback in the mixin). Ship `LIKE` first, add FTS5 when it bites.
+- **Injection:** `q` is a bound param (SQLAlchemy `.like(f'%{q}%')` parameterizes
+  the whole pattern) — safe — but `%`/`_` in `q` act as wildcards; escape them if
+  literal matching matters.
+- FE: a search box on the incidents page (`incident.svelte.js` `loadIncidents(label,
+  q)` → `?q=`), debounced. The list rail already shows channel + body preview.
+
+**Done already (context):** label filter is in-query, offset paging works, and each
+incident carries group + actor (who/where). Search is the last of the three
+"genuinely amazing" asks (search / filtering / actor correlation).
+
 ## QR login — QR code does not regenerate in the UI on expiry
 
 The server driver (`eyenet/api/auth/_qr_login.py` `_run_login`) DOES call
