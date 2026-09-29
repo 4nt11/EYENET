@@ -79,10 +79,20 @@ async def groups_category_threads(
         GroupThread.from_group(g, s, op_labels.get(s.op_message_id) if s is not None else None)
         for g, s in page_rows
     ]
+    estimated_total = (
+        await storage.count_threads_for_category(
+            source_id=category.source_id,
+            category_platform_groupid=category.platform_groupid,
+            countries=country,
+            labels=label,
+        )
+        if page.include_total
+        else None
+    )
     return CursorPageGroupThread(
         items=items,
         next_cursor=encode_cursor(page.offset + page.limit) if has_more else None,
-        estimated_total=None,
+        estimated_total=estimated_total,
     )
 
 

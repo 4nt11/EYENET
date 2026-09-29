@@ -137,6 +137,51 @@ class ForumMixin:
             result = await session.exec(stmt)
             return [(g, _summary_row(s) if s is not None else None) for g, s in result.all()]
 
+    async def count_threads_for_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+    ) -> int:
+        """Total FORUM_THREAD groups under a category matching the same filters as
+        :meth:`list_threads_for_category` (for the list's real total, not the page cap)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            ts = ThreadSummaryTable
+            stmt = (
+                select(func.count(func.distinct(col(GroupTable.id))))
+                .select_from(GroupTable)
+                .join(
+                    ForumThreadLinkTable,
+                    col(ForumThreadLinkTable.thread_platform_groupid)
+                    == col(GroupTable.platform_groupid),
+                )
+                .join(ts, col(ts.group_id) == col(GroupTable.id), isouter=True)
+                .where(col(ForumThreadLinkTable.source_id) == source_id)
+                .where(
+                    col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid
+                )
+                .where(col(GroupTable.source_id) == source_id)
+                .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
+            )
+            if countries:
+                stmt = stmt.where(col(ts.victim_country).in_(countries))
+            if labels:
+                label_match = or_(
+                    *(
+                        sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
+                        for lbl in labels
+                    )
+                )
+                stmt = stmt.where(
+                    exists().where(
+                        col(IncidentTable.message_id) == col(ts.op_message_id), label_match
+                    )
+                )
+            result = await session.exec(stmt)
+            return int(result.one())
+
     # ── forum-thread OP-anchored summary (date + victim country) ──────────────
     async def forum_threads_needing_summary(
         self, *, limit: int = 500
