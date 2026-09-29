@@ -92,6 +92,7 @@ class IncidentsMixin:
         q: str | None,
         group_ids: list[UUID] | None,
         source_ids: list[UUID] | None,
+        victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
     ) -> Any:
         """Apply the triage-feed filters to a SELECT over IncidentTable.
@@ -138,6 +139,16 @@ class IncidentsMixin:
         if exclude_bodyless:
             # length(trim(NULL)) is NULL (> 0 → false), so this drops null bodies too.
             stmt = stmt.where(func.length(func.trim(col(MessageTable.body))) > 0)
+        if victim_countries:
+            # Victim-country (geo) filter: join the message_geo sidecar (unique
+            # message_id, so no row multiplication for the COUNT) and keep only the
+            # resolved verdicts in the set. This is the "show me CL incidents"
+            # filter — distinct from ?q= which is a body full-text search and never
+            # matched the geo verdict.
+            stmt = stmt.join(
+                MessageGeoTable, col(IncidentTable.message_id) == col(MessageGeoTable.message_id)
+            )
+            stmt = stmt.where(col(MessageGeoTable.country).in_(victim_countries))
         return stmt
 
     async def recent_incidents(
@@ -149,6 +160,7 @@ class IncidentsMixin:
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters IN
@@ -156,8 +168,9 @@ class IncidentsMixin:
         leaves are found regardless of overall recency (the old post-fetch filter hid rare
         labels below the limit); ``q`` free-text-matches the message body; ``group_ids``
         restricts to incidents whose message is in ONE of the given groups (show-only
-        channels); ``exclude_bodyless`` drops content-less rows in SQL; ``offset`` pages.
-        Newest first."""
+        channels); ``victim_countries`` keeps only incidents whose geo verdict is one of the
+        given ISO alpha-2 codes; ``exclude_bodyless`` drops content-less rows in SQL;
+        ``offset`` pages. Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = self._apply_incident_filters(
                 select(IncidentTable),
@@ -165,6 +178,7 @@ class IncidentsMixin:
                 q=q,
                 group_ids=group_ids,
                 source_ids=source_ids,
+                victim_countries=victim_countries,
                 exclude_bodyless=exclude_bodyless,
             )
             stmt = (
@@ -180,6 +194,7 @@ class IncidentsMixin:
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
     ) -> int:
         """Total incidents matching the same filters as :meth:`recent_incidents`
@@ -192,6 +207,7 @@ class IncidentsMixin:
                 q=q,
                 group_ids=group_ids,
                 source_ids=source_ids,
+                victim_countries=victim_countries,
                 exclude_bodyless=exclude_bodyless,
             )
             result = await session.exec(stmt)
@@ -236,6 +252,27 @@ class IncidentsMixin:
             )
             result = await session.exec(stmt)
             return [(UUID(str(sid)), name, int(n)) for sid, name, n in result.all()]
+
+    async def incident_countries(self) -> list[tuple[str, int]]:
+        """Distinct resolved victim countries with at least one incident, as
+        (country_alpha2, count), noisiest first — the feed's victim-country filter.
+        incident → message_geo, GROUP BY country; NULL (mixed/unknown) excluded so
+        the filter only offers codes that actually resolve to something."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            count = func.count()
+            stmt = (
+                select(MessageGeoTable.country, count)
+                .select_from(IncidentTable)
+                .join(
+                    MessageGeoTable,
+                    col(IncidentTable.message_id) == col(MessageGeoTable.message_id),
+                )
+                .where(col(MessageGeoTable.country).is_not(None))
+                .group_by(col(MessageGeoTable.country))
+                .order_by(count.desc())
+            )
+            result = await session.exec(stmt)
+            return [(str(c), int(n)) for c, n in result.all()]
 
     def _body_match(self, q: str) -> Any:
         """Free-text predicate over the joined ``message.body``. Generic ANSI ``LIKE`` —

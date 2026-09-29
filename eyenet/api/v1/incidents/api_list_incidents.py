@@ -19,6 +19,7 @@ from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params
 from eyenet.api.v1.schemas.incidents import (
     CursorPageIncidentOut,
+    IncidentCountryOut,
     IncidentGroupOut,
     IncidentOut,
     IncidentSourceOut,
@@ -38,8 +39,11 @@ async def list_incidents(
     q: Annotated[str | None, Query(max_length=256)] = None,
     group_id: Annotated[list[UUID] | None, Query()] = None,
     source_id: Annotated[list[UUID] | None, Query()] = None,
+    victim_country: Annotated[list[str] | None, Query(min_length=2, max_length=2)] = None,
 ) -> CursorPageIncidentOut:
     # ?label= repeats (OR); ?group_id= / ?source_id= repeat to show only those groups/sources.
+    # ?victim_country= repeats (ISO alpha-2) to show only incidents with that geo verdict —
+    # the "show me CL incidents" filter (?q= is a body search and never matched the verdict).
     # Bodyless incidents (pure-quote forum posts that strip to empty and classify into
     # content-less "row not retained" rows) are dropped IN SQL via exclude_bodyless, so the
     # page returns `limit` real rows and estimated_total counts the same set — no post-fetch
@@ -53,6 +57,7 @@ async def list_incidents(
             q=q,
             group_ids=group_id,
             source_ids=source_id,
+            victim_countries=victim_country,
             exclude_bodyless=True,
         ),
     )
@@ -68,7 +73,12 @@ async def list_incidents(
     country_by_id = {mid: g.country for mid, g in geo.items()}
     estimated_total = (
         await storage.count_incidents(
-            labels=label, q=q, group_ids=group_id, source_ids=source_id, exclude_bodyless=True
+            labels=label,
+            q=q,
+            group_ids=group_id,
+            source_ids=source_id,
+            victim_countries=victim_country,
+            exclude_bodyless=True,
         )
         if page.include_total
         else None
@@ -128,3 +138,18 @@ async def list_incident_sources(
     (a forum's incidents roll up under one source instead of thousands of threads)."""
     rows = await storage.incident_sources()
     return [IncidentSourceOut(source_id=sid, title=title, count=n) for sid, title, n in rows]
+
+
+@router.get(
+    "/incidents/countries",
+    operation_id="list_incident_countries",
+    response_model=list[IncidentCountryOut],
+)
+async def list_incident_countries(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:incidents"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+) -> list[IncidentCountryOut]:
+    """Every resolved victim country in the incident feed, noisiest first — the option set
+    for the victim-country filter (ISO alpha-2; mixed/unknown verdicts excluded)."""
+    rows = await storage.incident_countries()
+    return [IncidentCountryOut(country=c, count=n) for c, n in rows]

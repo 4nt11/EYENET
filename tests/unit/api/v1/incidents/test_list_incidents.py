@@ -11,7 +11,11 @@ from uuid import uuid4
 import pytest
 
 from eyenet.api.deps_paging import CursorParams
-from eyenet.api.v1.incidents.api_list_incidents import list_incident_groups, list_incidents
+from eyenet.api.v1.incidents.api_list_incidents import (
+    list_incident_countries,
+    list_incident_groups,
+    list_incidents,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -41,11 +45,12 @@ class _FakeStorage:
         q=None,
         group_ids=None,
         source_ids=None,
+        victim_countries=None,
         exclude_bodyless: bool = False,
     ) -> list:
-        # q/FTS + exclude_bodyless semantics are covered at the storage layer
-        # (test_incident_search_sqlite); this fake exercises response mapping +
-        # the label(OR)/group-filter wiring and the over-fetch/paging math.
+        # q/FTS + exclude_bodyless + victim_countries semantics are covered at the
+        # storage layer (test_incident_search_sqlite / test_backfill); this fake
+        # exercises response mapping + the label(OR)/group-filter + paging math.
         return self._filter(labels, group_ids)[offset : offset + limit]
 
     async def count_incidents(
@@ -55,9 +60,13 @@ class _FakeStorage:
         q=None,
         group_ids=None,
         source_ids=None,
+        victim_countries=None,
         exclude_bodyless: bool = False,
     ) -> int:
         return len(self._filter(labels, group_ids))
+
+    async def incident_countries(self) -> list:
+        return [("CL", 12), ("AR", 4)]
 
     async def bodies_by_message_ids(self, message_ids: list) -> dict:
         return {mid: f"body {mid}" for mid in message_ids}
@@ -151,3 +160,9 @@ def test_list_incident_groups() -> None:
     out = asyncio.run(list_incident_groups(_=None, storage=storage))
     assert [g.title for g in out] == ["Noisy Market", "Quiet Chan"]  # noisiest first
     assert out[0].count == 42 and out[0].group_id is not None
+
+
+def test_list_incident_countries() -> None:
+    storage = _FakeStorage([])
+    out = asyncio.run(list_incident_countries(_=None, storage=storage))
+    assert [(c.country, c.count) for c in out] == [("CL", 12), ("AR", 4)]  # noisiest first

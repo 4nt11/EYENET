@@ -57,6 +57,14 @@ class IncidentSourceOut(ApiSchema):
     count: int
 
 
+class IncidentCountryOut(ApiSchema):
+    """A resolved victim country appearing in the incident feed, with its incident count —
+    populates the victim-country filter (ISO 3166-1 alpha-2)."""
+
+    country: str = Field(min_length=2, max_length=2)
+    count: int
+
+
 class IncidentLabelUpdate(ApiSchema):
     """Operator relabel of a classified message: the true label set + an audit reason."""
 
