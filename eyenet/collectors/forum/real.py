@@ -614,6 +614,13 @@ class MyBBForumCollector(CollectorSkeleton):
         if not written:
             return
 
+        # Pure-quote posts strip to an empty body: no authored words to classify
+        # (the quoted content belongs to someone else). Store as evidence but do
+        # NOT feed the classifier — same gate as a telegram forward. Otherwise the
+        # incident feed fills with bodyless "row not retained" noise.
+        if not body.strip():
+            return
+
         env = RawMessageEnvelope(
             source=SourceKind.FORUM,
             instance_id=self.instance_id,
