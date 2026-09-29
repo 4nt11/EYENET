@@ -1945,6 +1945,24 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def bind_collector_source(
+        self,
+        *,
+        collector_id: UUID,
+        source_id: UUID,
+    ) -> CollectorRow:
+        """Rebind a collector to the source it actually ingests into.
+
+        System-initiated, NOT operator metadata (so it stays off the PATCH
+        surface): a collector registers against a placeholder source but at
+        connect upserts its real per-identity source and ingests there. Without
+        this rebind, ``collector.source_id`` points at an empty placeholder and
+        any collector→source join (fleet UI, messages-by-collector) reads zero
+        rows for a healthy collector. Idempotent. Raises :class:`ValueError` if
+        the collector is missing.
+        """
+
+    @abstractmethod
     async def collector_fleet_health(self) -> CollectorFleetHealth:
         """Fleet snapshot — counts by observed_state, oldest live heartbeat,
         restart-storm leader (API_PLAN §3.9, M9.D2)."""
