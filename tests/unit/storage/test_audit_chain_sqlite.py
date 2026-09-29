@@ -8,6 +8,7 @@ filename (``_sqlite`` suffix) signals the scope.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,6 +50,41 @@ async def test_chain_holds_over_100_events(storage: BaseRepository) -> None:
         assert ok
         assert broken is None
         assert len(rows) == 100
+    finally:
+        await storage.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_append_does_not_leak_greenlet(
+    storage: BaseRepository, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Regression: the audit append released its raw connection with a SYNC
+    ``raw_conn.close()``, which fired ``MissingGreenlet`` on the aiosqlite pool's
+    reset-on-return rollback (SQLAlchemy catches + logs it, so the row still
+    persisted but every write churned a connection and logged a traceback — 37k
+    on the linker in production). The async ``connect()`` release runs the reset
+    in-greenlet.
+
+    Only reproduces on a FILE-backed engine (a real pool); the in-memory
+    ``StaticPool`` never returns/reset the connection, which is why the unit
+    suite missed it — hence the ``_sqlite`` file fixture (``data_dir=tmp_path``).
+    """
+    try:
+        with caplog.at_level(logging.DEBUG, logger="sqlalchemy"):
+            for i in range(5):
+                await storage.append_audit(
+                    {
+                        "event": "evidence_access",
+                        "service": "engine",
+                        "instance_id": "eng_1",
+                        "subject_kind": "actor",
+                        "at": datetime(2026, 5, 4, 12, i, 0, tzinfo=UTC),
+                    }
+                )
+        blob = caplog.text
+        assert "MissingGreenlet" not in blob, "audit append leaked a greenlet on conn reset"
+        assert "greenlet_spawn has not been called" not in blob
     finally:
         await storage.close()
 
