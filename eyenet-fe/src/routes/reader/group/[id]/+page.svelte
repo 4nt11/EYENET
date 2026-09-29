@@ -3,7 +3,8 @@
   import { page } from '$app/stores';
   import DOMPurify from 'dompurify';
   import { apiGet, apiPost } from '$lib/api.js';
-  import { incidentLabelName } from '$lib/data.js';
+  import { incidentLabelName, INCIDENT_LABELS } from '$lib/data.js';
+  import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
 
   // Message view for any group: a forum thread OR a chat/channel/room. Posts
   // render their evidence-faithful body_html (SANITIZED — this is threat-actor
@@ -37,6 +38,35 @@
   }
 
   const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : '');
+
+  // Per-post relabel editor (same ground-truth flow as the incidents page). Only one
+  // post's editor is open at a time (editId).
+  const REASON_PRESETS = ['False positive', 'Incorrectly tagged', 'Missing label', 'Partially correct'];
+  let editId = $state(null);
+  let draft = $state(new Set());
+  let reason = $state('');
+  let customReason = $state(false);
+  const canSave = $derived(reason.trim().length > 0 && !incidentEdit.submitting);
+
+  function startEdit(m) {
+    editId = m.id;
+    draft = new Set(m.corrected_labels ?? m.incident_labels ?? []);
+    reason = '';
+    customReason = false;
+  }
+  function toggleLabel(l) {
+    const n = new Set(draft);
+    n.has(l) ? n.delete(l) : n.add(l);
+    draft = n;
+  }
+  async function saveLabels(m) {
+    const labels = INCIDENT_LABELS.filter((l) => draft.has(l));
+    const ok = await relabelIncident(m.id, labels, reason.trim());
+    if (ok) {
+      m.corrected_labels = labels; // reflect the correction inline
+      editId = null;
+    }
+  }
 
   // Board host from evidence_ref (forum:<board>:<tid>:<pid>) so the board's own
   // relative links can be resolved to absolute — otherwise they'd point at us.
@@ -177,6 +207,32 @@
             {:else}
               <div class="pbody plain">{m.body}</div>
             {/if}
+
+            <div class="relabel">
+              {#if editId === m.id}
+                <div class="chips">
+                  {#each INCIDENT_LABELS as l}
+                    <button type="button" class="chip" class:on={draft.has(l)} onclick={() => toggleLabel(l)}>{incidentLabelName(l)}</button>
+                  {/each}
+                </div>
+                <div class="chips">
+                  {#each REASON_PRESETS as r}
+                    <button type="button" class="chip" class:on={!customReason && reason === r} onclick={() => { reason = r; customReason = false; }}>{r}</button>
+                  {/each}
+                  <button type="button" class="chip" class:on={customReason} onclick={() => { customReason = true; reason = ''; }}>Custom…</button>
+                </div>
+                {#if customReason}<input class="fin" type="text" bind:value={reason} placeholder="Custom reason (recorded to the audit chain)" />{/if}
+                <div class="ra">
+                  <button class="btn" disabled={!canSave} onclick={() => saveLabels(m)}>Save correction</button>
+                  <button class="btn ghost" onclick={() => (editId = null)}>Cancel</button>
+                  <span class="hint">reason required · empty labels = false positive</span>
+                </div>
+              {:else}
+                {#if m.corrected_labels}{#each m.corrected_labels as l}<span class="badge corrected">{incidentLabelName(l)}</span>{/each}{/if}
+                <button class="editlink" onclick={() => startEdit(m)}>{m.corrected_labels ? 'edit correction' : 'correct labels'}</button>
+              {/if}
+              {#if editId === m.id && incidentEdit.msg}<span class="hint" class:err={incidentEdit.msg.startsWith('Failed')}>{incidentEdit.msg}</span>{/if}
+            </div>
           </li>
         {/each}
       </ol>
@@ -206,6 +262,15 @@
   .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; }
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
   .badge.incident { color: var(--red-text); border-color: var(--red-text); }
+  .badge.corrected { color: var(--accent-text); border-color: var(--accent-text); }
+  .relabel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-11); padding: 2px 8px; cursor: pointer; }
+  .chip.on { background: var(--accent-fill); border-color: var(--accent); color: var(--text-body); }
+  .ra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .editlink { background: none; border: none; color: var(--text-faint); font-family: var(--font-sans); font-size: var(--fs-11); text-decoration: underline; cursor: pointer; padding: 0; }
+  .editlink:hover { color: var(--accent); }
+  .hint.err { color: var(--red-text); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; }
   .pbody.plain { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-12); }
   /* links come from sanitized {@html}, so they need :global to be reachable.
