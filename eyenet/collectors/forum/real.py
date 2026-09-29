@@ -34,6 +34,7 @@ from eyenet.collectors.forum import (
     parse_forum_links,
     parse_thread,
     parse_thread_links,
+    parse_thread_title,
     thread_page_count,
 )
 from eyenet.contracts._base import TraceContext
@@ -319,10 +320,11 @@ class MyBBForumCollector(CollectorSkeleton):
         try:
             first = await self._get(url)
             pages = thread_page_count(first.text)
-            await self._ingest_page(tid, first.text)
+            title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
+            await self._ingest_page(tid, title, first.text)
             for page in range(2, pages + 1):
                 resp = await self._get(url, params={"page": page})
-                await self._ingest_page(tid, resp.text)
+                await self._ingest_page(tid, title, resp.text)
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
@@ -330,7 +332,7 @@ class MyBBForumCollector(CollectorSkeleton):
                 message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
             )
 
-    async def _ingest_page(self, tid: str, html: str) -> None:
+    async def _ingest_page(self, tid: str, title: str | None, html: str) -> None:
         posts = parse_thread(html)
         if not posts:
             _log.warning(
@@ -340,9 +342,9 @@ class MyBBForumCollector(CollectorSkeleton):
             )
             return
         for post in posts:
-            await self._ingest_post(tid, post)
+            await self._ingest_post(tid, title, post)
 
-    async def _ingest_post(self, tid: str, post: ParsedPost) -> None:
+    async def _ingest_post(self, tid: str, title: str | None, post: ParsedPost) -> None:
         source_uuid = self._source_uuid
         if source_uuid is None:
             return
@@ -359,7 +361,7 @@ class MyBBForumCollector(CollectorSkeleton):
             source_id=source_uuid,
             platform_groupid=tid,
             kind=GroupKind.FORUM_THREAD,
-            title=None,
+            title=title,
             seen_at=now,
         )
         actor_id = await self._storage.upsert_actor(
@@ -397,6 +399,10 @@ class MyBBForumCollector(CollectorSkeleton):
                 # [hide] gate: content locked until we reply. Recorded so the
                 # operator can find gated threads and decide whether to unlock.
                 "reply_gated": post.reply_gated,
+                # Denormalized author so the thread reader renders posts without
+                # an actor join per row.
+                "author_display": post.author_display,
+                "author_username": post.author_username,
             },
         )
         written = await self._storage.put_message(msg_row, [])

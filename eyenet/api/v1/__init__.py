@@ -18,14 +18,13 @@ from fastapi import APIRouter
 from eyenet.api.v1.actor_groups.api_list_actor_groups import router as actor_groups_router
 from eyenet.api.v1.actor_groups.api_open_crew_case import router as actor_groups_case_router
 from eyenet.api.v1.actor_groups.api_sweep_crew_cases import router as actor_groups_sweep_router
-from eyenet.api.v1.crews.api_crews import router as crews_router
+from eyenet.api.v1.actors.api_actor_stats import router as actors_stats_router
 
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
 from eyenet.api.v1.actors.api_get_neighbors import router as actors_neighbors_router
 from eyenet.api.v1.actors.api_get_relationships import router as actors_relationships_router
 from eyenet.api.v1.actors.api_get_timeline import router as actors_timeline_router
-from eyenet.api.v1.actors.api_actor_stats import router as actors_stats_router
 from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
 from eyenet.api.v1.actors.api_list_observations import router as actors_observations_router
 from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
@@ -115,6 +114,7 @@ from eyenet.api.v1.collectors.api_list_memberships import router as collectors_m
 from eyenet.api.v1.collectors.api_start_collector import router as collectors_start_router
 from eyenet.api.v1.collectors.api_stop_collector import router as collectors_stop_router
 from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
+from eyenet.api.v1.crews.api_crews import router as crews_router
 
 # === documents (M10 classifier) ===
 from eyenet.api.v1.documents.api_access_document import router as documents_access_router
@@ -131,20 +131,13 @@ from eyenet.api.v1.graph.api_search import router as graph_search_router
 # === groups (monitored-groups: see + join at will) ===
 from eyenet.api.v1.groups.api_join_group import router as groups_join_router
 from eyenet.api.v1.groups.api_leave_group import router as groups_leave_router
+from eyenet.api.v1.groups.api_list_group_messages import router as groups_messages_router
 from eyenet.api.v1.groups.api_list_groups import router as groups_list_router
 from eyenet.api.v1.groups.api_scan_groups import router as groups_scan_router
 
 # === health / metrics ===
 from eyenet.api.v1.health.api_healthz import router as health_live_router
 from eyenet.api.v1.health.api_readyz import router as health_ready_router
-
-# === identities ===
-from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
-from eyenet.api.v1.incidents.api_delete_incident_rule import router as incident_rule_delete_router
-from eyenet.api.v1.incidents.api_list_incident_rules import router as incident_rules_list_router
-from eyenet.api.v1.incidents.api_list_incidents import router as incidents_list_router
-from eyenet.api.v1.incidents.api_set_incident_label import router as incident_relabel_router
-from eyenet.api.v1.incidents.api_update_incident_rule import router as incident_rule_update_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
@@ -157,6 +150,14 @@ from eyenet.api.v1.identities.api_qr_start import router as identities_qr_start_
 from eyenet.api.v1.identities.api_qr_status import router as identities_qr_status_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
 
+# === identities ===
+from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
+from eyenet.api.v1.incidents.api_delete_incident_rule import router as incident_rule_delete_router
+from eyenet.api.v1.incidents.api_list_incident_rules import router as incident_rules_list_router
+from eyenet.api.v1.incidents.api_list_incidents import router as incidents_list_router
+from eyenet.api.v1.incidents.api_set_incident_label import router as incident_relabel_router
+from eyenet.api.v1.incidents.api_update_incident_rule import router as incident_rule_update_router
+
 # === linkages ===
 from eyenet.api.v1.linkages.api_confirm_linkage import router as linkages_confirm_router
 from eyenet.api.v1.linkages.api_get_linkage import router as linkages_get_router
@@ -164,7 +165,6 @@ from eyenet.api.v1.linkages.api_list_linkages import router as linkages_list_rou
 from eyenet.api.v1.linkages.api_reject_linkage import router as linkages_reject_router
 from eyenet.api.v1.linkages.api_suspect_linkage import router as linkages_suspect_router
 from eyenet.api.v1.linker.api_run import router as linker_run_router
-from eyenet.api.v1.relations.api_rebuild import router as relations_rebuild_router
 
 # === meta (gated OpenAPI schema, §12.5) ===
 from eyenet.api.v1.meta.api_openapi import router as meta_openapi_router
@@ -190,6 +190,7 @@ from eyenet.api.v1.reclassify.api_reclassify_document import (
 from eyenet.api.v1.reclassify.api_reclassify_observation import (
     router as reclassify_observation_router,
 )
+from eyenet.api.v1.relations.api_rebuild import router as relations_rebuild_router
 from eyenet.api.v1.schemas.errors import ProblemDetail
 
 # === sources (M9.D1 discovery) ===
@@ -373,6 +374,7 @@ v1_router.include_router(candidates_retry_router)
 
 # groups (monitored-groups: see + join at will)
 v1_router.include_router(groups_list_router)
+v1_router.include_router(groups_messages_router)
 v1_router.include_router(groups_join_router)
 v1_router.include_router(groups_leave_router)
 v1_router.include_router(groups_scan_router)

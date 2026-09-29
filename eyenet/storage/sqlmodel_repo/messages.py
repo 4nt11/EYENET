@@ -79,13 +79,11 @@ class MessagesMixin:
             return {}
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(
-                select(
-                    MessageTable.evidence_ref, MessageTable.id, MessageTable.body
-                ).where(col(MessageTable.evidence_ref).in_(evidence_refs))
+                select(MessageTable.evidence_ref, MessageTable.id, MessageTable.body).where(
+                    col(MessageTable.evidence_ref).in_(evidence_refs)
+                )
             )
-            return {
-                str(ref): (UUID(str(mid)), str(body)) for ref, mid, body in result.all()
-            }
+            return {str(ref): (UUID(str(mid)), str(body)) for ref, mid, body in result.all()}
 
     async def bodies_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, str]:
         """Bulk-fetch {message_id: body} for many ids in ONE query — enriches the
@@ -369,6 +367,41 @@ class MessagesMixin:
                 stmt = stmt.where(col(MessageTable.sent_at_source) >= since)
             if until is not None:
                 stmt = stmt.where(col(MessageTable.sent_at_source) < until)
+            result = await session.exec(stmt)
+            return int(result.one())
+
+    async def messages_for_group(
+        self,
+        group_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Messages in a group (a forum thread / chat), OLDEST-first.
+
+        A thread reads top-to-bottom, so unlike the actor timeline this orders
+        ascending. Returns ``MessageTable`` rows (type-erased) for the reader.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(MessageTable)
+                .where(MessageTable.group_id == group_id)
+                .order_by(col(MessageTable.sent_at_source).asc())
+                .order_by(col(MessageTable.id).asc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
+    async def count_messages_for_group(self, group_id: UUID) -> int:
+        """Count messages in a group."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(func.count())
+                .select_from(MessageTable)
+                .where(MessageTable.group_id == group_id)
+            )
             result = await session.exec(stmt)
             return int(result.one())
 

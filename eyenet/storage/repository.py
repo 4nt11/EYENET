@@ -1171,6 +1171,21 @@ class BaseRepository(ABC):
     ) -> int: ...
 
     @abstractmethod
+    async def messages_for_group(
+        self,
+        group_id: UUID,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Messages in a group (forum thread / chat), oldest-first. Returns
+        MessageTable rows (type-erased) for the thread reader."""
+
+    @abstractmethod
+    async def count_messages_for_group(self, group_id: UUID) -> int:
+        """Count messages in a group."""
+
+    @abstractmethod
     async def resolve_message_id(
         self,
         *,

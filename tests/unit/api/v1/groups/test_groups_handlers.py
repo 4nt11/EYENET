@@ -279,3 +279,73 @@ async def test_monitor_forum_category_opens_internal_membership(storage: BaseRep
         audit=_audit(storage),
     )
     assert len(await storage.list_active_memberships(collector_id=coll.id)) == 1
+
+
+@pytest.mark.unit
+async def test_groups_messages_returns_thread_posts_oldest_first(storage: BaseRepository) -> None:
+    from datetime import timedelta
+
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_group_messages import groups_messages
+    from eyenet.models import MessageTable
+    from eyenet.models._base import new_uuid7
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    gid = await storage.upsert_group(
+        source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
+    )
+    aid = await storage.upsert_actor(
+        source_id=sid,
+        actor_key="actor:x",
+        platform_userid="p",
+        handle="h",
+        display_name="d",
+        seen_at=now,
+    )
+    for i, body in enumerate(["first", "second"]):
+        await storage.put_message(
+            MessageTable(
+                id=new_uuid7(),
+                source_id=sid,
+                group_id=gid,
+                actor_id=aid,
+                platform_msgid=str(i),
+                evidence_ref=f"forum:b:42:{i}",
+                body=body,
+                length_chars=len(body),
+                length_words=1,
+                sent_at_source=now + timedelta(seconds=i),
+                ingested_at=now,
+                has_attachment=False,
+                source_specific={"body_html": f"<p>{body}</p>", "author_display": "d"},
+            ),
+            [],
+        )
+
+    page = await groups_messages(
+        group_id=gid,
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=True),
+    )
+    assert [m.body for m in page.items] == ["first", "second"]  # oldest-first
+    assert page.items[0].body_html == "<p>first</p>"
+    assert page.items[0].author_display == "d"
+    assert page.estimated_total == 2
+
+
+@pytest.mark.unit
+async def test_groups_messages_unknown_group_404(storage: BaseRepository) -> None:
+    from uuid import uuid4
+
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_group_messages import groups_messages
+
+    with pytest.raises(ResourceNotFound):
+        await groups_messages(
+            group_id=uuid4(),
+            _=_user(),
+            storage=storage,
+            page=CursorParams(offset=0, limit=50, include_total=False),
+        )

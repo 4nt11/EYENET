@@ -13,6 +13,7 @@ from eyenet.collectors.forum._mybb import (
     parse_forum_links,
     parse_thread,
     parse_thread_links,
+    parse_thread_title,
     thread_page_count,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "parse_forum_links",
     "parse_thread",
     "parse_thread_links",
+    "parse_thread_title",
     "thread_page_count",
 ]
