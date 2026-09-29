@@ -276,7 +276,7 @@
 </DossierLayout>
 
 <style>
-  .mid { font-size: var(--fs-16); color: var(--text-body); }
+  .mid { font-size: var(--fs-16); color: var(--text-body); min-width: 0; overflow-wrap: anywhere; }
   .mid.muted { color: var(--text-faint); }
   .oftotal { color: var(--text-muted); }
   .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 5px 10px; min-width: 200px; }
