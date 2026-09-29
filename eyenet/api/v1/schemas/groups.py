@@ -205,6 +205,36 @@ class CursorPageGroupThread(CursorPage[GroupThread]):
     """200 page response for `GET /v1/groups/{category_id}/threads`."""
 
 
+class CategorySearchHit(ApiSchema):
+    """One body-search match inside a forum category, tagged with the thread it came
+    from — the reader's category-level search result (links back to that thread)."""
+
+    id: UUID
+    ts: datetime
+    author_display: str | None = None
+    body: str
+    thread_group_id: UUID
+    thread_title: str | None = None
+
+    @classmethod
+    def from_row(
+        cls, msg: MessageTable, thread_group_id: UUID, thread_title: str | None
+    ) -> CategorySearchHit:
+        ss = msg.source_specific or {}
+        return cls(
+            id=msg.id,
+            ts=msg.sent_at_source,
+            author_display=_s(ss.get("author_display")),
+            body=msg.body,
+            thread_group_id=thread_group_id,
+            thread_title=thread_title,
+        )
+
+
+class CursorPageCategorySearchHit(CursorPage[CategorySearchHit]):
+    """200 page response for `GET /v1/groups/{category_id}/search`."""
+
+
 class ForumReplyRequest(ApiSchema):
     """Body for POST /v1/groups/{group_id}/reply — the operator's typed reply.
 
@@ -222,6 +252,8 @@ class ForumReplyResult(ApiSchema):
 
 
 __all__ = [
+    "CategorySearchHit",
+    "CursorPageCategorySearchHit",
     "CursorPageGroupMessage",
     "CursorPageGroupSummary",
     "CursorPageGroupThread",

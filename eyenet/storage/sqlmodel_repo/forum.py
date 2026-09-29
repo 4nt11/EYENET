@@ -8,8 +8,10 @@ requests, executes each write under its own throttle, then marks the outcome.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from eyenet.contracts.enums import GroupKind
@@ -18,6 +20,7 @@ from eyenet.models import (
     ForumReplyRequestTable,
     ForumThreadLinkTable,
     GroupTable,
+    MessageTable,
 )
 
 from ._helpers import safe_session
@@ -86,6 +89,66 @@ class ForumMixin:
             )
             result = await session.exec(stmt)
             return list(result)
+
+    def _category_search_stmt(
+        self, projection: Any, *, source_id: UUID, category_platform_groupid: str, q: str
+    ) -> Any:
+        """Shared FROM/JOIN/WHERE for the category-level body search: message → its
+        FORUM_THREAD group → the category link, filtered by the body match. The caller
+        owns the projection (rows vs COUNT), ordering, limit and offset — so the page
+        and its estimated_total can never diverge."""
+        return (
+            projection.join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id))
+            .join(
+                ForumThreadLinkTable,
+                col(ForumThreadLinkTable.thread_platform_groupid)
+                == col(GroupTable.platform_groupid),
+            )
+            .where(col(ForumThreadLinkTable.source_id) == source_id)
+            .where(col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid)
+            .where(col(GroupTable.source_id) == source_id)
+            .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
+            .where(self._body_match(q))  # type: ignore[attr-defined]
+        )
+
+    async def search_messages_in_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        q: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[tuple[object, UUID, str | None]]:
+        """Body-search across EVERY FORUM_THREAD under a category (the reader's
+        category-level search), so an operator can find a post without opening each
+        thread. Returns (MessageTable, thread_group_id, thread_title), newest match
+        first. FTS5 on SQLite via the ``_body_match`` seam, LIKE elsewhere."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._category_search_stmt(
+                select(MessageTable, GroupTable.id, GroupTable.current_title),
+                source_id=source_id,
+                category_platform_groupid=category_platform_groupid,
+                q=q,
+            )
+            stmt = stmt.order_by(col(MessageTable.sent_at_source).desc()).limit(limit).offset(offset)
+            result = await session.exec(stmt)
+            return [(m, UUID(str(gid)), title) for m, gid, title in result.all()]
+
+    async def count_messages_in_category(
+        self, *, source_id: UUID, category_platform_groupid: str, q: str
+    ) -> int:
+        """Total matches for :meth:`search_messages_in_category` (no offset/limit) —
+        the category search's ``estimated_total``."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._category_search_stmt(
+                select(func.count()).select_from(MessageTable),
+                source_id=source_id,
+                category_platform_groupid=category_platform_groupid,
+                q=q,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def create_forum_reply_request(
         self,
