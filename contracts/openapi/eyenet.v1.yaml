@@ -4628,11 +4628,12 @@ components:
       description: A group in the incident feed with its incident count (feed filter set).
       type: object
       additionalProperties: false
-      required: [group_id, count]
+      required: [group_id, source_id, count]
       properties:
-        group_id: { type: string, format: uuid }
-        title:    { type: string, nullable: true }
-        count:    { type: integer }
+        group_id:  { type: string, format: uuid }
+        title:     { type: string, nullable: true }
+        source_id: { type: string, format: uuid }
+        count:     { type: integer }
     IncidentSourceOut:
       description: A source in the incident feed with its incident count (source-level filter).
       type: object

@@ -43,7 +43,14 @@
 
   // The group popover lists the full server set (noisiest first), so groups outside the
   // current 200-row window are still mutable.
-  const groupOpts = $derived(incidentCtx.groups);
+  // Scope the group list to the selected source(s): picking "Darkforums" should
+  // narrow Groups to its threads, not still list Telegram chats. No source selected
+  // = all groups.
+  const groupOpts = $derived(
+    selectedSources.size
+      ? incidentCtx.groups.filter((g) => selectedSources.has(g.sourceId))
+      : incidentCtx.groups
+  );
   const sourceOpts = $derived(incidentCtx.sources);
 
   function applyFilter() {

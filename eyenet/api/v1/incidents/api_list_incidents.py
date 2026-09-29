@@ -84,7 +84,10 @@ async def list_incident_groups(
     """Every group that has incidents, noisiest first — the full option set for the feed's
     group filter (independent of the ``/incidents`` window)."""
     rows = await storage.incident_groups()
-    return [IncidentGroupOut(group_id=gid, title=title, count=n) for gid, title, n in rows]
+    return [
+        IncidentGroupOut(group_id=gid, title=title, source_id=sid, count=n)
+        for gid, title, sid, n in rows
+    ]
 
 
 @router.get(

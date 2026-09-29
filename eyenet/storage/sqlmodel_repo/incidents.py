@@ -118,22 +118,28 @@ class IncidentsMixin:
             result = await session.exec(stmt)
             return list(result.all())
 
-    async def incident_groups(self) -> list[tuple[UUID, str | None, int]]:
-        """Distinct groups with at least one incident, as (group_id, title, incident_count),
-        noisiest first — the source for the feed's group filter, independent of the
-        200-row feed window. Generic ANSI: incident → message → group, GROUP BY + COUNT."""
+    async def incident_groups(self) -> list[tuple[UUID, str | None, UUID, int]]:
+        """Distinct groups with at least one incident, as (group_id, title, source_id,
+        incident_count), noisiest first — the feed's group filter (with source_id so the
+        UI can scope the group list to a selected source). Generic ANSI: incident →
+        message → group, GROUP BY + COUNT."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             count = func.count()
             stmt = (
-                select(GroupTable.id, GroupTable.current_title, count)
+                select(GroupTable.id, GroupTable.current_title, GroupTable.source_id, count)
                 .select_from(IncidentTable)
                 .join(MessageTable, col(IncidentTable.message_id) == col(MessageTable.id))
                 .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id))
-                .group_by(col(GroupTable.id), col(GroupTable.current_title))
+                .group_by(
+                    col(GroupTable.id), col(GroupTable.current_title), col(GroupTable.source_id)
+                )
                 .order_by(count.desc())
             )
             result = await session.exec(stmt)
-            return [(UUID(str(gid)), title, int(n)) for gid, title, n in result.all()]
+            return [
+                (UUID(str(gid)), title, UUID(str(sid)), int(n))
+                for gid, title, sid, n in result.all()
+            ]
 
     async def incident_sources(self) -> list[tuple[UUID, str | None, int]]:
         """Distinct sources with at least one incident, as (source_id, display_name,

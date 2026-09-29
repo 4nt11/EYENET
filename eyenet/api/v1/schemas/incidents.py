@@ -32,10 +32,12 @@ class IncidentOut(ApiSchema):
 
 class IncidentGroupOut(ApiSchema):
     """A group appearing in the incident feed, with its incident count — populates the
-    triage feed's group filter (the full set, not the current feed window)."""
+    triage feed's group filter (the full set, not the current feed window). source_id lets
+    the UI scope the group list to a selected source."""
 
     group_id: UUID
     title: str | None = None
+    source_id: UUID
     count: int
 
 

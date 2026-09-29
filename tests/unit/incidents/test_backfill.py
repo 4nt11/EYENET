@@ -125,8 +125,8 @@ def test_recent_incidents_group_filter_shows_only_selected(storage) -> None:
 
         # incident_groups lists BOTH groups (full set, window-independent) with counts
         groups = await storage.incident_groups()
-        assert {gid for gid, _t, _n in groups} == {g_a, g_b}
-        assert {t: n for _g, t, n in groups} == {"Alpha": 1, "Beta": 1}
+        assert {gid for gid, _t, _sid, _n in groups} == {g_a, g_b}
+        assert {t: n for _g, t, _sid, n in groups} == {"Alpha": 1, "Beta": 1}
 
     asyncio.run(_run())
 
