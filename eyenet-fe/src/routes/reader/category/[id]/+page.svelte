@@ -23,6 +23,7 @@
   let selectedLabels = $state(new Set());
   let countryOpts = $state([]);
   let labelOpts = $state([]);
+  let threadTotal = $state(null); // real total for the current filter (not the page cap)
 
   // Detail pane: the selected thread's posts.
   let detailMsgs = $state([]);
@@ -55,12 +56,13 @@
     html ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }) : (fallback ?? '');
 
   async function load() {
-    const params = new URLSearchParams({ limit: '200', sort });
+    const params = new URLSearchParams({ limit: '200', sort, include_total: '1' });
     for (const c of selectedCountries) params.append('country', c);
     for (const l of selectedLabels) params.append('label', l);
     try {
       const p = await apiGet(`/v1/groups/${$page.params.id}/threads?${params}`, { auth: true });
       threads = p.items ?? [];
+      threadTotal = p.estimated_total ?? null;
       error = null;
     } catch (e) {
       error = e.message;
@@ -167,7 +169,7 @@
   {/snippet}
 
   {#snippet filters()}
-    <span class="fcount">{threads.length} thread{threads.length === 1 ? '' : 's'}</span>
+    <span class="fcount">{threadTotal ?? threads.length}{#if threadTotal != null && threadTotal > threads.length}<span class="oftotal"> (showing {threads.length})</span>{/if} thread{(threadTotal ?? threads.length) === 1 ? '' : 's'}</span>
     <input
       class="search"
       type="search"
@@ -274,6 +276,7 @@
 <style>
   .mid { font-size: var(--fs-16); color: var(--text-body); }
   .mid.muted { color: var(--text-faint); }
+  .oftotal { color: var(--text-muted); }
   .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 5px 10px; min-width: 200px; }
   .search:focus { outline: none; border-color: var(--accent); }
   .fgroup { display: flex; align-items: center; gap: 4px; }

@@ -1283,6 +1283,18 @@ class BaseRepository(ABC):
         resolved to one of the ISO codes / carries any of the incident labels."""
 
     @abstractmethod
+    async def count_threads_for_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+    ) -> int:
+        """Total threads under a category matching the same filters as
+        :meth:`list_threads_for_category` — the list's real total, not the page cap."""
+
+    @abstractmethod
     async def forum_threads_needing_summary(
         self, *, limit: int = 500
     ) -> list[tuple[UUID, str | None, UUID, str, datetime]]:
