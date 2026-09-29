@@ -195,6 +195,9 @@ class MyBBForumCollector(CollectorSkeleton):
         # empty and we crawl nothing (fail-closed).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
+        # Bind our row to the source we actually ingest into (the placeholder
+        # source it was registered against has zero of our messages).
+        await self._bind_collector_row_source(collector, self._source_uuid)
         # Populate /monitored-groups with the board's categories so the operator
         # can pick which to monitor. Read-only page fetch, nothing joined.
         if await self._check_session():
