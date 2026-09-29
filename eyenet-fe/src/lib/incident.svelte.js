@@ -18,6 +18,7 @@ function mapIncident(r) {
     groupId: r.group_id ?? null, // group id (drives the group filter)
     actorId: r.actor_id ?? null, // WHO: sender actor (dossier link)
     actorHandle: r.actor_handle ?? null,
+    victimCountry: r.victim_country ?? null, // WHERE (victim): ISO alpha-2, null if unknown
     labels: r.labels ?? [],
     // per-head scores as [label, prob] rows, highest first (for the detail pane)
     scoreRows: Object.entries(scores).sort((a, b) => b[1] - a[1]),

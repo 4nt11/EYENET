@@ -119,7 +119,7 @@
 </script>
 
 <DossierLayout listLabel="Incidents"
-  items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.map(incidentLabelName).join(' · ') || x.idShort, secondary: (x.group ? x.group + ' · ' : '') + ((x.body ?? '').slice(0, 56) || x.idShort) }))}
+  items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.map(incidentLabelName).join(' · ') || x.idShort, secondary: (x.victimCountry ? '[' + x.victimCountry + '] ' : '') + (x.group ? x.group + ' · ' : '') + ((x.body ?? '').slice(0, 56) || x.idShort) }))}
   selectedId={sel?.id} onSelect={(id) => (selectedId = id)}
   selected={!!sel}>
 
@@ -198,6 +198,7 @@
     {/if}
     <div class="ctx">
       {#if sel.group}<span class="cwhere">in {sel.group}</span>{/if}
+      {#if sel.victimCountry}<span class="cwhere">victim {sel.victimCountry}</span>{/if}
       {#if sel.actorHandle || sel.actorId}
         <span class="cwho">from
           {#if sel.actorId}<a class="alink" href={`/actors?id=${sel.actorId}`}>{sel.actorHandle || sel.actorId.slice(0, 8)}</a>{:else}{sel.actorHandle}{/if}

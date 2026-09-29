@@ -50,6 +50,7 @@ from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import ServiceBase, run_service
 from eyenet.services.anchor_emitter import AnchorEmitter
 from eyenet.services.collector_supervisor import CollectorSupervisor
+from eyenet.services.geo_attribution import GeoAttributionService
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 from eyenet.verifier.service import VerifierService
@@ -417,6 +418,31 @@ def incident_classifier_run(  # pragma: no cover
         ),
         cfg,
         tick=flush_interval,
+    )
+
+
+@app.command("geo")
+def geo_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+    batch_size: int = typer.Option(500, "--batch-size", help="messages per attribution batch"),
+    interval: float = typer.Option(
+        2.0, "--interval", help="seconds between attribution batches (0 = one pass then wait)"
+    ),
+) -> None:
+    """Run victim-country attribution over incident-flagged messages.
+
+    Tick-driven: each tick attributes a batch of flagged messages that have no geo
+    verdict yet, so it backfills the existing corpus then stays live. Results land in
+    the message_geo sidecar and surface on the incident feed.
+    """
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(
+        lambda bus, storage: GeoAttributionService(bus=bus, storage=storage, batch_size=batch_size),
+        cfg,
+        tick=interval,
     )
 
 

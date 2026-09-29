@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.v1.schemas.incidents import IncidentGroupOut, IncidentOut, IncidentSourceOut
-from eyenet.contracts.incident import IncidentLabelRow, IncidentRow
+from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, MessageGeoRow
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["incidents"])
@@ -52,6 +52,8 @@ async def list_incidents(
     corrections = cast(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
+    geo = cast("dict[UUID, MessageGeoRow]", await storage.message_geo_by_message_ids(ids))
+    country_by_id = {mid: g.country for mid, g in geo.items()}
     return [
         IncidentOut(
             message_id=r.message_id,
@@ -60,6 +62,7 @@ async def list_incidents(
             group_id=mc[1],
             actor_id=mc[2],
             actor_handle=mc[3],
+            victim_country=country_by_id.get(r.message_id),
             labels=r.labels,
             scores=r.scores,
             model_version=r.model_version,
