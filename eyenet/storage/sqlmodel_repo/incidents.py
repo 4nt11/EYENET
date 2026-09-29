@@ -15,12 +15,18 @@ from uuid import UUID
 from sqlalchemy import String, cast as sql_cast, func, or_
 from sqlmodel import col, select
 
-from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRuleRow
+from eyenet.contracts.incident import (
+    IncidentLabelRow,
+    IncidentRow,
+    IncidentRuleRow,
+    MessageGeoRow,
+)
 from eyenet.models import (
     GroupTable,
     IncidentLabelTable,
     IncidentRuleTable,
     IncidentTable,
+    MessageGeoTable,
     MessageTable,
     SourceTable,
 )
@@ -40,6 +46,17 @@ def _label_row(t: IncidentLabelTable) -> IncidentLabelRow:
         reason=t.reason,
         decided_by=t.decided_by,
         decided_at=t.decided_at,
+    )
+
+
+def _geo_row(t: MessageGeoTable) -> MessageGeoRow:
+    return MessageGeoRow(
+        message_id=t.message_id,
+        country=t.country,
+        status=t.status,
+        decided_by=t.decided_by,
+        engine_version=t.engine_version,
+        classified_at=t.classified_at,
     )
 
 
@@ -181,6 +198,61 @@ class IncidentsMixin:
             result = await session.exec(stmt)
             return [(mid, body) for mid, body in result]
 
+    # ── victim-country attribution (geo sidecar, incident-flagged messages) ───
+    async def messages_needing_geo(self, *, limit: int = 500) -> list[tuple[UUID, str, str | None]]:
+        """(message_id, body, thread_title) for incident messages that have no geo row yet.
+
+        A message counts as an incident if EITHER the classifier flagged it (a row in
+        ``incident``) OR an operator asserted a non-empty true-label set via the reader (a
+        ``incident_label`` row with labels != []). The operator channel matters: with a
+        young classifier, real incidents are often hand-rescued, and those never get an
+        ``incident`` row. Generic ANSI: message IN (model-flagged OR operator-labeled) and
+        NOT IN the geo set; outer-join the group for its title. Oldest id first."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            model_flagged = select(IncidentTable.message_id)
+            # labels is a JSON array; "[]" is the operator false-positive marker — exclude it.
+            operator_labeled = select(IncidentLabelTable.message_id).where(
+                sql_cast(col(IncidentLabelTable.labels), String) != "[]"
+            )
+            done = select(MessageGeoTable.message_id)
+            stmt = (
+                select(MessageTable.id, MessageTable.body, GroupTable.current_title)
+                .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id), isouter=True)
+                .where(
+                    or_(
+                        col(MessageTable.id).in_(model_flagged),
+                        col(MessageTable.id).in_(operator_labeled),
+                    )
+                )
+                .where(col(MessageTable.id).not_in(done))
+                .order_by(col(MessageTable.id))
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [(mid, body, title) for mid, body, title in result.all()]
+
+    async def put_message_geo_bulk(self, geo_rows: list[object]) -> None:
+        """Persist many MessageGeoRows in ONE session (the geo service's batch flush).
+        Append-only; ``message_id`` is unique and the work queue only yields un-attributed
+        messages, so a plain ANSI insert never conflicts."""
+        if not geo_rows:
+            return
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            for r in geo_rows:
+                row = cast("MessageGeoRow", r)
+                session.add(MessageGeoTable(**row.model_dump()))
+            await session.commit()
+
+    async def message_geo_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, object]:
+        """Bulk {message_id: MessageGeoRow} for feed enrichment (mirrors the label join)."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageGeoTable).where(col(MessageGeoTable.message_id).in_(message_ids))
+            )
+            return {t.message_id: _geo_row(t) for t in result.all()}
+
     # ── operator ground-truth label corrections (retraining signal) ──────────
     async def set_incident_label(
         self,
@@ -235,9 +307,7 @@ class IncidentsMixin:
             return {}
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(
-                select(
-                    IncidentTable.message_id, IncidentTable.labels, IncidentTable.classified_at
-                )
+                select(IncidentTable.message_id, IncidentTable.labels, IncidentTable.classified_at)
                 .where(col(IncidentTable.message_id).in_(message_ids))
                 .order_by(col(IncidentTable.classified_at).desc())
             )

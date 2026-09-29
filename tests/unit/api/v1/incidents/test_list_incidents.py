@@ -37,6 +37,18 @@ class _FakeStorage:
     async def incident_labels_by_message_ids(self, message_ids: list) -> dict:
         return {}
 
+    async def message_geo_by_message_ids(self, message_ids: list) -> dict:
+        # first message gets a CL verdict; the rest are un-attributed (None country)
+        return (
+            {
+                message_ids[0]: SimpleNamespace(
+                    country="CL", status="resolved", decided_by="country_name"
+                )
+            }
+            if message_ids
+            else {}
+        )
+
     async def message_context_by_ids(self, message_ids: list) -> dict:
         # fields returned: group_title, group_id, actor_id, actor_handle
         return {mid: ("Cash Network", uuid4(), uuid4(), "@scammer") for mid in message_ids}
@@ -64,6 +76,8 @@ def test_list_incidents_maps_all() -> None:
     assert all(o.body == f"body {o.message_id}" for o in out)  # body enrichment
     assert out[0].group == "Cash Network" and out[0].actor_handle == "@scammer"  # who/where
     assert out[0].group_id is not None  # group id surfaced for the group filter
+    assert out[0].victim_country == "CL"  # geo verdict merged in
+    assert out[1].victim_country is None  # un-attributed message stays None
 
 
 def test_list_incidents_label_filter_multi() -> None:

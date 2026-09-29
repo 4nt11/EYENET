@@ -57,6 +57,21 @@ class IncidentLabelRow(DbRowBase):
     decided_at: datetime
 
 
+class MessageGeoRow(DbRowBase):
+    """Victim-country attribution for a message (twin of MessageGeoTable).
+
+    ``country`` is the resolved ISO 3166-1 alpha-2, or None when ``status`` is
+    ``mixed``/``unknown``. Written by the geo-attribution service for incident-flagged
+    messages only. See eyenet/classifier/geo."""
+
+    message_id: UUID
+    country: str | None = None
+    status: str
+    decided_by: str | None = None
+    engine_version: str
+    classified_at: datetime
+
+
 class IncidentEnvelope(BusEnvelope):
     """Fired-incident bus event (published on INCIDENT_SUBJECT) — the triage feed payload.
     Carries the dereferenceable evidence_ref, not the body (operator-grade)."""
@@ -69,4 +84,11 @@ class IncidentEnvelope(BusEnvelope):
     classified_at: datetime
 
 
-__all__ = ["INCIDENT_SUBJECT", "SUBJECT", "IncidentEnvelope", "IncidentRow", "IncidentRuleRow"]
+__all__ = [
+    "INCIDENT_SUBJECT",
+    "SUBJECT",
+    "IncidentEnvelope",
+    "IncidentRow",
+    "IncidentRuleRow",
+    "MessageGeoRow",
+]

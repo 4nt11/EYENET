@@ -730,6 +730,22 @@ class BaseRepository(ABC):
         ordered), so pass the last returned id as ``after_id`` for the next page."""
 
     @abstractmethod
+    async def messages_needing_geo(self, *, limit: int = 500) -> list[tuple[UUID, str, str | None]]:
+        """(message_id, body, thread_title) for incident messages with no geo row yet.
+
+        The geo-attribution service's work queue. A message is an incident if the classifier
+        flagged it OR an operator gave it a non-empty true-label set via the reader (rescued
+        messages the young model missed). Excludes already-attributed messages. Oldest first."""
+
+    @abstractmethod
+    async def put_message_geo_bulk(self, geo_rows: list[object]) -> None:
+        """Persist many :class:`MessageGeoRow` in one session (append-only, unique per msg)."""
+
+    @abstractmethod
+    async def message_geo_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, object]:
+        """Bulk {message_id: MessageGeoRow} of victim-country verdicts (feed enrichment)."""
+
+    @abstractmethod
     async def set_incident_label(
         self,
         message_id: UUID,
@@ -1140,9 +1156,12 @@ class BaseRepository(ABC):
     @abstractmethod
     async def get_manual_crew(
         self, crew_id: UUID
-    ) -> tuple[
-        str, str | None, datetime, datetime, list[tuple[UUID, str | None, str | None, datetime]]
-    ] | None:
+    ) -> (
+        tuple[
+            str, str | None, datetime, datetime, list[tuple[UUID, str | None, str | None, datetime]]
+        ]
+        | None
+    ):
         """(name, notes, created_at, updated_at, members) or None; member =
         (actor_id, handle, display_name, added_at)."""
 

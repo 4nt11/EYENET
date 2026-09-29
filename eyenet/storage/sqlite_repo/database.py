@@ -76,6 +76,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "incident_rule",
         # operator ground-truth label corrections (retraining signal)
         "incident_label",
+        # victim-country attribution for incident-flagged messages (geo sidecar)
+        "message_geo",
         # operator-queued forum reply-to-unlock requests
         "forum_reply_request",
         # category -> thread edge for the forum reader navigation

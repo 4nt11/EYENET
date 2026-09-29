@@ -59,6 +59,7 @@ from .linkage_verifier_result import LinkageVerifierResultTable
 from .manual_crew import ManualCrewMemberTable, ManualCrewTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .message import AttachmentTable, ContentTemplateTable, MessageTable
+from .message_geo import MessageGeoTable
 from .mfa import MfaChallengeTable
 from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
@@ -119,6 +120,7 @@ __all__ = [
     "ManualCrewMemberTable",
     "ManualCrewTable",
     "MembershipTable",
+    "MessageGeoTable",
     "MessageObservationTable",
     "MessageTable",
     "MfaChallengeTable",
