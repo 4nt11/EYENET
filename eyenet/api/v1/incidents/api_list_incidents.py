@@ -39,7 +39,10 @@ async def list_incidents(
     q: Annotated[str | None, Query(max_length=256)] = None,
     group_id: Annotated[list[UUID] | None, Query()] = None,
     source_id: Annotated[list[UUID] | None, Query()] = None,
-    victim_country: Annotated[list[str] | None, Query(min_length=2, max_length=2)] = None,
+    # NOTE: no min_length/max_length here — on a list Query those constrain the NUMBER of
+    # items, not each string (a single ?victim_country=RU is a 1-item list → would 422).
+    # Per-item alpha-2 is documented in the OpenAPI; an unknown code just matches no rows.
+    victim_country: Annotated[list[str] | None, Query()] = None,
 ) -> CursorPageIncidentOut:
     # ?label= repeats (OR); ?group_id= / ?source_id= repeat to show only those groups/sources.
     # ?victim_country= repeats (ISO alpha-2) to show only incidents with that geo verdict —
