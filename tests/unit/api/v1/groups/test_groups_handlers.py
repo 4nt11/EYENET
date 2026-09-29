@@ -349,3 +349,46 @@ async def test_groups_messages_unknown_group_404(storage: BaseRepository) -> Non
             storage=storage,
             page=CursorParams(offset=0, limit=50, include_total=False),
         )
+
+
+@pytest.mark.unit
+async def test_groups_reply_enqueues_pending(storage: BaseRepository) -> None:
+    from eyenet.api.v1.groups.api_reply_group import groups_reply
+    from eyenet.api.v1.schemas.groups import ForumReplyRequest
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    gid = await storage.upsert_group(
+        source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
+    )
+    res = await groups_reply(
+        group_id=gid,
+        body=ForumReplyRequest(message="thanks, appreciated"),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+    )
+    assert res.state == "pending"
+    pending = await storage.list_pending_forum_reply_requests(sid)
+    assert len(pending) == 1
+    assert pending[0].message == "thanks, appreciated"
+
+
+@pytest.mark.unit
+async def test_groups_reply_rejects_non_forum_thread(storage: BaseRepository) -> None:
+    from eyenet.api.v1.groups.api_reply_group import groups_reply
+    from eyenet.api.v1.schemas.groups import ForumReplyRequest
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
+    gid = await storage.upsert_group(
+        source_id=sid, platform_groupid="@c", kind=GroupKind.CHANNEL, title="c", seen_at=now
+    )
+    with pytest.raises(ConflictError):
+        await groups_reply(
+            group_id=gid,
+            body=ForumReplyRequest(message="x"),
+            current_user=_user(),
+            storage=storage,
+            audit=_audit(storage),
+        )

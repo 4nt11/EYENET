@@ -3061,6 +3061,29 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/groups/{group_id}/reply:
+    post:
+      tags: [groups]
+      operationId: groups_reply
+      summary: Enqueue an operator reply to unlock a gated forum thread (write:groups).
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForumReplyRequest' }
+      responses:
+        "202":
+          description: Reply queued for the collector to post under throttle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumReplyResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /v1/groups/join:
     post:
       tags: [groups]
@@ -5601,6 +5624,19 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/GroupMessage' }
+    ForumReplyRequest:
+      description: The operator's verbatim reply to unlock a gated forum thread.
+      type: object
+      required: [message]
+      properties:
+        message: { type: string, minLength: 1, maxLength: 10000 }
+    ForumReplyResult:
+      description: A queued forum reply-to-unlock request.
+      type: object
+      required: [request_id, state]
+      properties:
+        request_id: { type: string, format: uuid }
+        state:      { type: string }
     JoinGroupRequest:
       description: |
         Join-at-will target: either an existing candidate_id, or an undiscovered

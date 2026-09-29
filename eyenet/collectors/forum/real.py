@@ -32,6 +32,7 @@ from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.collectors.forum import (
     ParsedPost,
     parse_forum_links,
+    parse_reply_form,
     parse_thread,
     parse_thread_links,
     parse_thread_title,
@@ -76,6 +77,24 @@ _DEFAULT_MAX_CATEGORY_PAGES = 0
 
 def _zero_traceparent() -> str:
     return "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
+
+
+def _reply_outcome(html: str) -> str:
+    """Classify a MyBB do_newreply response: 'flood' | 'error' | 'ok'.
+
+    Leans toward 'ok' on ambiguity ON PURPOSE: a false 'failed' would tempt a
+    re-queue and double-post (a bot signature), whereas a false 'ok' just leaves
+    the operator seeing still-gated content to re-try. So only an explicit flood
+    or error page is a non-ok outcome.
+    ponytail: text heuristic on MyBB's stock pages; a hard theme rewrite of these
+    strings would need updating here.
+    """
+    t = html.lower()
+    if "wait" in t and "second" in t and ("post" in t or "flood" in t):
+        return "flood"
+    if 'class="error"' in t or "did not enter a message" in t or "not allowed to post" in t:
+        return "error"
+    return "ok"
 
 
 def _last_segment(url: str) -> str:
@@ -188,6 +207,13 @@ class MyBBForumCollector(CollectorSkeleton):
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
         return await self._client.get(url, **kw)
 
+    async def _post(self, url: str, **kw: Any) -> httpx.Response:
+        """Throttled POST — the ONLY write path, same jittered pacing as reads."""
+        if self._client is None:  # pragma: no cover - guarded by callers
+            raise RuntimeError("forum collector http client not initialized")
+        await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
+        return await self._client.post(url, **kw)
+
     async def enumerate_visible_groups(self) -> list[VisibleGroup]:
         """The board's categories (GroupKind.FORUM_CATEGORY) from the index.
 
@@ -238,6 +264,8 @@ class MyBBForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
+        # Operator-queued replies first, so an unlock is prompt (still throttled).
+        await self._process_reply_requests()
         # Re-sweep only when there is a reason to: first run, the monitored set
         # changed, or the interval elapsed. Reading the monitored set is a cheap
         # DB read; the paced HTTP sweep is gated behind it, so an idle collector
@@ -330,6 +358,115 @@ class MyBBForumCollector(CollectorSkeleton):
                 level=SystemLogLevel.WARN,
                 event="forum.fetch_failed",
                 message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
+            )
+
+    # -- operator-triggered reply-to-unlock (write path) ----------------------
+
+    async def _process_reply_requests(self) -> None:
+        """Post the operator's queued replies, one at a time, under the throttle.
+
+        Never automatic: each request was explicitly enqueued by the operator with
+        their own typed message. We only execute what is already PENDING.
+        """
+        if self._source_uuid is None:
+            return
+        for req in await self._storage.list_pending_forum_reply_requests(self._source_uuid):
+            await self._execute_reply(req)
+
+    async def _execute_reply(self, req: Any) -> None:
+        now = datetime.now(tz=UTC)
+        grp = await self._storage.get_group(req.group_id)
+        if grp is None:
+            await self._storage.complete_forum_reply_request(
+                req.id, state="failed", result="group_gone", completed_at=now
+            )
+            return
+        tid = grp.platform_groupid
+        try:
+            # Scrape fresh single-use tokens from the reply form.
+            form_page = await self._get("newreply.php", params={"tid": tid})
+            form = parse_reply_form(form_page.text)
+            if form is None:
+                await self._storage.complete_forum_reply_request(
+                    req.id,
+                    state="failed",
+                    result="no_reply_form (session may lack post permission)",
+                    completed_at=now,
+                )
+                return
+            resp = await self._post(
+                "newreply.php",
+                params={"tid": tid, "processed": "1"},
+                data={
+                    "my_post_key": form.my_post_key,
+                    "posthash": form.posthash,
+                    "subject": form.subject or f"RE: {tid}",
+                    "tid": form.tid,
+                    "action": "do_newreply",
+                    "message": req.message,
+                },
+            )
+        except httpx.HTTPError as exc:
+            await self._storage.complete_forum_reply_request(
+                req.id, state="failed", result=f"http_error:{exc!r}", completed_at=now
+            )
+            return
+
+        outcome = _reply_outcome(resp.text)
+        if outcome != "ok":
+            await self._storage.complete_forum_reply_request(
+                req.id,
+                state="failed",
+                result=f"{outcome} (re-queue to retry)",
+                completed_at=now,
+            )
+            return
+
+        await self._refetch_thread_unlocked(tid)
+        await self._storage.complete_forum_reply_request(
+            req.id, state="done", result="posted; thread re-fetched", completed_at=now
+        )
+        await self.syslog(
+            level=SystemLogLevel.NOTICE,
+            event="forum.reply_posted",
+            message=f"{self._identity_name}: replied to unlock {tid} (op {req.requested_by})",
+        )
+
+    async def _refetch_thread_unlocked(self, tid: str) -> None:
+        """Re-fetch a thread after unlock and OVERWRITE its posts in place.
+
+        Uses showthread.php?tid (MyBB canonical, no slug). The gated placeholders
+        already exist, so we update by evidence_ref rather than insert.
+        """
+        try:
+            first = await self._get("showthread.php", params={"tid": tid})
+            pages = thread_page_count(first.text)
+            for page in range(1, pages + 1):
+                html = (
+                    first.text
+                    if page == 1
+                    else (await self._get("showthread.php", params={"tid": tid, "page": page})).text
+                )
+                for post in parse_thread(html):
+                    body = post.body_text
+                    await self._storage.update_message_content(
+                        f"forum:{self._board}:{tid}:{post.pid}",
+                        body=body,
+                        length_chars=len(body),
+                        length_words=len(body.split()),
+                        source_specific={
+                            "body_html": post.body_html,
+                            "edited": post.edited,
+                            "reply_gated": post.reply_gated,
+                            "author_display": post.author_display,
+                            "author_username": post.author_username,
+                        },
+                    )
+        except httpx.HTTPError as exc:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.refetch_failed",
+                message=f"{self._identity_name}: re-fetch of {tid} after reply failed ({exc!r})",
             )
 
     async def _ingest_page(self, tid: str, title: str | None, html: str) -> None:

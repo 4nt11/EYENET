@@ -76,6 +76,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "incident_rule",
         # operator ground-truth label corrections (retraining signal)
         "incident_label",
+        # operator-queued forum reply-to-unlock requests
+        "forum_reply_request",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

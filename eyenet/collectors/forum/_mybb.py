@@ -196,6 +196,49 @@ def parse_thread_links(html: str) -> list[str]:
     return out
 
 
+@dataclass(frozen=True)
+class ReplyForm:
+    """The per-session tokens a MyBB reply POST needs, scraped from newreply.php.
+
+    ``my_post_key`` + ``posthash`` are single-use anti-CSRF/anti-dup tokens; they
+    must be scraped fresh from the newreply GET immediately before the POST.
+    """
+
+    my_post_key: str
+    posthash: str
+    subject: str
+    tid: str
+
+
+def parse_reply_form(html: str) -> ReplyForm | None:
+    """Scrape the reply-form tokens from a MyBB ``newreply.php`` page.
+
+    Returns None if the form/tokens are absent (e.g. the session is not allowed
+    to post, or the page is not a newreply page) so the caller fails closed
+    rather than POSTing a reply with missing tokens.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+
+    def _val(name: str) -> str | None:
+        el = soup.select_one(f'input[name="{name}"]')
+        if el is None:
+            return None
+        v = el.get("value")
+        return str(v) if v is not None else None
+
+    my_post_key = _val("my_post_key")
+    posthash = _val("posthash")
+    tid = _val("tid")
+    if not (my_post_key and posthash and tid):
+        return None
+    return ReplyForm(
+        my_post_key=my_post_key,
+        posthash=posthash,
+        subject=_val("subject") or "",
+        tid=tid,
+    )
+
+
 def parse_thread_title(html: str) -> str | None:
     """The thread subject from a MyBB thread page's ``<title>``.
 

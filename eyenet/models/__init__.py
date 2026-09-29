@@ -47,6 +47,7 @@ from .identity import (
     IdentityLabelTable,
     IdentityTable,
 )
+from .forum_reply import ForumReplyRequestTable
 from .incident import IncidentTable
 from .incident_label import IncidentLabelTable
 from .incident_rule import IncidentRuleTable
@@ -102,6 +103,7 @@ __all__ = [
     "IdentityEventLogTable",
     "IdentityLabelTable",
     "IdentityTable",
+    "ForumReplyRequestTable",
     "IncidentLabelTable",
     "IncidentRuleTable",
     "IncidentTable",

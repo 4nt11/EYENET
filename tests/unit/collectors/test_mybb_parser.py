@@ -10,6 +10,7 @@ import pytest
 
 from eyenet.collectors.forum import (
     parse_forum_links,
+    parse_reply_form,
     parse_thread,
     parse_thread_links,
     thread_page_count,
@@ -76,6 +77,28 @@ def test_parse_thread_links_strips_query_and_dedupes() -> None:
         "<a href='Forum-X'>not a thread</a>"
     )
     assert parse_thread_links(html) == ["Thread-a--1", "Thread-b--2"]
+
+
+def test_parse_reply_form_scrapes_tokens() -> None:
+    html = (
+        '<form action="newreply.php?tid=92204&processed=1" method="post">'
+        '<input type="hidden" name="my_post_key" value="878c614c4935" />'
+        '<input type="hidden" name="posthash" value="3e0e812884b8" />'
+        '<input type="hidden" name="tid" value="92204" />'
+        '<input type="hidden" name="subject" value="RE: leak thread" />'
+        '<textarea name="message"></textarea></form>'
+    )
+    form = parse_reply_form(html)
+    assert form is not None
+    assert form.my_post_key == "878c614c4935"
+    assert form.posthash == "3e0e812884b8"
+    assert form.tid == "92204"
+    assert form.subject == "RE: leak thread"
+
+
+def test_parse_reply_form_missing_tokens_returns_none() -> None:
+    # no my_post_key -> fail closed, never POST without the CSRF token
+    assert parse_reply_form('<form><input name="tid" value="1"></form>') is None
 
 
 def test_thread_page_count() -> None:

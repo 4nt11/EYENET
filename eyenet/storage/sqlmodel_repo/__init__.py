@@ -31,6 +31,7 @@ from .documents import DocumentsMixin
 from .event_logs import EventLogsMixin
 from .feedback import FeedbackMixin
 from .file_access import FileAccessMixin
+from .forum import ForumMixin
 from .graph import GraphMixin
 from .health import HealthMixin
 from .idempotency import IdempotencyMixin
@@ -72,6 +73,7 @@ class SQLModelRepository(
     EventLogsMixin,
     FeedbackMixin,
     FileAccessMixin,
+    ForumMixin,
     GraphMixin,
     HealthMixin,
     IdempotencyMixin,
