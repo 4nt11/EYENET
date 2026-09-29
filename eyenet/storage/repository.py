@@ -1242,13 +1242,16 @@ class BaseRepository(ABC):
         *,
         limit: int,
         offset: int = 0,
+        q: str | None = None,
     ) -> list[object]:
         """Messages in a group (forum thread / chat), oldest-first. Returns
-        MessageTable rows (type-erased) for the thread reader."""
+        MessageTable rows (type-erased) for the thread reader. ``q`` free-text-matches
+        the body, scoped to this group (the reader's in-context search)."""
 
     @abstractmethod
-    async def count_messages_for_group(self, group_id: UUID) -> int:
-        """Count messages in a group."""
+    async def count_messages_for_group(self, group_id: UUID, *, q: str | None = None) -> int:
+        """Count messages in a group (``q`` scopes the same body search as
+        :meth:`messages_for_group`)."""
 
     @abstractmethod
     async def record_forum_thread_link(
@@ -1271,6 +1274,26 @@ class BaseRepository(ABC):
         offset: int = 0,
     ) -> list[object]:
         """FORUM_THREAD groups discovered under a category, most-recent-first."""
+
+    @abstractmethod
+    async def search_messages_in_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        q: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[tuple[object, UUID, str | None]]:
+        """Body-search across every FORUM_THREAD under a category (the reader's
+        category-level search). Returns (MessageTable, thread_group_id, thread_title),
+        newest match first."""
+
+    @abstractmethod
+    async def count_messages_in_category(
+        self, *, source_id: UUID, category_platform_groupid: str, q: str
+    ) -> int:
+        """Total matches for :meth:`search_messages_in_category` (no offset/limit)."""
 
     @abstractmethod
     async def create_forum_reply_request(

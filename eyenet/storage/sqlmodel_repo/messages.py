@@ -407,17 +407,21 @@ class MessagesMixin:
         *,
         limit: int,
         offset: int = 0,
+        q: str | None = None,
     ) -> list[object]:
         """Messages in a group (a forum thread / chat), OLDEST-first.
 
         A thread reads top-to-bottom, so unlike the actor timeline this orders
         ascending. Returns ``MessageTable`` rows (type-erased) for the reader.
+        ``q`` free-text-matches the body (the reader's in-context search), scoped to
+        this group — FTS5 on SQLite via the ``_body_match`` seam, LIKE elsewhere.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(MessageTable).where(MessageTable.group_id == group_id)
+            if q:
+                stmt = stmt.where(self._body_match(q))  # type: ignore[attr-defined]
             stmt = (
-                select(MessageTable)
-                .where(MessageTable.group_id == group_id)
-                .order_by(col(MessageTable.sent_at_source).asc())
+                stmt.order_by(col(MessageTable.sent_at_source).asc())
                 .order_by(col(MessageTable.id).asc())
                 .limit(limit)
                 .offset(offset)
@@ -425,14 +429,17 @@ class MessagesMixin:
             result = await session.exec(stmt)
             return list(result)
 
-    async def count_messages_for_group(self, group_id: UUID) -> int:
-        """Count messages in a group."""
+    async def count_messages_for_group(self, group_id: UUID, *, q: str | None = None) -> int:
+        """Count messages in a group (``q`` scopes the same body search as
+        :meth:`messages_for_group`, so the reader's estimated_total matches its page)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(func.count())
                 .select_from(MessageTable)
                 .where(MessageTable.group_id == group_id)
             )
+            if q:
+                stmt = stmt.where(self._body_match(q))  # type: ignore[attr-defined]
             result = await session.exec(stmt)
             return int(result.one())
 
