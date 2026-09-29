@@ -40,7 +40,10 @@ async def groups_messages(
         await storage.messages_for_group(group_id, limit=page.limit + 1, offset=page.offset),
     )
     has_more = len(rows) > page.limit
-    items = [GroupMessage.from_message(m) for m in rows[: page.limit]]
+    page_rows = rows[: page.limit]
+    # Attach the classifier's verdict per post so the reader shows what each was tagged.
+    labels = await storage.incident_labels_for_messages([m.id for m in page_rows])
+    items = [GroupMessage.from_message(m, labels.get(m.id)) for m in page_rows]
     estimated_total = (
         await storage.count_messages_for_group(group_id) if page.include_total else None
     )

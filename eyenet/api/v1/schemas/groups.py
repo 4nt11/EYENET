@@ -138,9 +138,12 @@ class GroupMessage(ApiSchema):
     reply_gated: bool = False
     edited: bool = False
     has_attachment: bool = False
+    incident_labels: list[str] = Field(default_factory=list)  # classifier verdict, if any
 
     @classmethod
-    def from_message(cls, msg: MessageTable) -> GroupMessage:
+    def from_message(
+        cls, msg: MessageTable, incident_labels: list[str] | None = None
+    ) -> GroupMessage:
         ss = msg.source_specific or {}
         return cls(
             id=msg.id,
@@ -154,6 +157,7 @@ class GroupMessage(ApiSchema):
             reply_gated=bool(ss.get("reply_gated", False)),
             edited=bool(ss.get("edited", False)),
             has_attachment=msg.has_attachment,
+            incident_labels=incident_labels or [],
         )
 
 

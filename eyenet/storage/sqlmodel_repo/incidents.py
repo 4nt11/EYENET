@@ -227,6 +227,26 @@ class IncidentsMixin:
             )
             return {t.message_id: _label_row(t) for t in result.all()}
 
+    async def incident_labels_for_messages(self, message_ids: list[UUID]) -> dict[UUID, list[str]]:
+        """Bulk {message_id: [labels]} from the CLASSIFIER's latest incident per message
+        (not operator corrections). Enriches the reader so a post shows what it was
+        tagged (e.g. data_breach). Messages with no incident are omitted."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(
+                    IncidentTable.message_id, IncidentTable.labels, IncidentTable.classified_at
+                )
+                .where(col(IncidentTable.message_id).in_(message_ids))
+                .order_by(col(IncidentTable.classified_at).desc())
+            )
+            out: dict[UUID, list[str]] = {}
+            for mid, labels, _ts in result.all():
+                if mid not in out:  # desc order → first seen is the latest run
+                    out[mid] = list(labels)
+            return out
+
     async def all_incident_labels(self) -> list[object]:
         """Every operator correction (the retraining ground-truth export)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
