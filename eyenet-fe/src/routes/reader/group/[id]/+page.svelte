@@ -200,6 +200,7 @@
               <span class="ts">{fmt(m.ts)}</span>
               {#if m.reply_gated}<span class="badge">gated</span>{/if}
               {#if m.edited}<span class="badge edited">edited</span>{/if}
+              {#if m.victim_country}<span class="badge country">{m.victim_country}</span>{/if}
               {#each m.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
               {#if m.corrected_labels}
                 <span class="corrtag">operator</span>
@@ -267,6 +268,7 @@
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
   .badge.incident { color: var(--red-text); border-color: var(--red-text); }
   .badge.corrected { color: var(--accent-text); border-color: var(--accent-text); }
+  .badge.country { color: var(--text-body); border-color: var(--text-faint); }
   .corrtag { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent-text); }
   .relabel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }

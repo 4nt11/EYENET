@@ -20,7 +20,7 @@ from pydantic import Field, model_validator
 
 from eyenet.contracts.candidate import GroupCandidateRow
 from eyenet.contracts.enums import CandidateState, GroupKind
-from eyenet.contracts.incident import IncidentLabelRow
+from eyenet.contracts.incident import IncidentLabelRow, MessageGeoRow
 from eyenet.models.group import GroupTable
 from eyenet.models.message import MessageTable
 
@@ -143,6 +143,12 @@ class GroupMessage(ApiSchema):
     corrected_labels: list[str] | None = None  # operator ground-truth (None = uncorrected)
     corrected_by: str | None = None
     corrected_at: datetime | None = None
+    victim_country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="WHERE (victim): ISO 3166-1 alpha-2; None if unknown/mixed/unattributed.",
+    )
 
     @classmethod
     def from_message(
@@ -150,6 +156,7 @@ class GroupMessage(ApiSchema):
         msg: MessageTable,
         incident_labels: list[str] | None = None,
         correction: IncidentLabelRow | None = None,
+        geo: MessageGeoRow | None = None,
     ) -> GroupMessage:
         ss = msg.source_specific or {}
         return cls(
@@ -168,6 +175,7 @@ class GroupMessage(ApiSchema):
             corrected_labels=list(correction.labels) if correction is not None else None,
             corrected_by=correction.decided_by if correction is not None else None,
             corrected_at=correction.decided_at if correction is not None else None,
+            victim_country=geo.country if geo is not None else None,
         )
 
 
