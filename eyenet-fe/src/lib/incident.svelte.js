@@ -37,7 +37,9 @@ export const incidentCtx = $state({
   labels: [],
   q: '',
   groupIds: [],
-  groups: [] // {id, title, count} for the group filter (full set, not window-limited)
+  groups: [], // {id, title, count} for the group filter (full set, not window-limited)
+  sourceIds: [],
+  sources: [] // {id, title, count} for the source-level filter (e.g. a whole forum)
 });
 
 // The complete set of groups that have incidents (noisiest first) — populates the group
@@ -58,15 +60,34 @@ export async function loadIncidentGroups() {
   }
 }
 
+// The complete set of SOURCES that have incidents (noisiest first) — the source-level
+// filter, so a whole forum ("Darkforums") is one option instead of thousands of threads.
+export async function loadIncidentSources() {
+  try {
+    const rows = await apiGet('/v1/incidents/sources', { auth: true });
+    if (Array.isArray(rows)) {
+      incidentCtx.sources = rows.map((s) => ({
+        id: s.source_id,
+        title: s.title ?? s.source_id.slice(0, 8),
+        count: s.count
+      }));
+    }
+  } catch {
+    // Non-critical: leaves the source filter empty; feed and other filters unaffected.
+  }
+}
+
 // labels: taxonomy leaves (OR filter, repeated ?label=). groupIds: show ONLY these groups
-// (repeated ?group_id=); empty = all groups.
-export async function loadIncidents(labels = [], q = '', groupIds = []) {
+// (repeated ?group_id=); sourceIds: show ONLY these sources (?source_id=); empty = all.
+export async function loadIncidents(labels = [], q = '', groupIds = [], sourceIds = []) {
   incidentCtx.labels = labels;
   incidentCtx.q = q;
   incidentCtx.groupIds = groupIds;
+  incidentCtx.sourceIds = sourceIds;
   const params = new URLSearchParams({ limit: '200' });
   for (const l of labels) params.append('label', l); // repeated ?label=a&label=b (OR)
   for (const g of groupIds) params.append('group_id', g); // show-only ?group_id=a&group_id=b
+  for (const s of sourceIds) params.append('source_id', s); // show-only ?source_id=a&source_id=b
   if (q) params.set('q', q); // free-text over message body (FTS5 on the backend)
   try {
     const rows = await apiGet(`/v1/incidents?${params}`, { auth: true });

@@ -39,6 +39,15 @@ class IncidentGroupOut(ApiSchema):
     count: int
 
 
+class IncidentSourceOut(ApiSchema):
+    """A source appearing in the incident feed, with its incident count — the source-level
+    filter (a forum rolls up under one source instead of thousands of threads)."""
+
+    source_id: UUID
+    title: str | None = None
+    count: int
+
+
 class IncidentLabelUpdate(ApiSchema):
     """Operator relabel of a classified message: the true label set + an audit reason."""
 

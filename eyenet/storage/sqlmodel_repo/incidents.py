@@ -22,6 +22,7 @@ from eyenet.models import (
     IncidentRuleTable,
     IncidentTable,
     MessageTable,
+    SourceTable,
 )
 
 from ._helpers import safe_session
@@ -74,6 +75,7 @@ class IncidentsMixin:
         offset: int = 0,
         q: str | None = None,
         group_ids: list[UUID] | None = None,
+        source_ids: list[UUID] | None = None,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters IN
         the query (OR: an incident matches if it carries ANY of the given leaves) so rare
@@ -95,8 +97,8 @@ class IncidentsMixin:
                         )
                     )
                 )
-            # q and group_ids both need the message; join ONCE.
-            if q or group_ids:
+            # q, group_ids, source_ids all need the message; join ONCE.
+            if q or group_ids or source_ids:
                 stmt = stmt.join(
                     MessageTable, col(IncidentTable.message_id) == col(MessageTable.id)
                 )
@@ -106,6 +108,10 @@ class IncidentsMixin:
                 stmt = stmt.where(self._body_match(q))
             if group_ids:
                 stmt = stmt.where(col(MessageTable.group_id).in_(group_ids))
+            if source_ids:
+                # Source-level filter: a forum's incidents all share one source
+                # ("Darkforums") even though each thread is its own group.
+                stmt = stmt.where(col(MessageTable.source_id).in_(source_ids))
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )
@@ -128,6 +134,23 @@ class IncidentsMixin:
             )
             result = await session.exec(stmt)
             return [(UUID(str(gid)), title, int(n)) for gid, title, n in result.all()]
+
+    async def incident_sources(self) -> list[tuple[UUID, str | None, int]]:
+        """Distinct sources with at least one incident, as (source_id, display_name,
+        count), noisiest first. The source-level feed filter — a forum's incidents
+        roll up under one source ("Darkforums") instead of thousands of threads."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            count = func.count()
+            stmt = (
+                select(SourceTable.id, SourceTable.display_name, count)
+                .select_from(IncidentTable)
+                .join(MessageTable, col(IncidentTable.message_id) == col(MessageTable.id))
+                .join(SourceTable, col(MessageTable.source_id) == col(SourceTable.id))
+                .group_by(col(SourceTable.id), col(SourceTable.display_name))
+                .order_by(count.desc())
+            )
+            result = await session.exec(stmt)
+            return [(UUID(str(sid)), name, int(n)) for sid, name, n in result.all()]
 
     def _body_match(self, q: str) -> Any:
         """Free-text predicate over the joined ``message.body``. Generic ANSI ``LIKE`` —
