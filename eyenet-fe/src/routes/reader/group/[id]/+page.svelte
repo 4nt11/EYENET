@@ -3,8 +3,9 @@
   import { page } from '$app/stores';
   import DOMPurify from 'dompurify';
   import { apiGet, apiPost } from '$lib/api.js';
-  import { incidentLabelName, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentLabelName, incidentTone, INCIDENT_LABELS } from '$lib/data.js';
   import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
+  import Badge from '$lib/components/Badge.svelte';
 
   // Message view for any group: a forum thread OR a chat/channel/room. Posts
   // render their evidence-faithful body_html (SANITIZED — this is threat-actor
@@ -228,12 +229,12 @@
               <span class="ts">{fmt(m.ts)}</span>
               {#if m.reply_gated}<span class="badge">gated</span>{/if}
               {#if m.edited}<span class="badge edited">edited</span>{/if}
-              {#if m.victim_country}<span class="badge country">{m.victim_country}</span>{/if}
-              {#each m.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
+              {#each m.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
+              {#if m.victim_country}<span class="ts">victim {m.victim_country}</span>{/if}
               {#if m.corrected_labels}
                 <span class="corrtag">operator</span>
-                {#each m.corrected_labels as l}<span class="badge corrected">{incidentLabelName(l)}</span>{/each}
-                {#if !m.corrected_labels.length}<span class="badge corrected">false positive</span>{/if}
+                {#each m.corrected_labels as l}<Badge tone={incidentTone(l)} dot>{incidentLabelName(l)}</Badge>{/each}
+                {#if !m.corrected_labels.length}<Badge tone="neutral" dot>false positive</Badge>{/if}
               {/if}
             </div>
             {#if m.body_html}
@@ -299,9 +300,6 @@
   .ts { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; }
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
-  .badge.incident { color: var(--red-text); border-color: var(--red-text); }
-  .badge.corrected { color: var(--accent-text); border-color: var(--accent-text); }
-  .badge.country { color: var(--text-body); border-color: var(--text-faint); }
   .corrtag { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent-text); }
   .relabel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
