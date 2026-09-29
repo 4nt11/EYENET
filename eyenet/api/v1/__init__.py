@@ -72,6 +72,7 @@ from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_re
 
 # === cases ===
 from eyenet.api.v1.cases.api_add_collaborator import router as cases_add_collaborator_router
+from eyenet.api.v1.cases.api_add_actor import router as cases_add_actor_router
 from eyenet.api.v1.cases.api_add_member import router as cases_add_member_router
 from eyenet.api.v1.cases.api_archive_case import router as cases_archive_router
 from eyenet.api.v1.cases.api_bulk_add_members import router as cases_bulk_add_members_router
@@ -327,6 +328,7 @@ v1_router.include_router(cases_list_members_router)
 v1_router.include_router(cases_list_observations_router)
 v1_router.include_router(cases_list_attachments_router)
 v1_router.include_router(cases_add_member_router)
+v1_router.include_router(cases_add_actor_router)
 v1_router.include_router(cases_bulk_add_members_router)
 v1_router.include_router(cases_bulk_remove_members_router)
 v1_router.include_router(cases_remove_member_router)

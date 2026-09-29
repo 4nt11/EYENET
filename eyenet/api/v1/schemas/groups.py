@@ -132,6 +132,7 @@ class GroupMessage(ApiSchema):
     evidence_ref: str
     platform_msgid: str
     ts: datetime
+    actor_id: UUID  # the author, for "open a case on this author"
     author_display: str | None = None
     author_username: str | None = None
     body: str
@@ -164,6 +165,7 @@ class GroupMessage(ApiSchema):
             evidence_ref=msg.evidence_ref,
             platform_msgid=msg.platform_msgid,
             ts=msg.sent_at_source,
+            actor_id=msg.actor_id,
             author_display=_s(ss.get("author_display")),
             author_username=_s(ss.get("author_username")),
             body=msg.body,

@@ -6,6 +6,7 @@
   import { incidentLabelName, incidentTone, INCIDENT_LABELS } from '$lib/data.js';
   import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
   import Badge from '$lib/components/Badge.svelte';
+  import CaseAddModal from '$lib/components/CaseAddModal.svelte';
 
   // Message view for any group: a forum thread OR a chat/channel/room. Posts
   // render their evidence-faithful body_html (SANITIZED — this is threat-actor
@@ -13,6 +14,7 @@
   // back to escaped body text. If any post is [hide]-gated, the operator can
   // enqueue a reply-to-unlock (posted by the collector under throttle).
   let msgs = $state([]);
+  let caseModalPost = $state(null); // {id, actor_id, author, threadTitle} or null
   let error = $state(null);
   let loaded = $state(false);
   let search = $state(''); // in-context body search, scoped to THIS group (thread/channel)
@@ -236,6 +238,10 @@
                 {#each m.corrected_labels as l}<Badge tone={incidentTone(l)} dot>{incidentLabelName(l)}</Badge>{/each}
                 {#if !m.corrected_labels.length}<Badge tone="neutral" dot>false positive</Badge>{/if}
               {/if}
+              <button
+                class="casebtn"
+                title="Add to a case"
+                onclick={() => (caseModalPost = { id: m.id, actor_id: m.actor_id, author: m.author_display || m.author_username, threadTitle: null })}>+ case</button>
             </div>
             {#if m.body_html}
               <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
@@ -275,6 +281,10 @@
   </div>
 </main>
 
+{#if caseModalPost}
+  <CaseAddModal post={caseModalPost} onClose={() => (caseModalPost = null)} />
+{/if}
+
 <style>
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .head { padding: 20px 24px 0; }
@@ -301,6 +311,8 @@
   .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; }
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
   .corrtag { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent-text); }
+  .casebtn { appearance: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 3px; background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); cursor: pointer; }
+  .casebtn:hover { border-color: var(--accent); color: var(--accent); }
   .relabel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-11); padding: 2px 8px; cursor: pointer; }
