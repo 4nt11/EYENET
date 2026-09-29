@@ -702,13 +702,15 @@ class BaseRepository(ABC):
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters in
         the query (OR across the given leaves; rare leaves found regardless of recency);
         ``q`` free-text-matches the message body; ``group_ids`` restricts to incidents in the
         given groups (show-only channels); ``source_ids`` restricts to sources;
-        ``exclude_bodyless`` drops content-less rows in SQL; ``offset`` pages."""
+        ``victim_countries`` keeps only incidents whose geo verdict is one of the given ISO
+        alpha-2 codes; ``exclude_bodyless`` drops content-less rows in SQL; ``offset`` pages."""
 
     @abstractmethod
     async def count_incidents(
@@ -718,6 +720,7 @@ class BaseRepository(ABC):
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
     ) -> int:
         """Total incidents matching the same filters as :meth:`recent_incidents`
@@ -732,6 +735,11 @@ class BaseRepository(ABC):
     async def incident_sources(self) -> list[tuple[UUID, str | None, int]]:
         """Distinct sources with at least one incident as (source_id, display_name, count),
         noisiest first — the source-level feed filter."""
+
+    @abstractmethod
+    async def incident_countries(self) -> list[tuple[str, int]]:
+        """Distinct resolved victim countries with at least one incident as
+        (country_alpha2, count), noisiest first — the victim-country feed filter."""
 
     @abstractmethod
     async def messages_without_incidents(
