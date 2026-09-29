@@ -65,16 +65,22 @@ def test_recent_incidents_q_searches_body(storage: BaseRepository) -> None:
         # a term absent from every body returns nothing
         assert await bodies(q="ransomware") == []
         # composes with label (matching body + non-matching label -> empty)
-        assert await bodies(q="greetz", label="not_a_real_label") == []
+        assert await bodies(q="greetz", labels=["not_a_real_label"]) == []
 
-        # FTS5 sync trigger: editing the body re-indexes it
-        first_id = msgs[0][0]
+        # FTS5 sync trigger: editing the body re-indexes it. Target the "bulk sms"
+        # row explicitly — messages_without_incidents has no guaranteed order, so
+        # msgs[0] is not reliably the row the assertions below expect to change.
+        first_id = next(mid for mid, body in msgs if "bulk sms" in body)
         async with storage.session() as s:  # type: ignore[attr-defined]
             from sqlalchemy import text
 
+            # WHERE id=:i must use the STORED form: SQLAlchemy's Uuid type persists
+            # UUIDs as 32-char hex WITHOUT dashes on SQLite, so bind first_id.hex,
+            # not str(first_id) (dashed) — the latter matches zero rows and the
+            # UPDATE (and its trigger) silently no-ops.
             await s.exec(
                 text("UPDATE message SET body='pivoted to phishing kits' WHERE id=:i").bindparams(
-                    i=str(first_id)
+                    i=first_id.hex
                 )
             )
             await s.commit()
