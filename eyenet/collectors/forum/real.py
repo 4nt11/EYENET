@@ -391,7 +391,13 @@ class MyBBForumCollector(CollectorSkeleton):
             forward_of_msg_id=None,
             forward_origin_actor_id=None,
             # Keep the evidence-faithful markup + edited flag alongside the row.
-            source_specific={"body_html": post.body_html, "edited": post.edited},
+            source_specific={
+                "body_html": post.body_html,
+                "edited": post.edited,
+                # [hide] gate: content locked until we reply. Recorded so the
+                # operator can find gated threads and decide whether to unlock.
+                "reply_gated": post.reply_gated,
+            },
         )
         written = await self._storage.put_message(msg_row, [])
 
