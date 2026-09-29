@@ -3,8 +3,9 @@
   import { page } from '$app/stores';
   import DOMPurify from 'dompurify';
   import { apiGet } from '$lib/api.js';
-  import { incidentLabelName } from '$lib/data.js';
+  import { incidentLabelName, incidentTone } from '$lib/data.js';
   import DossierLayout from '$lib/components/DossierLayout.svelte';
+  import Badge from '$lib/components/Badge.svelte';
 
   // Two-pane reader for a forum category: threads in the rail (each carries its
   // OP-anchored rollup — victim country + incident labels + date, so the list is
@@ -210,10 +211,10 @@
   {#snippet head()}
     {#if !searchMode && selectedThread}
       <div class="dhead">
+        {#each selectedThread.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
         {#if selectedThread.victim_country}
-          <span class="badge country" title={countryName(selectedThread.victim_country)}>{countryName(selectedThread.victim_country)}</span>
+          <span class="dmeta">victim {countryName(selectedThread.victim_country)}</span>
         {/if}
-        {#each selectedThread.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
         <span class="dmeta">tid {selectedThread.platform_groupid} · {fmt(selectedThread.thread_date ?? selectedThread.last_observed_at)}</span>
         <a class="openlink" href={`/reader/group/${selectedThread.group_id}`}>open full thread →</a>
       </div>
@@ -253,8 +254,8 @@
             <div class="pmeta">
               <span class="pauthor">{m.author_display || m.author_username || 'unknown'}</span>
               <span class="pts">{fmt(m.ts)}</span>
-              {#if m.victim_country}<span class="badge country" title={countryName(m.victim_country)}>{m.victim_country}</span>{/if}
-              {#each m.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
+              {#each m.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
+              {#if m.victim_country}<span class="pts" title={countryName(m.victim_country)}>victim {m.victim_country}</span>{/if}
             </div>
             <div class="pbody">{@html clean(m.body_html, m.body)}</div>
           </li>
@@ -309,10 +310,6 @@
   .pts { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); word-break: break-word; overflow-wrap: anywhere; }
   .pbody :global(img) { max-width: 100%; height: auto; }
-
-  .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); border: 1px solid var(--text-faint); color: var(--text-body); border-radius: 3px; padding: 0 5px; }
-  .badge.incident { color: var(--red-text); border-color: var(--red-text); }
-  .badge.country { color: var(--text-body); border-color: var(--text-faint); }
 
   .pnote { margin: 0; padding: 8px 2px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   .pnote.err { color: var(--red-text); }
