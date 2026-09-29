@@ -84,6 +84,62 @@ class IncidentsMixin:
             result = await session.exec(stmt)
             return list(result.all())
 
+    def _apply_incident_filters(
+        self,
+        stmt: Any,
+        *,
+        labels: list[str] | None,
+        q: str | None,
+        group_ids: list[UUID] | None,
+        source_ids: list[UUID] | None,
+        exclude_bodyless: bool = False,
+    ) -> Any:
+        """Apply the triage-feed filters to a SELECT over IncidentTable.
+
+        Shared by :meth:`recent_incidents` and :meth:`count_incidents` so the
+        page and its ``estimated_total`` can never drift apart. The caller owns
+        the projection (rows vs COUNT), ordering, offset and limit; this only
+        adds the WHERE/JOIN that both share.
+
+        ``exclude_bodyless`` drops incidents whose message body is null/blank
+        (pure-quote forum posts strip to empty and classify into content-less
+        "row not retained" rows). Doing it IN SQL — not as a post-fetch Python
+        filter — is what keeps offset paging honest (a page of ``limit`` returns
+        ``limit`` real rows) and the count exact.
+        # ponytail: SQL TRIM strips ASCII spaces; a body of only tabs/newlines
+        # would count as non-blank here where Python str.strip() drops it. Rare
+        # enough to accept; tighten with a char-class trim if it ever matters.
+        """
+        if labels:
+            # labels is a JSON array of clean identifiers; match the quoted token in its
+            # text form. cast + LIKE are ANSI; each pattern is a bound param (no
+            # injection). OR across the selected leaves (checkbox multi-select).
+            stmt = stmt.where(
+                or_(
+                    *(
+                        sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
+                        for lbl in labels
+                    )
+                )
+            )
+        # q, group_ids, source_ids, exclude_bodyless all need the message; join ONCE.
+        if q or group_ids or source_ids or exclude_bodyless:
+            stmt = stmt.join(MessageTable, col(IncidentTable.message_id) == col(MessageTable.id))
+        if q:
+            # the free-text predicate is the dialect seam (_body_match): generic LIKE
+            # here, FTS5 MATCH on SQLite, tsvector on a future Postgres backend.
+            stmt = stmt.where(self._body_match(q))
+        if group_ids:
+            stmt = stmt.where(col(MessageTable.group_id).in_(group_ids))
+        if source_ids:
+            # Source-level filter: a forum's incidents all share one source
+            # ("Darkforums") even though each thread is its own group.
+            stmt = stmt.where(col(MessageTable.source_id).in_(source_ids))
+        if exclude_bodyless:
+            # length(trim(NULL)) is NULL (> 0 → false), so this drops null bodies too.
+            stmt = stmt.where(func.length(func.trim(col(MessageTable.body))) > 0)
+        return stmt
+
     async def recent_incidents(
         self,
         limit: int = 50,
@@ -93,47 +149,53 @@ class IncidentsMixin:
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        exclude_bodyless: bool = False,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters IN
         the query (OR: an incident matches if it carries ANY of the given leaves) so rare
         leaves are found regardless of overall recency (the old post-fetch filter hid rare
         labels below the limit); ``q`` free-text-matches the message body; ``group_ids``
         restricts to incidents whose message is in ONE of the given groups (show-only
-        channels); ``offset`` pages. Newest first."""
+        channels); ``exclude_bodyless`` drops content-less rows in SQL; ``offset`` pages.
+        Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(IncidentTable)
-            if labels:
-                # labels is a JSON array of clean identifiers; match the quoted token in its
-                # text form. cast + LIKE are ANSI; each pattern is a bound param (no
-                # injection). OR across the selected leaves (checkbox multi-select).
-                stmt = stmt.where(
-                    or_(
-                        *(
-                            sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
-                            for lbl in labels
-                        )
-                    )
-                )
-            # q, group_ids, source_ids all need the message; join ONCE.
-            if q or group_ids or source_ids:
-                stmt = stmt.join(
-                    MessageTable, col(IncidentTable.message_id) == col(MessageTable.id)
-                )
-            if q:
-                # the free-text predicate is the dialect seam (_body_match): generic LIKE
-                # here, FTS5 MATCH on SQLite, tsvector on a future Postgres backend.
-                stmt = stmt.where(self._body_match(q))
-            if group_ids:
-                stmt = stmt.where(col(MessageTable.group_id).in_(group_ids))
-            if source_ids:
-                # Source-level filter: a forum's incidents all share one source
-                # ("Darkforums") even though each thread is its own group.
-                stmt = stmt.where(col(MessageTable.source_id).in_(source_ids))
+            stmt = self._apply_incident_filters(
+                select(IncidentTable),
+                labels=labels,
+                q=q,
+                group_ids=group_ids,
+                source_ids=source_ids,
+                exclude_bodyless=exclude_bodyless,
+            )
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    async def count_incidents(
+        self,
+        *,
+        labels: list[str] | None = None,
+        q: str | None = None,
+        group_ids: list[UUID] | None = None,
+        source_ids: list[UUID] | None = None,
+        exclude_bodyless: bool = False,
+    ) -> int:
+        """Total incidents matching the same filters as :meth:`recent_incidents`
+        (no offset/limit) — powers the triage feed's ``estimated_total`` so the
+        operator sees the full match size, not just the capped current page."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._apply_incident_filters(
+                select(func.count()).select_from(IncidentTable),
+                labels=labels,
+                q=q,
+                group_ids=group_ids,
+                source_ids=source_ids,
+                exclude_bodyless=exclude_bodyless,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def incident_groups(self) -> list[tuple[UUID, str | None, UUID, int]]:
         """Distinct groups with at least one incident, as (group_id, title, source_id,
