@@ -39,6 +39,9 @@ from .file_access import (
     SigningKeyChallengeTable,
     SystemUserSigningPubkeyHistoryTable,
 )
+from .forum_backfill import ForumBackfillRequestTable
+from .forum_reply import ForumReplyRequestTable
+from .forum_thread_link import ForumThreadLinkTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from .group import GroupSnapshotTable, GroupTable
 from .idempotency import IdempotencyRecordTable
@@ -47,8 +50,6 @@ from .identity import (
     IdentityLabelTable,
     IdentityTable,
 )
-from .forum_reply import ForumReplyRequestTable
-from .forum_thread_link import ForumThreadLinkTable
 from .incident import IncidentTable
 from .incident_label import IncidentLabelTable
 from .incident_rule import IncidentRuleTable
@@ -91,6 +92,9 @@ __all__ = [
     "FeedbackPairTable",
     "FileAccessAcknowledgmentTable",
     "FileAccessJournalTable",
+    "ForumBackfillRequestTable",
+    "ForumReplyRequestTable",
+    "ForumThreadLinkTable",
     "GraphEdgeTable",
     "GraphEdgeType",
     "GraphNodeTable",
@@ -104,8 +108,6 @@ __all__ = [
     "IdentityEventLogTable",
     "IdentityLabelTable",
     "IdentityTable",
-    "ForumReplyRequestTable",
-    "ForumThreadLinkTable",
     "IncidentLabelTable",
     "IncidentRuleTable",
     "IncidentTable",

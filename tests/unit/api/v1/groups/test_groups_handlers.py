@@ -446,3 +446,19 @@ async def test_groups_category_threads_rejects_non_category(storage: BaseReposit
             storage=storage,
             page=CursorParams(offset=0, limit=50, include_total=False),
         )
+
+
+@pytest.mark.unit
+async def test_groups_backfill_enqueues_pending(storage: BaseRepository) -> None:
+    from eyenet.api.v1.groups.api_backfill_group import groups_backfill
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    gid = await storage.upsert_group(
+        source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
+    )
+    res = await groups_backfill(
+        group_id=gid, current_user=_user(), storage=storage, audit=_audit(storage)
+    )
+    assert res.state == "pending"
+    assert len(await storage.list_pending_forum_backfill_requests(sid)) == 1

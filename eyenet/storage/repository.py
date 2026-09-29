@@ -1248,6 +1248,32 @@ class BaseRepository(ABC):
         """Mark a reply request done|failed with a result note."""
 
     @abstractmethod
+    async def create_forum_backfill_request(
+        self,
+        *,
+        source_id: UUID,
+        group_id: UUID,
+        requested_by: str,
+        requested_at: datetime,
+    ) -> UUID:
+        """Enqueue a deep-backfill of one forum thread (state=pending)."""
+
+    @abstractmethod
+    async def list_pending_forum_backfill_requests(self, source_id: UUID) -> list[object]:
+        """PENDING forum backfill requests for a source, oldest-first."""
+
+    @abstractmethod
+    async def complete_forum_backfill_request(
+        self,
+        request_id: UUID,
+        *,
+        state: str,
+        result: str | None,
+        completed_at: datetime,
+    ) -> None:
+        """Mark a backfill request done|failed."""
+
+    @abstractmethod
     async def resolve_message_id(
         self,
         *,

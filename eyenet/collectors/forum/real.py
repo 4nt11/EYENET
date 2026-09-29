@@ -73,6 +73,11 @@ _DEFAULT_DISCOVERY_INTERVAL = 21_600  # 6h
 # 0 = walk every page of a category (full backfill). MyBB sorts threads by last
 # post desc, so a positive cap gets the most recently active threads first.
 _DEFAULT_MAX_CATEGORY_PAGES = 0
+# Per-thread depth on a sweep. Page 1 is the leak + the OP (the signal + the
+# actor worth scraping); deeper pages are leecher "thanks" that bloat the corpus.
+# So default shallow for breadth; the operator backfills a specific thread deeper
+# on demand (POST .../backfill). 0 = all pages.
+_DEFAULT_MAX_THREAD_PAGES = 1
 
 
 def _zero_traceparent() -> str:
@@ -146,6 +151,7 @@ class MyBBForumCollector(CollectorSkeleton):
         self._delay_max = _DEFAULT_DELAY_MAX
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
+        self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
         # When we last swept (monotonic) + the monitored set that sweep was for
         # (so a newly-monitored category triggers a re-sweep next tick instead of
         # waiting out the interval).
@@ -164,6 +170,9 @@ class MyBBForumCollector(CollectorSkeleton):
         )
         self._max_category_pages = int(
             getattr(entry, "forum_max_category_pages", _DEFAULT_MAX_CATEGORY_PAGES)
+        )
+        self._max_thread_pages = int(
+            getattr(entry, "forum_max_thread_pages", _DEFAULT_MAX_THREAD_PAGES)
         )
 
         if self._client is None:
@@ -264,8 +273,9 @@ class MyBBForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
-        # Operator-queued replies first, so an unlock is prompt (still throttled).
+        # Operator-queued actions first, so they're prompt (still throttled).
         await self._process_reply_requests()
+        await self._process_backfill_requests()
         # Re-sweep only when there is a reason to: first run, the monitored set
         # changed, or the interval elapsed. Reading the monitored set is a cheap
         # DB read; the paced HTTP sweep is gated behind it, so an idle collector
@@ -355,6 +365,11 @@ class MyBBForumCollector(CollectorSkeleton):
         try:
             first = await self._get(url)
             pages = thread_page_count(first.text)
+            # Cap per-thread depth: the leak announcement + download live on page 1;
+            # deep pages are "thanks for the share" noise. Capping gets breadth
+            # (many threads' signal) instead of deep-mining a few. 0 = all pages.
+            if self._max_thread_pages > 0:
+                pages = min(pages, self._max_thread_pages)
             title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
             await self._ingest_page(tid, title, first.text)
             for page in range(2, pages + 1):
@@ -438,6 +453,49 @@ class MyBBForumCollector(CollectorSkeleton):
             event="forum.reply_posted",
             message=f"{self._identity_name}: replied to unlock {tid} (op {req.requested_by})",
         )
+
+    # -- operator-triggered deep backfill (read-only, one thread) --------------
+
+    async def _process_backfill_requests(self) -> None:
+        """Deep-fetch every page of the threads the operator queued for backfill."""
+        if self._source_uuid is None:
+            return
+        for req in await self._storage.list_pending_forum_backfill_requests(self._source_uuid):
+            await self._execute_backfill(req)
+
+    async def _execute_backfill(self, req: Any) -> None:
+        now = datetime.now(tz=UTC)
+        grp = await self._storage.get_group(req.group_id)
+        if grp is None:
+            await self._storage.complete_forum_backfill_request(
+                req.id, state="failed", result="group_gone", completed_at=now
+            )
+            return
+        try:
+            pages = await self._backfill_thread(grp.platform_groupid)
+        except httpx.HTTPError as exc:
+            await self._storage.complete_forum_backfill_request(
+                req.id, state="failed", result=f"http_error:{exc!r}", completed_at=now
+            )
+            return
+        await self._storage.complete_forum_backfill_request(
+            req.id, state="done", result=f"backfilled {pages} page(s)", completed_at=now
+        )
+
+    async def _backfill_thread(self, tid: str) -> int:
+        """Fetch ALL pages of a thread (showthread.php?tid) and ingest them.
+
+        Bypasses the shallow per-thread cap. put_message is insert-only, so the
+        already-stored page-1 posts are skipped and the deep pages are added.
+        """
+        first = await self._get("showthread.php", params={"tid": tid})
+        pages = thread_page_count(first.text)
+        title = parse_thread_title(first.text)
+        await self._ingest_page(tid, title, first.text)
+        for page in range(2, pages + 1):
+            resp = await self._get("showthread.php", params={"tid": tid, "page": page})
+            await self._ingest_page(tid, title, resp.text)
+        return pages
 
     async def _refetch_thread_unlocked(self, tid: str) -> None:
         """Re-fetch a thread after unlock and OVERWRITE its posts in place.

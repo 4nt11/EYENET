@@ -60,6 +60,39 @@ class ParsedPost:
     reply_gated: bool  # body carries a MyBB [hide] block: content locked until we reply
 
 
+def _cf_decode(hexs: str) -> str:
+    """Decode a Cloudflare cf_email hex string to the real address.
+
+    Cloudflare XORs the email bytes with the first byte as the key. Recovering it
+    matters: the obfuscated emails ARE the leaked PII this collector exists to
+    capture; storing "[email protected]" is silent data loss.
+    """
+    try:
+        raw = bytes.fromhex(hexs)
+    except ValueError:
+        return ""
+    if not raw:
+        return ""
+    key = raw[0]
+    return "".join(chr(b ^ key) for b in raw[1:])
+
+
+def _decode_cf_emails(node: Tag) -> None:
+    """Replace Cloudflare-obfuscated email links in-place with the real address."""
+    for a in node.select("a.__cf_email__"):
+        hexs = a.get("data-cfemail")
+        if isinstance(hexs, str):
+            decoded = _cf_decode(hexs)
+            if decoded:
+                a.replace_with(decoded)
+    # Some themes stash the hex on the href fragment of a protection link.
+    for a in node.select('a[href*="/cdn-cgi/l/email-protection#"]'):
+        href = str(a.get("href", ""))
+        decoded = _cf_decode(href.split("#", 1)[-1])
+        if decoded:
+            a.replace_with(decoded)
+
+
 def _username_slug(href: str) -> str:
     """``https://host/User-xNov`` or ``User-xNov`` -> ``xNov``."""
     tail = href.rstrip("/").rsplit("/", 1)[-1]
@@ -117,6 +150,10 @@ def parse_thread(html: str) -> list[ParsedPost]:
         edited = bool(edit_span and edit_span.get_text(strip=True))
 
         body = container.select_one("div.post_body")
+        if body is not None:
+            # Recover Cloudflare-obfuscated emails before capturing anything, so
+            # both the evidence HTML and the classifier text hold the real address.
+            _decode_cf_emails(body)
         # body_html keeps EVERYTHING (evidence-faithful), captured before we strip.
         body_html = body.decode_contents() if body else ""
         # body_text feeds the classifier/stylometry, so it must be the poster's

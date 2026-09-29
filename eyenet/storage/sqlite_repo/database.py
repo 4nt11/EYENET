@@ -80,6 +80,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "forum_reply_request",
         # category -> thread edge for the forum reader navigation
         "forum_thread_link",
+        # operator-queued deep backfill of one forum thread
+        "forum_backfill_request",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

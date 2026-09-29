@@ -131,6 +131,7 @@ from eyenet.api.v1.graph.api_search import router as graph_search_router
 # === groups (monitored-groups: see + join at will) ===
 from eyenet.api.v1.groups.api_join_group import router as groups_join_router
 from eyenet.api.v1.groups.api_leave_group import router as groups_leave_router
+from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
 from eyenet.api.v1.groups.api_list_category_threads import router as groups_threads_router
 from eyenet.api.v1.groups.api_list_group_messages import router as groups_messages_router
 from eyenet.api.v1.groups.api_reply_group import router as groups_reply_router
@@ -379,6 +380,7 @@ v1_router.include_router(groups_list_router)
 v1_router.include_router(groups_threads_router)
 v1_router.include_router(groups_messages_router)
 v1_router.include_router(groups_reply_router)
+v1_router.include_router(groups_backfill_router)
 v1_router.include_router(groups_join_router)
 v1_router.include_router(groups_leave_router)
 v1_router.include_router(groups_scan_router)
