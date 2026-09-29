@@ -1,5 +1,6 @@
-// Incidents triage state. List from GET /v1/incidents (a plain array, newest
-// first; optional ?label= filters to one taxonomy head). Read-only: each row
+// Incidents triage state. List from GET /v1/incidents (a CursorPage envelope:
+// { items, next_cursor, estimated_total }, newest first; optional ?label= filters
+// to one taxonomy head, ?include_total=1 asks for the count). Read-only: each row
 // carries everything the dossier shows (labels, per-head scores, model version,
 // timestamp), so selecting one needs no second fetch. Svelte 5 runes in a module,
 // same shape as linkage.svelte.js.
@@ -33,6 +34,8 @@ function mapIncident(r) {
 
 export const incidentCtx = $state({
   list: [],
+  total: null, // estimated_total from the page envelope (null until loaded / if unavailable)
+  nextCursor: null, // opaque cursor for the next page, null when this is the last
   loaded: false,
   error: null,
   labels: [],
@@ -86,18 +89,24 @@ export async function loadIncidents(labels = [], q = '', groupIds = [], sourceId
   incidentCtx.q = q;
   incidentCtx.groupIds = groupIds;
   incidentCtx.sourceIds = sourceIds;
-  const params = new URLSearchParams({ limit: '200' });
+  // include_total=1 → the page carries estimated_total for the count badge.
+  const params = new URLSearchParams({ limit: '200', include_total: '1' });
   for (const l of labels) params.append('label', l); // repeated ?label=a&label=b (OR)
   for (const g of groupIds) params.append('group_id', g); // show-only ?group_id=a&group_id=b
   for (const s of sourceIds) params.append('source_id', s); // show-only ?source_id=a&source_id=b
   if (q) params.set('q', q); // free-text over message body (FTS5 on the backend)
   try {
-    const rows = await apiGet(`/v1/incidents?${params}`, { auth: true });
-    incidentCtx.list = rows.map(mapIncident);
+    // GET /v1/incidents is a CursorPage envelope: { items, next_cursor, estimated_total }.
+    const page = await apiGet(`/v1/incidents?${params}`, { auth: true });
+    incidentCtx.list = (page.items ?? []).map(mapIncident);
+    incidentCtx.total = page.estimated_total ?? null;
+    incidentCtx.nextCursor = page.next_cursor ?? null;
     incidentCtx.error = null;
   } catch (e) {
     incidentCtx.error = e.message ?? String(e);
     incidentCtx.list = [];
+    incidentCtx.total = null;
+    incidentCtx.nextCursor = null;
   } finally {
     incidentCtx.loaded = true;
   }
