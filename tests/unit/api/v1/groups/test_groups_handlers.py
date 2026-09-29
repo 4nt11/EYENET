@@ -392,3 +392,57 @@ async def test_groups_reply_rejects_non_forum_thread(storage: BaseRepository) ->
             storage=storage,
             audit=_audit(storage),
         )
+
+
+@pytest.mark.unit
+async def test_groups_category_threads_lists_linked_threads(storage: BaseRepository) -> None:
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_category_threads import groups_category_threads
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    cat = await storage.upsert_group(
+        source_id=sid,
+        platform_groupid="Forum-Databases",
+        kind=GroupKind.FORUM_CATEGORY,
+        title="Databases",
+        seen_at=now,
+    )
+    await storage.upsert_group(
+        source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="leak", seen_at=now
+    )
+    await storage.record_forum_thread_link(
+        source_id=sid,
+        category_platform_groupid="Forum-Databases",
+        thread_platform_groupid="42",
+        seen_at=now,
+    )
+
+    page = await groups_category_threads(
+        category_id=cat,
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=False),
+    )
+    assert len(page.items) == 1
+    assert page.items[0].platform_groupid == "42"
+    assert page.items[0].title == "leak"
+
+
+@pytest.mark.unit
+async def test_groups_category_threads_rejects_non_category(storage: BaseRepository) -> None:
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_category_threads import groups_category_threads
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    thread = await storage.upsert_group(
+        source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
+    )
+    with pytest.raises(ConflictError):
+        await groups_category_threads(
+            category_id=thread,
+            _=_user(),
+            storage=storage,
+            page=CursorParams(offset=0, limit=50, include_total=False),
+        )

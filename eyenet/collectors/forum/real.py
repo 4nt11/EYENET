@@ -330,6 +330,13 @@ class MyBBForumCollector(CollectorSkeleton):
                 if self._max_category_pages > 0:
                     last = min(last, self._max_category_pages)
             for thread_url in parse_thread_links(resp.text):
+                if self._source_uuid is not None:
+                    await self._storage.record_forum_thread_link(
+                        source_id=self._source_uuid,
+                        category_platform_groupid=slug,
+                        thread_platform_groupid=_thread_id_from_url(thread_url),
+                        seen_at=datetime.now(tz=UTC),
+                    )
                 await self._poll_thread(thread_url)
                 threads += 1
             if page >= last:

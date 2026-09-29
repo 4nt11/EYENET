@@ -12,12 +12,76 @@ from uuid import UUID
 
 from sqlmodel import col, select
 
-from eyenet.models import ForumReplyRequestTable
+from eyenet.contracts.enums import GroupKind
+from eyenet.models import ForumReplyRequestTable, ForumThreadLinkTable, GroupTable
 
 from ._helpers import safe_session
 
 
 class ForumMixin:
+    async def record_forum_thread_link(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        thread_platform_groupid: str,
+        seen_at: datetime,
+    ) -> None:
+        """Record (idempotently) that a thread was discovered under a category."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            existing = await session.exec(
+                select(ForumThreadLinkTable)
+                .where(ForumThreadLinkTable.source_id == source_id)
+                .where(
+                    col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid
+                )
+                .where(col(ForumThreadLinkTable.thread_platform_groupid) == thread_platform_groupid)
+            )
+            row = existing.first()
+            if row is not None:
+                row.last_seen_at = seen_at
+                session.add(row)
+            else:
+                session.add(
+                    ForumThreadLinkTable(
+                        source_id=source_id,
+                        category_platform_groupid=category_platform_groupid,
+                        thread_platform_groupid=thread_platform_groupid,
+                        last_seen_at=seen_at,
+                    )
+                )
+            await session.commit()
+
+    async def list_threads_for_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """FORUM_THREAD groups discovered under a category, most-recent-first."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(GroupTable)
+                .join(
+                    ForumThreadLinkTable,
+                    col(ForumThreadLinkTable.thread_platform_groupid)
+                    == col(GroupTable.platform_groupid),
+                )
+                .where(col(ForumThreadLinkTable.source_id) == source_id)
+                .where(
+                    col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid
+                )
+                .where(col(GroupTable.source_id) == source_id)
+                .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
+                .order_by(col(GroupTable.last_observed_at_ingest).desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return list(result)
+
     async def create_forum_reply_request(
         self,
         *,

@@ -1199,6 +1199,28 @@ class BaseRepository(ABC):
         """Count messages in a group."""
 
     @abstractmethod
+    async def record_forum_thread_link(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        thread_platform_groupid: str,
+        seen_at: datetime,
+    ) -> None:
+        """Record (idempotently) that a thread was discovered under a category."""
+
+    @abstractmethod
+    async def list_threads_for_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """FORUM_THREAD groups discovered under a category, most-recent-first."""
+
+    @abstractmethod
     async def create_forum_reply_request(
         self,
         *,
