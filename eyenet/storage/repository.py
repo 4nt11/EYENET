@@ -1242,13 +1242,16 @@ class BaseRepository(ABC):
         *,
         limit: int,
         offset: int = 0,
+        q: str | None = None,
     ) -> list[object]:
         """Messages in a group (forum thread / chat), oldest-first. Returns
-        MessageTable rows (type-erased) for the thread reader."""
+        MessageTable rows (type-erased) for the thread reader. ``q`` free-text-matches
+        the body, scoped to this group (the reader's in-context search)."""
 
     @abstractmethod
-    async def count_messages_for_group(self, group_id: UUID) -> int:
-        """Count messages in a group."""
+    async def count_messages_for_group(self, group_id: UUID, *, q: str | None = None) -> int:
+        """Count messages in a group (``q`` scopes the same body search as
+        :meth:`messages_for_group`)."""
 
     @abstractmethod
     async def record_forum_thread_link(
