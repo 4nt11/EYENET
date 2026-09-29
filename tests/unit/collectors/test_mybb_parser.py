@@ -91,6 +91,27 @@ def test_thread_page_count() -> None:
     assert thread_page_count(paged) == 7
 
 
+def test_quote_stripped_from_classifier_text_but_kept_in_html() -> None:
+    # a reply that quotes a breach dump, then says one word
+    html = (
+        '<div class="post classic" id="post_7">'
+        '<div class="post_user-profile"><a href="User-x">x</a></div>'
+        '<span class="post_date">01-02-26, 09:30 AM</span>'
+        '<div class="post_body">'
+        '<blockquote class="mycode_quote"><cite>david20 Wrote:</cite>'
+        "235K+ records breach dump sample email:pass leaked</blockquote>"
+        "interresting</div></div>"
+    )
+    (post,) = parse_thread(html)
+    # classifier text = the poster's own word only, NOT the quoted breach dump
+    assert post.body_text == "interresting"
+    assert "235K" not in post.body_text
+    assert "breach" not in post.body_text
+    # evidence HTML keeps the full quote
+    assert "235K+ records" in post.body_html
+    assert "mycode_quote" in post.body_html
+
+
 def test_reply_gated_detection(posts: list) -> None:
     # the synthetic fixture has no [hide] gate
     assert all(p.reply_gated is False for p in posts)

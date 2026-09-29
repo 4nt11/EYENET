@@ -20,9 +20,15 @@ from pydantic import Field, model_validator
 
 from eyenet.contracts.candidate import GroupCandidateRow
 from eyenet.contracts.enums import CandidateState, GroupKind
+from eyenet.models.message import MessageTable
 
 from ._base import ApiSchema
 from .pagination import CursorPage
+
+
+def _s(value: object) -> str | None:
+    return str(value) if value is not None else None
+
 
 # Candidate state (+ member_dialog) -> operator-facing status.
 _STATUS: dict[CandidateState, str] = {
@@ -117,8 +123,47 @@ class ScanGroupsResult(ApiSchema):
     collectors_signaled: int
 
 
+class GroupMessage(ApiSchema):
+    """One message in a group (forum thread / chat) — for the raw reader."""
+
+    id: UUID
+    evidence_ref: str
+    platform_msgid: str
+    ts: datetime
+    author_display: str | None = None
+    author_username: str | None = None
+    body: str
+    body_html: str | None = None
+    reply_gated: bool = False
+    edited: bool = False
+    has_attachment: bool = False
+
+    @classmethod
+    def from_message(cls, msg: MessageTable) -> GroupMessage:
+        ss = msg.source_specific or {}
+        return cls(
+            id=msg.id,
+            evidence_ref=msg.evidence_ref,
+            platform_msgid=msg.platform_msgid,
+            ts=msg.sent_at_source,
+            author_display=_s(ss.get("author_display")),
+            author_username=_s(ss.get("author_username")),
+            body=msg.body,
+            body_html=_s(ss.get("body_html")),
+            reply_gated=bool(ss.get("reply_gated", False)),
+            edited=bool(ss.get("edited", False)),
+            has_attachment=msg.has_attachment,
+        )
+
+
+class CursorPageGroupMessage(CursorPage[GroupMessage]):
+    """200 page response for `GET /v1/groups/{group_id}/messages`."""
+
+
 __all__ = [
+    "CursorPageGroupMessage",
     "CursorPageGroupSummary",
+    "GroupMessage",
     "GroupSummary",
     "JoinGroupRequest",
     "LeaveGroupRequest",

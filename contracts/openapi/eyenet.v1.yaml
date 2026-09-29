@@ -1596,6 +1596,21 @@ paths:
                 items: { $ref: '#/components/schemas/IncidentOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+  /v1/incidents/groups:
+    get:
+      tags: [incidents]
+      operationId: list_incident_groups
+      summary: Groups in the incident feed with their incident counts (the filter set). Requires `read:incidents`.
+      responses:
+        "200":
+          description: Groups appearing in the incident feed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentGroupOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
   /v1/incidents/{message_id}/labels:
     put:
       tags: [incidents]
@@ -3024,6 +3039,27 @@ paths:
               schema: { $ref: '#/components/schemas/CursorPageGroupSummary' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/groups/{group_id}/messages:
+    get:
+      tags: [groups]
+      operationId: groups_messages
+      summary: Raw posts in a group (forum thread / chat), oldest-first (read:observations).
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of group messages.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageGroupMessage' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/groups/join:
     post:
@@ -4508,6 +4544,15 @@ components:
         version:        { type: string }
         components:     { $ref: '#/components/schemas/ComponentDetail' }
 
+    IncidentGroupOut:
+      description: A group in the incident feed with its incident count (feed filter set).
+      type: object
+      additionalProperties: false
+      required: [group_id, count]
+      properties:
+        group_id: { type: string, format: uuid }
+        title:    { type: string, nullable: true }
+        count:    { type: integer }
     IncidentOut:
       description: One classified incident on the operator triage feed (`/v1/incidents`).
       type: object
@@ -5529,6 +5574,33 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/GroupSummary' }
+    GroupMessage:
+      description: |
+        One retained post in a group (forum thread / chat) for the raw reader.
+        `body` is the poster's own words (quotes stripped, classifier-facing);
+        `body_html` is the evidence-faithful markup (quotes kept).
+      type: object
+      required: [id, evidence_ref, platform_msgid, ts, body]
+      properties:
+        id:              { type: string, format: uuid }
+        evidence_ref:    { type: string }
+        platform_msgid:  { type: string }
+        ts:              { type: string, format: date-time }
+        author_display:  { type: string, nullable: true }
+        author_username: { type: string, nullable: true }
+        body:            { type: string }
+        body_html:       { type: string, nullable: true }
+        reply_gated:     { type: boolean }
+        edited:          { type: boolean }
+        has_attachment:  { type: boolean }
+    CursorPageGroupMessage:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/GroupMessage' }
     JoinGroupRequest:
       description: |
         Join-at-will target: either an existing candidate_id, or an undiscovered

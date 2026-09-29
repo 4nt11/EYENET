@@ -117,8 +117,17 @@ def parse_thread(html: str) -> list[ParsedPost]:
         edited = bool(edit_span and edit_span.get_text(strip=True))
 
         body = container.select_one("div.post_body")
-        body_text = body.get_text("\n", strip=True) if body else ""
+        # body_html keeps EVERYTHING (evidence-faithful), captured before we strip.
         body_html = body.decode_contents() if body else ""
+        # body_text feeds the classifier/stylometry, so it must be the poster's
+        # OWN words only: strip MyBB quote blocks (someone else's content). Without
+        # this, a one-word reply quoting a breach dump gets tagged as a breach dump.
+        if body is not None:
+            for quote in body.select("blockquote.mycode_quote"):
+                quote.decompose()
+            body_text = body.get_text("\n", strip=True)
+        else:
+            body_text = ""
 
         posts.append(
             ParsedPost(
@@ -185,6 +194,20 @@ def parse_thread_links(html: str) -> list[str]:
             seen.add(canon)
             out.append(canon)
     return out
+
+
+def parse_thread_title(html: str) -> str | None:
+    """The thread subject from a MyBB thread page's ``<title>``.
+
+    On this theme the ``<title>`` is the clean subject ("912,966 lines - URL
+    LOGIN PASS ..."). Returns None when absent so the collector can fall back to
+    the tid. Capture from page 1; later pages carry the same subject.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    if soup.title is None:
+        return None
+    title = soup.title.get_text(strip=True)
+    return title or None
 
 
 def thread_page_count(html: str) -> int:
