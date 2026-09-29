@@ -20,6 +20,12 @@ class IncidentOut(ApiSchema):
     group_id: UUID | None = None  # the group's id (for the feed's group filter)
     actor_id: UUID | None = None  # WHO: sender actor (for dossier click-through)
     actor_handle: str | None = None
+    victim_country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="WHERE (victim): ISO 3166-1 alpha-2; None if unknown/mixed/unattributed.",
+    )
     labels: list[str]
     scores: dict[str, float]
     model_version: str
