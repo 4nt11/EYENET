@@ -16,6 +16,7 @@ from eyenet.contracts.bus import Bus
 from eyenet.contracts.collector import (
     CollectorBase,
     CollectorHealth,
+    CollectorRow,
     compute_instance_id,
 )
 from eyenet.contracts.enums import CollectorState, GroupKind, SourceKind
@@ -101,6 +102,26 @@ class CollectorSkeleton(ServiceBase, CollectorBase):
     def _record_emission(self) -> None:
         self._last_message_at = datetime.now(tz=UTC)
         self._messages_in_last_hour += 1
+
+    async def _bind_collector_row_source(
+        self, collector: CollectorRow | None, source_uuid: UUID | None
+    ) -> None:
+        """Rebind our collector row to the source we actually ingest into, so
+        collector→source joins (fleet UI, messages-by-collector) resolve instead
+        of reading an empty placeholder source. No-op when either handle is
+        unresolved (no collector row, or source not yet upserted)."""
+        if collector is None or source_uuid is None:
+            return
+        if collector.source_id != source_uuid:
+            await self._storage.bind_collector_source(
+                collector_id=collector.id, source_id=source_uuid
+            )
+            _log.info(
+                "collector.source_rebound",
+                identity=self._identity_name,
+                collector_id=str(collector.id),
+                source_id=str(source_uuid),
+            )
 
     # -- visible-group scan (generic; per-source enumeration is overridden) ----
 

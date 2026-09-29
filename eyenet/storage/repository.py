@@ -702,12 +702,26 @@ class BaseRepository(ABC):
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        exclude_bodyless: bool = False,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters in
         the query (OR across the given leaves; rare leaves found regardless of recency);
         ``q`` free-text-matches the message body; ``group_ids`` restricts to incidents in the
-        given groups (show-only channels); ``source_ids`` restricts to sources; ``offset``
-        pages."""
+        given groups (show-only channels); ``source_ids`` restricts to sources;
+        ``exclude_bodyless`` drops content-less rows in SQL; ``offset`` pages."""
+
+    @abstractmethod
+    async def count_incidents(
+        self,
+        *,
+        labels: list[str] | None = None,
+        q: str | None = None,
+        group_ids: list[UUID] | None = None,
+        source_ids: list[UUID] | None = None,
+        exclude_bodyless: bool = False,
+    ) -> int:
+        """Total incidents matching the same filters as :meth:`recent_incidents`
+        (no offset/limit) — the triage feed's ``estimated_total``."""
 
     @abstractmethod
     async def incident_groups(self) -> list[tuple[UUID, str | None, UUID, int]]:
@@ -1942,6 +1956,24 @@ class BaseRepository(ABC):
         ``None`` means *leave unchanged*. ``desired_state`` goes through
         :meth:`set_collector_desired_state`; ``observed_state`` is
         supervisor-only. Raises :class:`ValueError` if missing.
+        """
+
+    @abstractmethod
+    async def bind_collector_source(
+        self,
+        *,
+        collector_id: UUID,
+        source_id: UUID,
+    ) -> CollectorRow:
+        """Rebind a collector to the source it actually ingests into.
+
+        System-initiated, NOT operator metadata (so it stays off the PATCH
+        surface): a collector registers against a placeholder source but at
+        connect upserts its real per-identity source and ingests there. Without
+        this rebind, ``collector.source_id`` points at an empty placeholder and
+        any collector→source join (fleet UI, messages-by-collector) reads zero
+        rows for a healthy collector. Idempotent. Raises :class:`ValueError` if
+        the collector is missing.
         """
 
     @abstractmethod

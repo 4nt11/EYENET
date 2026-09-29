@@ -16,45 +16,64 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
-from eyenet.api.v1.schemas.incidents import IncidentGroupOut, IncidentOut, IncidentSourceOut
+from eyenet.api.deps_paging import CursorParams, cursor_params
+from eyenet.api.v1.schemas.incidents import (
+    CursorPageIncidentOut,
+    IncidentGroupOut,
+    IncidentOut,
+    IncidentSourceOut,
+)
 from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, MessageGeoRow
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["incidents"])
 
 
-@router.get("/incidents", operation_id="list_incidents", response_model=list[IncidentOut])
+@router.get("/incidents", operation_id="list_incidents", response_model=CursorPageIncidentOut)
 async def list_incidents(
     _: Annotated[CurrentUser, Depends(RequireScope("read:incidents"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
-    limit: Annotated[int, Query(ge=1, le=500)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    page: Annotated[CursorParams, Depends(cursor_params)],
     label: Annotated[list[str] | None, Query()] = None,
     q: Annotated[str | None, Query(max_length=256)] = None,
     group_id: Annotated[list[UUID] | None, Query()] = None,
     source_id: Annotated[list[UUID] | None, Query()] = None,
-) -> list[IncidentOut]:
+) -> CursorPageIncidentOut:
     # ?label= repeats (OR); ?group_id= / ?source_id= repeat to show only those groups/sources.
+    # Bodyless incidents (pure-quote forum posts that strip to empty and classify into
+    # content-less "row not retained" rows) are dropped IN SQL via exclude_bodyless, so the
+    # page returns `limit` real rows and estimated_total counts the same set — no post-fetch
+    # trimming that would make the page shorter than requested or the total overcount.
     rows = cast(
         "list[IncidentRow]",
         await storage.recent_incidents(
-            limit=limit, labels=label, offset=offset, q=q, group_ids=group_id, source_ids=source_id
+            limit=page.fetch_limit,  # over-fetch by one to detect a further page
+            labels=label,
+            offset=page.offset,
+            q=q,
+            group_ids=group_id,
+            source_ids=source_id,
+            exclude_bodyless=True,
         ),
     )
-    ids = [r.message_id for r in rows]
+    next_cursor = page.next_cursor(fetched=len(rows))
+    page_rows = rows[: page.limit]
+    ids = [r.message_id for r in page_rows]
     bodies = await storage.bodies_by_message_ids(ids)
-    # Drop bodyless incidents: pure-quote forum posts strip to an empty body and
-    # classified into content-less "row not retained" rows. The incident table is
-    # append-only (we never delete predictions), so filter them from the feed here.
-    rows = [r for r in rows if (bodies.get(r.message_id) or "").strip()]
-    ids = [r.message_id for r in rows]
     ctx = await storage.message_context_by_ids(ids)  # (group_title, group_id, actor_id, handle)
     corrections = cast(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
     geo = cast("dict[UUID, MessageGeoRow]", await storage.message_geo_by_message_ids(ids))
     country_by_id = {mid: g.country for mid, g in geo.items()}
-    return [
+    estimated_total = (
+        await storage.count_incidents(
+            labels=label, q=q, group_ids=group_id, source_ids=source_id, exclude_bodyless=True
+        )
+        if page.include_total
+        else None
+    )
+    items = [
         IncidentOut(
             message_id=r.message_id,
             body=bodies.get(r.message_id),
@@ -71,8 +90,11 @@ async def list_incidents(
             corrected_by=c.decided_by if c else None,
             corrected_at=c.decided_at if c else None,
         )
-        for r in rows
+        for r in page_rows
     ]
+    return CursorPageIncidentOut(
+        items=items, next_cursor=next_cursor, estimated_total=estimated_total
+    )
 
 
 @router.get(

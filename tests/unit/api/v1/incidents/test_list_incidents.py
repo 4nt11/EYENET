@@ -10,26 +10,54 @@ from uuid import uuid4
 
 import pytest
 
+from eyenet.api.deps_paging import CursorParams
 from eyenet.api.v1.incidents.api_list_incidents import list_incident_groups, list_incidents
 
 pytestmark = pytest.mark.unit
+
+
+def _page(*, limit: int = 50, offset: int = 0, include_total: bool = False) -> CursorParams:
+    return CursorParams(offset=offset, limit=limit, include_total=include_total)
 
 
 class _FakeStorage:
     def __init__(self, rows: list) -> None:
         self._rows = rows
 
-    async def recent_incidents(
-        self, limit: int, *, labels=None, offset: int = 0, q=None, group_ids=None, source_ids=None
-    ) -> list:
-        # q/FTS semantics are covered at the storage layer (test_incident_search_sqlite);
-        # this fake only exercises response mapping + the label(OR)/group-filter wiring.
+    def _filter(self, labels, group_ids) -> list:
         rows = self._rows
         if labels:
             rows = [r for r in rows if any(lbl in r.labels for lbl in labels)]
         if group_ids:
             rows = [r for r in rows if r.group_id in group_ids]
-        return rows[offset : offset + limit]
+        return rows
+
+    async def recent_incidents(
+        self,
+        limit: int,
+        *,
+        labels=None,
+        offset: int = 0,
+        q=None,
+        group_ids=None,
+        source_ids=None,
+        exclude_bodyless: bool = False,
+    ) -> list:
+        # q/FTS + exclude_bodyless semantics are covered at the storage layer
+        # (test_incident_search_sqlite); this fake exercises response mapping +
+        # the label(OR)/group-filter wiring and the over-fetch/paging math.
+        return self._filter(labels, group_ids)[offset : offset + limit]
+
+    async def count_incidents(
+        self,
+        *,
+        labels=None,
+        q=None,
+        group_ids=None,
+        source_ids=None,
+        exclude_bodyless: bool = False,
+    ) -> int:
+        return len(self._filter(labels, group_ids))
 
     async def bodies_by_message_ids(self, message_ids: list) -> dict:
         return {mid: f"body {mid}" for mid in message_ids}
@@ -70,8 +98,11 @@ def _row(labels: list[str], group_id=None):
 
 def test_list_incidents_maps_all() -> None:
     storage = _FakeStorage([_row(["tooling"]), _row(["leak"]), _row(["tooling", "leak"])])
-    out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, label=None))
+    page = asyncio.run(list_incidents(_=None, storage=storage, page=_page(), label=None))
+    out = page.items
     assert len(out) == 3
+    assert page.next_cursor is None  # whole set fit on the page
+    assert page.estimated_total is None  # not requested
     assert out[0].scores == {"tooling": 0.9}
     assert all(o.body == f"body {o.message_id}" for o in out)  # body enrichment
     assert out[0].group == "Cash Network" and out[0].actor_handle == "@scammer"  # who/where
@@ -83,18 +114,36 @@ def test_list_incidents_maps_all() -> None:
 def test_list_incidents_label_filter_multi() -> None:
     storage = _FakeStorage([_row(["tooling"]), _row(["leak"]), _row(["access_sale"])])
     # multi-select OR: tooling or leak (not access_sale)
-    out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, label=["tooling", "leak"]))
-    assert len(out) == 2
-    assert all(set(o.labels) & {"tooling", "leak"} for o in out)
+    page = asyncio.run(
+        list_incidents(_=None, storage=storage, page=_page(), label=["tooling", "leak"])
+    )
+    assert len(page.items) == 2
+    assert all(set(o.labels) & {"tooling", "leak"} for o in page.items)
 
 
 def test_list_incidents_group_filter() -> None:
     keep = uuid4()
     storage = _FakeStorage([_row(["tooling"], group_id=keep), _row(["leak"])])
-    out = asyncio.run(
-        list_incidents(_=None, storage=storage, limit=50, label=None, group_id=[keep])
+    page = asyncio.run(
+        list_incidents(_=None, storage=storage, page=_page(), label=None, group_id=[keep])
     )
-    assert len(out) == 1 and out[0].labels == ["tooling"]  # only the chosen group shown
+    assert len(page.items) == 1 and page.items[0].labels == ["tooling"]  # only the chosen group
+
+
+def test_list_incidents_paginates_with_cursor_and_total() -> None:
+    storage = _FakeStorage([_row(["a"]), _row(["b"]), _row(["c"])])
+    page = asyncio.run(
+        list_incidents(_=None, storage=storage, page=_page(limit=2, include_total=True), label=None)
+    )
+    assert len(page.items) == 2  # capped to the requested page size
+    assert page.next_cursor is not None  # a further page exists (over-fetch saw row 3)
+    assert page.estimated_total == 3  # full match count, not just the page
+
+
+def test_list_incidents_offset_pages() -> None:
+    storage = _FakeStorage([_row(["a"]), _row(["b"]), _row(["c"])])
+    page = asyncio.run(list_incidents(_=None, storage=storage, page=_page(offset=1), label=None))
+    assert len(page.items) == 2  # first row skipped by offset
 
 
 def test_list_incident_groups() -> None:
@@ -102,9 +151,3 @@ def test_list_incident_groups() -> None:
     out = asyncio.run(list_incident_groups(_=None, storage=storage))
     assert [g.title for g in out] == ["Noisy Market", "Quiet Chan"]  # noisiest first
     assert out[0].count == 42 and out[0].group_id is not None
-
-
-def test_list_incidents_offset_pages() -> None:
-    storage = _FakeStorage([_row(["a"]), _row(["b"]), _row(["c"])])
-    out = asyncio.run(list_incidents(_=None, storage=storage, limit=50, offset=1, label=None))
-    assert len(out) == 2  # first row skipped by offset
