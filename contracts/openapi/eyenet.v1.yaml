@@ -1583,20 +1583,19 @@ paths:
       operationId: list_incidents
       summary: Operator triage feed — recent classified incidents, newest first. Requires `read:incidents`.
       parameters:
-        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
-        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
         - { name: label, in: query, required: false, schema: { type: string, nullable: true } }
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 256 } }
         - { name: group_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: source_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
       responses:
         "200":
-          description: Recent incidents.
+          description: A page of recent incidents (bodyless rows excluded).
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/IncidentOut' }
+              schema: { $ref: '#/components/schemas/CursorPageIncidentOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
   /v1/incidents/groups:
@@ -4662,6 +4661,14 @@ components:
         corrected_labels: { type: array, nullable: true, items: { type: string }, description: 'Operator ground-truth label set, when corrected.' }
         corrected_by:     { type: string, nullable: true }
         corrected_at:     { type: string, format: date-time, nullable: true }
+    CursorPageIncidentOut:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/IncidentOut' }
 
     IncidentLabelUpdate:
       description: Operator relabel of a classified message (`PUT /v1/incidents/{message_id}/labels`).

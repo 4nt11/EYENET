@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import Field
 
 from ._base import ApiSchema
+from .pagination import CursorPage
 
 
 class IncidentOut(ApiSchema):
@@ -108,4 +109,14 @@ class IncidentRuleUpdate(ApiSchema):
     description: str | None = None
 
 
-__all__ = ["IncidentOut", "IncidentRuleCreate", "IncidentRuleOut", "IncidentRuleUpdate"]
+class CursorPageIncidentOut(CursorPage[IncidentOut]):
+    """200 page response for `GET /v1/incidents` — the operator triage feed."""
+
+
+__all__ = [
+    "CursorPageIncidentOut",
+    "IncidentOut",
+    "IncidentRuleCreate",
+    "IncidentRuleOut",
+    "IncidentRuleUpdate",
+]
