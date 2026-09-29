@@ -118,6 +118,10 @@
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; }
   .pbody.plain { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-12); }
+  /* links come from sanitized {@html}, so they need :global to be reachable.
+     Browser-default dark blue is unreadable on black; use the theme link token. */
+  .pbody :global(a) { color: var(--link); text-decoration: underline; overflow-wrap: anywhere; }
+  .pbody :global(a:hover) { color: var(--link-hover); }
   .replybox { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
   .rlabel { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; resize: vertical; }
