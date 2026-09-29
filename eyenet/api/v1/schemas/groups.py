@@ -20,7 +20,7 @@ from pydantic import Field, model_validator
 
 from eyenet.contracts.candidate import GroupCandidateRow
 from eyenet.contracts.enums import CandidateState, GroupKind
-from eyenet.contracts.incident import IncidentLabelRow, MessageGeoRow
+from eyenet.contracts.incident import IncidentLabelRow, MessageGeoRow, ThreadSummaryRow
 from eyenet.models.group import GroupTable
 from eyenet.models.message import MessageTable
 
@@ -184,20 +184,40 @@ class CursorPageGroupMessage(CursorPage[GroupMessage]):
 
 
 class GroupThread(ApiSchema):
-    """A forum thread under a category — the reader's thread-list row."""
+    """A forum thread under a category — the reader's thread-list row.
+
+    Carries the OP-anchored rollup so the list is scannable and filterable without
+    opening the thread: the thread date (OP post time), the OP's victim country, and
+    the OP's incident labels ("thread X: Y incident from Z country")."""
 
     group_id: UUID
     platform_groupid: str
     title: str | None = None
     last_observed_at: datetime
+    thread_date: datetime | None = None  # OP post time (the real thread date), if summarized
+    victim_country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="WHERE (victim): the OP's ISO 3166-1 alpha-2; None if unknown/unsummarized.",
+    )
+    incident_labels: list[str] = Field(default_factory=list)  # the OP's classifier verdict
 
     @classmethod
-    def from_group(cls, g: GroupTable) -> GroupThread:
+    def from_group(
+        cls,
+        g: GroupTable,
+        summary: ThreadSummaryRow | None = None,
+        incident_labels: list[str] | None = None,
+    ) -> GroupThread:
         return cls(
             group_id=g.id,
             platform_groupid=g.platform_groupid,
             title=g.current_title,
             last_observed_at=g.last_observed_at_ingest,
+            thread_date=summary.op_sent_at if summary is not None else None,
+            victim_country=summary.victim_country if summary is not None else None,
+            incident_labels=incident_labels or [],
         )
 
 

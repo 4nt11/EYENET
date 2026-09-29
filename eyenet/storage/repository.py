@@ -1272,8 +1272,26 @@ class BaseRepository(ABC):
         category_platform_groupid: str,
         limit: int,
         offset: int = 0,
-    ) -> list[object]:
-        """FORUM_THREAD groups discovered under a category, most-recent-first."""
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+        sort: str = "recent",
+    ) -> list[tuple[object, object | None]]:
+        """FORUM_THREAD groups under a category, each with its OP-anchored thread summary.
+
+        Returns (GroupTable, ThreadSummaryRow-like | None). ``sort`` is "recent" (default)
+        or "date" (OP post time). ``countries`` / ``labels`` filter to threads whose OP
+        resolved to one of the ISO codes / carries any of the incident labels."""
+
+    @abstractmethod
+    async def forum_threads_needing_summary(
+        self, *, limit: int = 500
+    ) -> list[tuple[UUID, str | None, UUID, str, datetime]]:
+        """(group_id, title, op_message_id, op_body, op_sent_at) for FORUM_THREAD groups
+        with no summary yet — the geo worker's thread-rollup queue. OP = earliest post."""
+
+    @abstractmethod
+    async def put_thread_summaries_bulk(self, rows: list[object]) -> None:
+        """Persist many :class:`ThreadSummaryRow` in one session (unique per group)."""
 
     @abstractmethod
     async def search_messages_in_category(

@@ -72,6 +72,22 @@ class MessageGeoRow(DbRowBase):
     classified_at: datetime
 
 
+class ThreadSummaryRow(DbRowBase):
+    """Per-forum-thread rollup anchored on the OP (twin of ThreadSummaryTable).
+
+    ``victim_country`` is the OP's ISO alpha-2 verdict (None if mixed/unknown);
+    ``op_sent_at`` is the thread date. Incident labels are joined live off
+    ``op_message_id``, not carried here. See eyenet/classifier/geo."""
+
+    group_id: UUID
+    op_message_id: UUID
+    op_sent_at: datetime
+    victim_country: str | None = None
+    victim_status: str
+    engine_version: str
+    computed_at: datetime
+
+
 class IncidentEnvelope(BusEnvelope):
     """Fired-incident bus event (published on INCIDENT_SUBJECT) — the triage feed payload.
     Carries the dereferenceable evidence_ref, not the body (operator-grade)."""
@@ -91,4 +107,5 @@ __all__ = [
     "IncidentRow",
     "IncidentRuleRow",
     "MessageGeoRow",
+    "ThreadSummaryRow",
 ]
