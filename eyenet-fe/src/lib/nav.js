@@ -21,7 +21,8 @@ export const NAV = [
       { slug: 'linkages',   label: 'Linkages',   href: '/linkages', built: true, desc: 'Linkage reads and confirm/reject/suspect decisions' },
       { slug: 'incidents',  label: 'Incidents',  href: '/incidents', built: true, desc: 'Classifier detections triage feed · taxonomy heads and per-head scores' },
       { slug: 'graph',      label: 'Graph',      href: '/graph', built: true, desc: 'Aggregate graph stats and actor search' },
-      { slug: 'actor-groups', label: 'Actor groups', href: '/actor-groups', built: true, desc: 'Crews · accounts clustered by shared operational infrastructure' }
+      { slug: 'actor-groups', label: 'Actor groups', href: '/actor-groups', built: true, desc: 'Crews · accounts clustered by shared operational infrastructure' },
+      { slug: 'reader', label: 'Reader', href: '/reader', built: true, desc: 'Reconstruct monitored conversations · forum threads and group chats, raw' }
     ]
   },
   {

@@ -3040,6 +3040,27 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
 
+  /v1/groups/{category_id}/threads:
+    get:
+      tags: [groups]
+      operationId: groups_category_threads
+      summary: Threads discovered under a forum category, most-recent-first (read:observations).
+      parameters:
+        - { name: category_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of threads.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageGroupThread' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /v1/groups/{group_id}/messages:
     get:
       tags: [groups]
@@ -5624,6 +5645,23 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/GroupMessage' }
+    GroupThread:
+      description: A forum thread under a category (the reader's thread-list row).
+      type: object
+      required: [group_id, platform_groupid, last_observed_at]
+      properties:
+        group_id:         { type: string, format: uuid }
+        platform_groupid: { type: string }
+        title:            { type: string, nullable: true }
+        last_observed_at: { type: string, format: date-time }
+    CursorPageGroupThread:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/GroupThread' }
     ForumReplyRequest:
       description: The operator's verbatim reply to unlock a gated forum thread.
       type: object

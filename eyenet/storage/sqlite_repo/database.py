@@ -78,6 +78,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "incident_label",
         # operator-queued forum reply-to-unlock requests
         "forum_reply_request",
+        # category -> thread edge for the forum reader navigation
+        "forum_thread_link",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

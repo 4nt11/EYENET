@@ -20,6 +20,7 @@ from pydantic import Field, model_validator
 
 from eyenet.contracts.candidate import GroupCandidateRow
 from eyenet.contracts.enums import CandidateState, GroupKind
+from eyenet.models.group import GroupTable
 from eyenet.models.message import MessageTable
 
 from ._base import ApiSchema
@@ -160,6 +161,28 @@ class CursorPageGroupMessage(CursorPage[GroupMessage]):
     """200 page response for `GET /v1/groups/{group_id}/messages`."""
 
 
+class GroupThread(ApiSchema):
+    """A forum thread under a category — the reader's thread-list row."""
+
+    group_id: UUID
+    platform_groupid: str
+    title: str | None = None
+    last_observed_at: datetime
+
+    @classmethod
+    def from_group(cls, g: GroupTable) -> GroupThread:
+        return cls(
+            group_id=g.id,
+            platform_groupid=g.platform_groupid,
+            title=g.current_title,
+            last_observed_at=g.last_observed_at_ingest,
+        )
+
+
+class CursorPageGroupThread(CursorPage[GroupThread]):
+    """200 page response for `GET /v1/groups/{category_id}/threads`."""
+
+
 class ForumReplyRequest(ApiSchema):
     """Body for POST /v1/groups/{group_id}/reply — the operator's typed reply.
 
@@ -179,10 +202,12 @@ class ForumReplyResult(ApiSchema):
 __all__ = [
     "CursorPageGroupMessage",
     "CursorPageGroupSummary",
+    "CursorPageGroupThread",
     "ForumReplyRequest",
     "ForumReplyResult",
     "GroupMessage",
     "GroupSummary",
+    "GroupThread",
     "JoinGroupRequest",
     "LeaveGroupRequest",
     "ScanGroupsResult",
