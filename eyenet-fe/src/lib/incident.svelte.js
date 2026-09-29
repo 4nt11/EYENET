@@ -51,6 +51,7 @@ export async function loadIncidentGroups() {
       incidentCtx.groups = rows.map((g) => ({
         id: g.group_id,
         title: g.title ?? g.group_id.slice(0, 8),
+        sourceId: g.source_id,
         count: g.count
       }));
     }

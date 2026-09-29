@@ -710,9 +710,9 @@ class BaseRepository(ABC):
         pages."""
 
     @abstractmethod
-    async def incident_groups(self) -> list[tuple[UUID, str | None, int]]:
-        """Distinct groups with at least one incident as (group_id, title, count), noisiest
-        first — the full source for the feed's group filter (not window-limited)."""
+    async def incident_groups(self) -> list[tuple[UUID, str | None, UUID, int]]:
+        """Distinct groups with at least one incident as (group_id, title, source_id, count),
+        noisiest first — the feed's group filter (source_id scopes it to a source)."""
 
     @abstractmethod
     async def incident_sources(self) -> list[tuple[UUID, str | None, int]]:

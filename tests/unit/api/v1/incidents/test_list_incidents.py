@@ -42,7 +42,7 @@ class _FakeStorage:
         return {mid: ("Cash Network", uuid4(), uuid4(), "@scammer") for mid in message_ids}
 
     async def incident_groups(self) -> list:
-        return [(uuid4(), "Noisy Market", 42), (uuid4(), "Quiet Chan", 3)]
+        return [(uuid4(), "Noisy Market", uuid4(), 42), (uuid4(), "Quiet Chan", uuid4(), 3)]
 
 
 def _row(labels: list[str], group_id=None):
