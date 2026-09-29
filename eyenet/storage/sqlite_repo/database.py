@@ -78,6 +78,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "incident_label",
         # victim-country attribution for incident-flagged messages (geo sidecar)
         "message_geo",
+        # per-forum-thread rollup anchored on the OP (date + victim country)
+        "thread_summary",
         # operator-queued forum reply-to-unlock requests
         "forum_reply_request",
         # category -> thread edge for the forum reader navigation

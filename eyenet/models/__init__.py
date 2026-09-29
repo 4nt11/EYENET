@@ -71,6 +71,7 @@ from .source import SourceTable
 from .source_domain import SourceDomainTable
 from .syslog import SystemLogTable
 from .system_user import SystemUserTable
+from .thread_summary import ThreadSummaryTable
 
 __all__ = [
     "ActorAliasHistoryTable",
@@ -142,4 +143,5 @@ __all__ = [
     "SystemUserScopeTable",
     "SystemUserSigningPubkeyHistoryTable",
     "SystemUserTable",
+    "ThreadSummaryTable",
 ]

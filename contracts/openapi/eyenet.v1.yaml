@@ -5760,6 +5760,9 @@ components:
         platform_groupid: { type: string }
         title:            { type: string, nullable: true }
         last_observed_at: { type: string, format: date-time }
+        thread_date:      { type: string, format: date-time, nullable: true, description: 'OP post time (the real thread date); null if unsummarized.' }
+        victim_country:   { type: string, nullable: true, minLength: 2, maxLength: 2, description: 'WHERE (victim): the OP''s ISO 3166-1 alpha-2; null if unknown/unsummarized.' }
+        incident_labels:  { type: array, items: { type: string }, description: 'The OP''s classifier verdict.' }
     CursorPageGroupThread:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from eyenet.classifier.geo import ENGINE_VERSION, classify_country
 from eyenet.contracts.enums import SystemLogLevel
-from eyenet.contracts.incident import MessageGeoRow
+from eyenet.contracts.incident import MessageGeoRow, ThreadSummaryRow
 from eyenet.service import ServiceBase
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ class GeoAttributionService(ServiceBase):
 
     async def tick(self) -> None:
         await self.attribute_batch()
+        await self.summarize_threads_batch()
 
     async def attribute_batch(self) -> int:
         """Classify one batch of un-attributed incident messages. Returns how many."""
@@ -75,6 +76,39 @@ class GeoAttributionService(ServiceBase):
             level=SystemLogLevel.NOTICE,
             event="geo.attributed",
             message=f"attributed {len(rows)} incident message(s)",
+        )
+        return len(rows)
+
+    async def summarize_threads_batch(self) -> int:
+        """Roll up one batch of forum threads: classify each thread's OP (title + OP body)
+        into a victim country and cache the OP date. Idempotent (skips summarized threads)."""
+        pending = await self.storage.forum_threads_needing_summary(limit=self._batch_size)
+        if not pending:
+            return 0
+        now = datetime.now(tz=UTC)
+        seen: set[object] = set()
+        rows: list[object] = []
+        for group_id, title, op_message_id, op_body, op_sent_at in pending:
+            if group_id in seen:  # de-dup ties (two posts sharing the earliest timestamp)
+                continue
+            seen.add(group_id)
+            verdict = classify_country(op_body, title=title)
+            rows.append(
+                ThreadSummaryRow(
+                    group_id=group_id,
+                    op_message_id=op_message_id,
+                    op_sent_at=op_sent_at,
+                    victim_country=verdict.country,
+                    victim_status=verdict.status,
+                    engine_version=ENGINE_VERSION,
+                    computed_at=now,
+                )
+            )
+        await self.storage.put_thread_summaries_bulk(rows)
+        await self.syslog(
+            level=SystemLogLevel.NOTICE,
+            event="geo.thread_summarized",
+            message=f"summarized {len(rows)} forum thread(s)",
         )
         return len(rows)
 

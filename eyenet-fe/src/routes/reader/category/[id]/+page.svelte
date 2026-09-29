@@ -2,11 +2,13 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { apiGet } from '$lib/api.js';
+  import { incidentLabelName } from '$lib/data.js';
 
   // Thread list for a forum category (GroupKind.FORUM_CATEGORY). Each thread
   // opens to its posts. Only forums have this layer; chats skip straight to messages.
-  // A search box flips this to a cross-thread body search: find a post anywhere in
-  // the category without opening each thread (GET .../search?q=), scoped to THIS category.
+  // Each thread carries its OP-anchored rollup (date + victim country + incident labels)
+  // so the list is scannable and filterable without opening the thread. A search box
+  // flips this to a cross-thread body search (GET .../search?q=), scoped to THIS category.
   let threads = $state([]);
   let error = $state(null);
   let loaded = $state(false);
@@ -17,15 +19,49 @@
   let searchTimer;
   const searchMode = $derived(search.trim().length > 0);
 
-  onMount(async () => {
+  // Sort + filters (server-side via ?sort=&country=&label=). Option universe is captured
+  // from the first unfiltered load so checkboxes don't vanish as you filter.
+  let sort = $state('date'); // 'date' (OP post time) | 'recent' (last observed)
+  let selectedCountries = $state(new Set());
+  let selectedLabels = $state(new Set());
+  let countryOpts = $state([]);
+  let labelOpts = $state([]);
+
+  async function load() {
+    const params = new URLSearchParams({ limit: '200', sort });
+    for (const c of selectedCountries) params.append('country', c);
+    for (const l of selectedLabels) params.append('label', l);
     try {
-      const p = await apiGet(`/v1/groups/${$page.params.id}/threads?limit=200`, { auth: true });
+      const p = await apiGet(`/v1/groups/${$page.params.id}/threads?${params}`, { auth: true });
       threads = p.items ?? [];
+      error = null;
     } catch (e) {
       error = e.message;
     }
     loaded = true;
+  }
+
+  onMount(async () => {
+    await load();
+    // Capture the filter universe from the initial (unfiltered) load.
+    countryOpts = [...new Set(threads.map((t) => t.victim_country).filter(Boolean))].sort();
+    labelOpts = [...new Set(threads.flatMap((t) => t.incident_labels ?? []))].sort();
   });
+
+  function toggleCountry(c) {
+    selectedCountries.has(c) ? selectedCountries.delete(c) : selectedCountries.add(c);
+    selectedCountries = new Set(selectedCountries);
+    load();
+  }
+  function toggleLabel(l) {
+    selectedLabels.has(l) ? selectedLabels.delete(l) : selectedLabels.add(l);
+    selectedLabels = new Set(selectedLabels);
+    load();
+  }
+  function setSort(s) {
+    sort = s;
+    load();
+  }
 
   async function runSearch() {
     const q = search.trim();
@@ -102,19 +138,50 @@
       {/if}
     {:else if !loaded}
       <p class="pnote">Loading…</p>
-    {:else if !threads.length}
-      <p class="pnote">No threads discovered in this category yet. The collector fills these as it crawls (paced).</p>
     {:else}
-      <ul class="rows">
-        {#each threads as t}
-          <li>
-            <a class="row" href={`/reader/group/${t.group_id}`}>
-              <span class="title">{t.title || t.platform_groupid}</span>
-              <span class="meta">tid {t.platform_groupid} · {fmt(t.last_observed_at)}</span>
-            </a>
-          </li>
-        {/each}
-      </ul>
+      {#if countryOpts.length || labelOpts.length}
+        <div class="filterbar">
+          <div class="fgroup">
+            <span class="flabel">sort</span>
+            <button class="chip" class:on={sort === 'date'} onclick={() => setSort('date')}>date</button>
+            <button class="chip" class:on={sort === 'recent'} onclick={() => setSort('recent')}>recent</button>
+          </div>
+          {#if countryOpts.length}
+            <div class="fgroup">
+              <span class="flabel">country</span>
+              {#each countryOpts as c}
+                <button class="chip" class:on={selectedCountries.has(c)} onclick={() => toggleCountry(c)}>{c}</button>
+              {/each}
+            </div>
+          {/if}
+          {#if labelOpts.length}
+            <div class="fgroup">
+              <span class="flabel">incident</span>
+              {#each labelOpts as l}
+                <button class="chip" class:on={selectedLabels.has(l)} onclick={() => toggleLabel(l)}>{incidentLabelName(l)}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
+      {#if !threads.length}
+        <p class="pnote">No threads match. The collector fills these as it crawls (paced); geo/incident tags fill in as the workers process each thread's first post.</p>
+      {:else}
+        <ul class="rows">
+          {#each threads as t}
+            <li>
+              <a class="row" href={`/reader/group/${t.group_id}`}>
+                <span class="title">
+                  {#if t.victim_country}<span class="badge country">{t.victim_country}</span>{/if}
+                  {#each t.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
+                  {t.title || t.platform_groupid}
+                </span>
+                <span class="meta">tid {t.platform_groupid} · {fmt(t.thread_date ?? t.last_observed_at)}</span>
+              </a>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     {/if}
   </div>
 </main>
@@ -137,6 +204,15 @@
   .row:hover { border-color: var(--accent); }
   .title { color: var(--text-body); font-size: var(--fs-14); word-break: break-word; }
   .meta { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
+  .filterbar { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .fgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+  .flabel { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); margin-right: 2px; }
+  .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-11); padding: 2px 8px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--black); }
+  .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); border: 1px solid var(--text-faint); color: var(--text-body); border-radius: 3px; padding: 0 5px; margin-right: 4px; }
+  .badge.incident { color: var(--red-text); border-color: var(--red-text); }
+  .badge.country { color: var(--text-body); border-color: var(--text-faint); }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   .pnote.err { color: var(--red-text); }
 </style>
