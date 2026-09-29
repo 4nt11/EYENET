@@ -22,12 +22,18 @@ Selector contract reversed from real darkforums.as (MyBB SEO-URL theme):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
+
+# MyBB [hide] plugin gate: content is locked until the viewer replies. Text
+# match on the rendered notice ("You must reply to this thread to view this
+# content"). Linear alternation, no backtracking blowup on adversarial bodies.
+_HIDE_GATE = re.compile(r"reply to (?:this )?thread to view", re.IGNORECASE)
 
 # MyBB renders absolute post times in the viewer's board timezone. As an
 # unauthenticated/guest collector we get the board default; the true UTC offset
@@ -51,6 +57,7 @@ class ParsedPost:
     edited: bool
     body_text: str  # tags stripped, for the classifier
     body_html: str  # inner HTML of .post_body, evidence-faithful
+    reply_gated: bool  # body carries a MyBB [hide] block: content locked until we reply
 
 
 def _username_slug(href: str) -> str:
@@ -123,6 +130,7 @@ def parse_thread(html: str) -> list[ParsedPost]:
                 edited=edited,
                 body_text=body_text,
                 body_html=body_html,
+                reply_gated=bool(_HIDE_GATE.search(body_text)),
             )
         )
 

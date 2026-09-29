@@ -91,6 +91,20 @@ def test_thread_page_count() -> None:
     assert thread_page_count(paged) == 7
 
 
+def test_reply_gated_detection(posts: list) -> None:
+    # the synthetic fixture has no [hide] gate
+    assert all(p.reply_gated is False for p in posts)
+    gated = (
+        '<div class="post classic" id="post_5">'
+        '<div class="post_user-profile"><a href="User-x">x</a></div>'
+        '<span class="post_date">01-02-26, 09:30 AM</span>'
+        '<div class="post_body">Hidden Content. You must reply to this thread to '
+        "view this content or upgrade your account.</div></div>"
+    )
+    (post,) = parse_thread(gated)
+    assert post.reply_gated is True
+
+
 def test_unparseable_date_yields_none_not_crash() -> None:
     html = (
         '<div class="post classic" id="post_9">'
