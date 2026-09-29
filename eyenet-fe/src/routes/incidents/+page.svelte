@@ -11,11 +11,13 @@
     incidentEdit,
     loadIncidents,
     loadIncidentGroups,
+    loadIncidentSources,
     relabelIncident
   } from '$lib/incident.svelte.js';
 
   let selectedLabels = $state(new Set()); // OR include-filter over taxonomy leaves
   let selectedGroups = $state(new Set()); // group ids to show (empty = all groups)
+  let selectedSources = $state(new Set()); // source ids to show (empty = all sources)
   let search = $state('');
   let searchTimer;
 
@@ -25,6 +27,7 @@
   onMount(() => {
     loadIncidents();
     loadIncidentGroups(); // the full group set for the group filter (not the feed window)
+    loadIncidentSources(); // the source-level filter (a whole forum in one option)
   });
 
   // Close any open filter popover when clicking outside it.
@@ -41,10 +44,11 @@
   // The group popover lists the full server set (noisiest first), so groups outside the
   // current 200-row window are still mutable.
   const groupOpts = $derived(incidentCtx.groups);
+  const sourceOpts = $derived(incidentCtx.sources);
 
   function applyFilter() {
     selectedId = null;
-    loadIncidents([...selectedLabels], search.trim(), [...selectedGroups]);
+    loadIncidents([...selectedLabels], search.trim(), [...selectedGroups], [...selectedSources]);
   }
 
   function toggleLabel(l) {
@@ -58,6 +62,13 @@
     const n = new Set(selectedGroups);
     n.has(id) ? n.delete(id) : n.add(id);
     selectedGroups = n;
+    applyFilter();
+  }
+
+  function toggleSource(id) {
+    const n = new Set(selectedSources);
+    n.has(id) ? n.delete(id) : n.add(id);
+    selectedSources = n;
     applyFilter();
   }
 
@@ -139,6 +150,21 @@
             <input type="checkbox" checked={selectedGroups.has(g.id)} onchange={() => toggleGroup(g.id)} />
             <span class="ptitle">{g.title}</span>
             <span class="pcount">{g.count}</span>
+          </label>
+        {/each}
+      </div>
+    </details>
+
+    <details class="pop">
+      <summary>{selectedSources.size ? `${selectedSources.size} source${selectedSources.size > 1 ? 's' : ''}` : 'Sources'}</summary>
+      <div class="pmenu">
+        <span class="phint">show only checked sources (a whole forum in one)</span>
+        {#if sourceOpts.length === 0}<span class="pnone">no sources yet</span>{/if}
+        {#each sourceOpts as s (s.id)}
+          <label class="popt">
+            <input type="checkbox" checked={selectedSources.has(s.id)} onchange={() => toggleSource(s.id)} />
+            <span class="ptitle">{s.title}</span>
+            <span class="pcount">{s.count}</span>
           </label>
         {/each}
       </div>

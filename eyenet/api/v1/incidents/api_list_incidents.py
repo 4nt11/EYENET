@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
-from eyenet.api.v1.schemas.incidents import IncidentGroupOut, IncidentOut
+from eyenet.api.v1.schemas.incidents import IncidentGroupOut, IncidentOut, IncidentSourceOut
 from eyenet.contracts.incident import IncidentLabelRow, IncidentRow
 from eyenet.storage.repository import BaseRepository
 
@@ -32,12 +32,13 @@ async def list_incidents(
     label: Annotated[list[str] | None, Query()] = None,
     q: Annotated[str | None, Query(max_length=256)] = None,
     group_id: Annotated[list[UUID] | None, Query()] = None,
+    source_id: Annotated[list[UUID] | None, Query()] = None,
 ) -> list[IncidentOut]:
-    # ?label= repeats for multi-select (OR); ?group_id= repeats to show only those groups.
+    # ?label= repeats (OR); ?group_id= / ?source_id= repeat to show only those groups/sources.
     rows = cast(
         "list[IncidentRow]",
         await storage.recent_incidents(
-            limit=limit, labels=label, offset=offset, q=q, group_ids=group_id
+            limit=limit, labels=label, offset=offset, q=q, group_ids=group_id, source_ids=source_id
         ),
     )
     ids = [r.message_id for r in rows]
@@ -79,3 +80,18 @@ async def list_incident_groups(
     group filter (independent of the ``/incidents`` window)."""
     rows = await storage.incident_groups()
     return [IncidentGroupOut(group_id=gid, title=title, count=n) for gid, title, n in rows]
+
+
+@router.get(
+    "/incidents/sources",
+    operation_id="list_incident_sources",
+    response_model=list[IncidentSourceOut],
+)
+async def list_incident_sources(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:incidents"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+) -> list[IncidentSourceOut]:
+    """Every source that has incidents, noisiest first — the source-level feed filter
+    (a forum's incidents roll up under one source instead of thousands of threads)."""
+    rows = await storage.incident_sources()
+    return [IncidentSourceOut(source_id=sid, title=title, count=n) for sid, title, n in rows]

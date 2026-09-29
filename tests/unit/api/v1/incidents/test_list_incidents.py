@@ -20,7 +20,7 @@ class _FakeStorage:
         self._rows = rows
 
     async def recent_incidents(
-        self, limit: int, *, labels=None, offset: int = 0, q=None, group_ids=None
+        self, limit: int, *, labels=None, offset: int = 0, q=None, group_ids=None, source_ids=None
     ) -> list:
         # q/FTS semantics are covered at the storage layer (test_incident_search_sqlite);
         # this fake only exercises response mapping + the label(OR)/group-filter wiring.
