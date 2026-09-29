@@ -27,12 +27,22 @@ _log = get_logger()
 # frozenset is the validation surface for operator rules + relabels.
 TAXONOMY_LABELS: frozenset[str] = frozenset(
     {
-        "defacement", "ddos_attack", "intrusion",
-        "breach_dump", "credentials", "stealer_logs",
+        "defacement",
+        "ddos_attack",
+        "intrusion",
+        "breach_dump",
+        "credentials",
+        "stealer_logs",
         "iab_corporate",
-        "crimeware_tooling", "crime_aas", "telecom_abuse",
-        "phishing_delivery", "fraud_ops", "infra_resale",
-        "recruiting", "alliance", "crew_ops",
+        "crimeware_tooling",
+        "crime_aas",
+        "telecom_abuse",
+        "phishing_delivery",
+        "fraud_ops",
+        "infra_resale",
+        "recruiting",
+        "alliance",
+        "crew_ops",
     }
 )
 BUILTIN_SIGNAL_NAMES: frozenset[str] = frozenset(s.name for s in SIGNALS)

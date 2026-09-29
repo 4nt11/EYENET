@@ -29,9 +29,7 @@ class ManualCrewTable(SQLModel, table=True):
 
 class ManualCrewMemberTable(SQLModel, table=True):
     __tablename__ = "manual_crew_member"
-    __table_args__ = (
-        UniqueConstraint("crew_id", "actor_id", name="uq_manual_crew_member"),
-    )
+    __table_args__ = (UniqueConstraint("crew_id", "actor_id", name="uq_manual_crew_member"),)
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     crew_id: UUID = Field(foreign_key="manual_crew.id", index=True)

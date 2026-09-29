@@ -16,8 +16,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Column
-from sqlalchemy import JSON as SA_JSON
+from sqlalchemy import JSON as SA_JSON, Column
 from sqlmodel import Field, SQLModel
 
 from ._base import new_uuid7

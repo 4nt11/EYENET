@@ -130,9 +130,7 @@ class IncidentClassifierService(ServiceBase):
         # and build the SAME text the model was trained on. The prefilter/rules stay on
         # the raw body (their signals are calibrated on message content, not filenames).
         att = await self._storage.attachment_files_by_message_ids([mid for _, (mid, _b) in ordered])
-        enriched = [
-            classifier.enrich_text(body, att.get(mid)) for (_ref, (mid, body)) in ordered
-        ]
+        enriched = [classifier.enrich_text(body, att.get(mid)) for (_ref, (mid, body)) in ordered]
         loop = asyncio.get_running_loop()
         scored = await loop.run_in_executor(self._infer_pool, classifier.classify_batch, enriched)
 

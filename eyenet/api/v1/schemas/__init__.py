@@ -15,7 +15,6 @@ from .actors import (
     ActorDetail,
     ActorSummary,
     AliasEntry,
-    SetActorAssessmentRequest,
     BelongsToPersonaAttrs,
     BelongsToPersonaEdge,
     CursorPageActorSummary,
@@ -26,6 +25,7 @@ from .actors import (
     NeighborEdge,
     NeighborList,
     ObservationSummary,
+    SetActorAssessmentRequest,
     TimelineEntry,
 )
 from .anchors import Anchor, CursorPageAnchor
@@ -133,7 +133,6 @@ __all__ = [
     "ActorDetail",
     "ActorSummary",
     "AliasEntry",
-    "SetActorAssessmentRequest",
     "Anchor",
     "AuditChainBreak",
     "AuditEvent",
@@ -226,6 +225,7 @@ __all__ = [
     "RedactionMarker",
     "RefreshRequest",
     "SensitivityTier",
+    "SetActorAssessmentRequest",
     "SigningKeyChallengeResponse",
     "SigningKeyRegisterRequest",
     "SigningKeyRegisterResponse",
