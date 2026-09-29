@@ -282,9 +282,9 @@
   .search:focus { outline: none; border-color: var(--accent); }
   .fgroup { display: flex; align-items: center; gap: 4px; }
   .flabel { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); margin-right: 2px; }
-  .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-11); padding: 4px 9px; cursor: pointer; }
-  .chip:hover { border-color: var(--accent); }
-  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--black); }
+  .chip { appearance: none; padding: 3px 9px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); cursor: pointer; }
+  .chip:hover { background: var(--panel-2); }
+  .chip.on { background: var(--accent-fill); border-color: var(--accent); color: var(--text); }
 
   .pop { position: relative; }
   .pop > summary { list-style: none; cursor: pointer; user-select: none; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); padding: 6px 12px; white-space: nowrap; }
