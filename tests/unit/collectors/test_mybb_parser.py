@@ -159,3 +159,23 @@ def test_unparseable_date_yields_none_not_crash() -> None:
     (post,) = parse_thread(html)
     assert post.posted_at is None
     assert post.posted_raw == "Today, 10:56 PM"
+
+
+def _cf_encode(email: str, key: int = 0x2b) -> str:
+    return bytes([key, *[ord(c) ^ key for c in email]]).hex()
+
+
+def test_cloudflare_email_decoded() -> None:
+    email = "victim@leak.io"
+    html = (
+        '<div class="post classic" id="post_3">'
+        '<div class="post_user-profile"><a href="User-x">x</a></div>'
+        '<span class="post_date">01-02-26, 09:30 AM</span>'
+        '<div class="post_body">contact <a class="__cf_email__" '
+        f'href="/cdn-cgi/l/email-protection" data-cfemail="{_cf_encode(email)}">'
+        '[email\u00a0protected]</a></div></div>'
+    )
+    (post,) = parse_thread(html)
+    assert email in post.body_text
+    assert email in post.body_html
+    assert "cf_email" not in post.body_html  # the obfuscation element is gone

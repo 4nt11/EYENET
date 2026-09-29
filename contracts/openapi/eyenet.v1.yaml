@@ -3105,6 +3105,24 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /v1/groups/{group_id}/backfill:
+    post:
+      tags: [groups]
+      operationId: groups_backfill
+      summary: Queue a deep backfill of one forum thread (all pages, write:groups).
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: Backfill queued for the collector.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumReplyResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /v1/groups/join:
     post:
       tags: [groups]

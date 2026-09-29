@@ -77,6 +77,7 @@ class IdentityFileEntry(BaseModel):
     forum_delay_max: float = 12.0
     forum_discovery_interval: int = 21_600
     forum_max_category_pages: int = 0
+    forum_max_thread_pages: int = 1  # per-thread depth on a sweep; 0 = all pages
 
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
@@ -189,6 +190,7 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
         out.append(f"forum_delay_max = {entry.forum_delay_max}")
         out.append(f"forum_discovery_interval = {entry.forum_discovery_interval}")
         out.append(f"forum_max_category_pages = {entry.forum_max_category_pages}")
+        out.append(f"forum_max_thread_pages = {entry.forum_max_thread_pages}")
     return out
 
 
