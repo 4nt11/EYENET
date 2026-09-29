@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params, encode_cursor
 from eyenet.api.v1.schemas.groups import CursorPageGroupMessage, GroupMessage
+from eyenet.contracts.incident import IncidentLabelRow
 from eyenet.models.message import MessageTable
 from eyenet.storage.repository import BaseRepository
 
@@ -41,9 +42,21 @@ async def groups_messages(
     )
     has_more = len(rows) > page.limit
     page_rows = rows[: page.limit]
-    # Attach the classifier's verdict per post so the reader shows what each was tagged.
-    labels = await storage.incident_labels_for_messages([m.id for m in page_rows])
-    items = [GroupMessage.from_message(m, labels.get(m.id)) for m in page_rows]
+    ids = [m.id for m in page_rows]
+    # Classifier verdict + operator correction per post, so the reader can show and
+    # relabel inline (same ground-truth channel as the incidents feed).
+    labels = await storage.incident_labels_for_messages(ids)
+    corrections = cast(
+        "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
+    )
+    items = [
+        GroupMessage.from_message(
+            m,
+            labels.get(m.id),
+            list(c.labels) if (c := corrections.get(m.id)) is not None else None,
+        )
+        for m in page_rows
+    ]
     estimated_total = (
         await storage.count_messages_for_group(group_id) if page.include_total else None
     )

@@ -139,10 +139,14 @@ class GroupMessage(ApiSchema):
     edited: bool = False
     has_attachment: bool = False
     incident_labels: list[str] = Field(default_factory=list)  # classifier verdict, if any
+    corrected_labels: list[str] | None = None  # operator ground-truth (None = uncorrected)
 
     @classmethod
     def from_message(
-        cls, msg: MessageTable, incident_labels: list[str] | None = None
+        cls,
+        msg: MessageTable,
+        incident_labels: list[str] | None = None,
+        corrected_labels: list[str] | None = None,
     ) -> GroupMessage:
         ss = msg.source_specific or {}
         return cls(
@@ -158,6 +162,7 @@ class GroupMessage(ApiSchema):
             edited=bool(ss.get("edited", False)),
             has_attachment=msg.has_attachment,
             incident_labels=incident_labels or [],
+            corrected_labels=corrected_labels,
         )
 
 
