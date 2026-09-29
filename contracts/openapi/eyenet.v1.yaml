@@ -4654,6 +4654,7 @@ components:
         group:         { type: string, nullable: true, description: 'WHERE: channel/group title.' }
         actor_id:      { type: string, format: uuid, nullable: true, description: 'WHO: sender actor (dossier click-through).' }
         actor_handle:  { type: string, nullable: true }
+        victim_country: { type: string, nullable: true, minLength: 2, maxLength: 2, description: 'WHERE (victim): ISO 3166-1 alpha-2; null if unknown/mixed/unattributed.' }
         labels:        { type: array, items: { type: string } }
         scores:        { type: object, additionalProperties: { type: number } }
         model_version: { type: string }
