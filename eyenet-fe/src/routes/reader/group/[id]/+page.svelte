@@ -201,6 +201,11 @@
               {#if m.reply_gated}<span class="badge">gated</span>{/if}
               {#if m.edited}<span class="badge edited">edited</span>{/if}
               {#each m.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
+              {#if m.corrected_labels}
+                <span class="corrtag">operator</span>
+                {#each m.corrected_labels as l}<span class="badge corrected">{incidentLabelName(l)}</span>{/each}
+                {#if !m.corrected_labels.length}<span class="badge corrected">false positive</span>{/if}
+              {/if}
             </div>
             {#if m.body_html}
               <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
@@ -228,7 +233,6 @@
                   <span class="hint">reason required · empty labels = false positive</span>
                 </div>
               {:else}
-                {#if m.corrected_labels}{#each m.corrected_labels as l}<span class="badge corrected">{incidentLabelName(l)}</span>{/each}{/if}
                 <button class="editlink" onclick={() => startEdit(m)}>{m.corrected_labels ? 'edit correction' : 'correct labels'}</button>
               {/if}
               {#if editId === m.id && incidentEdit.msg}<span class="hint" class:err={incidentEdit.msg.startsWith('Failed')}>{incidentEdit.msg}</span>{/if}
@@ -263,6 +267,7 @@
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
   .badge.incident { color: var(--red-text); border-color: var(--red-text); }
   .badge.corrected { color: var(--accent-text); border-color: var(--accent-text); }
+  .corrtag { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent-text); }
   .relabel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-11); padding: 2px 8px; cursor: pointer; }

@@ -50,12 +50,7 @@ async def groups_messages(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
     items = [
-        GroupMessage.from_message(
-            m,
-            labels.get(m.id),
-            list(c.labels) if (c := corrections.get(m.id)) is not None else None,
-        )
-        for m in page_rows
+        GroupMessage.from_message(m, labels.get(m.id), corrections.get(m.id)) for m in page_rows
     ]
     estimated_total = (
         await storage.count_messages_for_group(group_id) if page.include_total else None
