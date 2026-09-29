@@ -179,8 +179,9 @@
       aria-label="Search message bodies across this category's threads" />
 
     <div class="fgroup">
-      <button class="chip" class:on={sort === 'date'} onclick={() => setSort('date')}>date</button>
-      <button class="chip" class:on={sort === 'recent'} onclick={() => setSort('recent')}>recent</button>
+      <span class="flabel">sort</span>
+      <button class="chip" class:on={sort === 'date'} onclick={() => setSort('date')} title="When the thread's first post (OP) was posted">posted</button>
+      <button class="chip" class:on={sort === 'recent'} onclick={() => setSort('recent')} title="When EYENET last ingested activity in this thread">last seen</button>
     </div>
 
     {#if countryOpts.length}
@@ -280,6 +281,7 @@
   .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 5px 10px; min-width: 200px; }
   .search:focus { outline: none; border-color: var(--accent); }
   .fgroup { display: flex; align-items: center; gap: 4px; }
+  .flabel { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); margin-right: 2px; }
   .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-11); padding: 4px 9px; cursor: pointer; }
   .chip:hover { border-color: var(--accent); }
   .chip.on { background: var(--accent); border-color: var(--accent); color: var(--black); }
