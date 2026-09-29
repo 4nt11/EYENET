@@ -2350,6 +2350,35 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/cases/{case_id}/members/by-actor:
+    post:
+      tags: [cases]
+      operationId: cases_add_actor
+      summary: Add an actor and (optionally) all their posts to a case.
+      description: |
+        The reader's "open a case on this author" action. Adds the ACTOR as the
+        tracked member and, when `include_posts` is set, materializes every post we
+        hold by that actor (up to a server cap) as MESSAGE members, batched.
+        Duplicate subjects are skipped, not errored.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseActorAddRequest' }
+      responses:
+        "200":
+          description: Actor (and posts) added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseMemberBulkResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/cases/{case_id}/members/bulk-remove:
     post:
       tags: [cases]
@@ -5317,6 +5346,17 @@ components:
           maxItems: 500
           items: { $ref: '#/components/schemas/CaseMemberSubjectRef' }
         add_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseActorAddRequest:
+      description: |
+        Body for `POST /v1/cases/{case_id}/members/by-actor`. Adds the actor and,
+        when `include_posts` is true, every post we hold by them (server cap), batched.
+      type: object
+      additionalProperties: false
+      required: [actor_id, add_reason]
+      properties:
+        actor_id:      { type: string, format: uuid }
+        include_posts: { type: boolean, default: true }
+        add_reason:    { type: string, minLength: 16, maxLength: 1024 }
     CaseMemberBulkRemoveRequest:
       description: |
         Body for `POST /v1/cases/{case_id}/members/bulk-remove`. Atomic — soft-removes
@@ -5725,12 +5765,13 @@ components:
         `body` is the poster's own words (quotes stripped, classifier-facing);
         `body_html` is the evidence-faithful markup (quotes kept).
       type: object
-      required: [id, evidence_ref, platform_msgid, ts, body]
+      required: [id, evidence_ref, platform_msgid, ts, actor_id, body]
       properties:
         id:              { type: string, format: uuid }
         evidence_ref:    { type: string }
         platform_msgid:  { type: string }
         ts:              { type: string, format: date-time }
+        actor_id:        { type: string, format: uuid }
         author_display:  { type: string, nullable: true }
         author_username: { type: string, nullable: true }
         body:            { type: string }

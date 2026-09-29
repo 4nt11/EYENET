@@ -6,6 +6,7 @@
   import { incidentLabelName, incidentTone } from '$lib/data.js';
   import DossierLayout from '$lib/components/DossierLayout.svelte';
   import Badge from '$lib/components/Badge.svelte';
+  import CaseAddModal from '$lib/components/CaseAddModal.svelte';
 
   // Two-pane reader for a forum category: threads in the rail (each carries its
   // OP-anchored rollup — victim country + incident labels + date, so the list is
@@ -29,6 +30,7 @@
   // Detail pane: the selected thread's posts.
   let detailMsgs = $state([]);
   let detailLoaded = $state(false);
+  let caseModalPost = $state(null); // {id, actor_id, author, threadTitle} or null
 
   // Cross-thread body search (scoped to this category).
   let search = $state('');
@@ -256,6 +258,10 @@
               <span class="pts">{fmt(m.ts)}</span>
               {#each m.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
               {#if m.victim_country}<span class="pts" title={countryName(m.victim_country)}>victim {m.victim_country}</span>{/if}
+              <button
+                class="casebtn"
+                title="Add to a case"
+                onclick={() => (caseModalPost = { id: m.id, actor_id: m.actor_id, author: m.author_display || m.author_username, threadTitle: selectedThread?.title })}>+ case</button>
             </div>
             <div class="pbody">{@html clean(m.body_html, m.body)}</div>
           </li>
@@ -274,6 +280,10 @@
     {/if}
   {/snippet}
 </DossierLayout>
+
+{#if caseModalPost}
+  <CaseAddModal post={caseModalPost} onClose={() => (caseModalPost = null)} />
+{/if}
 
 <style>
   .mid { font-size: var(--fs-16); color: var(--text-body); min-width: 0; overflow-wrap: anywhere; }
@@ -310,6 +320,8 @@
   .pts { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); word-break: break-word; overflow-wrap: anywhere; }
   .pbody :global(img) { max-width: 100%; height: auto; }
+  .casebtn { appearance: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 3px; background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); cursor: pointer; }
+  .casebtn:hover { border-color: var(--accent); color: var(--accent); }
 
   .pnote { margin: 0; padding: 8px 2px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   .pnote.err { color: var(--red-text); }
