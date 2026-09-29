@@ -10,14 +10,17 @@
     incidentCtx,
     incidentEdit,
     loadIncidents,
+    loadMoreIncidents,
     loadIncidentGroups,
     loadIncidentSources,
+    loadIncidentCountries,
     relabelIncident
   } from '$lib/incident.svelte.js';
 
   let selectedLabels = $state(new Set()); // OR include-filter over taxonomy leaves
   let selectedGroups = $state(new Set()); // group ids to show (empty = all groups)
   let selectedSources = $state(new Set()); // source ids to show (empty = all sources)
+  let selectedCountries = $state(new Set()); // ISO alpha-2 victim countries to show (empty = all)
   let search = $state('');
   let searchTimer;
 
@@ -28,6 +31,7 @@
     loadIncidents();
     loadIncidentGroups(); // the full group set for the group filter (not the feed window)
     loadIncidentSources(); // the source-level filter (a whole forum in one option)
+    loadIncidentCountries(); // the victim-country filter (?q= never matched the geo verdict)
   });
 
   // Close any open filter popover when clicking outside it.
@@ -52,10 +56,17 @@
       : incidentCtx.groups
   );
   const sourceOpts = $derived(incidentCtx.sources);
+  const countryOpts = $derived(incidentCtx.countries);
 
   function applyFilter() {
     selectedId = null;
-    loadIncidents([...selectedLabels], search.trim(), [...selectedGroups], [...selectedSources]);
+    loadIncidents(
+      [...selectedLabels],
+      search.trim(),
+      [...selectedGroups],
+      [...selectedSources],
+      [...selectedCountries]
+    );
   }
 
   function toggleLabel(l) {
@@ -76,6 +87,13 @@
     const n = new Set(selectedSources);
     n.has(id) ? n.delete(id) : n.add(id);
     selectedSources = n;
+    applyFilter();
+  }
+
+  function toggleCountry(code) {
+    const n = new Set(selectedCountries);
+    n.has(code) ? n.delete(code) : n.add(code);
+    selectedCountries = n;
     applyFilter();
   }
 
@@ -121,6 +139,7 @@
 <DossierLayout listLabel="Incidents"
   items={incidentCtx.list.map((x) => ({ id: x.id, primary: x.labels.map(incidentLabelName).join(' · ') || x.idShort, secondary: (x.victimCountry ? '[' + x.victimCountry + '] ' : '') + (x.group ? x.group + ' · ' : '') + ((x.body ?? '').slice(0, 56) || x.idShort) }))}
   selectedId={sel?.id} onSelect={(id) => (selectedId = id)}
+  onLoadMore={loadMoreIncidents} hasMore={!!incidentCtx.nextCursor}
   selected={!!sel}>
 
   {#snippet title()}
@@ -132,7 +151,10 @@
   {/snippet}
 
   {#snippet filters()}
-    <div class="fcount">{incidentCtx.list.length} detection{incidentCtx.list.length === 1 ? '' : 's'}</div>
+    <div class="fcount">
+      {incidentCtx.list.length}{#if incidentCtx.total != null && incidentCtx.total > incidentCtx.list.length}<span class="oftotal"> / {incidentCtx.total}</span>{/if}
+      detection{(incidentCtx.total ?? incidentCtx.list.length) === 1 ? '' : 's'}
+    </div>
     <input class="search" type="search" placeholder="Search message body…" bind:value={search} oninput={onSearch} aria-label="Search incident message bodies" />
 
     <details class="pop">
@@ -172,6 +194,21 @@
             <input type="checkbox" checked={selectedSources.has(s.id)} onchange={() => toggleSource(s.id)} />
             <span class="ptitle">{s.title}</span>
             <span class="pcount">{s.count}</span>
+          </label>
+        {/each}
+      </div>
+    </details>
+
+    <details class="pop">
+      <summary>{selectedCountries.size ? `${selectedCountries.size} countr${selectedCountries.size > 1 ? 'ies' : 'y'}` : 'Countries'}</summary>
+      <div class="pmenu">
+        <span class="phint">victim country (geo verdict, not body text)</span>
+        {#if countryOpts.length === 0}<span class="pnone">no country verdicts yet</span>{/if}
+        {#each countryOpts as c (c.code)}
+          <label class="popt">
+            <input type="checkbox" checked={selectedCountries.has(c.code)} onchange={() => toggleCountry(c.code)} />
+            <span class="ptitle">{c.code}</span>
+            <span class="pcount">{c.count}</span>
           </label>
         {/each}
       </div>
@@ -285,6 +322,7 @@
   .mid { font-family: var(--font-mono); font-size: var(--fs-22); font-weight: var(--fw-bold); letter-spacing: var(--tracking-data); color: var(--text); }
   .mid.muted { color: var(--text-faint); }
   .fcount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; margin-right: 2px; }
+  .oftotal { color: var(--text-muted); }
   .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; min-width: 200px; }
   .search:focus { outline: none; border-color: var(--accent); }
 

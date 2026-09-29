@@ -1590,6 +1590,7 @@ paths:
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 256 } }
         - { name: group_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: source_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: victim_country, in: query, required: false, description: "ISO 3166-1 alpha-2; repeat to OR. Keeps only incidents with that geo verdict.", schema: { type: array, items: { type: string, minLength: 2, maxLength: 2 } } }
       responses:
         "200":
           description: A page of recent incidents (bodyless rows excluded).
@@ -1626,6 +1627,21 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/IncidentSourceOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+  /v1/incidents/countries:
+    get:
+      tags: [incidents]
+      operationId: list_incident_countries
+      summary: Resolved victim countries in the incident feed with counts (victim-country filter). Requires `read:incidents`.
+      responses:
+        "200":
+          description: Victim countries appearing in the incident feed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentCountryOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
   /v1/incidents/{message_id}/labels:
@@ -4642,6 +4658,14 @@ components:
         source_id: { type: string, format: uuid }
         title:     { type: string, nullable: true }
         count:     { type: integer }
+    IncidentCountryOut:
+      description: A resolved victim country in the incident feed with its incident count (ISO alpha-2).
+      type: object
+      additionalProperties: false
+      required: [country, count]
+      properties:
+        country: { type: string, minLength: 2, maxLength: 2 }
+        count:   { type: integer }
     IncidentOut:
       description: One classified incident on the operator triage feed (`/v1/incidents`).
       type: object
