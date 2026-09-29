@@ -43,6 +43,11 @@ async def list_incidents(
     )
     ids = [r.message_id for r in rows]
     bodies = await storage.bodies_by_message_ids(ids)
+    # Drop bodyless incidents: pure-quote forum posts strip to an empty body and
+    # classified into content-less "row not retained" rows. The incident table is
+    # append-only (we never delete predictions), so filter them from the feed here.
+    rows = [r for r in rows if (bodies.get(r.message_id) or "").strip()]
+    ids = [r.message_id for r in rows]
     ctx = await storage.message_context_by_ids(ids)  # (group_title, group_id, actor_id, handle)
     corrections = cast(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
