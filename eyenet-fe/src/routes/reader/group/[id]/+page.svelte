@@ -3,6 +3,7 @@
   import { page } from '$app/stores';
   import DOMPurify from 'dompurify';
   import { apiGet, apiPost } from '$lib/api.js';
+  import { incidentLabelName } from '$lib/data.js';
 
   // Message view for any group: a forum thread OR a chat/channel/room. Posts
   // render their evidence-faithful body_html (SANITIZED — this is threat-actor
@@ -169,6 +170,7 @@
               <span class="ts">{fmt(m.ts)}</span>
               {#if m.reply_gated}<span class="badge">gated</span>{/if}
               {#if m.edited}<span class="badge edited">edited</span>{/if}
+              {#each m.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
             </div>
             {#if m.body_html}
               <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
@@ -203,6 +205,7 @@
   .ts { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; }
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
+  .badge.incident { color: var(--red-text); border-color: var(--red-text); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; }
   .pbody.plain { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-12); }
   /* links come from sanitized {@html}, so they need :global to be reachable.

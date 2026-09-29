@@ -747,6 +747,10 @@ class BaseRepository(ABC):
         """Bulk {message_id: IncidentLabelRow} of current corrections (feed enrichment)."""
 
     @abstractmethod
+    async def incident_labels_for_messages(self, message_ids: list[UUID]) -> dict[UUID, list[str]]:
+        """Bulk {message_id: [labels]} from the classifier's latest incident per message."""
+
+    @abstractmethod
     async def all_incident_labels(self) -> list[object]:
         """Every operator correction — the retraining ground-truth export."""
 
