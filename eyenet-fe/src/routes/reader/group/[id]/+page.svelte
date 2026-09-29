@@ -14,6 +14,9 @@
   let msgs = $state([]);
   let error = $state(null);
   let loaded = $state(false);
+  let search = $state(''); // in-context body search, scoped to THIS group (thread/channel)
+  let total = $state(null); // estimated_total for the current (filtered) view
+  let searchTimer;
   let replyText = $state('');
   let replyMsg = $state(null);
   let submitting = $state(false);
@@ -28,13 +31,23 @@
 
   async function load() {
     loaded = false;
+    error = null;
+    const params = new URLSearchParams({ limit: '500', include_total: '1' });
+    if (search.trim()) params.set('q', search.trim()); // scoped to this group only
     try {
-      const p = await apiGet(`/v1/groups/${$page.params.id}/messages?limit=500`, { auth: true });
+      const p = await apiGet(`/v1/groups/${$page.params.id}/messages?${params}`, { auth: true });
       msgs = p.items ?? [];
+      total = p.estimated_total ?? null;
     } catch (e) {
       error = e.message;
     }
     loaded = true;
+  }
+
+  // Debounce keystrokes: one request 250ms after the operator stops typing.
+  function onSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(load, 250);
   }
 
   const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : '');
@@ -165,6 +178,21 @@
     </div>
     <h1>Conversation</h1>
     {#if gated}<span class="gatehint">Contains [hide]-gated posts · reply to unlock.</span>{/if}
+    <div class="searchrow">
+      <input
+        class="search"
+        type="search"
+        placeholder="Search this conversation…"
+        bind:value={search}
+        oninput={onSearch}
+        aria-label="Search message bodies in this group" />
+      {#if search.trim() && loaded}
+        <span class="scount">
+          {msgs.length}{#if total != null && total > msgs.length}<span class="oftotal"> / {total}</span>{/if}
+          match{(total ?? msgs.length) === 1 ? '' : 'es'}
+        </span>
+      {/if}
+    </div>
     {#if isForum}
       <div class="toolbar">
         <button class="btn ghost" disabled={backfilling} onclick={backfill}>Backfill deeper</button>
@@ -190,7 +218,7 @@
     {:else if error}
       <p class="pnote err">Could not load: {error}</p>
     {:else if !msgs.length}
-      <p class="pnote">No posts stored yet.</p>
+      <p class="pnote">{search.trim() ? `No posts in this conversation match “${search.trim()}”.` : 'No posts stored yet.'}</p>
     {:else}
       <ol class="posts" onclick={onPostClick}>
         {#each msgs as m}
@@ -254,6 +282,11 @@
   .slug-link:hover { color: var(--accent); }
   h1 { margin: 4px 0 0; font-size: var(--fs-20); color: var(--text-body); }
   .gatehint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--accent); }
+  .searchrow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; min-width: 260px; }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .scount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; }
+  .oftotal { color: var(--text-muted); }
   .toolbar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
   .btn.ghost { background: transparent; color: var(--accent-text); border: 1px solid var(--border-strong); }
   .btn.ghost:hover:not(:disabled) { border-color: var(--accent); }

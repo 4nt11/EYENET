@@ -334,6 +334,17 @@ async def test_groups_messages_returns_thread_posts_oldest_first(storage: BaseRe
     assert page.items[0].author_display == "d"
     assert page.estimated_total == 2
 
+    # ?q= scopes an in-context body search to THIS group (the reader search bar).
+    hit = await groups_messages(
+        group_id=gid,
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=True),
+        q="second",
+    )
+    assert [m.body for m in hit.items] == ["second"]  # only the matching post
+    assert hit.estimated_total == 1  # count matches the filtered page
+
 
 @pytest.mark.unit
 async def test_groups_messages_unknown_group_404(storage: BaseRepository) -> None:
