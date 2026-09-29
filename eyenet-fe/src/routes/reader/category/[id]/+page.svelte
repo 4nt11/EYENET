@@ -91,6 +91,32 @@
 
   const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
   const snippet = (b) => (b ?? '').replace(/\s+/g, ' ').slice(0, 140);
+
+  // ISO alpha-2 -> full country name via the browser's built-in region names
+  // (CL -> Chile), so filters read premium. Falls back to the code on anything odd.
+  const _regionNames =
+    typeof Intl !== 'undefined' && Intl.DisplayNames
+      ? new Intl.DisplayNames(['en'], { type: 'region' })
+      : null;
+  function countryName(code) {
+    if (!code) return code;
+    try {
+      return _regionNames?.of(code) ?? code;
+    } catch {
+      return code;
+    }
+  }
+
+  // Close any open filter popover when clicking outside it (matches the incidents page).
+  $effect(() => {
+    function onDocClick(e) {
+      for (const d of document.querySelectorAll('details.pop[open]')) {
+        if (!d.contains(e.target)) d.open = false;
+      }
+    }
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  });
 </script>
 
 <main>
@@ -146,21 +172,27 @@
             <button class="chip" class:on={sort === 'date'} onclick={() => setSort('date')}>date</button>
             <button class="chip" class:on={sort === 'recent'} onclick={() => setSort('recent')}>recent</button>
           </div>
+
           {#if countryOpts.length}
-            <div class="fgroup">
-              <span class="flabel">country</span>
-              {#each countryOpts as c}
-                <button class="chip" class:on={selectedCountries.has(c)} onclick={() => toggleCountry(c)}>{c}</button>
-              {/each}
-            </div>
+            <details class="pop">
+              <summary>{selectedCountries.size ? `${selectedCountries.size} countr${selectedCountries.size > 1 ? 'ies' : 'y'}` : 'Country'}</summary>
+              <div class="pmenu">
+                {#each countryOpts as c}
+                  <label class="popt"><input type="checkbox" checked={selectedCountries.has(c)} onchange={() => toggleCountry(c)} /> {countryName(c)}</label>
+                {/each}
+              </div>
+            </details>
           {/if}
+
           {#if labelOpts.length}
-            <div class="fgroup">
-              <span class="flabel">incident</span>
-              {#each labelOpts as l}
-                <button class="chip" class:on={selectedLabels.has(l)} onclick={() => toggleLabel(l)}>{incidentLabelName(l)}</button>
-              {/each}
-            </div>
+            <details class="pop">
+              <summary>{selectedLabels.size ? `${selectedLabels.size} incident${selectedLabels.size > 1 ? 's' : ''}` : 'Incident'}</summary>
+              <div class="pmenu">
+                {#each labelOpts as l}
+                  <label class="popt"><input type="checkbox" checked={selectedLabels.has(l)} onchange={() => toggleLabel(l)} /> {incidentLabelName(l)}</label>
+                {/each}
+              </div>
+            </details>
           {/if}
         </div>
       {/if}
@@ -172,7 +204,7 @@
             <li>
               <a class="row" href={`/reader/group/${t.group_id}`}>
                 <span class="title">
-                  {#if t.victim_country}<span class="badge country">{t.victim_country}</span>{/if}
+                  {#if t.victim_country}<span class="badge country" title={countryName(t.victim_country)}>{t.victim_country}</span>{/if}
                   {#each t.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
                   {t.title || t.platform_groupid}
                 </span>
@@ -204,12 +236,20 @@
   .row:hover { border-color: var(--accent); }
   .title { color: var(--text-body); font-size: var(--fs-14); word-break: break-word; }
   .meta { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
-  .filterbar { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  .filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
   .fgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
   .flabel { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); margin-right: 2px; }
   .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-11); padding: 2px 8px; cursor: pointer; }
   .chip:hover { border-color: var(--accent); }
   .chip.on { background: var(--accent); border-color: var(--accent); color: var(--black); }
+  .pop { position: relative; }
+  .pop > summary { list-style: none; cursor: pointer; user-select: none; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); padding: 6px 12px; white-space: nowrap; }
+  .pop > summary::-webkit-details-marker { display: none; }
+  .pop[open] > summary { border-color: var(--accent); }
+  .pmenu { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; min-width: 200px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 8px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-2, 0 8px 24px rgba(0,0,0,0.4)); }
+  .popt { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: var(--radius); font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); cursor: pointer; white-space: nowrap; }
+  .popt:hover { background: var(--panel-2); }
+  .popt input { accent-color: var(--accent); }
   .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); border: 1px solid var(--text-faint); color: var(--text-body); border-radius: 3px; padding: 0 5px; margin-right: 4px; }
   .badge.incident { color: var(--red-text); border-color: var(--red-text); }
   .badge.country { color: var(--text-body); border-color: var(--text-faint); }
