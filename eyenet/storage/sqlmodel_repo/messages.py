@@ -370,6 +370,37 @@ class MessagesMixin:
             result = await session.exec(stmt)
             return int(result.one())
 
+    async def update_message_content(
+        self,
+        evidence_ref: str,
+        *,
+        body: str,
+        length_chars: int,
+        length_words: int,
+        source_specific: dict[str, object],
+    ) -> bool:
+        """Replace a message's body + source_specific by evidence_ref.
+
+        For the reply-to-unlock re-fetch: the same post now carries the unlocked
+        [hide] content, so the gated placeholder is overwritten in place (
+        put_message is insert-only and would no-op on the existing pid). Returns
+        True if a row was updated.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageTable).where(MessageTable.evidence_ref == evidence_ref)
+            )
+            row = result.first()
+            if row is None:
+                return False
+            row.body = body
+            row.length_chars = length_chars
+            row.length_words = length_words
+            row.source_specific = source_specific
+            session.add(row)
+            await session.commit()
+            return True
+
     async def messages_for_group(
         self,
         group_id: UUID,

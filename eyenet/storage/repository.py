@@ -1171,6 +1171,19 @@ class BaseRepository(ABC):
     ) -> int: ...
 
     @abstractmethod
+    async def update_message_content(
+        self,
+        evidence_ref: str,
+        *,
+        body: str,
+        length_chars: int,
+        length_words: int,
+        source_specific: dict[str, object],
+    ) -> bool:
+        """Replace a message's body + source_specific by evidence_ref (reply-to-
+        unlock re-fetch overwrites the gated placeholder). True if a row matched."""
+
+    @abstractmethod
     async def messages_for_group(
         self,
         group_id: UUID,
@@ -1184,6 +1197,33 @@ class BaseRepository(ABC):
     @abstractmethod
     async def count_messages_for_group(self, group_id: UUID) -> int:
         """Count messages in a group."""
+
+    @abstractmethod
+    async def create_forum_reply_request(
+        self,
+        *,
+        source_id: UUID,
+        group_id: UUID,
+        message: str,
+        requested_by: str,
+        requested_at: datetime,
+    ) -> UUID:
+        """Enqueue an operator reply-to-unlock request (state=pending)."""
+
+    @abstractmethod
+    async def list_pending_forum_reply_requests(self, source_id: UUID) -> list[object]:
+        """PENDING forum reply requests for a source, oldest-first."""
+
+    @abstractmethod
+    async def complete_forum_reply_request(
+        self,
+        request_id: UUID,
+        *,
+        state: str,
+        result: str | None,
+        completed_at: datetime,
+    ) -> None:
+        """Mark a reply request done|failed with a result note."""
 
     @abstractmethod
     async def resolve_message_id(

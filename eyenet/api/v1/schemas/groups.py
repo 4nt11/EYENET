@@ -160,9 +160,27 @@ class CursorPageGroupMessage(CursorPage[GroupMessage]):
     """200 page response for `GET /v1/groups/{group_id}/messages`."""
 
 
+class ForumReplyRequest(ApiSchema):
+    """Body for POST /v1/groups/{group_id}/reply — the operator's typed reply.
+
+    Replying unlocks a MyBB [hide] gate. The text is verbatim operator input,
+    never auto-generated; the collector posts exactly this."""
+
+    message: str = Field(min_length=1, max_length=10_000)
+
+
+class ForumReplyResult(ApiSchema):
+    """202 response — the reply was queued for the collector to post under throttle."""
+
+    request_id: UUID
+    state: str
+
+
 __all__ = [
     "CursorPageGroupMessage",
     "CursorPageGroupSummary",
+    "ForumReplyRequest",
+    "ForumReplyResult",
     "GroupMessage",
     "GroupSummary",
     "JoinGroupRequest",
