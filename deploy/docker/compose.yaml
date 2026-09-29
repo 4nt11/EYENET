@@ -114,6 +114,14 @@ services:
     <<: *eyenet-worker
     command: ["verifier"]
 
+  # Victim-country attribution over incident-flagged (and operator-rescued) messages.
+  # Pure-python (re2 + phonenumbers + pycountry), runs in eyenet:base. Tick-driven:
+  # drains the backlog then stays live. Writes the message_geo sidecar; surfaces on
+  # the incident feed + reader.
+  geo:
+    <<: *eyenet-worker
+    command: ["geo", "--interval", "2"]
+
   # ---- opt-in: classifier (M10). REQUIRES TUNING (nsjail-in-Docker). ----------
   # Enable with:  docker compose --profile classifier up -d
   classifier:
