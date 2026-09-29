@@ -3094,6 +3094,28 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /v1/groups/{category_id}/search:
+    get:
+      tags: [groups]
+      operationId: groups_category_search
+      summary: Body-search across every thread under a forum category, newest match first (read:observations).
+      parameters:
+        - { name: category_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 256 } }
+      responses:
+        "200":
+          description: Cursor page of matching posts, each tagged with its thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCategorySearchHit' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /v1/groups/{group_id}/messages:
     get:
       tags: [groups]
@@ -3101,6 +3123,7 @@ paths:
       summary: Raw posts in a group (forum thread / chat), oldest-first (read:observations).
       parameters:
         - { name: group_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: q, in: query, required: false, description: "Free-text body search scoped to this group.", schema: { type: string, maxLength: 256 } }
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/IncludeTotal' }
@@ -5745,6 +5768,26 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/GroupThread' }
+    CategorySearchHit:
+      description: A body-search match inside a forum category, tagged with its thread (reader category search).
+      type: object
+      additionalProperties: false
+      required: [id, ts, body, thread_group_id]
+      properties:
+        id:              { type: string, format: uuid }
+        ts:              { type: string, format: date-time }
+        author_display:  { type: string, nullable: true }
+        body:            { type: string }
+        thread_group_id: { type: string, format: uuid }
+        thread_title:    { type: string, nullable: true }
+    CursorPageCategorySearchHit:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/CategorySearchHit' }
     ForumReplyRequest:
       description: The operator's verbatim reply to unlock a gated forum thread.
       type: object
