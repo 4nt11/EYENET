@@ -3090,6 +3090,13 @@ paths:
       parameters:
         - { name: source_id, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: state, in: query, required: false, schema: { $ref: '#/components/schemas/CandidateState' } }
+        - name: status
+          in: query
+          required: false
+          description: Operator-facing status filter, derived from state + member_dialog.
+          schema:
+            type: string
+            enum: [monitored, joining, requested, approving, member_unmonitored, discovered, rejected, failed, parked]
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/IncludeTotal' }
@@ -5658,6 +5665,7 @@ components:
         kind_hint: { $ref: '#/components/schemas/GroupKind', nullable: true }
         display_name_hint: { type: string, nullable: true }
         state: { $ref: '#/components/schemas/CandidateState' }
+        member_dialog: { type: boolean, default: false }
         score: { type: number, minimum: 0.0 }
         first_observed_at_ingest: { type: string, format: date-time }
         last_observed_at_ingest: { type: string, format: date-time }
@@ -5693,6 +5701,7 @@ components:
         kind_hint: { $ref: '#/components/schemas/GroupKind', nullable: true }
         display_name_hint: { type: string, nullable: true }
         state: { $ref: '#/components/schemas/CandidateState' }
+        member_dialog: { type: boolean, default: false }
         score: { type: number, minimum: 0.0 }
         first_observed_at_ingest: { type: string, format: date-time }
         last_observed_at_ingest: { type: string, format: date-time }

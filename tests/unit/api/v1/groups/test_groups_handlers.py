@@ -147,6 +147,45 @@ async def test_list_groups_projects_candidates(storage: BaseRepository) -> None:
 
 
 @pytest.mark.unit
+async def test_list_groups_status_filter(storage: BaseRepository) -> None:
+    from fastapi import HTTPException
+
+    from eyenet.api.deps_paging import CursorParams
+
+    sid = await _source(storage)
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@member", seen_at=datetime.now(tz=UTC), member_dialog=True
+    )
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@disc", seen_at=datetime.now(tz=UTC)
+    )
+
+    async def _list(status: str | None):
+        return await groups_list(
+            _=_user(),
+            storage=storage,
+            page=CursorParams(offset=0, limit=50, include_total=True),
+            source_id=None,
+            state=None,
+            status=status,
+        )
+
+    # member_unmonitored selects only the dialog member; discovered only the other.
+    member = await _list("member_unmonitored")
+    assert {i.platform_groupid for i in member.items} == {"@member"}
+    assert member.estimated_total == 1
+    disc = await _list("discovered")
+    assert {i.platform_groupid for i in disc.items} == {"@disc"}
+    # monitored (JOINED) matches nothing here.
+    mon = await _list("monitored")
+    assert mon.items == []
+    # unknown status is a 400, not a silent empty page.
+    with pytest.raises(HTTPException) as ei:
+        await _list("bogus")
+    assert ei.value.status_code == 400
+
+
+@pytest.mark.unit
 async def test_leave_parks_and_closes_membership(storage: BaseRepository) -> None:
     sid = await _source(storage)
     coll = await _seed_collector(storage, sid)
