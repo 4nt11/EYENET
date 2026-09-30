@@ -50,8 +50,16 @@
       : []
   );
 
+  // Server-side search over the group name + platform id, debounced so each
+  // keystroke doesn't hammer the API. The initial run (empty search) loads all.
+  let search = $state('');
+  $effect(() => {
+    const q = search;
+    const t = setTimeout(() => loadGroups(q), 250);
+    return () => clearTimeout(t);
+  });
+
   onMount(() => {
-    loadGroups();
     loadCollectors();
     loadSources();
   });
@@ -76,12 +84,19 @@
 
   <div class="body">
     <div class="table-col">
+      <input
+        class="search"
+        type="search"
+        placeholder="Search groups by name or platform id…"
+        bind:value={search}
+        aria-label="Search groups"
+      />
       {#if rows.length}
         <DataTable rowKey="id" columns={COLUMNS} rows={rows}
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
       {:else}
         <p class="pnote">
-          {#if !groupCtx.loaded}Loading…{:else if groupCtx.error}Could not load groups: {groupCtx.error}{:else}No groups visible yet. Run a collector (it scans its identity's groups on start), or Rescan.{/if}
+          {#if !groupCtx.loaded}Loading…{:else if groupCtx.error}Could not load groups: {groupCtx.error}{:else if search.trim()}No groups match "{search.trim()}".{:else}No groups visible yet. Run a collector (it scans its identity's groups on start), or Rescan.{/if}
         </p>
       {/if}
     </div>
@@ -115,6 +130,8 @@
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-right: 20px; }
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .table-col { min-height: 0; overflow: auto; }
+  .search { width: 100%; box-sizing: border-box; margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 8px 12px; }
+  .search:focus { outline: none; border-color: var(--accent); }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .actions { display: flex; flex-direction: column; gap: 8px; }
   .actions-label { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }

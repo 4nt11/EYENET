@@ -43,9 +43,12 @@ function mapGroup(g) {
 
 export const groupCtx = $state({ list: [], loaded: false, error: null });
 
-export async function loadGroups() {
+export async function loadGroups(q = '') {
   try {
-    const page = await apiGet('/v1/groups?limit=200', { auth: true });
+    // Server-side substring search over name + platform id — cuts through the
+    // discovery firehose so the operator can find the group they mean to join.
+    const query = q.trim() ? `&q=${encodeURIComponent(q.trim())}` : '';
+    const page = await apiGet(`/v1/groups?limit=200${query}`, { auth: true });
     groupCtx.list = page.items.map(mapGroup);
     groupCtx.error = null;
   } catch (e) {
