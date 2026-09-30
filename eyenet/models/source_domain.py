@@ -29,7 +29,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CHAR, CheckConstraint, Column, Computed, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Computed, Index, UniqueConstraint, Uuid
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import SourceDomainPatternKind
@@ -44,7 +44,10 @@ class SourceDomainTable(SQLModel, table=True):
     __table_args__ = (
         CheckConstraint("length(pattern) >= 1", name="ck_source_domain_pattern_nonempty"),
         CheckConstraint("pattern = lower(pattern)", name="ck_source_domain_pattern_lower"),
-        CheckConstraint("instr(pattern, '*') = 0", name="ck_source_domain_pattern_no_star"),
+        # Portable "no literal '*'": '*' is not a LIKE wildcard, so NOT LIKE
+        # '%*%' means "contains no *" on SQLite AND Postgres (SQLite's instr()
+        # has no Postgres equivalent).
+        CheckConstraint("pattern NOT LIKE '%*%'", name="ck_source_domain_pattern_no_star"),
         # SQLAlchemy's default StrEnum mapping stores .name (uppercase),
         # not .value — same convention as case_v2.status, observation.tier,
         # etc. The CHECK enumerates the *stored* form so a backend that
@@ -94,7 +97,9 @@ class SourceDomainTable(SQLModel, table=True):
         default=None,
         sa_column=Column(
             "active_primary_source_id",
-            CHAR(32),
+            # Uuid() renders CHAR(32) on SQLite (unchanged) and native uuid on
+            # Postgres, matching the type of the source_id it materializes.
+            Uuid(),
             Computed(
                 "CASE WHEN is_primary AND removed_at IS NULL THEN source_id ELSE NULL END",
                 persisted=True,
