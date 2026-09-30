@@ -255,7 +255,6 @@
             <div class="pmeta">
               <span class="pauthor">{m.author_display || m.author_username || 'unknown'}</span>
               <span class="pts">{fmt(m.ts)}</span>
-              {#each m.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
               {#if m.victim_country}<span class="pts" title={countryName(m.victim_country)}>victim {m.victim_country}</span>{/if}
               <button
                 class="casebtn"
