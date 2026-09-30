@@ -4,6 +4,7 @@
   import { boardOf, prepare, onGuardedClick } from '$lib/linkguard.js';
   import { apiGet } from '$lib/api.js';
   import { incidentLabelName, incidentTone } from '$lib/data.js';
+  import RelabelEditor from '$lib/components/RelabelEditor.svelte';
   import DossierLayout from '$lib/components/DossierLayout.svelte';
   import Badge from '$lib/components/Badge.svelte';
   import CaseAddModal from '$lib/components/CaseAddModal.svelte';
@@ -266,6 +267,7 @@
             {:else}
               <div class="pbody plain">{m.body}</div>
             {/if}
+            <RelabelEditor message={m} />
           </li>
         {/each}
       </ul>
