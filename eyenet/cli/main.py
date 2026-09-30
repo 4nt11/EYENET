@@ -45,6 +45,8 @@ from eyenet.linker.linker import Linker
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.models.profile import ProfileTable
+from eyenet.sensor.discovery import DISCOVERY_EXTRACTORS, MessageContext
+from eyenet.sensor.discovery_sensor import DiscoverySensor
 from eyenet.sensor.skeleton import SensorSkeleton
 from eyenet.sensor.stylometric import StylometricSensor
 from eyenet.service import ServiceBase, run_service
@@ -53,6 +55,7 @@ from eyenet.services.collector_supervisor import CollectorSupervisor
 from eyenet.services.geo_attribution import GeoAttributionService
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
+from eyenet.storage.sqlmodel_repo.messages import DiscoveryBackfillMessage
 from eyenet.verifier.service import VerifierService
 
 app = typer.Typer(
@@ -393,6 +396,81 @@ def sensor_run(  # pragma: no cover
         _run(lambda bus, storage: StylometricSensor(bus=bus, storage=storage), cfg)
     else:
         _run(lambda bus, storage: SensorSkeleton(bus=bus, storage=storage), cfg)
+
+
+@app.command("discovery")
+def discovery_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Run the discovery sensor — extracts group references from every raw
+    message and records DISCOVERED candidates. Separate queue group from the
+    stylometric sensor, so it sees every message."""
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(lambda bus, storage: DiscoverySensor(bus=bus, storage=storage), cfg)
+
+
+@app.command("discovery-backfill")
+def discovery_backfill(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    batch: int = typer.Option(1000, "--batch", help="messages per keyset page"),
+    max_messages: int | None = typer.Option(
+        None, "--max-messages", help="stop after N messages (smoke/limited runs)"
+    ),
+) -> None:
+    """Run the discovery extractors over the STORED message corpus (one-shot).
+
+    The live discovery sensor only sees new messages off the bus; this mines the
+    history. Idempotent (record_candidate_mention dedupes on evidence ref), so it
+    is safe to re-run. New groups land as DISCOVERED — nothing auto-joins."""
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        lineage: dict[UUID, tuple[UUID | None, int]] = {}  # group_id -> (seed_root, depth), cached
+        after_id: UUID | None = None
+        seen = 0
+        rows_written = 0
+        try:
+            while True:
+                page = cast(
+                    "list[DiscoveryBackfillMessage]",
+                    await storage.messages_for_discovery_backfill(limit=batch, after_id=after_id),
+                )
+                if not page:
+                    break
+                for m in page:
+                    if m.group_id not in lineage:
+                        lineage[m.group_id] = await storage.group_lineage(m.group_id)
+                    seed_root_id, depth = lineage[m.group_id]
+                    ctx = MessageContext(
+                        text=m.body,
+                        source_id=m.source_id,
+                        observed_by_collector_id=m.observed_by_collector_id,
+                        observed_in_group_id=m.group_id,
+                        seed_root_id=seed_root_id,
+                        depth_from_root=depth,
+                        mentioning_actor_id=m.actor_id,
+                        evidence_ref=m.evidence_ref,
+                        sent_at_source=m.sent_at_source,
+                        collected_at=m.ingested_at,
+                    )
+                    for extractor in DISCOVERY_EXTRACTORS:
+                        rows_written += await extractor.process(ctx, storage)
+                    after_id = m.id
+                    seen += 1
+                    if max_messages is not None and seen >= max_messages:
+                        break
+                typer.echo(f"  scanned {seen} messages, {rows_written} discovery rows written")
+                if max_messages is not None and seen >= max_messages:
+                    break
+        finally:
+            await storage.close()
+        typer.echo(f"done: {seen} messages scanned, {rows_written} discovery rows written")
+
+    asyncio.run(_main())
 
 
 @app.command("incident-classifier")

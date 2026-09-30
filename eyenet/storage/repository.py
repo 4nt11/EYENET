@@ -1254,6 +1254,15 @@ class BaseRepository(ABC):
         :meth:`messages_for_group`)."""
 
     @abstractmethod
+    async def messages_for_discovery_backfill(
+        self, *, limit: int, after_id: UUID | None = None
+    ) -> list[object]:
+        """Page the whole corpus (keyset by id ASC) joined to each message's
+        first-sighting collector, for the one-shot discovery backfill. Returns
+        ``DiscoveryBackfillMessage`` rows (type-erased); pass the last id back as
+        ``after_id`` to continue. Empty list ends the walk."""
+
+    @abstractmethod
     async def record_forum_thread_link(
         self,
         *,
