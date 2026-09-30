@@ -2,7 +2,7 @@
 // layout gate renders the app only when `token` is present and validated.
 // Tokens live in localStorage so a refresh keeps the session; the store is the
 // in-memory mirror. api.js reads the same localStorage key (no import cycle).
-import { apiGet, apiPost } from './api.js';
+import { apiGet, apiPost, setUnauthorizedHandler } from './api.js';
 
 const TOKEN_KEY = 'eyenet_token';
 const REFRESH_KEY = 'eyenet_refresh';
@@ -44,6 +44,17 @@ function clearSession() {
   write(TOKEN_KEY, null);
   write(REFRESH_KEY, null);
 }
+
+// A 401 on any authenticated request means the token is dead (expired/revoked).
+// Drop the session; because the layout gate reads `auth.token` reactively, the
+// current page is replaced by <Login/> without any routing. `ready` stays true
+// so the gate shows the login form, not the boot splash. Registered with api.js
+// (inverted dependency — api.js cannot import this module).
+export function handleUnauthorized() {
+  clearSession();
+  auth.ready = true;
+}
+setUnauthorizedHandler(handleUnauthorized);
 
 // Returns {mfaChallengeId} when the account has MFA enrolled (caller then
 // collects a code and calls verifyMfa), or {ok:true} when logged straight in.
