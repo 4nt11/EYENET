@@ -32,11 +32,10 @@ from eyenet.models.file_access import FileAccessAcknowledgmentTable
 from eyenet.storage.sqlite_repo.database import (
     get_async_engine,
     get_sync_engine,
-    init_audit_db,
     init_lock,
-    init_main_db,
     open_in_memory_async_engine,
     open_in_memory_sync_engine,
+    upgrade_to_head,
 )
 from eyenet.storage.sqlmodel_repo import SQLModelRepository
 from eyenet.storage.sqlmodel_repo._helpers import safe_session
@@ -99,8 +98,7 @@ class SQLiteRepository(SQLModelRepository):
             audit_name = f"eyenet-audit-{_uuid.uuid4().hex}"
             self.sync_engine = open_in_memory_sync_engine(main_name)
             self.audit_sync_engine = open_in_memory_sync_engine(audit_name)
-            init_main_db(self.sync_engine)
-            init_audit_db(self.audit_sync_engine)
+            upgrade_to_head(self.sync_engine, self.audit_sync_engine)
             self.engine = open_in_memory_async_engine(main_name)
             self.audit_engine = open_in_memory_async_engine(audit_name)
         else:
@@ -110,8 +108,7 @@ class SQLiteRepository(SQLModelRepository):
             with init_lock(data_dir):
                 self.sync_engine = get_sync_engine(data_dir / "main.db")
                 self.audit_sync_engine = get_sync_engine(data_dir / "audit.db")
-                init_main_db(self.sync_engine)
-                init_audit_db(self.audit_sync_engine)
+                upgrade_to_head(self.sync_engine, self.audit_sync_engine)
                 self.engine = get_async_engine(data_dir / "main.db")
                 self.audit_engine = get_async_engine(data_dir / "audit.db")
 
