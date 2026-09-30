@@ -272,6 +272,10 @@ class MatrixCollector(CollectorSkeleton):
             display_name=f"matrix:{entry.name}",
             created_at=datetime.now(tz=UTC),
         )
+        # Bind our row to the source we actually ingest into (the placeholder
+        # source it was registered against has zero of our messages).
+        collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
+        await self._bind_collector_row_source(collector, self._source_uuid)
 
         async def _on_panic(_subject: str, _payload: bytes, _headers: dict[str, str]) -> None:
             _log.warning("collector.panic_received", identity=self._identity_name)

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from eyenet.contracts.audit_subjects import AuditSubject
@@ -126,8 +127,36 @@ class CollectorSupervisor(ServiceBase):
         self._cooling_until: dict[UUID, float] = {}
 
     def _monotonic(self) -> float:
-        """Wall-clock seam (overridable in tests) for the cooling backoff."""
+        """Monotonic-clock seam (overridable in tests) for the cooling backoff."""
         return time.monotonic()
+
+    def _wall_now(self) -> datetime:
+        """Wall-clock seam (overridable in tests) for the heartbeat stamp."""
+        return datetime.now(tz=UTC)
+
+    async def _heartbeat(self, collector: CollectorRow) -> None:
+        """Stamp ``last_heartbeat_at`` every tick a child is confirmed alive.
+
+        Audits the RUNNING transition only when the observed_state actually
+        changes (via :meth:`_set_observed`); a steady collector just refreshes
+        the heartbeat with no audit spam. The heartbeat is supervisor-observed
+        process liveness — the same signal reconcile already computes.
+
+        # ponytail: process-alive is the heartbeat; a wedged-but-alive collector
+        # still beats. Collector self-report (last actual ingest) is the upgrade
+        # path if we ever need to distinguish "up" from "up and pulling".
+        """
+        now = self._wall_now()
+        if collector.observed_state is not CollectorObservedState.RUNNING:
+            await self._set_observed(
+                collector, CollectorObservedState.RUNNING, last_heartbeat_at=now
+            )
+        else:
+            await self._storage.record_collector_observed_state(
+                collector_id=collector.id,
+                observed_state=CollectorObservedState.RUNNING,
+                last_heartbeat_at=now,
+            )
 
     async def _spawn(self, collector: CollectorRow) -> asyncio.subprocess.Process | None:
         """Launch the collector child process. Returns the handle, or None if the
@@ -185,6 +214,7 @@ class CollectorSupervisor(ServiceBase):
         restart_count: int | None = None,
         error_type: str | None = None,
         error_message: str | None = None,
+        last_heartbeat_at: datetime | None = None,
     ) -> None:
         """Write + audit an observed_state transition, but only when something
         actually changed (no per-tick audit spam for a steady collector). A
@@ -198,6 +228,7 @@ class CollectorSupervisor(ServiceBase):
             restart_count=restart_count,
             last_error_type=error_type,
             last_error_message=error_message,
+            last_heartbeat_at=last_heartbeat_at,
         )
         await self.audit.emit(
             event=AuditSubject.COLLECTOR_RECONCILED.value,
@@ -300,7 +331,7 @@ class CollectorSupervisor(ServiceBase):
 
             # 3. Operator wants it running.
             if alive:
-                await self._set_observed(collector, CollectorObservedState.RUNNING)
+                await self._heartbeat(collector)
                 continue
             cool = self._cooling_until.get(cid)
             if cool is not None and now < cool:
@@ -310,7 +341,11 @@ class CollectorSupervisor(ServiceBase):
             spawned = await self._spawn(collector)
             if spawned is not None:
                 self._procs[cid] = spawned
-                await self._set_observed(collector, CollectorObservedState.RUNNING)
+                await self._set_observed(
+                    collector,
+                    CollectorObservedState.RUNNING,
+                    last_heartbeat_at=self._wall_now(),
+                )
             else:
                 rc = collector.restart_count + 1
                 self._cooling_until[cid] = now + min(2.0**rc, _MAX_COOLING_S)

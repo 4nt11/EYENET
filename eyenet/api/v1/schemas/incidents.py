@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import Field
 
 from ._base import ApiSchema
+from .pagination import CursorPage
 
 
 class IncidentOut(ApiSchema):
@@ -20,6 +21,12 @@ class IncidentOut(ApiSchema):
     group_id: UUID | None = None  # the group's id (for the feed's group filter)
     actor_id: UUID | None = None  # WHO: sender actor (for dossier click-through)
     actor_handle: str | None = None
+    victim_country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="WHERE (victim): ISO 3166-1 alpha-2; None if unknown/mixed/unattributed.",
+    )
     labels: list[str]
     scores: dict[str, float]
     model_version: str
@@ -47,6 +54,14 @@ class IncidentSourceOut(ApiSchema):
 
     source_id: UUID
     title: str | None = None
+    count: int
+
+
+class IncidentCountryOut(ApiSchema):
+    """A resolved victim country appearing in the incident feed, with its incident count —
+    populates the victim-country filter (ISO 3166-1 alpha-2)."""
+
+    country: str = Field(min_length=2, max_length=2)
     count: int
 
 
@@ -102,4 +117,14 @@ class IncidentRuleUpdate(ApiSchema):
     description: str | None = None
 
 
-__all__ = ["IncidentOut", "IncidentRuleCreate", "IncidentRuleOut", "IncidentRuleUpdate"]
+class CursorPageIncidentOut(CursorPage[IncidentOut]):
+    """200 page response for `GET /v1/incidents` — the operator triage feed."""
+
+
+__all__ = [
+    "CursorPageIncidentOut",
+    "IncidentOut",
+    "IncidentRuleCreate",
+    "IncidentRuleOut",
+    "IncidentRuleUpdate",
+]

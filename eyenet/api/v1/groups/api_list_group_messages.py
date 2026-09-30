@@ -10,12 +10,12 @@ from __future__ import annotations
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params, encode_cursor
 from eyenet.api.v1.schemas.groups import CursorPageGroupMessage, GroupMessage
-from eyenet.contracts.incident import IncidentLabelRow
+from eyenet.contracts.incident import IncidentLabelRow, MessageGeoRow
 from eyenet.models.message import MessageTable
 from eyenet.storage.repository import BaseRepository
 
@@ -33,12 +33,15 @@ async def groups_messages(
     _: Annotated[CurrentUser, Depends(RequireScope("read:observations"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     page: Annotated[CursorParams, Depends(cursor_params)],
+    q: Annotated[str | None, Query(max_length=256)] = None,
 ) -> CursorPageGroupMessage:
     if await storage.get_group(group_id) is None:
         raise ResourceNotFound("group")
+    # ?q= free-text-searches this group's message bodies (the reader's in-context search),
+    # scoped to this thread/channel only — FTS5 on SQLite.
     rows = cast(
         "list[MessageTable]",
-        await storage.messages_for_group(group_id, limit=page.limit + 1, offset=page.offset),
+        await storage.messages_for_group(group_id, limit=page.limit + 1, offset=page.offset, q=q),
     )
     has_more = len(rows) > page.limit
     page_rows = rows[: page.limit]
@@ -49,11 +52,13 @@ async def groups_messages(
     corrections = cast(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
+    geo = cast("dict[UUID, MessageGeoRow]", await storage.message_geo_by_message_ids(ids))
     items = [
-        GroupMessage.from_message(m, labels.get(m.id), corrections.get(m.id)) for m in page_rows
+        GroupMessage.from_message(m, labels.get(m.id), corrections.get(m.id), geo.get(m.id))
+        for m in page_rows
     ]
     estimated_total = (
-        await storage.count_messages_for_group(group_id) if page.include_total else None
+        await storage.count_messages_for_group(group_id, q=q) if page.include_total else None
     )
     return CursorPageGroupMessage(
         items=items,

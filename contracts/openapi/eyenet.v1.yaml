@@ -1583,20 +1583,20 @@ paths:
       operationId: list_incidents
       summary: Operator triage feed — recent classified incidents, newest first. Requires `read:incidents`.
       parameters:
-        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
-        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
         - { name: label, in: query, required: false, schema: { type: string, nullable: true } }
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 256 } }
         - { name: group_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: source_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: victim_country, in: query, required: false, description: "ISO 3166-1 alpha-2; repeat to OR. Keeps only incidents with that geo verdict.", schema: { type: array, items: { type: string, minLength: 2, maxLength: 2 } } }
       responses:
         "200":
-          description: Recent incidents.
+          description: A page of recent incidents (bodyless rows excluded).
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/IncidentOut' }
+              schema: { $ref: '#/components/schemas/CursorPageIncidentOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
   /v1/incidents/groups:
@@ -1627,6 +1627,21 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/IncidentSourceOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+  /v1/incidents/countries:
+    get:
+      tags: [incidents]
+      operationId: list_incident_countries
+      summary: Resolved victim countries in the incident feed with counts (victim-country filter). Requires `read:incidents`.
+      responses:
+        "200":
+          description: Victim countries appearing in the incident feed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IncidentCountryOut' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
   /v1/incidents/{message_id}/labels:
@@ -2332,6 +2347,35 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/cases/{case_id}/members/by-actor:
+    post:
+      tags: [cases]
+      operationId: cases_add_actor
+      summary: Add an actor and (optionally) all their posts to a case.
+      description: |
+        The reader's "open a case on this author" action. Adds the ACTOR as the
+        tracked member and, when `include_posts` is set, materializes every post we
+        hold by that actor (up to a server cap) as MESSAGE members, batched.
+        Duplicate subjects are skipped, not errored.
+      parameters:
+        - { $ref: '#/components/parameters/CaseIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaseActorAddRequest' }
+      responses:
+        "200":
+          description: Actor (and posts) added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseMemberBulkResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
@@ -3046,6 +3090,13 @@ paths:
       parameters:
         - { name: source_id, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: state, in: query, required: false, schema: { $ref: '#/components/schemas/CandidateState' } }
+        - name: status
+          in: query
+          required: false
+          description: Operator-facing status filter, derived from state + member_dialog.
+          schema:
+            type: string
+            enum: [monitored, joining, requested, approving, member_unmonitored, discovered, rejected, failed, parked]
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/IncludeTotal' }
@@ -3079,6 +3130,28 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /v1/groups/{category_id}/search:
+    get:
+      tags: [groups]
+      operationId: groups_category_search
+      summary: Body-search across every thread under a forum category, newest match first (read:observations).
+      parameters:
+        - { name: category_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 256 } }
+      responses:
+        "200":
+          description: Cursor page of matching posts, each tagged with its thread.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageCategorySearchHit' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   /v1/groups/{group_id}/messages:
     get:
       tags: [groups]
@@ -3086,6 +3159,7 @@ paths:
       summary: Raw posts in a group (forum thread / chat), oldest-first (read:observations).
       parameters:
         - { name: group_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: q, in: query, required: false, description: "Free-text body search scoped to this group.", schema: { type: string, maxLength: 256 } }
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/IncludeTotal' }
@@ -4643,6 +4717,14 @@ components:
         source_id: { type: string, format: uuid }
         title:     { type: string, nullable: true }
         count:     { type: integer }
+    IncidentCountryOut:
+      description: A resolved victim country in the incident feed with its incident count (ISO alpha-2).
+      type: object
+      additionalProperties: false
+      required: [country, count]
+      properties:
+        country: { type: string, minLength: 2, maxLength: 2 }
+        count:   { type: integer }
     IncidentOut:
       description: One classified incident on the operator triage feed (`/v1/incidents`).
       type: object
@@ -4654,6 +4736,7 @@ components:
         group:         { type: string, nullable: true, description: 'WHERE: channel/group title.' }
         actor_id:      { type: string, format: uuid, nullable: true, description: 'WHO: sender actor (dossier click-through).' }
         actor_handle:  { type: string, nullable: true }
+        victim_country: { type: string, nullable: true, minLength: 2, maxLength: 2, description: 'WHERE (victim): ISO 3166-1 alpha-2; null if unknown/mixed/unattributed.' }
         labels:        { type: array, items: { type: string } }
         scores:        { type: object, additionalProperties: { type: number } }
         model_version: { type: string }
@@ -4661,6 +4744,14 @@ components:
         corrected_labels: { type: array, nullable: true, items: { type: string }, description: 'Operator ground-truth label set, when corrected.' }
         corrected_by:     { type: string, nullable: true }
         corrected_at:     { type: string, format: date-time, nullable: true }
+    CursorPageIncidentOut:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/IncidentOut' }
 
     IncidentLabelUpdate:
       description: Operator relabel of a classified message (`PUT /v1/incidents/{message_id}/labels`).
@@ -5262,6 +5353,17 @@ components:
           maxItems: 500
           items: { $ref: '#/components/schemas/CaseMemberSubjectRef' }
         add_reason: { type: string, minLength: 16, maxLength: 1024 }
+    CaseActorAddRequest:
+      description: |
+        Body for `POST /v1/cases/{case_id}/members/by-actor`. Adds the actor and,
+        when `include_posts` is true, every post we hold by them (server cap), batched.
+      type: object
+      additionalProperties: false
+      required: [actor_id, add_reason]
+      properties:
+        actor_id:      { type: string, format: uuid }
+        include_posts: { type: boolean, default: true }
+        add_reason:    { type: string, minLength: 16, maxLength: 1024 }
     CaseMemberBulkRemoveRequest:
       description: |
         Body for `POST /v1/cases/{case_id}/members/bulk-remove`. Atomic — soft-removes
@@ -5563,6 +5665,7 @@ components:
         kind_hint: { $ref: '#/components/schemas/GroupKind', nullable: true }
         display_name_hint: { type: string, nullable: true }
         state: { $ref: '#/components/schemas/CandidateState' }
+        member_dialog: { type: boolean, default: false }
         score: { type: number, minimum: 0.0 }
         first_observed_at_ingest: { type: string, format: date-time }
         last_observed_at_ingest: { type: string, format: date-time }
@@ -5598,6 +5701,7 @@ components:
         kind_hint: { $ref: '#/components/schemas/GroupKind', nullable: true }
         display_name_hint: { type: string, nullable: true }
         state: { $ref: '#/components/schemas/CandidateState' }
+        member_dialog: { type: boolean, default: false }
         score: { type: number, minimum: 0.0 }
         first_observed_at_ingest: { type: string, format: date-time }
         last_observed_at_ingest: { type: string, format: date-time }
@@ -5670,12 +5774,13 @@ components:
         `body` is the poster's own words (quotes stripped, classifier-facing);
         `body_html` is the evidence-faithful markup (quotes kept).
       type: object
-      required: [id, evidence_ref, platform_msgid, ts, body]
+      required: [id, evidence_ref, platform_msgid, ts, actor_id, body]
       properties:
         id:              { type: string, format: uuid }
         evidence_ref:    { type: string }
         platform_msgid:  { type: string }
         ts:              { type: string, format: date-time }
+        actor_id:        { type: string, format: uuid }
         author_display:  { type: string, nullable: true }
         author_username: { type: string, nullable: true }
         body:            { type: string }
@@ -5687,6 +5792,7 @@ components:
         corrected_labels: { type: array, items: { type: string }, nullable: true }
         corrected_by: { type: string, nullable: true }
         corrected_at: { type: string, format: date-time, nullable: true }
+        victim_country: { type: string, nullable: true, minLength: 2, maxLength: 2, description: 'WHERE (victim): ISO 3166-1 alpha-2; null if unknown/mixed/unattributed.' }
     CursorPageGroupMessage:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }
@@ -5704,6 +5810,9 @@ components:
         platform_groupid: { type: string }
         title:            { type: string, nullable: true }
         last_observed_at: { type: string, format: date-time }
+        thread_date:      { type: string, format: date-time, nullable: true, description: 'OP post time (the real thread date); null if unsummarized.' }
+        victim_country:   { type: string, nullable: true, minLength: 2, maxLength: 2, description: 'WHERE (victim): the OP''s ISO 3166-1 alpha-2; null if unknown/unsummarized.' }
+        incident_labels:  { type: array, items: { type: string }, description: 'The OP''s classifier verdict.' }
     CursorPageGroupThread:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }
@@ -5712,6 +5821,26 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/GroupThread' }
+    CategorySearchHit:
+      description: A body-search match inside a forum category, tagged with its thread (reader category search).
+      type: object
+      additionalProperties: false
+      required: [id, ts, body, thread_group_id]
+      properties:
+        id:              { type: string, format: uuid }
+        ts:              { type: string, format: date-time }
+        author_display:  { type: string, nullable: true }
+        body:            { type: string }
+        thread_group_id: { type: string, format: uuid }
+        thread_title:    { type: string, nullable: true }
+    CursorPageCategorySearchHit:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/CategorySearchHit' }
     ForumReplyRequest:
       description: The operator's verbatim reply to unlock a gated forum thread.
       type: object

@@ -60,6 +60,7 @@ from .linkage_verifier_result import LinkageVerifierResultTable
 from .manual_crew import ManualCrewMemberTable, ManualCrewTable
 from .membership import CollectorGroupMembershipTable, MessageObservationTable
 from .message import AttachmentTable, ContentTemplateTable, MessageTable
+from .message_geo import MessageGeoTable
 from .mfa import MfaChallengeTable
 from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
@@ -71,6 +72,7 @@ from .source import SourceTable
 from .source_domain import SourceDomainTable
 from .syslog import SystemLogTable
 from .system_user import SystemUserTable
+from .thread_summary import ThreadSummaryTable
 
 __all__ = [
     "ActorAliasHistoryTable",
@@ -121,6 +123,7 @@ __all__ = [
     "ManualCrewMemberTable",
     "ManualCrewTable",
     "MembershipTable",
+    "MessageGeoTable",
     "MessageObservationTable",
     "MessageTable",
     "MfaChallengeTable",
@@ -142,4 +145,5 @@ __all__ = [
     "SystemUserScopeTable",
     "SystemUserSigningPubkeyHistoryTable",
     "SystemUserTable",
+    "ThreadSummaryTable",
 ]

@@ -147,8 +147,15 @@ class SQLiteRepository(SQLModelRepository):
         return row
 
     async def _append_chain(self, row_data: dict[str, Any]) -> AuditLogRow:
-        raw_conn = await self.audit_engine.raw_connection()
-        try:
+        # Async connection context, NOT raw_connection() + a sync close(): on an
+        # aiosqlite engine the pool's reset-on-return runs a rollback that must be
+        # awaited inside a greenlet. `async with connect()` closes via await so the
+        # reset runs in-greenlet; a sync raw_conn.close() cannot, so every audit
+        # write raised MissingGreenlet on reset — caught + logged by SQLAlchemy
+        # (row still persisted) but it invalidated and hard-closed the connection
+        # each time (37k churned connections + tracebacks on the linker).
+        async with self.audit_engine.connect() as conn:
+            raw_conn = await conn.get_raw_connection()
             driver = raw_conn.driver_connection  # aiosqlite.Connection
             if driver is None:  # pragma: no cover
                 raise RuntimeError("audit engine returned no DBAPI connection")
@@ -189,8 +196,6 @@ class SQLiteRepository(SQLModelRepository):
                 return row
             finally:
                 driver.isolation_level = prior_isolation
-        finally:
-            raw_conn.close()
 
     def _write_ndjson(self, row: AuditLogRow) -> None:
         if self._ndjson is None:
@@ -228,8 +233,10 @@ class SQLiteRepository(SQLModelRepository):
         require_nonce: bool,
         now: datetime,
     ) -> UUID:
-        raw_conn = await self.audit_engine.raw_connection()
-        try:
+        # See _append_chain: async connect() so the pool reset rollback runs
+        # in-greenlet (a sync raw_conn.close() raises MissingGreenlet on aiosqlite).
+        async with self.audit_engine.connect() as conn:
+            raw_conn = await conn.get_raw_connection()
             driver = raw_conn.driver_connection  # aiosqlite.Connection
             if driver is None:  # pragma: no cover
                 raise RuntimeError("audit engine returned no DBAPI connection")
@@ -265,8 +272,6 @@ class SQLiteRepository(SQLModelRepository):
                 return prepared.access_id
             finally:
                 driver.isolation_level = prior_isolation
-        finally:
-            raw_conn.close()
 
     @staticmethod
     async def _consume_nonce_locked(cur: Any, nonce: UUID | None, now: datetime) -> None:
