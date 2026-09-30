@@ -23,10 +23,29 @@ from eyenet.models import (
     AttachmentTable,
     ContentTemplateTable,
     GroupTable,
+    MessageObservationTable,
     MessageTable,
 )
 
 from ._helpers import safe_session
+
+
+@dataclass(frozen=True)
+class DiscoveryBackfillMessage:
+    """One stored message + its first-sighting collector, for the discovery
+    backfill. The fields are exactly what a MessageContext needs, minus the
+    per-group lineage (the backfill caches group_lineage itself)."""
+
+    id: UUID
+    source_id: UUID
+    group_id: UUID
+    actor_id: UUID
+    observed_by_collector_id: UUID
+    evidence_ref: str
+    body: str
+    sent_at_source: datetime
+    ingested_at: datetime
+
 
 _log = structlog.get_logger()
 _tracer = trace.get_tracer("eyenet.storage.sqlmodel_repo.messages")
@@ -463,5 +482,45 @@ class MessagesMixin:
                 return None
             return UUID(str(row))
 
+    async def messages_for_discovery_backfill(
+        self, *, limit: int, after_id: UUID | None = None
+    ) -> list[DiscoveryBackfillMessage]:
+        """Page the whole corpus (keyset by id ASC) joined to each message's
+        first-sighting collector — the one-shot discovery backfill primitive.
 
-__all__ = ["MessagesMixin"]
+        uuid7 ids are time-ordered, so keyset paging on ``id`` is stable and
+        offset-free over hundreds of thousands of rows. A message with no
+        first-sighting observation row (should not happen post-ingest) is
+        dropped by the inner join — it has no collector to attribute the
+        mention to."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(MessageTable, MessageObservationTable.collector_id)
+                .join(
+                    MessageObservationTable,
+                    (col(MessageObservationTable.message_id) == col(MessageTable.id))
+                    & col(MessageObservationTable.was_first_sighting),
+                )
+                .order_by(col(MessageTable.id).asc())
+                .limit(limit)
+            )
+            if after_id is not None:
+                stmt = stmt.where(col(MessageTable.id) > after_id)
+            result = await session.exec(stmt)
+            return [
+                DiscoveryBackfillMessage(
+                    id=msg.id,
+                    source_id=msg.source_id,
+                    group_id=msg.group_id,
+                    actor_id=msg.actor_id,
+                    observed_by_collector_id=collector_id,
+                    evidence_ref=msg.evidence_ref,
+                    body=msg.body,
+                    sent_at_source=msg.sent_at_source,
+                    ingested_at=msg.ingested_at,
+                )
+                for msg, collector_id in result
+            ]
+
+
+__all__ = ["DiscoveryBackfillMessage", "MessagesMixin"]
