@@ -145,7 +145,7 @@ class PostgresRepository(SQLModelRepository):
             await session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _AUDIT_LOCK_KEY})
             tip = (
                 await session.execute(
-                    select(AuditLogTable.seq, AuditLogTable.self_hash)
+                    select(col(AuditLogTable.seq), col(AuditLogTable.self_hash))
                     .order_by(col(AuditLogTable.seq).desc())
                     .limit(1)
                 )
@@ -201,7 +201,7 @@ class PostgresRepository(SQLModelRepository):
                 await self._consume_nonce_locked(session, prepared.acknowledgment_id, now)
             tip = (
                 await session.execute(
-                    select(FileAccessJournalTable.seq, FileAccessJournalTable.self_hash)
+                    select(col(FileAccessJournalTable.seq), col(FileAccessJournalTable.self_hash))
                     .order_by(col(FileAccessJournalTable.seq).desc())
                     .limit(1)
                 )
@@ -252,7 +252,9 @@ class PostgresRepository(SQLModelRepository):
             )
             .values(consumed_at=now)
         )
-        if result.rowcount != 1:
+        # An UPDATE returns a CursorResult (which has rowcount); the AsyncSession
+        # stub types it as the base Result, hence the ignore.
+        if result.rowcount != 1:  # type: ignore[attr-defined]
             raise FileAccessJournalError(
                 f"acknowledgment nonce {nonce} is used, expired, or unknown"
             )
