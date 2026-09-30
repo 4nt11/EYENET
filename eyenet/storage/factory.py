@@ -28,7 +28,7 @@ def get_repository(**kwargs: Any) -> BaseRepository:
         from eyenet.storage.sqlite_repo.repository import SQLiteRepository  # noqa: PLC0415
 
         return SQLiteRepository(**kwargs)
-    if db_type == "postgres":
+    if db_type == "postgres":  # pragma: no cover — needs a live Postgres (e2e only)
         from eyenet.storage.postgres_repo.repository import PostgresRepository  # noqa: PLC0415
 
         return PostgresRepository(**kwargs)

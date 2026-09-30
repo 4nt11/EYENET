@@ -98,9 +98,10 @@ def stack() -> Iterator[dict[str, str]]:
         except Exception as exc:  # pragma: no cover — surface bouncer logs
             pytest.skip(f"pgbouncer did not come up: {exc}")
 
+        u, pw = pg.username, pg.password  # throwaway container credentials
         yield {
-            "pool_url": f"postgresql://test:test@{b_host}:{b_port}/{db}",
-            "ddl_url": f"postgresql://test:test@{pg_host}:{pg_port}/{db}",
+            "pool_url": f"postgresql://{u}:{pw}@{b_host}:{b_port}/{db}",
+            "ddl_url": f"postgresql://{u}:{pw}@{pg_host}:{pg_port}/{db}",
         }
     finally:
         if bouncer is not None:
