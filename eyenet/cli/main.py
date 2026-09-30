@@ -429,9 +429,17 @@ def discovery_backfill(  # pragma: no cover
     async def _main() -> None:
         cfg = RuntimeConfig.from_env(data_dir=data_dir)
         storage = get_repository(data_dir=cfg.data_dir)
+        # A historical message carries no observing-collector record
+        # (message_observation is not populated for the backfill corpus), so
+        # attribute each mention to a collector on the message's source.
+        collectors = await storage.list_collectors()
+        source_collector: dict[UUID, UUID] = {}
+        for c in collectors:
+            source_collector.setdefault(c.source_id, c.id)
         lineage: dict[UUID, tuple[UUID | None, int]] = {}  # group_id -> (seed_root, depth), cached
         after_id: UUID | None = None
         seen = 0
+        skipped_no_collector = 0
         rows_written = 0
         try:
             while True:
@@ -442,13 +450,19 @@ def discovery_backfill(  # pragma: no cover
                 if not page:
                     break
                 for m in page:
+                    after_id = m.id
+                    seen += 1
+                    collector_id = source_collector.get(m.source_id)
+                    if collector_id is None:
+                        skipped_no_collector += 1
+                        continue
                     if m.group_id not in lineage:
                         lineage[m.group_id] = await storage.group_lineage(m.group_id)
                     seed_root_id, depth = lineage[m.group_id]
                     ctx = MessageContext(
                         text=m.body,
                         source_id=m.source_id,
-                        observed_by_collector_id=m.observed_by_collector_id,
+                        observed_by_collector_id=collector_id,
                         observed_in_group_id=m.group_id,
                         seed_root_id=seed_root_id,
                         depth_from_root=depth,
@@ -459,8 +473,6 @@ def discovery_backfill(  # pragma: no cover
                     )
                     for extractor in DISCOVERY_EXTRACTORS:
                         rows_written += await extractor.process(ctx, storage)
-                    after_id = m.id
-                    seen += 1
                     if max_messages is not None and seen >= max_messages:
                         break
                 typer.echo(f"  scanned {seen} messages, {rows_written} discovery rows written")
@@ -468,7 +480,12 @@ def discovery_backfill(  # pragma: no cover
                     break
         finally:
             await storage.close()
-        typer.echo(f"done: {seen} messages scanned, {rows_written} discovery rows written")
+        tail = (
+            f", {skipped_no_collector} skipped (no collector for source)"
+            if skipped_no_collector
+            else ""
+        )
+        typer.echo(f"done: {seen} messages scanned, {rows_written} discovery rows written{tail}")
 
     asyncio.run(_main())
 
