@@ -262,12 +262,12 @@
                 title="Add to a case"
                 onclick={() => (caseModalPost = { id: m.id, actor_id: m.actor_id, author: m.author_display || m.author_username, threadTitle: selectedThread?.title })}>+ case</button>
             </div>
+            <RelabelEditor message={m} />
             {#if m.body_html}
               <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
             {:else}
               <div class="pbody plain">{m.body}</div>
             {/if}
-            <RelabelEditor message={m} />
           </li>
         {/each}
       </ul>
