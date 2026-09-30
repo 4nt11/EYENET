@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Index
+from sqlalchemy import JSON, BigInteger, Index
 from sqlmodel import Column, Field, SQLModel
 
 from ._base import new_uuid7
@@ -32,7 +32,7 @@ class AuditLogTable(SQLModel, table=True):
     # so the tip read (ORDER BY seq DESC LIMIT 1) and the full walk are cheap.
     # Nullable in the ORM so an existing DB can add it before backfill; the write
     # path always populates it.
-    seq: int | None = Field(default=None, index=True)
+    seq: int | None = Field(default=None, index=True, sa_type=BigInteger)
     event: str
     service: str = Field(index=True)
     instance_id: str

@@ -62,7 +62,7 @@ def upgrade_audit() -> None:
             continue
         # SQLite supports a native ADD COLUMN for a nullable column (no table
         # rebuild needed), so a plain op.add_column is fine here.
-        op.add_column(table, sa.Column("seq", sa.Integer(), nullable=True))
+        op.add_column(table, sa.Column("seq", sa.BigInteger(), nullable=True))
         # rowid is the real insertion order on this append-only chain.
         op.execute(f"UPDATE {table} SET seq = rowid")  # noqa: S608 — table is a fixed literal
         op.create_index(f"ix_{table}_seq", table, ["seq"], unique=False)
