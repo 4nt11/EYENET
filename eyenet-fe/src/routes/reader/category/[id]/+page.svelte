@@ -212,12 +212,20 @@
   {#snippet head()}
     {#if !searchMode && selectedThread}
       <div class="dhead">
-        {#each selectedThread.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
-        {#if selectedThread.victim_country}
-          <span class="dmeta">victim {countryName(selectedThread.victim_country)}</span>
+        <div class="dtop">
+          {#if selectedThread.victim_country}
+            <span class="dmeta">victim {countryName(selectedThread.victim_country)}</span>
+          {/if}
+          <span class="dmeta">tid {selectedThread.platform_groupid} · {fmt(selectedThread.thread_date ?? selectedThread.last_observed_at)}</span>
+          <a class="openlink" href={`/reader/group/${selectedThread.group_id}`}>open full thread →</a>
+        </div>
+        {#if detailMsgs.length}
+          <RelabelEditor message={detailMsgs[0]} />
+        {:else}
+          <div class="dtop">
+            {#each selectedThread.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
+          </div>
         {/if}
-        <span class="dmeta">tid {selectedThread.platform_groupid} · {fmt(selectedThread.thread_date ?? selectedThread.last_observed_at)}</span>
-        <a class="openlink" href={`/reader/group/${selectedThread.group_id}`}>open full thread →</a>
       </div>
     {/if}
   {/snippet}
@@ -261,7 +269,6 @@
                 title="Add to a case"
                 onclick={() => (caseModalPost = { id: m.id, actor_id: m.actor_id, author: m.author_display || m.author_username, threadTitle: selectedThread?.title })}>+ case</button>
             </div>
-            <RelabelEditor message={m} />
             {#if m.body_html}
               <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
             {:else}
@@ -309,7 +316,8 @@
   .popt:hover { background: var(--panel-2); }
   .popt input { accent-color: var(--accent); }
 
-  .dhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .dhead { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .dtop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .dmeta { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .openlink { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--accent); text-decoration: none; }
   .openlink:hover { text-decoration: underline; }
