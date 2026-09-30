@@ -23,6 +23,7 @@ from eyenet.storage.sqlite_repo.database import (
     _AUDIT_TABLES,
     _MAIN_TABLES,
     _RAW_DDL_OBJECTS,
+    _sqlite_compare_type,
     get_sync_engine,
 )
 
@@ -51,7 +52,7 @@ def _drift(engine: object, subset: frozenset[str]) -> list[object]:
                 "target_metadata": SQLModel.metadata,
                 "include_name": include_name,
                 "include_object": include_object,
-                "compare_type": True,
+                "compare_type": _sqlite_compare_type,
                 "include_schemas": False,
             },
         )

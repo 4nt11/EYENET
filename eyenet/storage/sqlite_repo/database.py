@@ -403,6 +403,32 @@ _RAW_DDL_OBJECTS: frozenset[str] = frozenset(
     }
 )
 
+
+def _sqlite_compare_type(
+    context: Any,
+    inspected_column: Any,
+    metadata_column: Any,
+    inspected_type: Any,
+    metadata_type: Any,
+) -> bool | None:  # noqa: ARG001, E501 — Alembic's fixed compare_type callback signature
+    """Alembic type comparator for SQLite: ignore string length-only diffs.
+
+    SQLite does NOT enforce ``VARCHAR(n)`` length (everything is TEXT affinity),
+    so a string column that differs only in declared length is not a real schema
+    change — e.g. a live ``VARCHAR(12)`` column vs a models-side ``Enum`` (which
+    renders as ``VARCHAR(14)``). Treat any string-vs-string pair as equal;
+    return None for everything else so Alembic's default catches real type
+    changes (``VARCHAR`` -> ``INTEGER`` etc.). CHECK/constraint changes are
+    compared separately and are unaffected.
+    """
+
+    from sqlalchemy import String  # noqa: PLC0415
+
+    if isinstance(inspected_type, String) and isinstance(metadata_type, String):
+        return False
+    return None
+
+
 _MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 
