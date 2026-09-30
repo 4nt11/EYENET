@@ -34,6 +34,7 @@ from eyenet.collectors.forum import (
     ParsedPost,
     parse_forum_links,
     parse_reply_form,
+    parse_subforum_links,
     parse_thread,
     parse_thread_links,
     parse_thread_title,
@@ -79,6 +80,10 @@ _DEFAULT_MAX_CATEGORY_PAGES = 0
 # So default shallow for breadth; the operator backfills a specific thread deeper
 # on demand (POST .../backfill). 0 = all pages.
 _DEFAULT_MAX_THREAD_PAGES = 1
+# How many subforum levels to descend when ENUMERATING the board tree (discovery
+# only, never crawling). 0 = index categories only (legacy). >=1 fetches each
+# forum's page to surface its child subforums as their own monitorable units.
+_DEFAULT_DISCOVERY_DEPTH = 2
 
 
 def _zero_traceparent() -> str:
@@ -153,6 +158,7 @@ class MyBBForumCollector(CollectorSkeleton):
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
         self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
+        self._discovery_depth = _DEFAULT_DISCOVERY_DEPTH
         # When we last swept (monotonic) + the monitored set that sweep was for
         # (so a newly-monitored category triggers a re-sweep next tick instead of
         # waiting out the interval).
@@ -174,6 +180,9 @@ class MyBBForumCollector(CollectorSkeleton):
         )
         self._max_thread_pages = int(
             getattr(entry, "forum_max_thread_pages", _DEFAULT_MAX_THREAD_PAGES)
+        )
+        self._discovery_depth = int(
+            getattr(entry, "forum_discovery_depth", _DEFAULT_DISCOVERY_DEPTH)
         )
 
         if self._client is None:
@@ -228,16 +237,27 @@ class MyBBForumCollector(CollectorSkeleton):
         return await self._client.post(url, **kw)
 
     async def enumerate_visible_groups(self) -> list[VisibleGroup]:
-        """The board's categories (GroupKind.FORUM_CATEGORY) from the index.
+        """The board's forums (GroupKind.FORUM_CATEGORY), index + subforum tree.
 
-        Read-only: fetches the index and lists forums. Monitoring one is a
-        purely internal membership the operator opens by hand; nothing here (or
-        anywhere in this collector) performs a forum-side join.
+        Read-only. Lists the index's top-level forums, then descends into each
+        forum's child SUBFORUMS up to ``forum_discovery_depth`` levels, surfacing
+        every one (e.g. "Databases Removed Content") as its own monitorable unit.
+        DISCOVERY only: monitoring any of them is a purely internal membership the
+        operator opens by hand; nothing here performs a forum-side join, and the
+        crawl loop stays flat + fail-closed regardless of what is discovered.
         """
         index = await self._get("/")
         out: list[VisibleGroup] = []
-        for url in parse_forum_links(index.text):
-            slug = _last_segment(url)
+        seen: set[str] = set()
+        # BFS over the forum tree: (slug, depth). Roots are the index's forums.
+        frontier: list[tuple[str, int]] = [
+            (_last_segment(url), 0) for url in parse_forum_links(index.text)
+        ]
+        while frontier:
+            slug, depth = frontier.pop(0)
+            if slug in seen:
+                continue  # cycle guard: a subforum linking back up never loops
+            seen.add(slug)
             out.append(
                 VisibleGroup(
                     platform_groupid=slug,
@@ -246,6 +266,23 @@ class MyBBForumCollector(CollectorSkeleton):
                     is_member=True,
                 )
             )
+            if depth >= self._discovery_depth:
+                continue
+            try:
+                page = await self._get(slug)
+            except httpx.HTTPError as exc:
+                # One forum failing to enumerate must not abort the whole tree
+                # walk (a blocked/removed forum just contributes no children).
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.subforum_enumerate_failed",
+                    message=f"{self._identity_name}: {slug} subforum scan failed ({exc!r})",
+                )
+                continue
+            for child_url in parse_subforum_links(page.text):
+                child = _last_segment(child_url)
+                if child not in seen:
+                    frontier.append((child, depth + 1))
         return out
 
     async def _check_session(self) -> bool:
