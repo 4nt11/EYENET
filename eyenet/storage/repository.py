@@ -2216,11 +2216,14 @@ class BaseRepository(ABC):
         min_score: float | None = None,
         states: Sequence[CandidateState] | None = None,
         member_dialog: bool | None = None,
+        q: str | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[GroupCandidateRow]:
         """Triage queue (API_PLAN §4.12, M9.D3) — generalizes
         :meth:`list_queued_candidates` to any state + score filter.
+
+        ``q`` is a case-insensitive substring over the group name + platform id.
 
         Filters compose (AND). ``states`` is a state-IN set (derived statuses
         spanning DISCOVERED/QUEUED); ``member_dialog`` filters the
@@ -2237,6 +2240,7 @@ class BaseRepository(ABC):
         min_score: float | None = None,
         states: Sequence[CandidateState] | None = None,
         member_dialog: bool | None = None,
+        q: str | None = None,
     ) -> int:
         """Count candidates matching :meth:`list_candidates` filters (M9.D3)."""
 
