@@ -287,26 +287,20 @@ class ForumMixin:
             result = await session.exec(stmt)
             return int(result.one())
 
-    async def _forum_crawl_cursor_row(
-        self, session: object, source_id: UUID, category_platform_groupid: str
-    ) -> ForumCrawlCursorTable | None:
-        result = await session.exec(  # type: ignore[attr-defined]
-            select(ForumCrawlCursorTable)
-            .where(ForumCrawlCursorTable.source_id == source_id)
-            .where(
-                col(ForumCrawlCursorTable.category_platform_groupid) == category_platform_groupid
-            )
-        )
-        return result.first()
-
     async def get_forum_crawl_cursor(
         self, *, source_id: UUID, category_platform_groupid: str
     ) -> tuple[int, bool]:
         """Backfill progress for a category: (next_page, backfill_complete)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            row = await self._forum_crawl_cursor_row(
-                session, source_id, category_platform_groupid
+            result = await session.exec(
+                select(ForumCrawlCursorTable)
+                .where(ForumCrawlCursorTable.source_id == source_id)
+                .where(
+                    col(ForumCrawlCursorTable.category_platform_groupid)
+                    == category_platform_groupid
+                )
             )
+            row = result.first()
             if row is None:
                 return (1, False)
             return (row.next_page, row.backfill_complete)
@@ -329,9 +323,15 @@ class ForumMixin:
         backend if that assumption ever breaks.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            row = await self._forum_crawl_cursor_row(
-                session, source_id, category_platform_groupid
+            result = await session.exec(
+                select(ForumCrawlCursorTable)
+                .where(ForumCrawlCursorTable.source_id == source_id)
+                .where(
+                    col(ForumCrawlCursorTable.category_platform_groupid)
+                    == category_platform_groupid
+                )
             )
+            row = result.first()
             if row is None:
                 session.add(
                     ForumCrawlCursorTable(

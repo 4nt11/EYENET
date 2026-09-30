@@ -330,61 +330,114 @@ class MyBBForumCollector(CollectorSkeleton):
                 slugs.append(grp.platform_groupid)
         return slugs
 
-    async def _crawl_category(self, slug: str) -> None:
-        """Walk one MONITORED category newest-page-first, scraping as we go.
+    async def _process_category_page(self, slug: str, html: str) -> int:
+        """Poll every thread linked on one category page. Returns count polled.
 
-        Read-only. Each page's threads are polled immediately (interleaved), so
-        the most recently active threads surface first and a huge category still
-        streams posts from the start instead of after a full enumeration.
+        Read-only; each thread is polled immediately (interleaved). A per-thread
+        DB lock is skipped, not fatal: the category still finishes and the next
+        sweep re-polls (newest-first, so a skip is re-picked-up promptly).
+        """
+        threads = 0
+        for thread_url in parse_thread_links(html):
+            try:
+                if self._source_uuid is not None:
+                    await self._storage.record_forum_thread_link(
+                        source_id=self._source_uuid,
+                        category_platform_groupid=slug,
+                        thread_platform_groupid=_thread_id_from_url(thread_url),
+                        seen_at=datetime.now(tz=UTC),
+                    )
+                await self._poll_thread(thread_url)
+                threads += 1
+            except OperationalError as exc:
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.thread_crawl_locked",
+                    message=f"{self._identity_name}: {thread_url} DB-locked, skipped ({exc!r})",
+                )
+        return threads
+
+    async def _crawl_category(self, slug: str) -> None:
+        """Sweep one MONITORED category: page 1 always, deep pages by resume cursor.
+
+        Page 1 (newest, MyBB last-post-desc) is swept every time so freshly
+        active threads are never missed. Historical pages are backfilled FORWARD
+        from a persisted cursor: a restart or scheduled re-sweep resumes where it
+        left off instead of re-paying the throttle to re-scrape already-stored top
+        pages. Once the last page is reached the category latches complete and
+        later sweeps stay page-1-only (the archive is compiled; from then on we
+        only track the newest). To re-backfill, reset the cursor row by hand.
         """
         _log.info("forum.category_sweep_start", identity=self._identity_name, category=slug)
-        page = 1
-        last = 1
-        threads = 0
-        while True:
+        cursor_page, complete = 1, False
+        if self._source_uuid is not None:
+            cursor_page, complete = await self._storage.get_forum_crawl_cursor(
+                source_id=self._source_uuid, category_platform_groupid=slug
+            )
+        # Page 1 first: newest threads, and it tells us the total page count.
+        try:
+            first = await self._get(slug)
+        except httpx.HTTPError as exc:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.category_fetch_failed",
+                message=f"{self._identity_name}: {slug} p1 failed ({exc!r})",
+            )
+            return
+        last = thread_page_count(first.text)
+        if self._max_category_pages > 0:
+            last = min(last, self._max_category_pages)
+        threads = await self._process_category_page(slug, first.text)
+
+        if complete:
+            # Steady state: archive already backfilled, page 1 is all we track.
+            _log.info(
+                "forum.category_sweep_done",
+                identity=self._identity_name,
+                category=slug,
+                threads=threads,
+                pages=last,
+                mode="page1",
+            )
+            return
+
+        # Backfill forward from the cursor (page 1 handled above).
+        page = max(2, cursor_page)
+        while page <= last:
             try:
-                resp = await self._get(slug, params={"page": page} if page > 1 else None)
+                resp = await self._get(slug, params={"page": page})
             except httpx.HTTPError as exc:
+                # Persist progress so the next sweep resumes here, not at page 1.
+                await self._save_cursor(slug, next_page=page, complete=False)
                 await self.syslog(
                     level=SystemLogLevel.WARN,
                     event="forum.category_fetch_failed",
                     message=f"{self._identity_name}: {slug} p{page} failed ({exc!r})",
                 )
                 return
-            if page == 1:
-                last = thread_page_count(resp.text)
-                if self._max_category_pages > 0:
-                    last = min(last, self._max_category_pages)
-            for thread_url in parse_thread_links(resp.text):
-                try:
-                    if self._source_uuid is not None:
-                        await self._storage.record_forum_thread_link(
-                            source_id=self._source_uuid,
-                            category_platform_groupid=slug,
-                            thread_platform_groupid=_thread_id_from_url(thread_url),
-                            seen_at=datetime.now(tz=UTC),
-                        )
-                    await self._poll_thread(thread_url)
-                    threads += 1
-                except OperationalError as exc:
-                    # One thread hitting a DB lock shouldn't abort the whole category
-                    # (and thus the sweep). Skip it; the category still finishes and
-                    # the next tick re-polls. Newest-first ordering means a skip is
-                    # re-picked-up promptly.
-                    await self.syslog(
-                        level=SystemLogLevel.WARN,
-                        event="forum.thread_crawl_locked",
-                        message=f"{self._identity_name}: {thread_url} DB-locked, skipped ({exc!r})",
-                    )
-            if page >= last:
-                break
+            threads += await self._process_category_page(slug, resp.text)
+            # Advance + persist after each page: a crash loses at most one page.
+            await self._save_cursor(slug, next_page=page + 1, complete=page >= last)
             page += 1
+
         _log.info(
             "forum.category_sweep_done",
             identity=self._identity_name,
             category=slug,
             threads=threads,
             pages=last,
+            mode="backfill",
+        )
+
+    async def _save_cursor(self, slug: str, *, next_page: int, complete: bool) -> None:
+        if self._source_uuid is None:
+            return
+        await self._storage.set_forum_crawl_cursor(
+            source_id=self._source_uuid,
+            category_platform_groupid=slug,
+            next_page=next_page,
+            backfill_complete=complete,
+            updated_at=datetime.now(tz=UTC),
         )
 
     async def _poll_thread(self, url: str) -> None:
