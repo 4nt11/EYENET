@@ -177,6 +177,10 @@ class FileAccessJournalTable(SQLModel, table=True):
     )
 
     access_id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    # Monotonic insertion sequence — the PORTABLE chain-walk order (mirrors
+    # AuditLogTable.seq; replaces the SQLite-only implicit rowid). Assigned inside
+    # the serialized append. Nullable in the ORM for the add-then-backfill path.
+    seq: int | None = Field(default=None, index=True)
     # Cross-store reference to the ``audit_log`` row this access also emitted
     # (main.db audit chain). Nullable for now — no FK across physical stores
     # (mirrors the clearance-grant / signing-key cross-store convention).

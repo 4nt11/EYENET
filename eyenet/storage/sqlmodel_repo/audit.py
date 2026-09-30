@@ -62,15 +62,16 @@ class AuditMixin:
 
     async def all_audit(self) -> list[AuditLogRow]:
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
-            # Order by SQLite's implicit rowid (= INSERT-commit order under
-            # the BEGIN IMMEDIATE write path). MySQL/Postgres equivalents
-            # use a monotonic id column when this mixin gets non-SQLite
-            # subclasses.
-            result = await session.exec(select(AuditLogTable).order_by(text("rowid ASC")))
+            # Order by the portable monotonic ``seq`` column (= INSERT order
+            # under the serialized append), NOT SQLite's implicit rowid which
+            # Postgres lacks. The concrete backend assigns seq inside the
+            # single-writer append transaction.
+            result = await session.exec(select(AuditLogTable).order_by(text("seq ASC")))
             tables = result.all()
             rows: list[AuditLogRow] = []
             for t in tables:
                 data = t.model_dump()
+                data.pop("seq", None)  # storage-internal order column, not a contract field
                 if data["at"].tzinfo is None:
                     data["at"] = data["at"].replace(tzinfo=UTC)
                 rows.append(AuditLogRow.model_validate(data))
@@ -111,6 +112,7 @@ class AuditMixin:
             rows: list[object] = []
             for t in result.all():
                 data = t.model_dump()
+                data.pop("seq", None)  # storage-internal order column, not a contract field
                 if data["at"].tzinfo is None:
                     data["at"] = data["at"].replace(tzinfo=UTC)
                 rows.append(AuditLogRow.model_validate(data))
