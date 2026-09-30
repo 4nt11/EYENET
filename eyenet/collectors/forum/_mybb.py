@@ -213,6 +213,30 @@ def parse_forum_links(html: str) -> list[str]:
     return out
 
 
+def parse_subforum_links(html: str) -> list[str]:
+    """Child subforum URLs from a MyBB forum-display page, in order, deduped.
+
+    Scoped to the subforum block (``table.forum-display__subforums``) so it
+    returns ONLY this forum's children, never the global nav, breadcrumb,
+    pagination, or column-sort anchors that also carry ``Forum-*`` hrefs (a
+    whole-page ``a[href*="Forum-"]`` select picks up ~20 such decoys and would
+    make recursion loop). Children surface as their own monitorable
+    FORUM_CATEGORY; the operator chooses whether any get crawled.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    out: list[str] = []
+    seen: set[str] = set()
+    for anchor in soup.select('table.forum-display__subforums a[href*="Forum-"]'):
+        href = str(anchor.get("href", ""))
+        if "Forum-" not in href:
+            continue
+        canon = _canonical(href)
+        if canon and canon not in seen:
+            seen.add(canon)
+            out.append(canon)
+    return out
+
+
 def parse_thread_links(html: str) -> list[str]:
     """Thread URLs from a MyBB forum/category page, in order, deduped.
 
