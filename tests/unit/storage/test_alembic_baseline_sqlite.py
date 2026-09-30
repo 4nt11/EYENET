@@ -43,6 +43,15 @@ def storage(monkeypatch: pytest.MonkeyPatch) -> BaseRepository:
     return get_repository(in_memory=True)
 
 
+def _head_revision() -> str:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    return ScriptDirectory.from_config(cfg).get_current_head()
+
+
 def _objects(engine: object) -> dict[str, str]:
     with engine.connect() as c:  # type: ignore[attr-defined]
         rows = c.execute(
@@ -69,11 +78,12 @@ def test_schema_complete_and_routed(storage: BaseRepository) -> None:
     assert not [t for t in _AUDIT_TABLES if t in main]
     assert not [t for t in _MAIN_TABLES if t in audit]
 
-    # both files stamped at the baseline
+    # both files migrated to the current head (0001 + any later revisions)
+    head = _head_revision()
     for engine in (storage.sync_engine, storage.audit_sync_engine):
         with engine.connect() as c:
             stamped = c.execute(text("select version_num from alembic_version")).scalar()
-        assert stamped == "0001_baseline"
+        assert stamped == head
 
 
 def _drift(engine: object, subset: frozenset[str]) -> list[object]:
@@ -138,3 +148,26 @@ def test_downgrade_base_is_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         assert not [t for t in raw if t in remaining], f"raw DDL survived: {remaining}"
         # only alembic's own bookkeeping table is allowed to remain
         assert set(remaining) <= {"alembic_version"}
+
+
+def test_incremental_0002_adds_forum_crawl_cursor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The operating-DB path: a DB at 0001 gets forum_crawl_cursor via 0002 on
+    the next upgrade (not a fresh build). This is what the live stamped DB does
+    on its next deploy."""
+    monkeypatch.setenv("EYENET_STORAGE_TYPE", "sqlite")
+    repo = get_repository(data_dir=tmp_path)  # boots to head
+
+    # roll back to the frozen baseline: forum_crawl_cursor must disappear
+    _run("downgrade", repo.sync_engine, repo.audit_sync_engine, "0001_baseline")
+    with repo.sync_engine.connect() as c:  # type: ignore[attr-defined]
+        assert (
+            c.execute(text("select version_num from alembic_version")).scalar() == "0001_baseline"
+        )
+    assert "forum_crawl_cursor" not in _objects(repo.sync_engine)
+
+    # upgrade one step: 0002 creates it
+    _run("upgrade", repo.sync_engine, repo.audit_sync_engine, "head")
+    assert "forum_crawl_cursor" in _objects(repo.sync_engine)
+    assert _drift(repo.sync_engine, _MAIN_TABLES) == []
