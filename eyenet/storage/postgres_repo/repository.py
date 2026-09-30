@@ -77,6 +77,8 @@ class PostgresRepository(SQLModelRepository):
         *,
         url: str | URL | None = None,
         audit_url: str | URL | None = None,
+        ddl_url: str | URL | None = None,
+        ddl_audit_url: str | URL | None = None,
         pool_size: int = 5,
         max_overflow: int = 10,
         ndjson_path: Path | None = None,
@@ -86,12 +88,24 @@ class PostgresRepository(SQLModelRepository):
             raise ValueError("PostgresRepository requires url= or EYENET_PG_URL")
         resolved_audit = audit_url if audit_url is not None else audit_url_for(url)
 
+        # The DDL/migration path uses SESSION features and must NOT go through a
+        # transaction-pooling pgbouncer. When pooling, point ``url``/``audit_url``
+        # at pgbouncer and ``ddl_url`` at Postgres DIRECTLY. Default: same URL
+        # (direct deployments, no pooler).
+        ddl_main = ddl_url if ddl_url is not None else url
+        if ddl_audit_url is not None:
+            ddl_audit = ddl_audit_url
+        elif ddl_url is not None:
+            ddl_audit = audit_url_for(ddl_url)
+        else:
+            ddl_audit = resolved_audit
+
         # Sync engines first: run the DDL baseline (both DBs must already exist).
-        self.sync_engine = get_sync_engine(url)
-        self.audit_sync_engine = get_sync_engine(resolved_audit)
+        self.sync_engine = get_sync_engine(ddl_main)
+        self.audit_sync_engine = get_sync_engine(ddl_audit)
         upgrade_to_head(self.sync_engine, self.audit_sync_engine)
 
-        # Async engines for the request path.
+        # Async engines for the request path (pgbouncer when pooling).
         self.engine = get_async_engine(url, pool_size=pool_size, max_overflow=max_overflow)
         self.audit_engine = get_async_engine(
             resolved_audit, pool_size=pool_size, max_overflow=max_overflow
