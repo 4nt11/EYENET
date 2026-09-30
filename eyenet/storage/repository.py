@@ -1232,6 +1232,27 @@ class BaseRepository(ABC):
         """FORUM_THREAD groups discovered under a category, most-recent-first."""
 
     @abstractmethod
+    async def get_forum_crawl_cursor(
+        self, *, source_id: UUID, category_platform_groupid: str
+    ) -> tuple[int, bool]:
+        """Backfill progress for a category: (next_page, backfill_complete).
+
+        Returns (1, False) when no cursor row exists yet (start from the top).
+        """
+
+    @abstractmethod
+    async def set_forum_crawl_cursor(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        next_page: int,
+        backfill_complete: bool,
+        updated_at: datetime,
+    ) -> None:
+        """Persist (upsert) backfill progress for a category."""
+
+    @abstractmethod
     async def create_forum_reply_request(
         self,
         *,
