@@ -44,6 +44,7 @@ function mapCandidate(c) {
     platformGroupId: c.platform_groupid,
     kindHint: c.kind_hint ?? '',
     state: c.state,
+    memberDialog: c.member_dialog ?? false, // operator's own account is already in this group
     score: c.score,
     scoreText: c.score.toFixed(2),
     firstObserved: shortTs(c.first_observed_at_ingest),
@@ -55,8 +56,21 @@ export const candidateCtx = $state({ list: [], loaded: false, error: null });
 
 export async function loadCandidates() {
   try {
-    const page = await apiGet('/v1/candidates?limit=200', { auth: true });
-    candidateCtx.list = page.items.map(mapCandidate);
+    // Page through all candidates via the opaque cursor — the operator can be in
+    // hundreds of groups, and a single fixed limit silently truncated the view.
+    // Once fully drained, list.length is the true total (no count() needed).
+    // ponytail: 50-page ceiling (×500 = 25k rows) guards a server that never
+    // stops handing out cursors; lift it if a real operator ever exceeds it.
+    const all = [];
+    let cursor = null;
+    for (let i = 0; i < 50; i++) {
+      const q = cursor ? `?limit=500&cursor=${encodeURIComponent(cursor)}` : '?limit=500';
+      const page = await apiGet(`/v1/candidates${q}`, { auth: true });
+      all.push(...page.items);
+      cursor = page.next_cursor;
+      if (!cursor) break;
+    }
+    candidateCtx.list = all.map(mapCandidate);
     candidateCtx.error = null;
   } catch (e) {
     candidateCtx.error = e.message ?? String(e);

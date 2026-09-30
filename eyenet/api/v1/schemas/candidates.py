@@ -34,6 +34,10 @@ class CandidateSummary(ApiSchema):
     kind_hint: GroupKind | None = None
     display_name_hint: str | None = None
     state: CandidateState
+    # True when an identity's own dialog/room scan sees this group directly (the
+    # operator's account is already in it), vs only reachable via mention descent.
+    # Same signal /v1/groups derives `member_unmonitored` from.
+    member_dialog: bool = False
     score: float = Field(ge=0.0)
     first_observed_at_ingest: datetime
     last_observed_at_ingest: datetime
@@ -47,6 +51,7 @@ class CandidateSummary(ApiSchema):
             kind_hint=row.kind_hint,
             display_name_hint=row.display_name_hint,
             state=row.state,
+            member_dialog=row.member_dialog,
             score=row.score,
             first_observed_at_ingest=row.first_observed_at_ingest,
             last_observed_at_ingest=row.last_observed_at_ingest,
