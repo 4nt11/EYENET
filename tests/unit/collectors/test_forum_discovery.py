@@ -146,6 +146,32 @@ async def test_monitored_category_crawled_unmonitored_skipped(tmp_path: Path) ->
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_category_lock_does_not_starve_other_category(tmp_path: Path) -> None:
+    """A DB lock crawling one category must not abort the sweep and starve the next
+    (the bug where 'Databases', swept first, kept dying and 'Stealer Logs' stayed at 0)."""
+    from sqlalchemy.exc import OperationalError
+
+    seen: list[str] = []
+    storage, coll, _ = await _wire(tmp_path, seen, monitor=True)  # monitors Forum-Databases
+    await _monitor_category(storage, coll._source_uuid, coll._collector_id, "Forum-Stealer-Logs")
+
+    called: list[str] = []
+
+    async def fake_crawl(slug: str) -> None:
+        called.append(slug)
+        if slug == "Forum-Databases":  # sorted() puts this first
+            raise OperationalError("stmt", None, Exception("database is locked"))
+
+    coll._crawl_category = fake_crawl  # type: ignore[method-assign]
+    await coll.tick()
+
+    # Databases raised its lock, but the sweep still advanced to Stealer Logs.
+    assert called == ["Forum-Databases", "Forum-Stealer-Logs"]
+    await storage.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_no_membership_crawls_nothing(tmp_path: Path) -> None:
     seen: list[str] = []
     storage, coll, captured = await _wire(tmp_path, seen, monitor=False)

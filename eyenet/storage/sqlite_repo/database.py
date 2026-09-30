@@ -210,6 +210,12 @@ def _wire_async_pragmas(engine: AsyncEngine) -> None:
         cur.execute("PRAGMA foreign_keys = ON")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
         dbapi_conn.create_function("hamming64", 2, _hamming64, deterministic=True)
 
@@ -221,6 +227,12 @@ def _wire_sync_pragmas(engine: Engine) -> None:
         cur.execute("PRAGMA foreign_keys = ON")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
 
 
@@ -273,6 +285,12 @@ def open_in_memory_async_engine(name: str) -> AsyncEngine:
         cur.execute("PRAGMA foreign_keys = OFF")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
         dbapi_conn.create_function("hamming64", 2, _hamming64, deterministic=True)
 
@@ -295,6 +313,12 @@ def open_in_memory_sync_engine(name: str) -> Engine:
         cur.execute("PRAGMA foreign_keys = OFF")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
 
     return engine
