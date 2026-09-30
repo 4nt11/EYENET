@@ -19,6 +19,7 @@ from eyenet.contracts.enums import GroupKind
 from eyenet.contracts.incident import ThreadSummaryRow
 from eyenet.models import (
     ForumBackfillRequestTable,
+    ForumCrawlCursorTable,
     ForumReplyRequestTable,
     ForumThreadLinkTable,
     GroupTable,
@@ -285,6 +286,68 @@ class ForumMixin:
             )
             result = await session.exec(stmt)
             return int(result.one())
+
+    async def get_forum_crawl_cursor(
+        self, *, source_id: UUID, category_platform_groupid: str
+    ) -> tuple[int, bool]:
+        """Backfill progress for a category: (next_page, backfill_complete)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(ForumCrawlCursorTable)
+                .where(ForumCrawlCursorTable.source_id == source_id)
+                .where(
+                    col(ForumCrawlCursorTable.category_platform_groupid)
+                    == category_platform_groupid
+                )
+            )
+            row = result.first()
+            if row is None:
+                return (1, False)
+            return (row.next_page, row.backfill_complete)
+
+    async def set_forum_crawl_cursor(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        next_page: int,
+        backfill_complete: bool,
+        updated_at: datetime,
+    ) -> None:
+        """Persist (upsert) backfill progress for a category.
+
+        ponytail: generic SELECT-then-upsert, no ON CONFLICT. One collector owns
+        its source's category cursor, so there is no concurrent writer to race;
+        if two ever shared a category the loser just overwrites with a nearby
+        (monotonic) page, which is benign. Move to a dialect upsert in the SQLite
+        backend if that assumption ever breaks.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(ForumCrawlCursorTable)
+                .where(ForumCrawlCursorTable.source_id == source_id)
+                .where(
+                    col(ForumCrawlCursorTable.category_platform_groupid)
+                    == category_platform_groupid
+                )
+            )
+            row = result.first()
+            if row is None:
+                session.add(
+                    ForumCrawlCursorTable(
+                        source_id=source_id,
+                        category_platform_groupid=category_platform_groupid,
+                        next_page=next_page,
+                        backfill_complete=backfill_complete,
+                        updated_at=updated_at,
+                    )
+                )
+            else:
+                row.next_page = next_page
+                row.backfill_complete = backfill_complete
+                row.updated_at = updated_at
+                session.add(row)
+            await session.commit()
 
     async def create_forum_reply_request(
         self,

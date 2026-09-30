@@ -86,6 +86,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "forum_thread_link",
         # operator-queued deep backfill of one forum thread
         "forum_backfill_request",
+        # per-category backfill page cursor (resume, don't re-scrape from page 1)
+        "forum_crawl_cursor",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

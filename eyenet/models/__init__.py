@@ -40,6 +40,7 @@ from .file_access import (
     SystemUserSigningPubkeyHistoryTable,
 )
 from .forum_backfill import ForumBackfillRequestTable
+from .forum_crawl_cursor import ForumCrawlCursorTable
 from .forum_reply import ForumReplyRequestTable
 from .forum_thread_link import ForumThreadLinkTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
@@ -95,6 +96,7 @@ __all__ = [
     "FileAccessAcknowledgmentTable",
     "FileAccessJournalTable",
     "ForumBackfillRequestTable",
+    "ForumCrawlCursorTable",
     "ForumReplyRequestTable",
     "ForumThreadLinkTable",
     "GraphEdgeTable",
