@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import DOMPurify from 'dompurify';
+  import { boardOf, prepare, onGuardedClick } from '$lib/linkguard.js';
   import { apiGet } from '$lib/api.js';
   import { incidentLabelName, incidentTone } from '$lib/data.js';
   import DossierLayout from '$lib/components/DossierLayout.svelte';
@@ -55,8 +55,6 @@
   }
 
   const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : '—');
-  const clean = (html, fallback) =>
-    html ? DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }) : (fallback ?? '');
 
   async function load() {
     const params = new URLSearchParams({ limit: '200', sort, include_total: '1' });
@@ -250,7 +248,7 @@
     {:else if !detailMsgs.length}
       <p class="pnote">No posts stored for this thread yet.</p>
     {:else}
-      <ul class="posts">
+      <ul class="posts" onclick={onGuardedClick}>
         {#each detailMsgs as m}
           <li class="post">
             <div class="pmeta">
@@ -263,7 +261,11 @@
                 title="Add to a case"
                 onclick={() => (caseModalPost = { id: m.id, actor_id: m.actor_id, author: m.author_display || m.author_username, threadTitle: selectedThread?.title })}>+ case</button>
             </div>
-            <div class="pbody">{@html clean(m.body_html, m.body)}</div>
+            {#if m.body_html}
+              <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
+            {:else}
+              <div class="pbody plain">{m.body}</div>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -319,7 +321,14 @@
   .pauthor { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-secondary); }
   .pts { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); word-break: break-word; overflow-wrap: anywhere; }
+  .pbody.plain { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-12); }
   .pbody :global(img) { max-width: 100%; height: auto; }
+  /* Links come from sanitized {@html} (defanged by linkguard), so they need
+     :global to be reachable. armed1/armed2 mark the triple-click open states. */
+  .pbody :global(a) { color: var(--link); text-decoration: underline; overflow-wrap: anywhere; cursor: pointer; }
+  .pbody :global(a:hover) { color: var(--link-hover); }
+  .pbody :global(a.armed1) { color: var(--accent-text); font-family: var(--font-mono); }
+  .pbody :global(a.armed2) { color: var(--red-text); font-family: var(--font-mono); font-weight: 600; }
   .casebtn { appearance: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 3px; background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); cursor: pointer; }
   .casebtn:hover { border-color: var(--accent); color: var(--accent); }
 
