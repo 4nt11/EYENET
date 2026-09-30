@@ -27,8 +27,9 @@ pytestmark = pytest.mark.integration
 
 
 async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
-    """Seed source/identity/collector/actor/group/message + a first-sighting
-    observation. Returns (source_id, collector_id, message_id)."""
+    """Seed source/identity/collector/actor/group/message. Returns
+    (source_id, collector_id, message_id). No message_observation row: the
+    backfill deliberately does NOT depend on one (historical rows lack it)."""
     src = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
     )
@@ -57,7 +58,7 @@ async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
         title="root",
         seen_at=_NOW,
     )
-    msg_id = uuid4()  # explicit so we can attach the observation
+    msg_id = uuid4()
     body = "join @target_channel now"
     await storage.put_message(
         MessageTable(
@@ -74,15 +75,12 @@ async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
             ingested_at=_NOW,
         )
     )
-    await storage.record_observation(
-        message_id=msg_id, collector_id=collector.id, observed_at_ingest=_NOW
-    )
     return src, collector.id, msg_id
 
 
-async def test_backfill_primitive_returns_message_with_first_sighting_collector() -> None:
+async def test_backfill_primitive_returns_message() -> None:
     storage = get_repository(in_memory=True)
-    _src, collector_id, msg_id = await _seed(storage)
+    _src, _collector_id, msg_id = await _seed(storage)
 
     page = await storage.messages_for_discovery_backfill(limit=100)
 
@@ -90,15 +88,18 @@ async def test_backfill_primitive_returns_message_with_first_sighting_collector(
     row = page[0]
     assert isinstance(row, DiscoveryBackfillMessage)
     assert row.id == msg_id
-    assert row.observed_by_collector_id == collector_id
     assert "@target_channel" in row.body
 
 
 async def test_backfill_loop_records_discovered_candidate_no_autojoin() -> None:
     storage = get_repository(in_memory=True)
-    await _seed(storage)
+    _src, collector_id, _msg_id = await _seed(storage)
 
-    # Mirror the discovery-backfill CLI loop.
+    # Mirror the discovery-backfill CLI loop: resolve the observing collector
+    # per source (message_observation is not populated for historical rows).
+    collectors = await storage.list_collectors()
+    source_collector = {c.source_id: c.id for c in collectors}
+
     page = await storage.messages_for_discovery_backfill(limit=100)
     for m in page:
         assert isinstance(m, DiscoveryBackfillMessage)
@@ -106,7 +107,7 @@ async def test_backfill_loop_records_discovered_candidate_no_autojoin() -> None:
         ctx = MessageContext(
             text=m.body,
             source_id=m.source_id,
-            observed_by_collector_id=m.observed_by_collector_id,
+            observed_by_collector_id=source_collector[m.source_id],
             observed_in_group_id=m.group_id,
             seed_root_id=seed_root_id,
             depth_from_root=depth,
@@ -117,6 +118,8 @@ async def test_backfill_loop_records_discovered_candidate_no_autojoin() -> None:
         )
         for extractor in DISCOVERY_EXTRACTORS:
             await extractor.process(ctx, storage)
+
+    assert collector_id in source_collector.values()
 
     cands = await storage.list_candidates(limit=10)
     assert len(cands) == 1
