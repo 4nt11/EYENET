@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import DOMPurify from 'dompurify';
+  import { boardOf, prepare, onGuardedClick } from '$lib/linkguard.js';
   import { apiGet, apiPost } from '$lib/api.js';
   import { incidentLabelName, incidentTone, INCIDENT_LABELS } from '$lib/data.js';
   import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
@@ -84,67 +84,8 @@
     }
   }
 
-  // Board host from evidence_ref (forum:<board>:<tid>:<pid>) so the board's own
-  // relative links can be resolved to absolute — otherwise they'd point at us.
-  const boardOf = (ref) => (ref && ref.startsWith('forum:') ? ref.split(':')[1] : '');
-
-  // Sanitize (XSS), then DEFANG every link: resolve relative hrefs against the
-  // board, move the target to data-url, and remove href so a stray click does
-  // nothing. Firing is a deliberate triple-click (see onPostClick).
-  function prepare(html, board) {
-    const cleaned = DOMPurify.sanitize(html ?? '');
-    if (typeof DOMParser === 'undefined') return cleaned; // SSR/prerender guard
-    const doc = new DOMParser().parseFromString(cleaned, 'text/html');
-    for (const a of doc.querySelectorAll('a')) {
-      let href = a.getAttribute('href') || '';
-      if (href && !/^https?:\/\//i.test(href) && !/^mailto:/i.test(href) && board) {
-        href = `https://${board}/${href.replace(/^\//, '')}`;
-      }
-      a.removeAttribute('href');
-      a.removeAttribute('target');
-      if (href) {
-        a.setAttribute('data-url', href);
-        a.classList.add('guarded');
-      }
-    }
-    return doc.body.innerHTML;
-  }
-
-  // Triple-click guard: 1st reveals the URL, 2nd arms, 3rd opens (new tab, no
-  // referrer). Never navigate the board from the console by accident.
-  function onPostClick(e) {
-    const a = e.target.closest('a.guarded');
-    if (!a) return;
-    e.preventDefault();
-    const url = a.getAttribute('data-url');
-    if (!url) return;
-    const step = Number(a.dataset.arm || '0') + 1;
-    if (step === 1) {
-      a.dataset.arm = '1';
-      a.dataset.orig = a.textContent;
-      a.textContent = `→ ${url}`;
-      a.classList.add('armed1');
-      clearTimeout(a._t);
-      a._t = setTimeout(() => resetLink(a), 6000);
-    } else if (step === 2) {
-      a.dataset.arm = '2';
-      a.textContent = `⚠ open? click once more · ${url}`;
-      a.classList.remove('armed1');
-      a.classList.add('armed2');
-      clearTimeout(a._t);
-      a._t = setTimeout(() => resetLink(a), 6000);
-    } else {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      resetLink(a);
-    }
-  }
-
-  function resetLink(a) {
-    clearTimeout(a._t);
-    if (a.dataset.orig != null) a.textContent = a.dataset.orig;
-    a.dataset.arm = '0';
-    a.classList.remove('armed1', 'armed2');
-  }
+  // Link defang + triple-click-to-open guard live in $lib/linkguard.js (shared
+  // with the category reader so the two never diverge on link safety).
 
   async function backfill() {
     backfilling = true;
@@ -223,7 +164,7 @@
     {:else if !msgs.length}
       <p class="pnote">{search.trim() ? `No posts in this conversation match “${search.trim()}”.` : 'No posts stored yet.'}</p>
     {:else}
-      <ol class="posts" onclick={onPostClick}>
+      <ol class="posts" onclick={onGuardedClick}>
         {#each msgs as m}
           <li class="post" class:gatedpost={m.reply_gated}>
             <div class="pmeta">
