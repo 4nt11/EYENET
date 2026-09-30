@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy.sql.elements import quoted_name
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import SystemUserRole
@@ -13,7 +14,12 @@ from ._base import new_uuid7
 
 
 class SystemUserTable(SQLModel, table=True):
-    __tablename__ = "system_user"
+    # ``system_user`` became a RESERVED keyword in SQL:2016 / Postgres 16
+    # (SYSTEM_USER). SQLAlchemy does not know it is reserved, so force-quote the
+    # identifier: harmless on SQLite (same table), required on Postgres.
+    # quoted_name is a str subclass, so metadata.tables["system_user"] and the
+    # _MAIN_TABLES frozenset still resolve unchanged.
+    __tablename__ = quoted_name("system_user", quote=True)
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     username: str = Field(unique=True, index=True)
