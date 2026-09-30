@@ -78,6 +78,12 @@ class IdentityFileEntry(BaseModel):
     forum_discovery_interval: int = 21_600
     forum_max_category_pages: int = 0
     forum_max_thread_pages: int = 1  # per-thread depth on a sweep; 0 = all pages
+    # How many levels of SUBFORUMS to descend when ENUMERATING the board tree
+    # (discovery only, never crawling). 0 = top-level categories from the index
+    # only (legacy). >=1 fetches each forum's page to surface its child subforums
+    # as their own monitorable FORUM_CATEGORY units; the operator then chooses
+    # which to crawl. Crawling stays flat + fail-closed regardless of this knob.
+    forum_discovery_depth: int = 2
 
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
@@ -191,6 +197,7 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
         out.append(f"forum_discovery_interval = {entry.forum_discovery_interval}")
         out.append(f"forum_max_category_pages = {entry.forum_max_category_pages}")
         out.append(f"forum_max_thread_pages = {entry.forum_max_thread_pages}")
+        out.append(f"forum_discovery_depth = {entry.forum_discovery_depth}")
     return out
 
 
