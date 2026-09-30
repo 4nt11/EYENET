@@ -356,14 +356,20 @@ def _filtered_tables(table_names: frozenset[str]) -> list[Any]:
 # any more; it runs ``upgrade_to_head`` (migration history is authoritative).
 
 
-def _apply_main_schema(conn: Any) -> None:
-    """Create every MAIN table + vector_signature side-table + FTS index (sync conn)."""
+def _apply_main_schema(conn: Any, table_names: frozenset[str]) -> None:
+    """Create the given MAIN tables + vector_signature side-table + FTS index.
+
+    ``table_names`` is passed by the caller (a migration revision) so the set is
+    FROZEN in that revision, not tracked from the live ``_MAIN_TABLES`` — a new
+    table added to the models gets its OWN revision, it does not retroactively
+    grow an earlier baseline.
+    """
 
     from sqlalchemy import text  # noqa: PLC0415
 
     import eyenet.models  # noqa: F401, PLC0415 — registers tables on SQLModel.metadata
 
-    tables = _filtered_tables(_MAIN_TABLES)
+    tables = _filtered_tables(table_names)
     if tables:
         SQLModel.metadata.create_all(conn, tables=tables)
     conn.execute(text(_VECTOR_SIGNATURE_DDL))
@@ -373,20 +379,20 @@ def _apply_main_schema(conn: Any) -> None:
     conn.execute(text(_MESSAGE_FTS_REBUILD))
 
 
-def _apply_audit_schema(conn: Any) -> None:
-    """Create the audit tables + single-active-key partial UNIQUE index (sync conn)."""
+def _apply_audit_schema(conn: Any, table_names: frozenset[str]) -> None:
+    """Create the given audit tables + single-active-key partial UNIQUE index."""
 
     from sqlalchemy import text  # noqa: PLC0415
 
     import eyenet.models  # noqa: F401, PLC0415
 
-    tables = _filtered_tables(_AUDIT_TABLES)
+    tables = _filtered_tables(table_names)
     if tables:
         SQLModel.metadata.create_all(conn, tables=tables)
     conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
 
 
-def _drop_main_schema(conn: Any) -> None:
+def _drop_main_schema(conn: Any, table_names: frozenset[str]) -> None:
     """Reverse :func:`_apply_main_schema` — the baseline's ``downgrade_main``."""
 
     from sqlalchemy import text  # noqa: PLC0415
@@ -398,12 +404,12 @@ def _drop_main_schema(conn: Any) -> None:
     conn.execute(text("DROP TABLE IF EXISTS message_fts"))
     conn.execute(text("DROP INDEX IF EXISTS ix_vs_primitive"))
     conn.execute(text("DROP TABLE IF EXISTS vector_signature"))
-    tables = _filtered_tables(_MAIN_TABLES)
+    tables = _filtered_tables(table_names)
     if tables:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
 
-def _drop_audit_schema(conn: Any) -> None:
+def _drop_audit_schema(conn: Any, table_names: frozenset[str]) -> None:
     """Reverse :func:`_apply_audit_schema` — the baseline's ``downgrade_audit``."""
 
     from sqlalchemy import text  # noqa: PLC0415
@@ -411,7 +417,7 @@ def _drop_audit_schema(conn: Any) -> None:
     import eyenet.models  # noqa: F401, PLC0415
 
     conn.execute(text("DROP INDEX IF EXISTS uq_signing_pubkey_active"))
-    tables = _filtered_tables(_AUDIT_TABLES)
+    tables = _filtered_tables(table_names)
     if tables:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
@@ -435,12 +441,12 @@ _RAW_DDL_OBJECTS: frozenset[str] = frozenset(
 
 
 def _sqlite_compare_type(
-    context: Any,
-    inspected_column: Any,
-    metadata_column: Any,
+    context: Any,  # noqa: ARG001 — Alembic's fixed compare_type callback signature
+    inspected_column: Any,  # noqa: ARG001
+    metadata_column: Any,  # noqa: ARG001
     inspected_type: Any,
     metadata_type: Any,
-) -> bool | None:  # noqa: ARG001, E501 — Alembic's fixed compare_type callback signature
+) -> bool | None:
     """Alembic type comparator for SQLite: ignore string length-only diffs.
 
     SQLite does NOT enforce ``VARCHAR(n)`` length (everything is TEXT affinity),
