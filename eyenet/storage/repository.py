@@ -2193,13 +2193,17 @@ class BaseRepository(ABC):
         state: CandidateState | None = None,
         source_id: UUID | None = None,
         min_score: float | None = None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[GroupCandidateRow]:
         """Triage queue (API_PLAN §4.12, M9.D3) — generalizes
         :meth:`list_queued_candidates` to any state + score filter.
 
-        Filters compose (AND). Sort: ``score DESC, last_observed_at_ingest
+        Filters compose (AND). ``states`` is a state-IN set (derived statuses
+        spanning DISCOVERED/QUEUED); ``member_dialog`` filters the
+        operator-is-a-member flag. Sort: ``score DESC, last_observed_at_ingest
         DESC``.
         """
 
@@ -2210,6 +2214,8 @@ class BaseRepository(ABC):
         state: CandidateState | None = None,
         source_id: UUID | None = None,
         min_score: float | None = None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
     ) -> int:
         """Count candidates matching :meth:`list_candidates` filters (M9.D3)."""
 

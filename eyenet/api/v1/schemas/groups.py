@@ -51,6 +51,28 @@ def _status(row: GroupCandidateRow) -> str:
     return _STATUS.get(row.state, row.state.value)
 
 
+# Reverse of `_status`: an operator-facing status -> the candidate filter that
+# selects it, as (states, member_dialog). `member_unmonitored`/`discovered`
+# span DISCOVERED+QUEUED and split on member_dialog; the rest are single-state.
+_STATUS_FILTER: dict[str, tuple[list[CandidateState], bool | None]] = {
+    "monitored": ([CandidateState.JOINED], None),
+    "joining": ([CandidateState.JOINING], None),
+    "requested": ([CandidateState.REQUESTED], None),
+    "approving": ([CandidateState.APPROVED], None),
+    "rejected": ([CandidateState.REJECTED], None),
+    "failed": ([CandidateState.FAILED], None),
+    "parked": ([CandidateState.PARKED], None),
+    "member_unmonitored": ([CandidateState.DISCOVERED, CandidateState.QUEUED], True),
+    "discovered": ([CandidateState.DISCOVERED, CandidateState.QUEUED], False),
+}
+
+
+def status_filter(status: str) -> tuple[list[CandidateState], bool | None]:
+    """Map an operator-facing status to (states, member_dialog). Raises
+    ``KeyError`` for an unknown status (the endpoint turns that into a 400)."""
+    return _STATUS_FILTER[status]
+
+
 class GroupSummary(ApiSchema):
     """Group-centric projection of a GroupCandidate for GET /v1/groups."""
 
