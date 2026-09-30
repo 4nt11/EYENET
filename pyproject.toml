@@ -19,6 +19,10 @@ dependencies = [
   "aiosqlite>=0.20",
   "greenlet>=3",
   "sqlite-vec>=0.1.6",
+  # Schema migrations. Baseline lands at v0.1.0; `eyenet init` runs
+  # `upgrade_to_head` (migration history is the source of truth, create_all is
+  # retired). Runtime dep — the boot path imports it, not just dev tooling.
+  "alembic>=1.13",
 
   # bus
   "nats-py>=2.7",
@@ -243,6 +247,13 @@ omit = [
   # trace it. The provider-agnostic advise() logic is fully unit-tested against a
   # fake BaseProvider; this thin httpx shell is proven by test_llm_real.py.
   "eyenet/classifier/llm/impl/ollama.py",
+  # Alembic migration scripts: the baseline runs at init (upgrade path is
+  # covered by the schema/routing/drift tests), but downgrade halves and the
+  # CLI-autogenerate engine builders don't run in the normal suite. Tracking
+  # per-line coverage of revision files is noise.
+  "eyenet/storage/sqlite_repo/migrations/*",
+  # Manual cutover-runbook ops tool; its drift logic mirrors the tested path.
+  "eyenet/storage/sqlite_repo/_drift_check.py",
 ]
 
 [tool.coverage.report]
@@ -323,6 +334,12 @@ ignore = [
 # TYPE_CHECKING) is wrong for these layers — the imports ARE runtime imports.
 "eyenet/contracts/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/models/**/*.py" = ["TC001", "TC002", "TC003"]
+# Alembic env/revisions: the include_name/include_object callbacks have a fixed
+# signature dictated by Alembic (unused args are part of the contract), and the
+# revision files are close kin to generated code.
+"eyenet/storage/sqlite_repo/migrations/**/*.py" = ["ARG001", "E501"]
+# Manual ops CLI: alembic callback signatures (ARG001) + operator-facing prints (T201).
+"eyenet/storage/sqlite_repo/_drift_check.py" = ["ARG001", "T201", "PLR2004"]
 "eyenet/storage/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/bus/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/telemetry/**/*.py" = ["TC001", "TC002", "TC003"]
@@ -370,7 +387,7 @@ strict = true
 # The in-jail workers import libraries (fitz, docx, presidio_analyzer) that live
 # only in the eyenet-extract venv, never in the type-check environment. They are
 # never imported by the app (only bind-mounted and run as scripts in nsjail).
-exclude = ['eyenet/classifier/(extract|presidio)/_workers/']
+exclude = ['eyenet/classifier/(extract|presidio)/_workers/', 'eyenet/storage/sqlite_repo/migrations/']
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_return_any = true

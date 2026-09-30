@@ -319,8 +319,15 @@ def _filtered_tables(table_names: frozenset[str]) -> list[Any]:
     return [SQLModel.metadata.tables[n] for n in table_names if n in SQLModel.metadata.tables]
 
 
-def init_main_db(sync_engine: Engine) -> None:
-    """Create every MAIN table + the vector_signature side-table (sync)."""
+# --- schema application: the SINGLE source of truth for the DDL --------------
+# These build the physical schema on a sync Connection. The Alembic baseline
+# revision (eyenet/storage/sqlite_repo/migrations/versions/) is the ONLY caller
+# of the ``_apply_*``/``_drop_*`` pair — the app never calls create_all directly
+# any more; it runs ``upgrade_to_head`` (migration history is authoritative).
+
+
+def _apply_main_schema(conn: Any) -> None:
+    """Create every MAIN table + vector_signature side-table + FTS index (sync conn)."""
 
     from sqlalchemy import text  # noqa: PLC0415
 
@@ -328,17 +335,16 @@ def init_main_db(sync_engine: Engine) -> None:
 
     tables = _filtered_tables(_MAIN_TABLES)
     if tables:
-        SQLModel.metadata.create_all(sync_engine, tables=tables)
-    with sync_engine.begin() as conn:
-        conn.execute(text(_VECTOR_SIGNATURE_DDL))
-        conn.execute(text(_VECTOR_SIGNATURE_INDEX))
-        for stmt in _MESSAGE_FTS_DDL:
-            conn.execute(text(stmt))
-        conn.execute(text(_MESSAGE_FTS_REBUILD))
+        SQLModel.metadata.create_all(conn, tables=tables)
+    conn.execute(text(_VECTOR_SIGNATURE_DDL))
+    conn.execute(text(_VECTOR_SIGNATURE_INDEX))
+    for stmt in _MESSAGE_FTS_DDL:
+        conn.execute(text(stmt))
+    conn.execute(text(_MESSAGE_FTS_REBUILD))
 
 
-def init_audit_db(sync_engine: Engine) -> None:
-    """Create the audit-log table on the audit DB (sync)."""
+def _apply_audit_schema(conn: Any) -> None:
+    """Create the audit tables + single-active-key partial UNIQUE index (sync conn)."""
 
     from sqlalchemy import text  # noqa: PLC0415
 
@@ -346,57 +352,84 @@ def init_audit_db(sync_engine: Engine) -> None:
 
     tables = _filtered_tables(_AUDIT_TABLES)
     if tables:
-        SQLModel.metadata.create_all(sync_engine, tables=tables)
-    with sync_engine.begin() as conn:
-        conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
+        SQLModel.metadata.create_all(conn, tables=tables)
+    conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
 
 
-async def init_main_db_async(engine: AsyncEngine) -> None:
-    """Create MAIN tables + vector_signature on an AsyncEngine.
+def _drop_main_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_main_schema` — the baseline's ``downgrade_main``."""
 
-    Required for in-memory engines, where sync and async create_engine
-    calls produce separate ``:memory:`` databases that cannot share DDL.
+    from sqlalchemy import text  # noqa: PLC0415
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    for trig in ("message_fts_au", "message_fts_ad", "message_fts_ai"):
+        conn.execute(text(f"DROP TRIGGER IF EXISTS {trig}"))
+    conn.execute(text("DROP TABLE IF EXISTS message_fts"))
+    conn.execute(text("DROP INDEX IF EXISTS ix_vs_primitive"))
+    conn.execute(text("DROP TABLE IF EXISTS vector_signature"))
+    tables = _filtered_tables(_MAIN_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+def _drop_audit_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_audit_schema` — the baseline's ``downgrade_audit``."""
+
+    from sqlalchemy import text  # noqa: PLC0415
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    conn.execute(text("DROP INDEX IF EXISTS uq_signing_pubkey_active"))
+    tables = _filtered_tables(_AUDIT_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+# Objects that live OUTSIDE SQLModel.metadata (raw DDL). ``env.py`` excludes
+# these from autogenerate so a future ``--autogenerate`` never emits a DROP for
+# what it cannot see in the models (the FTS index, its shadow tables, the
+# vector_signature side-table, and the partial UNIQUE index).
+_RAW_DDL_OBJECTS: frozenset[str] = frozenset(
+    {
+        "vector_signature",
+        "ix_vs_primitive",
+        "message_fts",
+        "message_fts_data",
+        "message_fts_idx",
+        "message_fts_docsize",
+        "message_fts_config",
+        "uq_signing_pubkey_active",
+    }
+)
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+
+
+def upgrade_to_head(main_engine: Engine, audit_engine: Engine) -> None:
+    """Apply all pending Alembic migrations to both DBs — the boot DDL path.
+
+    Replaces the legacy ``create_all`` bootstrap: migration history is the
+    single source of truth. A fresh DB runs the baseline; an existing DB runs
+    only what it is missing. Both engines are handed to ``env.py`` through
+    ``config.attributes`` so in-memory (shared-cache ``StaticPool``) and
+    file-backed engines migrate identically — no ``sqlalchemy.url`` juggling.
     """
 
-    from sqlalchemy import text  # noqa: PLC0415
+    from alembic import command  # noqa: PLC0415
+    from alembic.config import Config  # noqa: PLC0415
 
-    import eyenet.models  # noqa: F401, PLC0415
-
-    tables = _filtered_tables(_MAIN_TABLES)
-    async with engine.begin() as conn:
-        if tables:
-            await conn.run_sync(
-                lambda sync_conn: SQLModel.metadata.create_all(sync_conn, tables=tables)
-            )
-        await conn.execute(text(_VECTOR_SIGNATURE_DDL))
-        await conn.execute(text(_VECTOR_SIGNATURE_INDEX))
-        for stmt in _MESSAGE_FTS_DDL:
-            await conn.execute(text(stmt))
-        await conn.execute(text(_MESSAGE_FTS_REBUILD))
-
-
-async def init_audit_db_async(engine: AsyncEngine) -> None:
-    """Create audit_log on an AsyncEngine."""
-
-    from sqlalchemy import text  # noqa: PLC0415
-
-    import eyenet.models  # noqa: F401, PLC0415
-
-    tables = _filtered_tables(_AUDIT_TABLES)
-    async with engine.begin() as conn:
-        if tables:
-            await conn.run_sync(
-                lambda sync_conn: SQLModel.metadata.create_all(sync_conn, tables=tables)
-            )
-        await conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    cfg.attributes["engines"] = {"main": main_engine, "audit": audit_engine}
+    command.upgrade(cfg, "head")
 
 
 __all__ = [
     "get_async_engine",
     "get_sync_engine",
-    "init_audit_db",
     "init_lock",
-    "init_main_db",
     "open_in_memory_async_engine",
     "open_in_memory_sync_engine",
+    "upgrade_to_head",
 ]
