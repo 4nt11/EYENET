@@ -35,7 +35,7 @@ class AnchorsMixin:
     async def audit_head(self) -> str:
         """Hex `self_hash` of the latest audit_log row, or genesis if empty."""
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(AuditLogTable).order_by(text("rowid DESC")).limit(1)
+            stmt = select(AuditLogTable).order_by(text("seq DESC")).limit(1)
             row = (await session.exec(stmt)).first()
             return GENESIS_PREV_HASH if row is None else row.self_hash
 

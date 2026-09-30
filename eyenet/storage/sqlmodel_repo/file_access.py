@@ -573,7 +573,7 @@ class FileAccessMixin:
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
             from sqlalchemy import text  # noqa: PLC0415
 
-            result = await session.exec(select(FileAccessJournalTable).order_by(text("rowid ASC")))
+            result = await session.exec(select(FileAccessJournalTable).order_by(text("seq ASC")))
             rows = result.all()
 
         expected_prev = GENESIS_JOURNAL_HASH
@@ -606,14 +606,14 @@ class FileAccessMixin:
     ) -> list[FileAccessJournalRow]:
         """All journal rows served under ``content_hash``, insertion order (§5.8).
 
-        Insertion order is ``rowid ASC`` — the SAME order the chain is walked and
+        Insertion order is ``seq ASC`` — the SAME order the chain is walked and
         appended in, so the returned sequence matches the signed access-id order.
         """
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(FileAccessJournalTable)
                 .where(col(FileAccessJournalTable.content_hash) == content_hash)
-                .order_by(text("rowid ASC"))
+                .order_by(text("seq ASC"))
             )
             result = await session.exec(stmt)
             return [_journal_row(row) for row in result.all()]
@@ -634,20 +634,20 @@ class FileAccessMixin:
                 stmt = stmt.where(col(FileAccessJournalTable.served_at) >= since)
             if until is not None:
                 stmt = stmt.where(col(FileAccessJournalTable.served_at) <= until)
-            stmt = stmt.order_by(text("rowid ASC"))
+            stmt = stmt.order_by(text("seq ASC"))
             result = await session.exec(stmt)
             return [_journal_row(row) for row in result.all()]
 
     async def file_access_journal_head(self) -> bytes:
         """``self_hash`` of the head row, or the genesis seed if the journal is empty.
 
-        Head = the max-``rowid`` row's ``self_hash`` — the EXACT value the SQLite
+        Head = the max-``seq`` row's ``self_hash`` — the EXACT value the backend
         append override reads as ``prev_journal_hash`` for the next row
-        (``SELECT self_hash FROM file_access_journal ORDER BY rowid DESC LIMIT 1``),
+        (``SELECT self_hash FROM file_access_journal ORDER BY seq DESC LIMIT 1``),
         so the signed ``journal_head_at_query`` names the real chain head.
         """
         async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(FileAccessJournalTable).order_by(text("rowid DESC"))
+            stmt = select(FileAccessJournalTable).order_by(text("seq DESC"))
             result = await session.exec(stmt)
             row = result.first()
             return GENESIS_JOURNAL_HASH if row is None else bytes(row.self_hash)

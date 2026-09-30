@@ -45,12 +45,17 @@ from eyenet.storage.sqlmodel_repo.file_access import (
     _PreparedJournalRow,
 )
 
+# The trailing ``seq`` column is the portable monotonic chain-walk order (the
+# READ mixins order by it, not by SQLite rowid). It is NOT a field on
+# AuditLogRow — the append computes it as MAX(seq)+1 inside the serialized
+# BEGIN IMMEDIATE transaction and binds it as the final value, after the
+# AuditLogRow-derived columns in ``_AUDIT_INSERT_COLS``.
 _AUDIT_INSERT_SQL = (
     "INSERT INTO audit_log ("
     "id, event, service, instance_id, system_user_id, subject_kind, "
     "subject_id, evidence_ref, trace_id, span_id, payload, at, "
-    "prev_hash, self_hash"
-    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "prev_hash, self_hash, seq"
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 _AUDIT_INSERT_COLS: tuple[str, ...] = (
     "id",
@@ -74,8 +79,8 @@ _FILE_ACCESS_INSERT_SQL = (
     "access_id, audit_event_id, user_id, grant_id, content_hash, "
     "content_size, content_mime, tier, served_at, served_via, "
     "acknowledgment_id, operator_signature, signing_pubkey_fingerprint, "
-    "prev_journal_hash, self_hash"
-    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "prev_journal_hash, self_hash, seq"
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -162,9 +167,14 @@ class SQLiteRepository(SQLModelRepository):
                 cur = await driver.cursor()
                 try:
                     await cur.execute("BEGIN IMMEDIATE")
-                    await cur.execute("SELECT self_hash FROM audit_log ORDER BY rowid DESC LIMIT 1")
+                    await cur.execute(
+                        "SELECT seq, self_hash FROM audit_log ORDER BY seq DESC LIMIT 1"
+                    )
                     last = await cur.fetchone()
-                    prev = last[0] if last is not None else GENESIS_PREV_HASH
+                    # MAX(seq)+1 is race-free INSIDE this serialized BEGIN
+                    # IMMEDIATE transaction (the single-writer invariant).
+                    next_seq = 1 if last is None else int(last[0]) + 1
+                    prev = last[1] if last is not None else GENESIS_PREV_HASH
                     row = AuditLogRow(
                         prev_hash=prev,
                         self_hash="0" * 64,
@@ -182,7 +192,8 @@ class SQLiteRepository(SQLModelRepository):
                         json.dumps(data[c]) if isinstance(data[c], (dict, list)) else data[c]
                         for c in _AUDIT_INSERT_COLS
                     )
-                    await cur.execute(_AUDIT_INSERT_SQL, values)
+                    # seq is not an AuditLogRow field — bind it as the final value.
+                    await cur.execute(_AUDIT_INSERT_SQL, (*values, next_seq))
                     await cur.execute("COMMIT")
                 except BaseException:
                     with contextlib.suppress(Exception):
@@ -252,13 +263,15 @@ class SQLiteRepository(SQLModelRepository):
                     if require_nonce:
                         await self._consume_nonce_locked(cur, prepared.acknowledgment_id, now)
                     await cur.execute(
-                        "SELECT self_hash FROM file_access_journal ORDER BY rowid DESC LIMIT 1"
+                        "SELECT seq, self_hash FROM file_access_journal ORDER BY seq DESC LIMIT 1"
                     )
                     last = await cur.fetchone()
-                    prev = bytes(last[0]) if last is not None else GENESIS_JOURNAL_HASH
+                    next_seq = 1 if last is None else int(last[0]) + 1
+                    prev = bytes(last[1]) if last is not None else GENESIS_JOURNAL_HASH
                     self_hash = prepared.self_hash(prev)
                     values = self._file_access_insert_values(prepared, prev, self_hash)
-                    await cur.execute(_FILE_ACCESS_INSERT_SQL, values)
+                    # seq bound as the final value (see _FILE_ACCESS_INSERT_SQL).
+                    await cur.execute(_FILE_ACCESS_INSERT_SQL, (*values, next_seq))
                     await cur.execute("COMMIT")
                 except BaseException:
                     with contextlib.suppress(Exception):

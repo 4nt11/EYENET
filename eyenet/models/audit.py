@@ -25,6 +25,14 @@ class AuditLogTable(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    # Monotonic insertion sequence — the PORTABLE hash-chain walk order. Replaces
+    # the SQLite-only implicit ``rowid`` so the chain is walked identically on
+    # Postgres. Assigned inside the serialized append (SQLite: MAX(seq)+1;
+    # Postgres: BIGINT GENERATED ALWAYS AS IDENTITY in its baseline DDL). Indexed
+    # so the tip read (ORDER BY seq DESC LIMIT 1) and the full walk are cheap.
+    # Nullable in the ORM so an existing DB can add it before backfill; the write
+    # path always populates it.
+    seq: int | None = Field(default=None, index=True)
     event: str
     service: str = Field(index=True)
     instance_id: str

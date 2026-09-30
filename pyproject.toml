@@ -18,6 +18,12 @@ dependencies = [
   "aiosqlite>=0.20",
   "greenlet>=3",
   "sqlite-vec>=0.1.6",
+  # Postgres backend (EYENET_STORAGE_TYPE=postgres) — the high-ingest prod
+  # target (concurrent writers; SQLite's single-writer wall is the reason).
+  # asyncpg drives the request path (postgresql+asyncpg://); psycopg drives the
+  # sync DDL/Alembic engine (postgresql+psycopg://). SQLite stays the default.
+  "asyncpg>=0.30",
+  "psycopg[binary]>=3.2",
   # Schema migrations. Baseline lands at v0.1.0; `eyenet init` runs
   # `upgrade_to_head` (migration history is the source of truth, create_all is
   # retired). Runtime dep — the boot path imports it, not just dev tooling.
