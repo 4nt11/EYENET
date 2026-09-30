@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
+from sqlalchemy.exc import OperationalError
 
 from eyenet.collectors.base._credentials import materialize_forum_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
@@ -195,6 +196,9 @@ class MyBBForumCollector(CollectorSkeleton):
         # empty and we crawl nothing (fail-closed).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
+        # Bind our row to the source we actually ingest into (the placeholder
+        # source it was registered against has zero of our messages).
+        await self._bind_collector_row_source(collector, self._source_uuid)
         # Populate /monitored-groups with the board's categories so the operator
         # can pick which to monitor. Read-only page fetch, nothing joined.
         if await self._check_session():
@@ -297,7 +301,19 @@ class MyBBForumCollector(CollectorSkeleton):
         # as we discover them (newest-first on MyBB) so posts flow from the first
         # minute instead of after a full multi-hour enumeration.
         for slug in sorted(monitored):
-            await self._crawl_category(slug)
+            try:
+                await self._crawl_category(slug)
+            except OperationalError as exc:
+                # A DB lock (SQLITE_BUSY past busy_timeout) on ONE category must not
+                # abort the whole sweep and starve the others — that is exactly what
+                # left "Stealer Logs" at 0 threads while "Databases" (swept first,
+                # alphabetically) kept dying mid-crawl. Log this pass and move on;
+                # the next tick retries the category from the top.
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.category_crawl_locked",
+                    message=f"{self._identity_name}: {slug} DB-locked, skipping pass ({exc!r})",
+                )
 
     async def _monitored_categories(self) -> list[str]:
         """Category slugs the operator chose to monitor (fail-closed if none).
@@ -340,15 +356,26 @@ class MyBBForumCollector(CollectorSkeleton):
                 if self._max_category_pages > 0:
                     last = min(last, self._max_category_pages)
             for thread_url in parse_thread_links(resp.text):
-                if self._source_uuid is not None:
-                    await self._storage.record_forum_thread_link(
-                        source_id=self._source_uuid,
-                        category_platform_groupid=slug,
-                        thread_platform_groupid=_thread_id_from_url(thread_url),
-                        seen_at=datetime.now(tz=UTC),
+                try:
+                    if self._source_uuid is not None:
+                        await self._storage.record_forum_thread_link(
+                            source_id=self._source_uuid,
+                            category_platform_groupid=slug,
+                            thread_platform_groupid=_thread_id_from_url(thread_url),
+                            seen_at=datetime.now(tz=UTC),
+                        )
+                    await self._poll_thread(thread_url)
+                    threads += 1
+                except OperationalError as exc:
+                    # One thread hitting a DB lock shouldn't abort the whole category
+                    # (and thus the sweep). Skip it; the category still finishes and
+                    # the next tick re-polls. Newest-first ordering means a skip is
+                    # re-picked-up promptly.
+                    await self.syslog(
+                        level=SystemLogLevel.WARN,
+                        event="forum.thread_crawl_locked",
+                        message=f"{self._identity_name}: {thread_url} DB-locked, skipped ({exc!r})",
                     )
-                await self._poll_thread(thread_url)
-                threads += 1
             if page >= last:
                 break
             page += 1

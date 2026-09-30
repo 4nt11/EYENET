@@ -147,6 +147,45 @@ async def test_list_groups_projects_candidates(storage: BaseRepository) -> None:
 
 
 @pytest.mark.unit
+async def test_list_groups_status_filter(storage: BaseRepository) -> None:
+    from fastapi import HTTPException
+
+    from eyenet.api.deps_paging import CursorParams
+
+    sid = await _source(storage)
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@member", seen_at=datetime.now(tz=UTC), member_dialog=True
+    )
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@disc", seen_at=datetime.now(tz=UTC)
+    )
+
+    async def _list(status: str | None):
+        return await groups_list(
+            _=_user(),
+            storage=storage,
+            page=CursorParams(offset=0, limit=50, include_total=True),
+            source_id=None,
+            state=None,
+            status=status,
+        )
+
+    # member_unmonitored selects only the dialog member; discovered only the other.
+    member = await _list("member_unmonitored")
+    assert {i.platform_groupid for i in member.items} == {"@member"}
+    assert member.estimated_total == 1
+    disc = await _list("discovered")
+    assert {i.platform_groupid for i in disc.items} == {"@disc"}
+    # monitored (JOINED) matches nothing here.
+    mon = await _list("monitored")
+    assert mon.items == []
+    # unknown status is a 400, not a silent empty page.
+    with pytest.raises(HTTPException) as ei:
+        await _list("bogus")
+    assert ei.value.status_code == 400
+
+
+@pytest.mark.unit
 async def test_leave_parks_and_closes_membership(storage: BaseRepository) -> None:
     sid = await _source(storage)
     coll = await _seed_collector(storage, sid)
@@ -334,6 +373,17 @@ async def test_groups_messages_returns_thread_posts_oldest_first(storage: BaseRe
     assert page.items[0].author_display == "d"
     assert page.estimated_total == 2
 
+    # ?q= scopes an in-context body search to THIS group (the reader search bar).
+    hit = await groups_messages(
+        group_id=gid,
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=True),
+        q="second",
+    )
+    assert [m.body for m in hit.items] == ["second"]  # only the matching post
+    assert hit.estimated_total == 1  # count matches the filtered page
+
 
 @pytest.mark.unit
 async def test_groups_messages_unknown_group_404(storage: BaseRepository) -> None:
@@ -445,6 +495,92 @@ async def test_groups_category_threads_rejects_non_category(storage: BaseReposit
             _=_user(),
             storage=storage,
             page=CursorParams(offset=0, limit=50, include_total=False),
+        )
+
+
+@pytest.mark.unit
+async def test_groups_category_search_across_threads(storage: BaseRepository) -> None:
+    from datetime import timedelta
+
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_category_threads import groups_category_search
+    from eyenet.models import MessageTable
+    from eyenet.models._base import new_uuid7
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    cat = await storage.upsert_group(
+        source_id=sid, platform_groupid="Cat", kind=GroupKind.FORUM_CATEGORY, title="C", seen_at=now
+    )
+    t1 = await storage.upsert_group(
+        source_id=sid, platform_groupid="t1", kind=GroupKind.FORUM_THREAD, title="One", seen_at=now
+    )
+    t2 = await storage.upsert_group(
+        source_id=sid, platform_groupid="t2", kind=GroupKind.FORUM_THREAD, title="Two", seen_at=now
+    )
+    for tp in ("t1", "t2"):
+        await storage.record_forum_thread_link(
+            source_id=sid, category_platform_groupid="Cat", thread_platform_groupid=tp, seen_at=now
+        )
+    aid = await storage.upsert_actor(
+        source_id=sid, actor_key="a", platform_userid="p", handle="h", display_name="d", seen_at=now
+    )
+    posts = [
+        (t1, "0", "chile leak dump"),
+        (t1, "1", "unrelated stuff"),
+        (t2, "2", "a chile mention"),
+    ]
+    for gid, mid, body in posts:
+        await storage.put_message(
+            MessageTable(
+                id=new_uuid7(),
+                source_id=sid,
+                group_id=gid,
+                actor_id=aid,
+                platform_msgid=mid,
+                evidence_ref=f"e:{mid}",
+                body=body,
+                length_chars=len(body),
+                length_words=2,
+                sent_at_source=now + timedelta(seconds=int(mid)),
+                ingested_at=now,
+                has_attachment=False,
+                source_specific={"author_display": "d"},
+            ),
+            [],
+        )
+
+    page = await groups_category_search(
+        category_id=cat,
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=True),
+        q="chile",
+    )
+    # matches BOTH threads' chile posts, not the unrelated one — no need to open each thread
+    assert {h.body for h in page.items} == {"chile leak dump", "a chile mention"}
+    assert page.estimated_total == 2
+    assert {h.thread_group_id for h in page.items} == {t1, t2}  # each hit links to its thread
+    assert {h.thread_title for h in page.items} == {"One", "Two"}
+
+
+@pytest.mark.unit
+async def test_groups_category_search_rejects_non_category(storage: BaseRepository) -> None:
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_category_threads import groups_category_search
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    thread = await storage.upsert_group(
+        source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
+    )
+    with pytest.raises(ConflictError):
+        await groups_category_search(
+            category_id=thread,
+            _=_user(),
+            storage=storage,
+            page=CursorParams(offset=0, limit=50, include_total=False),
+            q="x",
         )
 
 

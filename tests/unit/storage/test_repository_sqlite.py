@@ -43,9 +43,13 @@ def test_pragmas_applied(storage: BaseRepository) -> None:
         fk = conn.execute(text("PRAGMA foreign_keys")).scalar()
         jm = conn.execute(text("PRAGMA journal_mode")).scalar()
         sync = conn.execute(text("PRAGMA synchronous")).scalar()
+        busy = conn.execute(text("PRAGMA busy_timeout")).scalar()
     assert fk == 1
     assert jm == "wal"
     assert sync == 1  # NORMAL
+    # Writers wait for the lock instead of erroring "database is locked" under
+    # multi-process write contention (both collectors + workers + api).
+    assert busy == 30000
 
 
 @pytest.mark.unit

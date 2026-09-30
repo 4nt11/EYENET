@@ -102,6 +102,13 @@ services:
     <<: *eyenet-worker
     command: ["sensor", "--profile", "stylometric"]
 
+  # Group-reference discovery over every raw message (own queue group, so it sees
+  # every message independent of the stylometric sensor). New groups land as
+  # DISCOVERED candidates; nothing auto-joins.
+  discovery:
+    <<: *eyenet-worker
+    command: ["discovery"]
+
   engine:
     <<: *eyenet-worker
     command: ["engine"]
@@ -113,6 +120,14 @@ services:
   verifier:
     <<: *eyenet-worker
     command: ["verifier"]
+
+  # Victim-country attribution over incident-flagged (and operator-rescued) messages.
+  # Pure-python (re2 + phonenumbers + pycountry), runs in eyenet:base. Tick-driven:
+  # drains the backlog then stays live. Writes the message_geo sidecar; surfaces on
+  # the incident feed + reader.
+  geo:
+    <<: *eyenet-worker
+    command: ["geo", "--interval", "2"]
 
   # ---- opt-in: classifier (M10). REQUIRES TUNING (nsjail-in-Docker). ----------
   # Enable with:  docker compose --profile classifier up -d

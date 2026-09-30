@@ -98,6 +98,38 @@ async def test_get_collector_returns_none_for_unknown(
 
 
 @pytest.mark.unit
+async def test_bind_collector_source_rebinds_and_is_idempotent(
+    storage: BaseRepository,
+) -> None:
+    """A collector registered against a placeholder source can be rebound to the
+    source it actually ingests into; re-binding to the same source is a no-op."""
+    placeholder = await _make_source(storage, "placeholder")
+    identity_id = await _make_identity(storage, placeholder, "tg_bind")
+    row = await storage.create_collector(
+        instance_name="binder",
+        kind=SourceKind.TELEGRAM,
+        source_id=placeholder,
+        identity_id=identity_id,
+        config={},
+        created_at=_NOW,
+        created_by_user_id=_OPERATOR,
+    )
+    assert row.source_id == placeholder
+    real = await _make_source(storage, "real")
+    rebound = await storage.bind_collector_source(collector_id=row.id, source_id=real)
+    assert rebound.source_id == real
+    # Idempotent: binding again to the same source returns the row unchanged.
+    again = await storage.bind_collector_source(collector_id=row.id, source_id=real)
+    assert again.source_id == real
+
+
+@pytest.mark.unit
+async def test_bind_collector_source_missing_raises(storage: BaseRepository) -> None:
+    with pytest.raises(ValueError, match="not found"):
+        await storage.bind_collector_source(collector_id=uuid4(), source_id=uuid4())
+
+
+@pytest.mark.unit
 async def test_list_collectors_ordered_by_created_at(
     storage: BaseRepository,
 ) -> None:

@@ -8,20 +8,39 @@ requests, executes each write under its own throttle, then marks the outcome.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, cast
 from uuid import UUID
 
+from sqlalchemy import String, cast as sql_cast, exists, func, or_
+from sqlalchemy.orm import aliased
 from sqlmodel import col, select
 
 from eyenet.contracts.enums import GroupKind
+from eyenet.contracts.incident import ThreadSummaryRow
 from eyenet.models import (
     ForumBackfillRequestTable,
     ForumCrawlCursorTable,
     ForumReplyRequestTable,
     ForumThreadLinkTable,
     GroupTable,
+    IncidentTable,
+    MessageTable,
+    ThreadSummaryTable,
 )
 
 from ._helpers import safe_session
+
+
+def _summary_row(t: ThreadSummaryTable) -> ThreadSummaryRow:
+    return ThreadSummaryRow(
+        group_id=t.group_id,
+        op_message_id=t.op_message_id,
+        op_sent_at=t.op_sent_at,
+        victim_country=t.victim_country,
+        victim_status=t.victim_status,
+        engine_version=t.engine_version,
+        computed_at=t.computed_at,
+    )
 
 
 class ForumMixin:
@@ -65,28 +84,208 @@ class ForumMixin:
         category_platform_groupid: str,
         limit: int,
         offset: int = 0,
-    ) -> list[object]:
-        """FORUM_THREAD groups discovered under a category, most-recent-first."""
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+        sort: str = "recent",
+    ) -> list[tuple[object, object | None]]:
+        """FORUM_THREAD groups under a category, each with its OP-anchored thread summary.
+
+        Returns (GroupTable, ThreadSummaryTable | None). ``sort`` is "recent" (last
+        observed, default) or "date" (the OP post time from the summary). ``countries``
+        filters to threads whose OP resolved to ONE of the given ISO codes; ``labels``
+        filters to threads whose OP carries ANY of the given incident labels (OR).
+        Filtering by country/label implies a summary exists (the outer join drops to
+        inner for those predicates). Generic ANSI."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            ts = ThreadSummaryTable
             stmt = (
-                select(GroupTable)
+                select(GroupTable, ts)
                 .join(
                     ForumThreadLinkTable,
                     col(ForumThreadLinkTable.thread_platform_groupid)
                     == col(GroupTable.platform_groupid),
                 )
+                .join(ts, col(ts.group_id) == col(GroupTable.id), isouter=True)
                 .where(col(ForumThreadLinkTable.source_id) == source_id)
                 .where(
                     col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid
                 )
                 .where(col(GroupTable.source_id) == source_id)
                 .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
-                .order_by(col(GroupTable.last_observed_at_ingest).desc())
+            )
+            if countries:
+                stmt = stmt.where(col(ts.victim_country).in_(countries))
+            if labels:
+                # OP has ANY of the labels: EXISTS an incident on the OP message whose
+                # JSON label array contains the quoted token (append-only, so OR the rows).
+                label_match = or_(
+                    *(
+                        sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
+                        for lbl in labels
+                    )
+                )
+                stmt = stmt.where(
+                    exists().where(
+                        col(IncidentTable.message_id) == col(ts.op_message_id), label_match
+                    )
+                )
+            order = (
+                col(ts.op_sent_at).desc()
+                if sort == "date"
+                else (col(GroupTable.last_observed_at_ingest).desc())
+            )
+            stmt = stmt.order_by(order).limit(limit).offset(offset)
+            result = await session.exec(stmt)
+            return [(g, _summary_row(s) if s is not None else None) for g, s in result.all()]
+
+    async def count_threads_for_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+    ) -> int:
+        """Total FORUM_THREAD groups under a category matching the same filters as
+        :meth:`list_threads_for_category` (for the list's real total, not the page cap)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            ts = ThreadSummaryTable
+            stmt = (
+                select(func.count(func.distinct(col(GroupTable.id))))
+                .select_from(GroupTable)
+                .join(
+                    ForumThreadLinkTable,
+                    col(ForumThreadLinkTable.thread_platform_groupid)
+                    == col(GroupTable.platform_groupid),
+                )
+                .join(ts, col(ts.group_id) == col(GroupTable.id), isouter=True)
+                .where(col(ForumThreadLinkTable.source_id) == source_id)
+                .where(
+                    col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid
+                )
+                .where(col(GroupTable.source_id) == source_id)
+                .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
+            )
+            if countries:
+                stmt = stmt.where(col(ts.victim_country).in_(countries))
+            if labels:
+                label_match = or_(
+                    *(
+                        sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
+                        for lbl in labels
+                    )
+                )
+                stmt = stmt.where(
+                    exists().where(
+                        col(IncidentTable.message_id) == col(ts.op_message_id), label_match
+                    )
+                )
+            result = await session.exec(stmt)
+            return int(result.one())
+
+    # ── forum-thread OP-anchored summary (date + victim country) ──────────────
+    async def forum_threads_needing_summary(
+        self, *, limit: int = 500
+    ) -> list[tuple[UUID, str | None, UUID, str, datetime]]:
+        """(group_id, title, op_message_id, op_body, op_sent_at) for FORUM_THREAD groups
+        with no summary yet. The OP is the earliest post (min sent_at_source). Ties (same
+        timestamp) may repeat a group; the caller de-dups. Generic ANSI."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            op = aliased(MessageTable)
+            summarized = select(ThreadSummaryTable.group_id)
+            earliest = (
+                select(func.min(MessageTable.sent_at_source))
+                .where(col(MessageTable.group_id) == col(GroupTable.id))
+                .scalar_subquery()
+            )
+            stmt = (
+                select(  # type: ignore[call-overload]  # 5-col + aliased exceeds SQLModel overloads
+                    GroupTable.id,
+                    GroupTable.current_title,
+                    op.id,
+                    op.body,
+                    op.sent_at_source,
+                )
+                .join(op, col(op.group_id) == col(GroupTable.id))
+                .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
+                .where(col(GroupTable.id).not_in(summarized))
+                .where(col(op.sent_at_source) == earliest)
                 .limit(limit)
-                .offset(offset)
             )
             result = await session.exec(stmt)
-            return list(result)
+            return [(gid, title, oid, body, ts) for gid, title, oid, body, ts in result.all()]
+
+    async def put_thread_summaries_bulk(self, rows: list[object]) -> None:
+        """Persist many ThreadSummaryRows in one session (append-only, unique per group)."""
+        if not rows:
+            return
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            for r in rows:
+                row = cast("ThreadSummaryRow", r)
+                session.add(ThreadSummaryTable(**row.model_dump()))
+            await session.commit()
+
+    def _category_search_stmt(
+        self, projection: Any, *, source_id: UUID, category_platform_groupid: str, q: str
+    ) -> Any:
+        """Shared FROM/JOIN/WHERE for the category-level body search: message → its
+        FORUM_THREAD group → the category link, filtered by the body match. The caller
+        owns the projection (rows vs COUNT), ordering, limit and offset — so the page
+        and its estimated_total can never diverge."""
+        return (
+            projection.join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id))
+            .join(
+                ForumThreadLinkTable,
+                col(ForumThreadLinkTable.thread_platform_groupid)
+                == col(GroupTable.platform_groupid),
+            )
+            .where(col(ForumThreadLinkTable.source_id) == source_id)
+            .where(col(ForumThreadLinkTable.category_platform_groupid) == category_platform_groupid)
+            .where(col(GroupTable.source_id) == source_id)
+            .where(col(GroupTable.kind) == GroupKind.FORUM_THREAD)
+            .where(self._body_match(q))  # type: ignore[attr-defined]
+        )
+
+    async def search_messages_in_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        q: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[tuple[object, UUID, str | None]]:
+        """Body-search across EVERY FORUM_THREAD under a category (the reader's
+        category-level search), so an operator can find a post without opening each
+        thread. Returns (MessageTable, thread_group_id, thread_title), newest match
+        first. FTS5 on SQLite via the ``_body_match`` seam, LIKE elsewhere."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._category_search_stmt(
+                select(MessageTable, GroupTable.id, GroupTable.current_title),
+                source_id=source_id,
+                category_platform_groupid=category_platform_groupid,
+                q=q,
+            )
+            stmt = (
+                stmt.order_by(col(MessageTable.sent_at_source).desc()).limit(limit).offset(offset)
+            )
+            result = await session.exec(stmt)
+            return [(m, UUID(str(gid)), title) for m, gid, title in result.all()]
+
+    async def count_messages_in_category(
+        self, *, source_id: UUID, category_platform_groupid: str, q: str
+    ) -> int:
+        """Total matches for :meth:`search_messages_in_category` (no offset/limit) —
+        the category search's ``estimated_total``."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._category_search_stmt(
+                select(func.count()).select_from(MessageTable),
+                source_id=source_id,
+                category_platform_groupid=category_platform_groupid,
+                q=q,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def _forum_crawl_cursor_row(
         self, session: object, source_id: UUID, category_platform_groupid: str

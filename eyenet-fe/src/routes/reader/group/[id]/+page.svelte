@@ -1,10 +1,12 @@
 <script>
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import DOMPurify from 'dompurify';
+  import { boardOf, prepare, onGuardedClick } from '$lib/linkguard.js';
   import { apiGet, apiPost } from '$lib/api.js';
-  import { incidentLabelName, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentLabelName, incidentTone, INCIDENT_LABELS } from '$lib/data.js';
   import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
+  import Badge from '$lib/components/Badge.svelte';
+  import CaseAddModal from '$lib/components/CaseAddModal.svelte';
 
   // Message view for any group: a forum thread OR a chat/channel/room. Posts
   // render their evidence-faithful body_html (SANITIZED — this is threat-actor
@@ -12,8 +14,12 @@
   // back to escaped body text. If any post is [hide]-gated, the operator can
   // enqueue a reply-to-unlock (posted by the collector under throttle).
   let msgs = $state([]);
+  let caseModalPost = $state(null); // {id, actor_id, author, threadTitle} or null
   let error = $state(null);
   let loaded = $state(false);
+  let search = $state(''); // in-context body search, scoped to THIS group (thread/channel)
+  let total = $state(null); // estimated_total for the current (filtered) view
+  let searchTimer;
   let replyText = $state('');
   let replyMsg = $state(null);
   let submitting = $state(false);
@@ -28,13 +34,23 @@
 
   async function load() {
     loaded = false;
+    error = null;
+    const params = new URLSearchParams({ limit: '500', include_total: '1' });
+    if (search.trim()) params.set('q', search.trim()); // scoped to this group only
     try {
-      const p = await apiGet(`/v1/groups/${$page.params.id}/messages?limit=500`, { auth: true });
+      const p = await apiGet(`/v1/groups/${$page.params.id}/messages?${params}`, { auth: true });
       msgs = p.items ?? [];
+      total = p.estimated_total ?? null;
     } catch (e) {
       error = e.message;
     }
     loaded = true;
+  }
+
+  // Debounce keystrokes: one request 250ms after the operator stops typing.
+  function onSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(load, 250);
   }
 
   const fmt = (ts) => (ts ? new Date(ts).toLocaleString() : '');
@@ -68,67 +84,8 @@
     }
   }
 
-  // Board host from evidence_ref (forum:<board>:<tid>:<pid>) so the board's own
-  // relative links can be resolved to absolute — otherwise they'd point at us.
-  const boardOf = (ref) => (ref && ref.startsWith('forum:') ? ref.split(':')[1] : '');
-
-  // Sanitize (XSS), then DEFANG every link: resolve relative hrefs against the
-  // board, move the target to data-url, and remove href so a stray click does
-  // nothing. Firing is a deliberate triple-click (see onPostClick).
-  function prepare(html, board) {
-    const cleaned = DOMPurify.sanitize(html ?? '');
-    if (typeof DOMParser === 'undefined') return cleaned; // SSR/prerender guard
-    const doc = new DOMParser().parseFromString(cleaned, 'text/html');
-    for (const a of doc.querySelectorAll('a')) {
-      let href = a.getAttribute('href') || '';
-      if (href && !/^https?:\/\//i.test(href) && !/^mailto:/i.test(href) && board) {
-        href = `https://${board}/${href.replace(/^\//, '')}`;
-      }
-      a.removeAttribute('href');
-      a.removeAttribute('target');
-      if (href) {
-        a.setAttribute('data-url', href);
-        a.classList.add('guarded');
-      }
-    }
-    return doc.body.innerHTML;
-  }
-
-  // Triple-click guard: 1st reveals the URL, 2nd arms, 3rd opens (new tab, no
-  // referrer). Never navigate the board from the console by accident.
-  function onPostClick(e) {
-    const a = e.target.closest('a.guarded');
-    if (!a) return;
-    e.preventDefault();
-    const url = a.getAttribute('data-url');
-    if (!url) return;
-    const step = Number(a.dataset.arm || '0') + 1;
-    if (step === 1) {
-      a.dataset.arm = '1';
-      a.dataset.orig = a.textContent;
-      a.textContent = `→ ${url}`;
-      a.classList.add('armed1');
-      clearTimeout(a._t);
-      a._t = setTimeout(() => resetLink(a), 6000);
-    } else if (step === 2) {
-      a.dataset.arm = '2';
-      a.textContent = `⚠ open? click once more · ${url}`;
-      a.classList.remove('armed1');
-      a.classList.add('armed2');
-      clearTimeout(a._t);
-      a._t = setTimeout(() => resetLink(a), 6000);
-    } else {
-      window.open(url, '_blank', 'noopener,noreferrer');
-      resetLink(a);
-    }
-  }
-
-  function resetLink(a) {
-    clearTimeout(a._t);
-    if (a.dataset.orig != null) a.textContent = a.dataset.orig;
-    a.dataset.arm = '0';
-    a.classList.remove('armed1', 'armed2');
-  }
+  // Link defang + triple-click-to-open guard live in $lib/linkguard.js (shared
+  // with the category reader so the two never diverge on link safety).
 
   async function backfill() {
     backfilling = true;
@@ -165,6 +122,21 @@
     </div>
     <h1>Conversation</h1>
     {#if gated}<span class="gatehint">Contains [hide]-gated posts · reply to unlock.</span>{/if}
+    <div class="searchrow">
+      <input
+        class="search"
+        type="search"
+        placeholder="Search this conversation…"
+        bind:value={search}
+        oninput={onSearch}
+        aria-label="Search message bodies in this group" />
+      {#if search.trim() && loaded}
+        <span class="scount">
+          {msgs.length}{#if total != null && total > msgs.length}<span class="oftotal"> / {total}</span>{/if}
+          match{(total ?? msgs.length) === 1 ? '' : 'es'}
+        </span>
+      {/if}
+    </div>
     {#if isForum}
       <div class="toolbar">
         <button class="btn ghost" disabled={backfilling} onclick={backfill}>Backfill deeper</button>
@@ -190,9 +162,9 @@
     {:else if error}
       <p class="pnote err">Could not load: {error}</p>
     {:else if !msgs.length}
-      <p class="pnote">No posts stored yet.</p>
+      <p class="pnote">{search.trim() ? `No posts in this conversation match “${search.trim()}”.` : 'No posts stored yet.'}</p>
     {:else}
-      <ol class="posts" onclick={onPostClick}>
+      <ol class="posts" onclick={onGuardedClick}>
         {#each msgs as m}
           <li class="post" class:gatedpost={m.reply_gated}>
             <div class="pmeta">
@@ -200,12 +172,17 @@
               <span class="ts">{fmt(m.ts)}</span>
               {#if m.reply_gated}<span class="badge">gated</span>{/if}
               {#if m.edited}<span class="badge edited">edited</span>{/if}
-              {#each m.incident_labels ?? [] as l}<span class="badge incident">{incidentLabelName(l)}</span>{/each}
+              {#each m.incident_labels ?? [] as l}<Badge tone={incidentTone(l)}>{incidentLabelName(l)}</Badge>{/each}
+              {#if m.victim_country}<span class="ts">victim {m.victim_country}</span>{/if}
               {#if m.corrected_labels}
                 <span class="corrtag">operator</span>
-                {#each m.corrected_labels as l}<span class="badge corrected">{incidentLabelName(l)}</span>{/each}
-                {#if !m.corrected_labels.length}<span class="badge corrected">false positive</span>{/if}
+                {#each m.corrected_labels as l}<Badge tone={incidentTone(l)} dot>{incidentLabelName(l)}</Badge>{/each}
+                {#if !m.corrected_labels.length}<Badge tone="neutral" dot>false positive</Badge>{/if}
               {/if}
+              <button
+                class="casebtn"
+                title="Add to a case"
+                onclick={() => (caseModalPost = { id: m.id, actor_id: m.actor_id, author: m.author_display || m.author_username, threadTitle: null })}>+ case</button>
             </div>
             {#if m.body_html}
               <div class="pbody">{@html prepare(m.body_html, boardOf(m.evidence_ref))}</div>
@@ -245,6 +222,10 @@
   </div>
 </main>
 
+{#if caseModalPost}
+  <CaseAddModal post={caseModalPost} onClose={() => (caseModalPost = null)} />
+{/if}
+
 <style>
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .head { padding: 20px 24px 0; }
@@ -253,6 +234,11 @@
   .slug-link:hover { color: var(--accent); }
   h1 { margin: 4px 0 0; font-size: var(--fs-20); color: var(--text-body); }
   .gatehint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--accent); }
+  .searchrow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .search { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; min-width: 260px; }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .scount { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; }
+  .oftotal { color: var(--text-muted); }
   .toolbar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
   .btn.ghost { background: transparent; color: var(--accent-text); border: 1px solid var(--border-strong); }
   .btn.ghost:hover:not(:disabled) { border-color: var(--accent); }
@@ -265,9 +251,9 @@
   .ts { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .badge { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; }
   .badge.edited { color: var(--text-faint); border-color: var(--border-strong); }
-  .badge.incident { color: var(--red-text); border-color: var(--red-text); }
-  .badge.corrected { color: var(--accent-text); border-color: var(--accent-text); }
   .corrtag { font-family: var(--font-sans); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent-text); }
+  .casebtn { appearance: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 3px; background: transparent; color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: var(--tracking-label); cursor: pointer; }
+  .casebtn:hover { border-color: var(--accent); color: var(--accent); }
   .relabel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .chip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--fs-11); padding: 2px 8px; cursor: pointer; }

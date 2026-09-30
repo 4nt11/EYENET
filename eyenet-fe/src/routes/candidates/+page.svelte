@@ -22,8 +22,21 @@
     { key: 'scoreText', header: 'Score', mono: true, align: 'right', width: '80px' }
   ];
 
+  // `memberDialog` = the operator's own account already sits in this group (seen
+  // directly in an identity's dialogs/rooms), vs reachable only via mention
+  // descent. Same signal /v1/groups derives `member_unmonitored` from — NOT the
+  // candidate `state`, which is collector-lifecycle and says nothing about
+  // whether YOU are in it.
+  let filter = $state('all'); // 'all' | 'member' | 'discovered'
+  let rows = $derived(
+    filter === 'all'
+      ? candidateCtx.list
+      : candidateCtx.list.filter((x) => (filter === 'member' ? x.memberDialog : !x.memberDialog))
+  );
+  let memberCount = $derived(candidateCtx.list.filter((x) => x.memberDialog).length);
+
   let selectedId = $state(null);
-  let sel = $derived(candidateCtx.list.find((x) => x.id === selectedId) ?? candidateCtx.list[0] ?? null);
+  let sel = $derived(rows.find((x) => x.id === selectedId) ?? rows[0] ?? null);
   // Only `queued` (approve/reject) and `joined` (park) carry an operator action.
   let canDecide = $derived(sel?.state === 'queued');
   let canPark = $derived(sel?.state === 'joined');
@@ -74,14 +87,21 @@
 
   <div class="body">
     <div class="table-col">
-      {#if candidateCtx.list.length}
-        <DataTable rowKey="id" columns={COLUMNS} rows={candidateCtx.list}
+      <div class="filter-bar">
+        <button class="seg" class:on={filter === 'all'} onclick={() => (filter = 'all')}>All · {candidateCtx.list.length}</button>
+        <button class="seg" class:on={filter === 'discovered'} onclick={() => (filter = 'discovered')}>Discovered · {candidateCtx.list.length - memberCount}</button>
+        <button class="seg" class:on={filter === 'member'} onclick={() => (filter = 'member')}>Already a member · {memberCount}</button>
+      </div>
+      <div class="table-scroll">
+      {#if rows.length}
+        <DataTable rowKey="id" columns={COLUMNS} rows={rows}
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
       {:else}
         <p class="pnote">
-          {#if !candidateCtx.loaded}Loading…{:else if candidateCtx.error}Could not load candidates: {candidateCtx.error}{:else}No candidates discovered yet.{/if}
+          {#if !candidateCtx.loaded}Loading…{:else if candidateCtx.error}Could not load candidates: {candidateCtx.error}{:else if candidateCtx.list.length}No candidates in this view.{:else}No candidates discovered yet.{/if}
         </p>
       {/if}
+      </div>
     </div>
 
     {#if sel}
@@ -94,6 +114,7 @@
           <div class="meta">
             <span class="m"><span class="k">Group</span> {sel.group}</span>
             <span class="m"><span class="k">Platform</span> {candidateView.source ?? sel.sourceId.slice(0, 8)}</span>
+            <span class="m"><span class="k">Membership</span> {sel.memberDialog ? 'account is a member' : 'discovered (not joined)'}</span>
             {#if sel.kindHint}<span class="m"><span class="k">Kind</span> {sel.kindHint}</span>{/if}
             <span class="m"><span class="k">Group ID</span> {sel.platformGroupId}</span>
             <span class="m"><span class="k">Score</span> {sel.scoreText}</span>
@@ -175,7 +196,12 @@
   .pending { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
-  .table-col { min-height: 0; overflow: auto; }
+  .table-col { min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .table-scroll { flex: 1; min-height: 0; overflow: auto; }
+  .filter-bar { display: flex; gap: 6px; flex-shrink: 0; }
+  .seg { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; }
+  .seg:hover { color: var(--text-body); border-color: var(--accent); }
+  .seg.on { color: var(--accent-text); border-color: var(--accent); background: var(--panel); }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 

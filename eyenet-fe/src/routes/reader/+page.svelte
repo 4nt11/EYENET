@@ -11,8 +11,21 @@
 
   onMount(async () => {
     try {
-      const page = await apiGet('/v1/groups?limit=200', { auth: true });
-      groups = (page.items ?? []).filter((g) => g.status === 'monitored' && g.group_id);
+      // Filter to monitored groups at the API (discovery floods the list with
+      // discovered candidates that would otherwise bury the readable ones), and
+      // page through the cursor so nothing is truncated at a fixed limit.
+      const all = [];
+      let cursor = null;
+      for (let i = 0; i < 50; i++) {
+        const q = cursor
+          ? `?status=monitored&limit=500&cursor=${encodeURIComponent(cursor)}`
+          : '?status=monitored&limit=500';
+        const page = await apiGet(`/v1/groups${q}`, { auth: true });
+        all.push(...(page.items ?? []));
+        cursor = page.next_cursor;
+        if (!cursor) break;
+      }
+      groups = all.filter((g) => g.group_id);
     } catch (e) {
       error = e.message;
     }
