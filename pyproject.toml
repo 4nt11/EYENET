@@ -247,6 +247,7 @@ omit = [
   # CLI-autogenerate engine builders don't run in the normal suite. Tracking
   # per-line coverage of revision files is noise.
   "eyenet/storage/sqlite_repo/migrations/*",
+  "eyenet/storage/postgres_repo/migrations/*",
   # Manual cutover-runbook ops tool; its drift logic mirrors the tested path.
   "eyenet/storage/sqlite_repo/_drift_check.py",
 ]
@@ -333,6 +334,7 @@ ignore = [
 # signature dictated by Alembic (unused args are part of the contract), and the
 # revision files are close kin to generated code.
 "eyenet/storage/sqlite_repo/migrations/**/*.py" = ["ARG001", "E501"]
+"eyenet/storage/postgres_repo/migrations/**/*.py" = ["ARG001", "E501"]
 # Manual ops CLI: alembic callback signatures (ARG001) + operator-facing prints (T201).
 "eyenet/storage/sqlite_repo/_drift_check.py" = ["ARG001", "T201", "PLR2004"]
 "eyenet/storage/**/*.py" = ["TC001", "TC002", "TC003"]
@@ -382,7 +384,7 @@ strict = true
 # The in-jail workers import libraries (fitz, docx, presidio_analyzer) that live
 # only in the eyenet-extract venv, never in the type-check environment. They are
 # never imported by the app (only bind-mounted and run as scripts in nsjail).
-exclude = ['eyenet/classifier/(extract|presidio)/_workers/', 'eyenet/storage/sqlite_repo/migrations/']
+exclude = ['eyenet/classifier/(extract|presidio)/_workers/', 'eyenet/storage/sqlite_repo/migrations/', 'eyenet/storage/postgres_repo/migrations/']
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_return_any = true

@@ -24,7 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CHAR, CheckConstraint, Column, Computed, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Computed, Index, UniqueConstraint, Uuid
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import JoinedVia
@@ -90,13 +90,17 @@ class MessageObservationTable(SQLModel, table=True):
     was_first_sighting: bool = False
     # Generated column: non-NULL only when was_first_sighting=TRUE so the
     # UNIQUE constraint lets at most one row claim first-sighting per message.
-    first_sighting_claim: str | None = Field(
+    first_sighting_claim: UUID | None = Field(
         default=None,
         sa_column=Column(
             "first_sighting_claim",
-            CHAR(32),
+            # Uuid() renders CHAR(32) on SQLite, native uuid on Postgres. The
+            # value only backs the UNIQUE below (never read), so materialize
+            # message_id directly — the old SQLite-only hex() wrapper added
+            # nothing portable and Postgres has no hex().
+            Uuid(),
             Computed(
-                "CASE WHEN was_first_sighting THEN hex(message_id) ELSE NULL END",
+                "CASE WHEN was_first_sighting THEN message_id ELSE NULL END",
                 persisted=True,
             ),
         ),
