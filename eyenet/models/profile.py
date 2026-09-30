@@ -23,7 +23,13 @@ class ProfileTable(SQLModel, table=True):
             "ix_profile_one_current_per_actor",
             "actor_id",
             unique=True,
+            # Partial-unique "one CURRENT profile per actor". The predicate MUST
+            # be given per dialect: with sqlite_where alone, Postgres drops the
+            # WHERE and builds a FULL unique index (one profile per actor total),
+            # which both enforces the wrong invariant and rejects the versioned
+            # profile history. postgresql_where restores the partial predicate.
             sqlite_where=text("is_current = 1"),
+            postgresql_where=text("is_current"),
         ),
         Index("ix_profile_actor_version", "actor_id", "version"),
     )

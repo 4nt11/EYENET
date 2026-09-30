@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, CheckConstraint, Index
+from sqlalchemy import JSON, BigInteger, CheckConstraint, Index
 from sqlmodel import Column, Field, SQLModel
 
 from eyenet.contracts.enums import SensitivityTier
@@ -47,7 +47,7 @@ class DocumentTable(SQLModel, table=True):
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     sha256: str = Field(index=True)
     mime: str
-    size_bytes: int
+    size_bytes: int = Field(sa_type=BigInteger)  # byte count: 64-bit (see message.attachment)
     doc_kind: str | None = None
     filename: str | None = None
     storage_uri: str | None = None
