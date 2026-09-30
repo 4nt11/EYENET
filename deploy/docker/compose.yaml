@@ -102,6 +102,13 @@ services:
     <<: *eyenet-worker
     command: ["sensor", "--profile", "stylometric"]
 
+  # Group-reference discovery over every raw message (own queue group, so it sees
+  # every message independent of the stylometric sensor). New groups land as
+  # DISCOVERED candidates; nothing auto-joins.
+  discovery:
+    <<: *eyenet-worker
+    command: ["discovery"]
+
   engine:
     <<: *eyenet-worker
     command: ["engine"]
