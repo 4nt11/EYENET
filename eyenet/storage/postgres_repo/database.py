@@ -21,12 +21,15 @@ the SQLite backend's raw-DDL set.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.util import await_only
 from sqlmodel import SQLModel, create_engine
 
 _ASYNC_DRIVER = "postgresql+asyncpg"
@@ -90,6 +93,32 @@ def audit_url_for(url: str | URL) -> URL:
     return u.set(database=f"{u.database}_audit")
 
 
+def _register_timestamp_codec(dbapi_conn: Any, _record: Any) -> None:
+    """Accept tz-aware datetimes for ``timestamp`` columns on asyncpg.
+
+    EYENET timestamps are tz-aware UTC, but the schema uses ``TIMESTAMP WITHOUT
+    TIME ZONE`` (the SQLite heritage — SQLite has no tz-aware type). asyncpg's
+    built-in binary codec refuses a tz-aware datetime for that type. A text-mode
+    codec strips the tz on encode (all values are UTC) and reattaches UTC on
+    decode, so a value round-trips tz-aware UTC exactly as SQLite returns it.
+    This matters for the hash chains: ``self_hash`` covers ``served_at``/``at``
+    via ``isoformat()``, so a naive read-back (no ``+00:00``) would recompute a
+    different hash and fail chain verification. Registered per-connection via the
+    connect event; ``await_only`` runs the coroutine in the connection's greenlet.
+    """
+    raw = dbapi_conn.driver_connection  # asyncpg.Connection
+
+    await_only(
+        raw.set_type_codec(
+            "timestamp",
+            schema="pg_catalog",
+            encoder=lambda dt: dt.replace(tzinfo=None).isoformat(sep=" "),
+            decoder=lambda s: datetime.fromisoformat(s).replace(tzinfo=UTC),
+            format="text",
+        )
+    )
+
+
 def get_async_engine(url: str | URL, *, pool_size: int, max_overflow: int) -> AsyncEngine:
     """Open an ``postgresql+asyncpg://`` engine for the request path.
 
@@ -99,7 +128,7 @@ def get_async_engine(url: str | URL, *, pool_size: int, max_overflow: int) -> As
     connection. Pools are kept SMALL per-process because many collector
     processes each hold one — the connection budget is the real ceiling.
     """
-    return create_async_engine(
+    engine = create_async_engine(
         _async_url(url),
         pool_size=pool_size,
         max_overflow=max_overflow,
@@ -107,6 +136,8 @@ def get_async_engine(url: str | URL, *, pool_size: int, max_overflow: int) -> As
         connect_args={"statement_cache_size": 0},
         future=True,
     )
+    event.listen(engine.sync_engine, "connect", _register_timestamp_codec)
+    return engine
 
 
 def get_sync_engine(url: str | URL) -> Engine:

@@ -29,7 +29,9 @@ from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 from eyenet.storage.sqlmodel_repo.file_access import _PreparedJournalRow
 
-pytestmark = pytest.mark.e2e
+# Each test provisions a fresh DB pair and runs the full 60-table migration, so
+# they legitimately exceed the 30s global --timeout.
+pytestmark = [pytest.mark.e2e, pytest.mark.timeout(120)]
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -51,17 +53,14 @@ def pg_container() -> Iterator[Any]:
 
 
 @pytest.fixture
-def pg_storage(pg_container: Any, monkeypatch: pytest.MonkeyPatch) -> Iterator[BaseRepository]:
+def pg_storage(pg_container: Any, monkeypatch: pytest.MonkeyPatch) -> BaseRepository:
     uid = uuid.uuid4().hex[:12]
     main_db = f"eyenet_{uid}"
     host = pg_container.get_container_host_ip()
     port = pg_container.get_exposed_port(5432)
     user = pg_container.username
     password = pg_container.password
-    admin = (
-        f"host={host} port={port} dbname={pg_container.dbname} "
-        f"user={user} password={password}"
-    )
+    admin = f"host={host} port={port} dbname={pg_container.dbname} user={user} password={password}"
     # The operator provisions both databases; the repo only builds their schema.
     with psycopg.connect(admin, autocommit=True) as conn:
         conn.execute(f'CREATE DATABASE "{main_db}"')
@@ -69,8 +68,9 @@ def pg_storage(pg_container: Any, monkeypatch: pytest.MonkeyPatch) -> Iterator[B
 
     url = f"postgresql://{user}:{password}@{host}:{port}/{main_db}"
     monkeypatch.setenv("EYENET_STORAGE_TYPE", "postgres")
-    storage = get_repository(url=url)  # runs the Postgres Alembic baseline on both DBs
-    yield storage
+    # Each test closes the storage in its own finally; the container is dropped
+    # at module teardown, so no fixture-level cleanup is needed.
+    return get_repository(url=url)  # runs the Postgres Alembic baseline on both DBs
 
 
 def _audit_event(i: int) -> dict[str, Any]:

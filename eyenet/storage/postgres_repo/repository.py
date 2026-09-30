@@ -128,9 +128,7 @@ class PostgresRepository(SQLModelRepository):
             # Transaction-scoped: serializes cross-process writers, auto-released
             # on COMMIT below. The SELECT-compute-INSERT is atomic under it, so
             # the chain can never fork.
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(:k)"), {"k": _AUDIT_LOCK_KEY}
-            )
+            await session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _AUDIT_LOCK_KEY})
             tip = (
                 await session.execute(
                     select(AuditLogTable.seq, AuditLogTable.self_hash)
