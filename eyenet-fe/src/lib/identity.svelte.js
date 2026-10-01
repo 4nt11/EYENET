@@ -3,7 +3,7 @@
 // (claim/release/freeze/burn + freeze_all) persist synchronously in the handler
 // (the operator-under-attack invariant), so a reload shows the new state — no
 // polling. Every action requires a reason (IdentityActionRequest).
-import { apiGet, apiPost, apiPostForm } from './api.js';
+import { apiDelete, apiGet, apiPost, apiPostForm } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
 
@@ -100,6 +100,34 @@ export async function identityAction(id, action, reason, note) {
 export async function freezeAll(reason) {
   if (await _post('/v1/identities/freeze_all', reason)) {
     identityView.submitMsg = 'freeze-all applied.';
+  }
+}
+
+// Delete (DELETE /v1/identities/{id}). Burn retires a COMPROMISED identity in
+// place; delete REMOVES a mistaken / never-wired one. 409 (returned as a body
+// via accept:[409], not thrown) means a collector still binds it or it is
+// IN_USE — detach that first. Returns true when the row is gone.
+export async function deleteIdentity(id) {
+  identityView.submitting = true;
+  identityView.submitMsg = null;
+  try {
+    const res = await apiDelete(`/v1/identities/${id}`, { auth: true, accept: [409] });
+    if (res !== null) {
+      const refs = res?.detail?.references ?? res?.references ?? null;
+      identityView.submitMsg = refs
+        ? `In use — ${Object.entries(refs).map(([k, v]) => `${k} (${v})`).join(', ')}. Detach first.`
+        : 'Identity is in use and cannot be deleted.';
+      return false;
+    }
+    await loadIdentities();
+    identityView.submitMsg = 'Identity deleted.';
+    return true;
+  } catch (e) {
+    identityView.submitMsg = e.status === 404 ? 'Identity already gone.' : `Failed: ${e.message ?? e}`;
+    if (e.status === 404) await loadIdentities();
+    return e.status === 404;
+  } finally {
+    identityView.submitting = false;
   }
 }
 

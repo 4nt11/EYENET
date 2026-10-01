@@ -5,7 +5,7 @@
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { sourceCtx, sourceView, sourceCreate, loadSources, loadSourceDetail, createSource } from '$lib/source.svelte.js';
+  import { sourceCtx, sourceView, sourceCreate, sourceDelete, loadSources, loadSourceDetail, createSource, deleteSource } from '$lib/source.svelte.js';
 
   const KINDS = ['telegram', 'matrix', 'irc', 'discord', 'forum', 'rss', 'xmpp'];
   let newKind = $state('telegram');
@@ -55,6 +55,13 @@
     if (sel) loadSourceDetail(sel.id);
   });
 
+  async function removeSource() {
+    if (!sel) return;
+    if (!confirm(`Delete source "${sel.name}"? Only works if nothing references it.`)) return;
+    const gone = await deleteSource(sel.id);
+    if (gone) selectedId = null; // fall back to the first remaining source
+  }
+
   onMount(loadSources); // populate the list from /v1/sources
 </script>
 
@@ -86,6 +93,16 @@
     <div class="detail-col">
       <EvidencePanel title={`Source · ${sel?.id ?? '—'}`} items={detail} labelWidth={120} />
 
+      {#if sel}
+        <div class="danger">
+          <Button variant="destructive" size="sm" disabled={sourceDelete.submitting} onclick={removeSource}>
+            {sourceDelete.submitting ? 'Deleting...' : 'Delete source'}
+          </Button>
+          {#if sourceDelete.error}<p class="pnote err">{sourceDelete.error}</p>{/if}
+          {#if sourceDelete.ok}<p class="pnote ok">{sourceDelete.ok}</p>{/if}
+        </div>
+      {/if}
+
       <Panel title={`Source domains · ${sourceView.domains.length}`} class="domains">
         {#if sourceView.domains.length}
           {#each sourceView.domains as d}
@@ -115,6 +132,7 @@
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
   .pnote.err { color: var(--red-text); }
   .pnote.ok { color: var(--accent); }
+  .danger { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
   .newsrc { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 9px; }
   .fin:focus { outline: none; border-color: var(--accent); }
