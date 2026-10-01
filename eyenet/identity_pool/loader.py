@@ -84,6 +84,12 @@ class IdentityFileEntry(BaseModel):
     # as their own monitorable FORUM_CATEGORY units; the operator then chooses
     # which to crawl. Crawling stays flat + fail-closed regardless of this knob.
     forum_discovery_depth: int = 2
+    # Per-identity User-Agent for the forum collector. Set it to the EXACT UA of
+    # the browser that logged in and exported the cookie jar (Tor Browser for an
+    # .onion board) so the collector's requests stay consistent with the session
+    # — a UA flip mid-session is a ban signal. None → the Tor Browser default
+    # baked into the collector (_DEFAULT_USER_AGENT).
+    forum_user_agent: str | None = None
 
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
@@ -198,6 +204,8 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
         out.append(f"forum_max_category_pages = {entry.forum_max_category_pages}")
         out.append(f"forum_max_thread_pages = {entry.forum_max_thread_pages}")
         out.append(f"forum_discovery_depth = {entry.forum_discovery_depth}")
+        if entry.forum_user_agent is not None:
+            out.append(f"forum_user_agent = {_q(entry.forum_user_agent)}")
     return out
 
 
