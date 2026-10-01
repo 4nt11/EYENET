@@ -10,9 +10,11 @@ slice-4 smoke test, not here.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 from eyenet.api.deps import CurrentUser, ResourceNotFound
 from eyenet.api.deps_paging import CursorParams
@@ -26,6 +28,7 @@ from eyenet.api.v1.schemas.sources import (
 )
 from eyenet.api.v1.sources.api_add_source_domain import sources_add_domain
 from eyenet.api.v1.sources.api_create_source import sources_create
+from eyenet.api.v1.sources.api_delete_source import sources_delete
 from eyenet.api.v1.sources.api_get_bridge_summary import sources_bridge_summary
 from eyenet.api.v1.sources.api_get_source import sources_get
 from eyenet.api.v1.sources.api_list_source_domains import sources_list_domains
@@ -35,7 +38,7 @@ from eyenet.api.v1.sources.api_update_source import sources_update
 from eyenet.api.v1.sources.api_update_source_domain import sources_update_domain
 from eyenet.bus.memory import MemoryBus
 from eyenet.bus.publisher import BusEnvelopePublisher
-from eyenet.contracts.enums import SourceDomainPatternKind, SourceKind
+from eyenet.contracts.enums import GroupKind, SourceDomainPatternKind, SourceKind
 from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -384,3 +387,51 @@ async def test_bridge_summary_unknown_404(
 ) -> None:
     with pytest.raises(ResourceNotFound):
         await sources_bridge_summary(uuid4(), mkuser("read:sources"), storage)
+
+
+# --- delete ---------------------------------------------------------------
+
+
+async def test_delete_unused_source(
+    storage: BaseRepository,
+    audit: AuditEmitter,
+    mkuser: Callable[..., CurrentUser],
+) -> None:
+    user = mkuser("write:sources")
+    src = await sources_create(
+        CreateSourceRequest(kind=SourceKind.TELEGRAM, display_name="tg:del"), user, storage, audit
+    )
+    await sources_delete(src.source_id, user, storage, audit)
+    with pytest.raises(ResourceNotFound):
+        await sources_get(src.source_id, mkuser("read:sources"), storage)
+
+
+async def test_delete_source_in_use_is_409(
+    storage: BaseRepository,
+    audit: AuditEmitter,
+    mkuser: Callable[..., CurrentUser],
+) -> None:
+    user = mkuser("write:sources")
+    src = await sources_create(
+        CreateSourceRequest(kind=SourceKind.FORUM, display_name="fm:del"), user, storage, audit
+    )
+    await storage.upsert_group(
+        source_id=src.source_id,
+        platform_groupid="g1",
+        kind=GroupKind.FORUM_CATEGORY,
+        title="t",
+        seen_at=datetime.now(tz=UTC),
+    )
+    with pytest.raises(HTTPException) as ei:
+        await sources_delete(src.source_id, user, storage, audit)
+    assert ei.value.status_code == 409
+    assert ei.value.detail["references"] == {"group": 1}  # type: ignore[index]
+
+
+async def test_delete_missing_source_404(
+    storage: BaseRepository,
+    audit: AuditEmitter,
+    mkuser: Callable[..., CurrentUser],
+) -> None:
+    with pytest.raises(ResourceNotFound):
+        await sources_delete(uuid4(), mkuser("write:sources"), storage, audit)

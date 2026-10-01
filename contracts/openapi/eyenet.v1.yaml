@@ -1226,6 +1226,18 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [identities]
+      operationId: identities_delete
+      summary: Delete an unused identity (409 if collector-bound or IN_USE). Burn retires a compromised one instead.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+      responses:
+        "204": { description: Identity deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /v1/identities/{identity_id}/claim:
     post:
@@ -2804,6 +2816,18 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "422": { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [sources]
+      operationId: sources_delete
+      summary: Delete an UNUSED source + its SourceDomains (409 if still referenced).
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Source deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
 
   /v1/sources/{source_id}/domains:
     get:
