@@ -44,6 +44,13 @@ dependencies = [
   # grade parsing of adversarial HTML, so a core dep, not jail-only.
   "beautifulsoup4>=4.15.0",
   "html5lib>=1.1",
+  # Discovery noise filter: leak forums are full of SQL dumps, and a regex can't
+  # tell a chat @handle from a mysqldump @variable (SET @old_unique_checks=...).
+  # sqlglot is a real multi-dialect SQL parser (pure-python, zero transitive
+  # deps, offline); the channel-reference extractor skips any line that PARSES as
+  # SQL, killing the dump-variable noise deterministically. See
+  # eyenet/sensor/discovery/channel_reference_extraction.py.
+  "sqlglot>=25,<31",
   # http api (graph query + operator surface)
   "fastapi>=0.115",
   # ASGI server: Hypercorn, not uvicorn (API_PLAN §12.1). uvicorn is h11-only
