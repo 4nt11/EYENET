@@ -31,7 +31,10 @@
           ...(identityView.delayMin != null
             ? [{
                 label: 'Profile',
-                value: `${identityView.evasion ?? 'custom'} · ${identityView.delayMin}-${identityView.delayMax}s/req`,
+                value: `${identityView.evasion ?? 'custom'} · ${identityView.delayMin}-${identityView.delayMax}s/req`
+                  + (identityView.discoveryDepth != null
+                      ? ` · ${identityView.discoveryDepth === 0 ? 'index only' : `depth ${identityView.discoveryDepth}`}`
+                      : ''),
                 tone: 'accent'
               }]
             : []),

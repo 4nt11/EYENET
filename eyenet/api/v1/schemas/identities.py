@@ -64,6 +64,7 @@ class IdentityDetail(IdentitySummary):
     forum_evasion_level: str | None = None
     forum_delay_min: float | None = None
     forum_delay_max: float | None = None
+    forum_discovery_depth: int | None = None
 
     @classmethod
     def from_domain(cls, row: IdentityRow) -> IdentityDetail:
@@ -81,6 +82,7 @@ class IdentityDetail(IdentitySummary):
             forum_evasion_level=cfg.get("forum_evasion_level"),
             forum_delay_min=cfg.get("forum_delay_min"),
             forum_delay_max=cfg.get("forum_delay_max"),
+            forum_discovery_depth=cfg.get("forum_discovery_depth"),
         )
 
 

@@ -34,7 +34,7 @@ from eyenet.api.deps import (
     get_storage,
 )
 from eyenet.api.v1.schemas.identities import IdentityDetail
-from eyenet.collectors.forum._timing_presets import resolve_evasion_pacing
+from eyenet.collectors.forum._timing_presets import resolve_evasion_profile
 from eyenet.contracts.enums import IdentityRole, SourceKind, SystemUserRole
 from eyenet.contracts.source import SourceRow
 from eyenet.identity_pool._provision import SessionValidationError, provision_identity
@@ -191,12 +191,12 @@ def _build_source_config(
         # when set so the pool's entry keeps its own default otherwise.
         if forum_user_agent:
             config["forum_user_agent"] = forum_user_agent
-        # Evasion level is a pacing preset: expand it to the delay knobs the
-        # collector actually reads, and keep the level itself for the record.
-        # Unknown level → rejected (operator typo shouldn't silently fall back).
+        # Evasion level is a preset: expand it to the concrete knobs the collector
+        # reads (pacing + subforum-discovery depth), and keep the level itself for
+        # the record. Unknown level → rejected (a typo shouldn't silently fall back).
         if forum_evasion_level:
-            pacing = resolve_evasion_pacing(forum_evasion_level)
-            if pacing is None:
+            prof = resolve_evasion_profile(forum_evasion_level)
+            if prof is None:
                 raise RequestValidationError(
                     [
                         {
@@ -207,7 +207,9 @@ def _build_source_config(
                     ]
                 )
             config["forum_evasion_level"] = forum_evasion_level.strip().lower()
-            config["forum_delay_min"], config["forum_delay_max"] = pacing
+            config["forum_delay_min"] = prof.delay_min
+            config["forum_delay_max"] = prof.delay_max
+            config["forum_discovery_depth"] = prof.discovery_depth
         return config
     raise RequestValidationError(
         [

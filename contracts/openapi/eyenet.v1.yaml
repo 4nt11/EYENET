@@ -4432,6 +4432,7 @@ components:
         forum_evasion_level: { type: string, nullable: true, description: 'running pacing profile (ghost|lurker|regular|brisk|smash); null if none/non-forum' }
         forum_delay_min:  { type: number, nullable: true, description: resolved inter-request delay floor (seconds) }
         forum_delay_max:  { type: number, nullable: true, description: resolved inter-request delay ceiling (seconds) }
+        forum_discovery_depth: { type: integer, nullable: true, description: 'subforum-discovery depth (0 = index top-level categories only)' }
     Body_identities_create:
       description: |
         Multipart form for POST /v1/identities. `session` is the uploaded

@@ -45,6 +45,7 @@ from eyenet.collectors.forum import (
 from eyenet.collectors.forum._timing_presets import (
     DEFAULT_DELAY_MAX,
     DEFAULT_DELAY_MIN,
+    DEFAULT_DISCOVERY_DEPTH,
     DEFAULT_RETRY_AFTER,
     RETRY_AFTER_PAD,
 )
@@ -84,10 +85,8 @@ _DEFAULT_MAX_CATEGORY_PAGES = 0
 # So default shallow for breadth; the operator backfills a specific thread deeper
 # on demand (POST .../backfill). 0 = all pages.
 _DEFAULT_MAX_THREAD_PAGES = 1
-# How many subforum levels to descend when ENUMERATING the board tree (discovery
-# only, never crawling). 0 = index categories only (legacy). >=1 fetches each
-# forum's page to surface its child subforums as their own monitorable units.
-_DEFAULT_DISCOVERY_DEPTH = 2
+# Subforum-discovery depth default (DEFAULT_DISCOVERY_DEPTH) lives in
+# _timing_presets alongside the per-level overrides.
 
 # Impersonate the browser that logs in over Tor and mints the cookie jar (Tor
 # Browser = Firefox ESR). Matching its header profile keeps the collector's
@@ -111,6 +110,7 @@ _BASE_HEADERS: dict[str, str] = {
     # extras in pyproject), which matches Tor Browser. Advertising a codec we
     # can't inflate would hand us undecodable bodies.
 }
+
 
 class RateLimited(Exception):  # noqa: N818 - a control signal, not an error condition
     """A board 429'd us (or we're still inside its cooldown). Caught at the tick
@@ -214,7 +214,7 @@ class MyBBForumCollector(CollectorSkeleton):
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
         self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
-        self._discovery_depth = _DEFAULT_DISCOVERY_DEPTH
+        self._discovery_depth = DEFAULT_DISCOVERY_DEPTH
         # Monotonic deadline: while now < this, every request is refused BEFORE it
         # hits the wire (poking during a 429 cooldown re-arms the server's timer).
         self._cooldown_until = 0.0
@@ -232,7 +232,7 @@ class MyBBForumCollector(CollectorSkeleton):
         self._thread_urls = list(entry.forum_thread_urls)
         # Pacing comes pre-resolved on the entry (an evasion level, if the operator
         # picked one, is expanded to forum_delay_min/max at provision time — see
-        # _timing_presets.resolve_evasion_pacing). The collector just honours it.
+        # _timing_presets.resolve_evasion_profile). The collector just honours it.
         self._delay_min = float(getattr(entry, "forum_delay_min", DEFAULT_DELAY_MIN))
         self._delay_max = float(getattr(entry, "forum_delay_max", DEFAULT_DELAY_MAX))
         self._discovery_interval = float(
@@ -245,7 +245,7 @@ class MyBBForumCollector(CollectorSkeleton):
             getattr(entry, "forum_max_thread_pages", _DEFAULT_MAX_THREAD_PAGES)
         )
         self._discovery_depth = int(
-            getattr(entry, "forum_discovery_depth", _DEFAULT_DISCOVERY_DEPTH)
+            getattr(entry, "forum_discovery_depth", DEFAULT_DISCOVERY_DEPTH)
         )
 
         if self._client is None:

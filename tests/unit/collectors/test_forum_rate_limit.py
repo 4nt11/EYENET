@@ -18,7 +18,7 @@ from eyenet.api.v1.identities.api_create_identity import _build_source_config
 from eyenet.bus import MemoryBus
 from eyenet.collectors.forum._timing_presets import (
     DEFAULT_RETRY_AFTER,
-    resolve_evasion_pacing,
+    resolve_evasion_profile,
 )
 from eyenet.collectors.forum.real import MyBBForumCollector, RateLimited
 from eyenet.contracts.enums import SourceKind
@@ -57,31 +57,36 @@ def _collector(tmp_path: Path, client: httpx.AsyncClient) -> MyBBForumCollector:
 
 
 @pytest.mark.unit
-def test_resolve_evasion_pacing_names_aliases_and_misses() -> None:
-    assert resolve_evasion_pacing("lurker") == (20.0, 60.0)
-    assert resolve_evasion_pacing("E1") == (20.0, 60.0)  # nmap-style alias
-    assert resolve_evasion_pacing(" LURKER ") == (20.0, 60.0)  # case/space-insensitive
-    assert resolve_evasion_pacing(None) is None
-    assert resolve_evasion_pacing("") is None
-    assert resolve_evasion_pacing("turbo") is None  # unknown
+def test_resolve_evasion_profile_names_aliases_and_misses() -> None:
+    assert resolve_evasion_profile("lurker") == (20.0, 60.0, 1)
+    assert resolve_evasion_profile("E1") == (20.0, 60.0, 1)  # nmap-style alias
+    assert resolve_evasion_profile(" LURKER ") == (20.0, 60.0, 1)  # case/space-insensitive
+    assert resolve_evasion_profile(None) is None
+    assert resolve_evasion_profile("") is None
+    assert resolve_evasion_profile("turbo") is None  # unknown
     # monotone: ghost is slowest, smash fastest
-    lo = resolve_evasion_pacing("ghost")
-    hi = resolve_evasion_pacing("smash")
-    assert lo is not None and hi is not None and lo[0] > hi[1]
+    lo = resolve_evasion_profile("ghost")
+    hi = resolve_evasion_profile("smash")
+    assert lo is not None and hi is not None and lo.delay_min > hi.delay_max
+    # ghost discovers index-only (the paranoid default); louder levels descend
+    assert resolve_evasion_profile("ghost").discovery_depth == 0
+    assert resolve_evasion_profile("smash").discovery_depth >= 1
 
 
 @pytest.mark.unit
-def test_build_source_config_expands_level_to_delays() -> None:
+def test_build_source_config_expands_level_to_knobs() -> None:
     cfg = _build_source_config(
         SourceKind.FORUM,
         telegram_api_id=None,
         telegram_api_hash=None,
         monitor_groups=None,
         forum_base_url="http://host.onion",
-        forum_evasion_level="lurker",
+        forum_evasion_level="ghost",
     )
-    assert cfg["forum_evasion_level"] == "lurker"
-    assert (cfg["forum_delay_min"], cfg["forum_delay_max"]) == (20.0, 60.0)
+    assert cfg["forum_evasion_level"] == "ghost"
+    assert (cfg["forum_delay_min"], cfg["forum_delay_max"]) == (90.0, 240.0)
+    # ghost = index-only discovery: no per-forum subforum walk on (re)subscribe.
+    assert cfg["forum_discovery_depth"] == 0
 
 
 @pytest.mark.unit
