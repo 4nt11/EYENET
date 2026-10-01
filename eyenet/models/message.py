@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, CheckConstraint, Index
+from sqlalchemy import JSON, BigInteger, CheckConstraint, Index
 from sqlmodel import Column, Field, SQLModel
 
 from eyenet.contracts.enums import AttachmentKind, SensitivityTier
@@ -81,7 +81,10 @@ class AttachmentTable(SQLModel, table=True):
     message_id: UUID = Field(foreign_key="message.id", index=True)
     kind: AttachmentKind
     mime: str
-    size_bytes: int
+    # BigInteger: a byte count exceeds 32-bit INTEGER for files >2 GiB. SQLite's
+    # INTEGER is already 64-bit (renders BIGINT, same affinity); Postgres needs
+    # BIGINT explicitly or the insert overflows.
+    size_bytes: int = Field(sa_type=BigInteger)
     sha256: str = Field(index=True)
     filename: str | None = None
     storage_uri: str | None = None

@@ -30,6 +30,8 @@ from urllib.parse import parse_qs, urlparse
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 
+from eyenet.collectors.forum._post import ParsedPost
+
 # MyBB [hide] plugin gate: content is locked until the viewer replies. Text
 # match on the rendered notice ("You must reply to this thread to view this
 # content"). Linear alternation, no backtracking blowup on adversarial bodies.
@@ -43,21 +45,6 @@ _HIDE_GATE = re.compile(r"reply to (?:this )?thread to view", re.IGNORECASE)
 # ("Today, 10:56 PM" / "2 hours ago") under some settings; parse_date returns
 # None + the raw string for those. Add a relative-date branch when a save shows one.
 _DATE_FMT = "%d-%m-%y, %I:%M %p"
-
-
-@dataclass(frozen=True)
-class ParsedPost:
-    """One post extracted from a MyBB thread page."""
-
-    pid: str
-    author_username: str  # slug from /User-<slug>; the actor_key seed
-    author_display: str  # anchor text as shown
-    posted_at: datetime | None  # board-local NAIVE; None if unparseable/relative
-    posted_raw: str  # date string exactly as rendered (audit)
-    edited: bool
-    body_text: str  # tags stripped, for the classifier
-    body_html: str  # inner HTML of .post_body, evidence-faithful
-    reply_gated: bool  # body carries a MyBB [hide] block: content locked until we reply
 
 
 def _cf_decode(hexs: str) -> str:
@@ -211,6 +198,49 @@ def parse_forum_links(html: str) -> list[str]:
             seen.add(canon)
             out.append(canon)
     return out
+
+
+def parse_subforum_links(html: str) -> list[str]:
+    """Child subforum URLs from a MyBB forum-display page, in order, deduped.
+
+    Scoped to the subforum block (``table.forum-display__subforums``) so it
+    returns ONLY this forum's children, never the global nav, breadcrumb,
+    pagination, or column-sort anchors that also carry ``Forum-*`` hrefs (a
+    whole-page ``a[href*="Forum-"]`` select picks up ~20 such decoys and would
+    make recursion loop). Children surface as their own monitorable
+    FORUM_CATEGORY; the operator chooses whether any get crawled.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    out: list[str] = []
+    seen: set[str] = set()
+    for anchor in soup.select('table.forum-display__subforums a[href*="Forum-"]'):
+        href = str(anchor.get("href", ""))
+        if "Forum-" not in href:
+            continue
+        canon = _canonical(href)
+        if canon and canon not in seen:
+            seen.add(canon)
+            out.append(canon)
+    return out
+
+
+def parse_canonical_tid(html: str) -> str | None:
+    """The board's stable numeric thread id (tid) from a thread page, or None.
+
+    DarkForums thread URLs are mostly tid-less SEO slugs, but the PAGE always
+    carries the tid: the reply form's ``<input name="tid">`` and the per-post
+    ``newreply.php?tid=<n>`` links. The tid is invariant across a move/re-slug,
+    so it is the thread's true identity. Prefer the hidden input (exact), fall
+    back to the first ``tid=<n>`` in a newreply link.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    el = soup.select_one('input[name="tid"]')
+    if el is not None:
+        val = str(el.get("value", "")).strip()
+        if val.isdigit():
+            return val
+    m = re.search(r"newreply\.php\?tid=(\d+)", html)
+    return m.group(1) if m else None
 
 
 def parse_thread_links(html: str) -> list[str]:

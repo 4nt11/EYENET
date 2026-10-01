@@ -21,8 +21,13 @@ Detected forms (platform-neutral on purpose — one extractor, many sources):
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING, NamedTuple
+
+import sqlglot
+import sqlglot.errors
+import sqlglot.expressions as sqlexp
 
 from eyenet.contracts.enums import MentionKind
 from eyenet.telemetry.logging import get_logger
@@ -35,6 +40,58 @@ if TYPE_CHECKING:
     from ._base import MessageContext
 
 _log = get_logger()
+
+# sqlglot logs a WARNING when it falls back to a generic Command node for an
+# unsupported-but-valid statement (e.g. LOCK TABLES). That's still "it's SQL" for
+# our purposes; quiet the noise so a dump thread doesn't flood the log.
+logging.getLogger("sqlglot").setLevel(logging.ERROR)
+
+# mysqldump wraps statements in version-gated executable comments:
+# ``/*!40101 SET @saved_cs_client = @@character_set_client */;`` — strip the
+# wrapper so the inner statement reaches the parser.
+_MYSQLDUMP_COMMENT = re.compile(r"/\*![0-9]*\s*|\s*\*/")
+
+# A line is SQL noise only if it parses as a real SQL STATEMENT. sqlglot is
+# lenient — it parses prose like ``see @child_chan`` as an ``Alias`` expression
+# (word AS @var), which would false-drop a genuine handle. Gating on statement
+# types keeps that: dump preambles are ``Set`` (SET @var=…), bodies are
+# Insert/Create/…, and unsupported-but-real statements (LOCK TABLES) fall back to
+# ``Command``. Expressions (Alias/Column/…) and parse failures are NOT SQL.
+_SQL_STATEMENT = (
+    sqlexp.Set,
+    sqlexp.Command,
+    sqlexp.Insert,
+    sqlexp.Create,
+    sqlexp.Alter,
+    sqlexp.Drop,
+    sqlexp.Delete,
+    sqlexp.Update,
+    sqlexp.Use,
+)
+
+
+def _is_sql_line(line: str) -> bool:
+    """True when ``line`` parses as a SQL STATEMENT.
+
+    Leak forums paste DB dumps wholesale, and mysqldump preambles are wall-to-wall
+    ``SET @old_unique_checks=@@unique_checks`` — whose ``@vars`` the bare-handle
+    regex below mistakes for chat handles. A regex CANNOT tell a chat ``@handle``
+    from a SQL ``@variable`` (SQL is context-free, not regular); a real SQL parser
+    can. So: if the line the handle lives on parses as a SQL statement, its
+    ``@tokens`` are variables, not channels — drop them. Deterministic, no model.
+    """
+    s = _MYSQLDUMP_COMMENT.sub(" ", line).strip().rstrip(";").strip()
+    if not s:
+        return False
+    # ponytail: parse the whole line. A pathological single-line megadump would
+    # be slow; cap length / keyword-prefix short-circuit if that ever bites. In
+    # practice only short ``SET @var=...`` lines reach here (email @s don't match
+    # the handle regex, so INSERT lines rarely produce a candidate to check).
+    try:
+        ast = sqlglot.parse_one(s, read="mysql")
+    except sqlglot.errors.SqlglotError:
+        return False
+    return isinstance(ast, _SQL_STATEMENT)
 
 
 class _Reference(NamedTuple):
@@ -66,8 +123,17 @@ def _detect(text: str) -> set[_Reference]:
         refs.add(_Reference(f"joinchat:{m.group(1)}", MentionKind.INVITE_LINK))
     for m in _TG_PUBLIC_RE.finditer(text):
         refs.add(_Reference(f"@{m.group(1).lower()}", MentionKind.USERNAME_MENTION))
-    for m in _AT_HANDLE_RE.finditer(text):
-        refs.add(_Reference(f"@{m.group(1).lower()}", MentionKind.USERNAME_MENTION))
+    # Bare @handles are the noisy branch: skip any line that parses as SQL (a
+    # pasted dump's @variables), per-line so one SQL line doesn't suppress a real
+    # handle elsewhere in the post. Explicit t.me/matrix links above are left
+    # alone — they're unambiguous even inside a dump.
+    for line in text.splitlines():
+        if "@" not in line:
+            continue
+        matches = list(_AT_HANDLE_RE.finditer(line))
+        if matches and not _is_sql_line(line):
+            for m in matches:
+                refs.add(_Reference(f"@{m.group(1).lower()}", MentionKind.USERNAME_MENTION))
     for m in _MATRIX_ALIAS_RE.finditer(text):
         refs.add(_Reference(m.group(1).lower(), MentionKind.USERNAME_MENTION))
     return refs

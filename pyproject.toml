@@ -12,17 +12,24 @@ dependencies = [
   "pydantic>=2.7",
   "sqlmodel>=0.0.22",
   "sqlalchemy>=2.0",
-
   # storage — async SQLite is the mandated engine (sqlite+aiosqlite, CLAUDE.md
   # §2.5). aiosqlite is the DBAPI driver; greenlet is SQLAlchemy's async bridge
   # (only auto-installed on some platforms, so pin it explicitly).
   "aiosqlite>=0.20",
   "greenlet>=3",
   "sqlite-vec>=0.1.6",
-
+  # Postgres backend (EYENET_STORAGE_TYPE=postgres) — the high-ingest prod
+  # target (concurrent writers; SQLite's single-writer wall is the reason).
+  # asyncpg drives the request path (postgresql+asyncpg://); psycopg drives the
+  # sync DDL/Alembic engine (postgresql+psycopg://). SQLite stays the default.
+  "asyncpg>=0.30",
+  "psycopg[binary]>=3.2",
+  # Schema migrations. Baseline lands at v0.1.0; `eyenet init` runs
+  # `upgrade_to_head` (migration history is the source of truth, create_all is
+  # retired). Runtime dep — the boot path imports it, not just dev tooling.
+  "alembic>=1.13",
   # bus
   "nats-py>=2.7",
-
   # collectors (telegram first)
   "telethon>=1.36",
   "tgcrypto>=1.2",          # MTProto AES-IGE acceleration for telethon
@@ -37,7 +44,13 @@ dependencies = [
   # grade parsing of adversarial HTML, so a core dep, not jail-only.
   "beautifulsoup4>=4.15.0",
   "html5lib>=1.1",
-
+  # Discovery noise filter: leak forums are full of SQL dumps, and a regex can't
+  # tell a chat @handle from a mysqldump @variable (SET @old_unique_checks=...).
+  # sqlglot is a real multi-dialect SQL parser (pure-python, zero transitive
+  # deps, offline); the channel-reference extractor skips any line that PARSES as
+  # SQL, killing the dump-variable noise deterministically. See
+  # eyenet/sensor/discovery/channel_reference_extraction.py.
+  "sqlglot>=25,<31",
   # http api (graph query + operator surface)
   "fastapi>=0.115",
   # ASGI server: Hypercorn, not uvicorn (API_PLAN §12.1). uvicorn is h11-only
@@ -46,7 +59,6 @@ dependencies = [
   "hypercorn[h3]>=0.17",
   "httpx>=0.27",            # used by fastapi TestClient and any outbound http
   "python-multipart>=0.0.9",  # fastapi multipart/form-data (identity session upload)
-
   # telemetry
   "opentelemetry-api>=1.27",
   "opentelemetry-sdk>=1.27",
@@ -54,7 +66,6 @@ dependencies = [
   "opentelemetry-exporter-prometheus>=0.48b0",  # M9.6 /v1/metrics scrape
   "prometheus-client>=0.20",  # M9.6 /v1/metrics text exposition (generate_latest)
   "structlog>=24.1",
-
   # crypto / opsec
   "cryptography>=43",
   "argon2-cffi>=23.1",      # M9.A2 password hashing
@@ -62,40 +73,35 @@ dependencies = [
   "cachetools>=5.3",        # M9.A2 auth resolver TTL cache
   "types-cachetools>=5.5",  # type stubs for the above
   "pyotp>=2.9",             # M9.A3 TOTP RFC 6238
-
   # domain normalization — IDNA2008 + UTS46 (stdlib codec is IDNA2003 only,
   # silently NFKC-folds adversarial input and defeats homograph defense).
   "idna>=3.7",
-
   # cli
   "typer>=0.12",
   "rich>=13.7",
-
   # ids
   "uuid7>=0.1",
-
   # host self-report — CPU/RAM/disk for /v1/system + eyenet_sys_* gauges
   # (already transitive; declared direct because eyenet imports it).
   "psutil>=5.9",
   "types-psutil>=5.9",  # type stubs for the above (mirrors types-cachetools)
-
   # behave (sibling specs — now published on PyPI; resolved like any other dep)
   "behave-core>=0.1.1",
   "behave-text>=0.1.3",
-
   # nlp (locale-aware primitives — M6.5 spaCy trio).
   # Core dep, not optional: EYENET ships small-operator CTI; operators
   # accept the storage cost in exchange for working software out of the box.
   # The es_core_news_sm model (~13MB) is auto-fetched on first run by
   # eyenet/sensor/primitives/_locale_morph_kernel.py.
   "spacy>=3.7,<4.0",
-
   # classifier — regex ruleset spine (M10 slice 3). RE2 is a linear-time,
   # ReDoS-immune engine: the classifier matches operator-editable rules over
   # threat-actor-authored text, where a backtracking engine is a DoS vector.
   # Runs in the main app (consumes already-extracted text), so it is a core dep,
   # not a jail-only extract dep. Imports as `re2`.
   "google-re2>=1.1",
+  "phonenumbers>=9.0.31",
+  "pycountry>=26.2.16",
 ]
 
 [project.optional-dependencies]
@@ -234,6 +240,12 @@ omit = [
   "eyenet/collectors/telegram/real.py",
   "eyenet/collectors/telegram/auth.py",
   "eyenet/collectors/matrix/real.py",
+  # Postgres backend: needs a live PostgreSQL (testcontainers), so the unit+
+  # contract suite cannot reach it. Proven by the e2e backend/parity/data-move/
+  # pgbouncer tests. Same treatment as the other live-service modules above.
+  "eyenet/storage/postgres_repo/repository.py",
+  "eyenet/storage/postgres_repo/database.py",
+  "eyenet/storage/postgres_repo/_data_migrate.py",
   # In-jail workers (extraction + Presidio NER): executed only inside nsjail by
   # the venv python, so coverage.py cannot trace them. Proven by real-nsjail
   # integration tests.
@@ -243,6 +255,14 @@ omit = [
   # trace it. The provider-agnostic advise() logic is fully unit-tested against a
   # fake BaseProvider; this thin httpx shell is proven by test_llm_real.py.
   "eyenet/classifier/llm/impl/ollama.py",
+  # Alembic migration scripts: the baseline runs at init (upgrade path is
+  # covered by the schema/routing/drift tests), but downgrade halves and the
+  # CLI-autogenerate engine builders don't run in the normal suite. Tracking
+  # per-line coverage of revision files is noise.
+  "eyenet/storage/sqlite_repo/migrations/*",
+  "eyenet/storage/postgres_repo/migrations/*",
+  # Manual cutover-runbook ops tool; its drift logic mirrors the tested path.
+  "eyenet/storage/sqlite_repo/_drift_check.py",
 ]
 
 [tool.coverage.report]
@@ -323,6 +343,13 @@ ignore = [
 # TYPE_CHECKING) is wrong for these layers — the imports ARE runtime imports.
 "eyenet/contracts/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/models/**/*.py" = ["TC001", "TC002", "TC003"]
+# Alembic env/revisions: the include_name/include_object callbacks have a fixed
+# signature dictated by Alembic (unused args are part of the contract), and the
+# revision files are close kin to generated code.
+"eyenet/storage/sqlite_repo/migrations/**/*.py" = ["ARG001", "E501"]
+"eyenet/storage/postgres_repo/migrations/**/*.py" = ["ARG001", "E501"]
+# Manual ops CLI: alembic callback signatures (ARG001) + operator-facing prints (T201).
+"eyenet/storage/sqlite_repo/_drift_check.py" = ["ARG001", "T201", "PLR2004"]
 "eyenet/storage/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/bus/**/*.py" = ["TC001", "TC002", "TC003"]
 "eyenet/telemetry/**/*.py" = ["TC001", "TC002", "TC003"]
@@ -370,7 +397,7 @@ strict = true
 # The in-jail workers import libraries (fitz, docx, presidio_analyzer) that live
 # only in the eyenet-extract venv, never in the type-check environment. They are
 # never imported by the app (only bind-mounted and run as scripts in nsjail).
-exclude = ['eyenet/classifier/(extract|presidio)/_workers/']
+exclude = ['eyenet/classifier/(extract|presidio)/_workers/', 'eyenet/storage/sqlite_repo/migrations/', 'eyenet/storage/postgres_repo/migrations/']
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_return_any = true
@@ -399,6 +426,8 @@ module = [
   "thinc.*",
   "nio.*",
   "re2.*",
+  "phonenumbers.*",
+  "pycountry.*",
 ]
 ignore_missing_imports = true
 

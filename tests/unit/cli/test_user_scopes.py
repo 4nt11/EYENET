@@ -193,8 +193,17 @@ def test_scopes_list_is_ungated_and_shows_grants(
 
 
 def test_scopes_revoke_removes_grant(
-    storage: BaseRepository, data_dir: Path, seed_user: SeedUser
+    storage: BaseRepository,
+    data_dir: Path,
+    seed_user: SeedUser,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Force the scopes_changed publish to fail fast so the best-effort branch is
+    # exercised deterministically, without dialing any local broker.
+    async def _refuse(_url: str) -> object:
+        raise nats_errors.NoServersError
+
+    monkeypatch.setattr("eyenet.cli.user.NATSBus.connect", _refuse)
     asyncio.run(seed_user(storage, username="admin", password="adminpw", role=SystemUserRole.ADMIN))
     asyncio.run(seed_user(storage, username="bob", password="bobpw", role=SystemUserRole.VIEWER))
 

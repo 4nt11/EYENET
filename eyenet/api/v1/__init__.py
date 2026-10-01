@@ -72,6 +72,7 @@ from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_re
 
 # === cases ===
 from eyenet.api.v1.cases.api_add_collaborator import router as cases_add_collaborator_router
+from eyenet.api.v1.cases.api_add_actor import router as cases_add_actor_router
 from eyenet.api.v1.cases.api_add_member import router as cases_add_member_router
 from eyenet.api.v1.cases.api_archive_case import router as cases_archive_router
 from eyenet.api.v1.cases.api_bulk_add_members import router as cases_bulk_add_members_router
@@ -127,15 +128,15 @@ from eyenet.api.v1.documents.api_upload_document import router as documents_uplo
 # === graph ===
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
+from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
 
 # === groups (monitored-groups: see + join at will) ===
 from eyenet.api.v1.groups.api_join_group import router as groups_join_router
 from eyenet.api.v1.groups.api_leave_group import router as groups_leave_router
-from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
 from eyenet.api.v1.groups.api_list_category_threads import router as groups_threads_router
 from eyenet.api.v1.groups.api_list_group_messages import router as groups_messages_router
-from eyenet.api.v1.groups.api_reply_group import router as groups_reply_router
 from eyenet.api.v1.groups.api_list_groups import router as groups_list_router
+from eyenet.api.v1.groups.api_reply_group import router as groups_reply_router
 from eyenet.api.v1.groups.api_scan_groups import router as groups_scan_router
 
 # === health / metrics ===
@@ -327,6 +328,7 @@ v1_router.include_router(cases_list_members_router)
 v1_router.include_router(cases_list_observations_router)
 v1_router.include_router(cases_list_attachments_router)
 v1_router.include_router(cases_add_member_router)
+v1_router.include_router(cases_add_actor_router)
 v1_router.include_router(cases_bulk_add_members_router)
 v1_router.include_router(cases_bulk_remove_members_router)
 v1_router.include_router(cases_remove_member_router)

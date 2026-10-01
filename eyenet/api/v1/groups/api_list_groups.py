@@ -11,11 +11,15 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params
-from eyenet.api.v1.schemas.groups import CursorPageGroupSummary, GroupSummary
+from eyenet.api.v1.schemas.groups import (
+    CursorPageGroupSummary,
+    GroupSummary,
+    status_filter,
+)
 from eyenet.contracts.enums import CandidateState
 from eyenet.storage.repository import BaseRepository
 
@@ -34,15 +38,38 @@ async def groups_list(
     page: Annotated[CursorParams, Depends(cursor_params)],
     source_id: Annotated[UUID | None, Query()] = None,
     state: Annotated[CandidateState | None, Query()] = None,
+    status: Annotated[
+        str | None,
+        Query(
+            description="Operator-facing status filter: monitored|joining|requested|approving"
+            "|member_unmonitored|discovered|rejected|failed|parked"
+        ),
+    ] = None,
+    q: Annotated[
+        str | None,
+        Query(description="Case-insensitive substring over the group name + platform id."),
+    ] = None,
 ) -> CursorPageGroupSummary:
+    states: list[CandidateState] | None = None
+    member_dialog: bool | None = None
+    if status is not None:
+        try:
+            states, member_dialog = status_filter(status)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"unknown status: {status}") from None
     rows = await storage.list_candidates(
         state=state,
         source_id=source_id,
+        states=states,
+        member_dialog=member_dialog,
+        q=q,
         limit=page.fetch_limit,
         offset=page.offset,
     )
     estimated_total = (
-        await storage.count_candidates(state=state, source_id=source_id)
+        await storage.count_candidates(
+            state=state, source_id=source_id, states=states, member_dialog=member_dialog, q=q
+        )
         if page.include_total
         else None
     )

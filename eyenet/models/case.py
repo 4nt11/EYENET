@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CHAR, JSON, CheckConstraint, Column, Computed, Index, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, Column, Computed, Index, UniqueConstraint, Uuid
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import (
@@ -171,7 +171,7 @@ class CaseMemberTable(SQLModel, table=True):
         default=None,
         sa_column=Column(
             "active_case_id",
-            CHAR(32),
+            Uuid(),  # CHAR(32) on SQLite (unchanged), native uuid on Postgres
             Computed("CASE WHEN removed_at IS NULL THEN case_id ELSE NULL END", persisted=True),
             index=True,
         ),
@@ -216,7 +216,7 @@ class CaseCollaboratorTable(SQLModel, table=True):
         default=None,
         sa_column=Column(
             "active_case_id",
-            CHAR(32),
+            Uuid(),  # CHAR(32) on SQLite (unchanged), native uuid on Postgres
             Computed("CASE WHEN revoked_at IS NULL THEN case_id ELSE NULL END", persisted=True),
             index=True,
         ),

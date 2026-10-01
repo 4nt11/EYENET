@@ -157,6 +157,31 @@ class CollectorsMixin:
             await session.refresh(table)
             return _row(table)
 
+    async def bind_collector_source(
+        self,
+        *,
+        collector_id: UUID,
+        source_id: UUID,
+    ) -> CollectorRow:
+        """Rebind a collector row to the source it actually ingests into.
+
+        A collector is registered against a placeholder source, but at connect it
+        upserts its real per-identity source (``telegram:{name}`` etc.) and
+        ingests there. Without this, ``collector.source_id`` points at an empty
+        placeholder and any collector→source join reads zero rows for a healthy
+        collector. Idempotent: a no-op (no write) when already bound.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(CollectorTable, collector_id)
+            if table is None:
+                raise ValueError(f"collector {collector_id} not found")
+            if table.source_id != source_id:
+                table.source_id = source_id
+                session.add(table)
+                await session.commit()
+                await session.refresh(table)
+            return _row(table)
+
     async def collector_fleet_health(self) -> CollectorFleetHealth:
         """Fleet snapshot: counts by observed_state, oldest live heartbeat,
         restart-storm leader (API_PLAN §3.9)."""

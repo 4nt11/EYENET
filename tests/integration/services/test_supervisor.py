@@ -10,7 +10,7 @@ DoD coverage:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -68,9 +68,13 @@ class _SpySupervisor(CollectorSupervisor):
         self.spawned: list[UUID] = []
         self.spawn_ok = True
         self.clock = 1000.0
+        self.wall = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
 
     def _monotonic(self) -> float:
         return self.clock
+
+    def _wall_now(self) -> datetime:
+        return self.wall
 
     async def _spawn(self, collector):  # type: ignore[no-untyped-def]
         if not self.spawn_ok:
@@ -117,6 +121,31 @@ async def test_reconcile_spawns_and_runs(storage: BaseRepository) -> None:
     assert sup.spawned == [coll]  # a child was actually launched
     events = [r.event for r in await storage.all_audit()]
     assert AuditSubject.COLLECTOR_RECONCILED.value in events
+
+
+async def test_reconcile_stamps_heartbeat_without_audit_spam(
+    storage: BaseRepository,
+) -> None:
+    """Every tick a child is confirmed alive advances last_heartbeat_at, but a
+    steady RUNNING collector writes no new audit row (heartbeat != transition)."""
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a", desired=CollectorDesiredState.RUNNING)
+    sup = _supervisor(storage)
+    await sup.reconcile_collectors()  # spawn → RUNNING, first heartbeat stamped
+    row = await storage.get_collector(coll)
+    assert row.observed_state is CollectorObservedState.RUNNING
+    assert row.last_heartbeat_at is not None
+    first_hb = row.last_heartbeat_at
+    audit_after_spawn = len(await storage.all_audit())
+
+    sup.wall = first_hb + timedelta(seconds=30)
+    await sup.reconcile_collectors()  # steady tick: heartbeat advances, no audit
+    row2 = await storage.get_collector(coll)
+    assert row2.last_heartbeat_at is not None
+    assert row2.last_heartbeat_at > first_hb
+    assert len(await storage.all_audit()) == audit_after_spawn
 
 
 async def test_reconcile_steady_state_no_respawn(storage: BaseRepository) -> None:

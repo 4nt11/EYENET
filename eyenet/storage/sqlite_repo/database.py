@@ -76,12 +76,20 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "incident_rule",
         # operator ground-truth label corrections (retraining signal)
         "incident_label",
+        # victim-country attribution for incident-flagged messages (geo sidecar)
+        "message_geo",
+        # per-forum-thread rollup anchored on the OP (date + victim country)
+        "thread_summary",
         # operator-queued forum reply-to-unlock requests
         "forum_reply_request",
         # category -> thread edge for the forum reader navigation
         "forum_thread_link",
         # operator-queued deep backfill of one forum thread
         "forum_backfill_request",
+        # per-category backfill page cursor (resume, don't re-scrape from page 1)
+        "forum_crawl_cursor",
+        # canonical-tid -> stable group key, for move/re-slug thread dedup
+        "forum_thread_alias",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback
@@ -206,6 +214,12 @@ def _wire_async_pragmas(engine: AsyncEngine) -> None:
         cur.execute("PRAGMA foreign_keys = ON")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
         dbapi_conn.create_function("hamming64", 2, _hamming64, deterministic=True)
 
@@ -217,6 +231,12 @@ def _wire_sync_pragmas(engine: Engine) -> None:
         cur.execute("PRAGMA foreign_keys = ON")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
 
 
@@ -269,6 +289,12 @@ def open_in_memory_async_engine(name: str) -> AsyncEngine:
         cur.execute("PRAGMA foreign_keys = OFF")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
         dbapi_conn.create_function("hamming64", 2, _hamming64, deterministic=True)
 
@@ -291,6 +317,12 @@ def open_in_memory_sync_engine(name: str) -> Engine:
         cur.execute("PRAGMA foreign_keys = OFF")
         cur.execute("PRAGMA journal_mode = WAL")
         cur.execute("PRAGMA synchronous = NORMAL")
+        # Multi-process writer contention (both collectors + engine/sensor/linker/
+        # verifier/graph + api all write main.db): without this a blocked writer gets
+        # SQLITE_BUSY immediately ("database is locked") and, e.g., aborts a forum
+        # category sweep. Wait up to 30s for the lock instead. Small-operator scale;
+        # the real multi-writer answer is the Postgres backend, not a bigger timeout.
+        cur.execute("PRAGMA busy_timeout = 30000")
         cur.close()
 
     return engine
@@ -319,84 +351,149 @@ def _filtered_tables(table_names: frozenset[str]) -> list[Any]:
     return [SQLModel.metadata.tables[n] for n in table_names if n in SQLModel.metadata.tables]
 
 
-def init_main_db(sync_engine: Engine) -> None:
-    """Create every MAIN table + the vector_signature side-table (sync)."""
+# --- schema application: the SINGLE source of truth for the DDL --------------
+# These build the physical schema on a sync Connection. The Alembic baseline
+# revision (eyenet/storage/sqlite_repo/migrations/versions/) is the ONLY caller
+# of the ``_apply_*``/``_drop_*`` pair — the app never calls create_all directly
+# any more; it runs ``upgrade_to_head`` (migration history is authoritative).
+
+
+def _apply_main_schema(conn: Any, table_names: frozenset[str]) -> None:
+    """Create the given MAIN tables + vector_signature side-table + FTS index.
+
+    ``table_names`` is passed by the caller (a migration revision) so the set is
+    FROZEN in that revision, not tracked from the live ``_MAIN_TABLES`` — a new
+    table added to the models gets its OWN revision, it does not retroactively
+    grow an earlier baseline.
+    """
 
     from sqlalchemy import text  # noqa: PLC0415
 
     import eyenet.models  # noqa: F401, PLC0415 — registers tables on SQLModel.metadata
 
-    tables = _filtered_tables(_MAIN_TABLES)
+    tables = _filtered_tables(table_names)
     if tables:
-        SQLModel.metadata.create_all(sync_engine, tables=tables)
-    with sync_engine.begin() as conn:
-        conn.execute(text(_VECTOR_SIGNATURE_DDL))
-        conn.execute(text(_VECTOR_SIGNATURE_INDEX))
-        for stmt in _MESSAGE_FTS_DDL:
-            conn.execute(text(stmt))
-        conn.execute(text(_MESSAGE_FTS_REBUILD))
+        SQLModel.metadata.create_all(conn, tables=tables)
+    conn.execute(text(_VECTOR_SIGNATURE_DDL))
+    conn.execute(text(_VECTOR_SIGNATURE_INDEX))
+    for stmt in _MESSAGE_FTS_DDL:
+        conn.execute(text(stmt))
+    conn.execute(text(_MESSAGE_FTS_REBUILD))
 
 
-def init_audit_db(sync_engine: Engine) -> None:
-    """Create the audit-log table on the audit DB (sync)."""
+def _apply_audit_schema(conn: Any, table_names: frozenset[str]) -> None:
+    """Create the given audit tables + single-active-key partial UNIQUE index."""
 
     from sqlalchemy import text  # noqa: PLC0415
 
     import eyenet.models  # noqa: F401, PLC0415
 
-    tables = _filtered_tables(_AUDIT_TABLES)
+    tables = _filtered_tables(table_names)
     if tables:
-        SQLModel.metadata.create_all(sync_engine, tables=tables)
-    with sync_engine.begin() as conn:
-        conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
+        SQLModel.metadata.create_all(conn, tables=tables)
+    conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
 
 
-async def init_main_db_async(engine: AsyncEngine) -> None:
-    """Create MAIN tables + vector_signature on an AsyncEngine.
+def _drop_main_schema(conn: Any, table_names: frozenset[str]) -> None:
+    """Reverse :func:`_apply_main_schema` — the baseline's ``downgrade_main``."""
 
-    Required for in-memory engines, where sync and async create_engine
-    calls produce separate ``:memory:`` databases that cannot share DDL.
+    from sqlalchemy import text  # noqa: PLC0415
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    for trig in ("message_fts_au", "message_fts_ad", "message_fts_ai"):
+        conn.execute(text(f"DROP TRIGGER IF EXISTS {trig}"))
+    conn.execute(text("DROP TABLE IF EXISTS message_fts"))
+    conn.execute(text("DROP INDEX IF EXISTS ix_vs_primitive"))
+    conn.execute(text("DROP TABLE IF EXISTS vector_signature"))
+    tables = _filtered_tables(table_names)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+def _drop_audit_schema(conn: Any, table_names: frozenset[str]) -> None:
+    """Reverse :func:`_apply_audit_schema` — the baseline's ``downgrade_audit``."""
+
+    from sqlalchemy import text  # noqa: PLC0415
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    conn.execute(text("DROP INDEX IF EXISTS uq_signing_pubkey_active"))
+    tables = _filtered_tables(table_names)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+# Objects that live OUTSIDE SQLModel.metadata (raw DDL). ``env.py`` excludes
+# these from autogenerate so a future ``--autogenerate`` never emits a DROP for
+# what it cannot see in the models (the FTS index, its shadow tables, the
+# vector_signature side-table, and the partial UNIQUE index).
+_RAW_DDL_OBJECTS: frozenset[str] = frozenset(
+    {
+        "vector_signature",
+        "ix_vs_primitive",
+        "message_fts",
+        "message_fts_data",
+        "message_fts_idx",
+        "message_fts_docsize",
+        "message_fts_config",
+        "uq_signing_pubkey_active",
+    }
+)
+
+
+def _sqlite_compare_type(
+    context: Any,  # noqa: ARG001 — Alembic's fixed compare_type callback signature
+    inspected_column: Any,  # noqa: ARG001
+    metadata_column: Any,  # noqa: ARG001
+    inspected_type: Any,
+    metadata_type: Any,
+) -> bool | None:
+    """Alembic type comparator for SQLite: ignore string length-only diffs.
+
+    SQLite does NOT enforce ``VARCHAR(n)`` length (everything is TEXT affinity),
+    so a string column that differs only in declared length is not a real schema
+    change — e.g. a live ``VARCHAR(12)`` column vs a models-side ``Enum`` (which
+    renders as ``VARCHAR(14)``). Treat any string-vs-string pair as equal;
+    return None for everything else so Alembic's default catches real type
+    changes (``VARCHAR`` -> ``INTEGER`` etc.). CHECK/constraint changes are
+    compared separately and are unaffected.
     """
 
-    from sqlalchemy import text  # noqa: PLC0415
+    from sqlalchemy import String  # noqa: PLC0415
 
-    import eyenet.models  # noqa: F401, PLC0415
-
-    tables = _filtered_tables(_MAIN_TABLES)
-    async with engine.begin() as conn:
-        if tables:
-            await conn.run_sync(
-                lambda sync_conn: SQLModel.metadata.create_all(sync_conn, tables=tables)
-            )
-        await conn.execute(text(_VECTOR_SIGNATURE_DDL))
-        await conn.execute(text(_VECTOR_SIGNATURE_INDEX))
-        for stmt in _MESSAGE_FTS_DDL:
-            await conn.execute(text(stmt))
-        await conn.execute(text(_MESSAGE_FTS_REBUILD))
+    if isinstance(inspected_type, String) and isinstance(metadata_type, String):
+        return False
+    return None
 
 
-async def init_audit_db_async(engine: AsyncEngine) -> None:
-    """Create audit_log on an AsyncEngine."""
+_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
-    from sqlalchemy import text  # noqa: PLC0415
 
-    import eyenet.models  # noqa: F401, PLC0415
+def upgrade_to_head(main_engine: Engine, audit_engine: Engine) -> None:
+    """Apply all pending Alembic migrations to both DBs — the boot DDL path.
 
-    tables = _filtered_tables(_AUDIT_TABLES)
-    async with engine.begin() as conn:
-        if tables:
-            await conn.run_sync(
-                lambda sync_conn: SQLModel.metadata.create_all(sync_conn, tables=tables)
-            )
-        await conn.execute(text(_SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX))
+    Replaces the legacy ``create_all`` bootstrap: migration history is the
+    single source of truth. A fresh DB runs the baseline; an existing DB runs
+    only what it is missing. Both engines are handed to ``env.py`` through
+    ``config.attributes`` so in-memory (shared-cache ``StaticPool``) and
+    file-backed engines migrate identically — no ``sqlalchemy.url`` juggling.
+    """
+
+    from alembic import command  # noqa: PLC0415
+    from alembic.config import Config  # noqa: PLC0415
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    cfg.attributes["engines"] = {"main": main_engine, "audit": audit_engine}
+    command.upgrade(cfg, "head")
 
 
 __all__ = [
     "get_async_engine",
     "get_sync_engine",
-    "init_audit_db",
     "init_lock",
-    "init_main_db",
     "open_in_memory_async_engine",
     "open_in_memory_sync_engine",
+    "upgrade_to_head",
 ]
