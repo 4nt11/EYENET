@@ -3,6 +3,7 @@
   import Button from '$lib/components/Button.svelte';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
   import { provisionCtx, provisionIdentity } from '$lib/identity.svelte.js';
+  import { curlToNetscape, hostFromUrl } from '$lib/curl-cookies.js';
 
   // Provision a new identity from an uploaded credential (POST /v1/identities,
   // admin-only). Telegram takes a .session file + API creds; Forum takes a
@@ -21,6 +22,21 @@
   let forumUserAgent = $state('');
   let forumEvasion = $state('');
   let cookiesText = $state('');
+  let curlBlob = $state('');
+  let curlMsg = $state('');
+
+  // The good kind of lazy: paste a DevTools "Copy as cURL" and pull the whole
+  // Cookie header (HttpOnly + session) into the Netscape jar the backend wants,
+  // scoped to the forum host. No per-cookie copying, no hand-built jar.
+  function extractFromCurl() {
+    try {
+      const { text, count } = curlToNetscape(curlBlob, forumBaseUrl);
+      cookiesText = text;
+      curlMsg = `✓ ${count} cookie${count === 1 ? '' : 's'} → ${hostFromUrl(forumBaseUrl)}`;
+    } catch (e) {
+      curlMsg = `✗ ${e.message}`;
+    }
+  }
   // shared
   let cooldown = $state('21600');
   let proxyUri = $state('');
@@ -100,6 +116,8 @@
       forumThreadUrls = '';
       forumUserAgent = '';
       forumEvasion = '';
+      curlBlob = '';
+      curlMsg = '';
       cookiesText = '';
       proxyUri = '';
       proxyTouched = false; // re-enable auto-manage for the next identity
@@ -157,9 +175,18 @@
       <label class="fld"><span class="flabel">Monitor groups (optional, comma-separated)</span>
         <input class="fin" type="text" bind:value={monitorGroups} placeholder="@group_one, @group_two" /></label>
     {:else if kind === 'forum'}
+      <label class="fld"><span class="flabel">Paste DevTools "Copy as cURL" (fastest)</span>
+        <textarea class="fin mono" rows="3" bind:value={curlBlob} placeholder="DevTools → Network → reload the board → right-click a request to the host → Copy → Copy as cURL, paste here"></textarea>
+        <div class="curl-row">
+          <Button variant="ghost" type="button" onclick={extractFromCurl}>Extract cookies →</Button>
+          {#if curlMsg}<span class="hint" class:ok={curlMsg.startsWith('✓')}>{curlMsg}</span>{/if}
+        </div>
+        <span class="hint">Grabs the whole Cookie header (HttpOnly + session) and fills the jar below, scoped to the Forum base URL. Set that URL first.</span>
+      </label>
+
       <label class="fld"><span class="flabel">Cookies (Netscape format — paste)</span>
         <textarea class="fin mono" rows="5" bind:value={cookiesText} placeholder="# Netscape HTTP Cookie File&#10;forum.example	FALSE	/	TRUE	9999999999	sid	abc123"></textarea>
-        <span class="hint">Or upload a cookies.txt below. Pasted text takes priority.</span>
+        <span class="hint">Filled by the cURL extractor above, or paste/upload a cookies.txt. Pasted text takes priority.</span>
       </label>
 
       <label class="fld"><span class="flabel">Cookies file (cookies.txt, optional)</span>
@@ -237,6 +264,8 @@
   .fin.file { padding: 6px 8px; }
   .fin.mono { font-family: var(--font-mono); font-size: var(--fs-12); resize: vertical; }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
+  .hint.ok { color: var(--accent, #743093); }
+  .curl-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
   .hint.err { color: var(--red-text); }
   .hint.ok { color: var(--accent); }
   .actions { display: flex; justify-content: flex-end; margin-top: 4px; }
