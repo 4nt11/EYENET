@@ -99,12 +99,10 @@
             {#if sel.state !== 'burned'}<Button variant="destructive" size="sm" disabled={identityView.submitting || !reason.trim()} onclick={() => act('burn')}>Burn</Button>{/if}
             {#if sel.state === 'burned'}<span class="terminal">Burned · terminal lifecycle.</span>{/if}
           </div>
-          {#if sel.state !== 'in_use'}
-            <div class="danger-row">
-              <Button variant="destructive" size="sm" disabled={identityView.submitting} onclick={removeIdentity}>Delete identity</Button>
-              <span class="hint">Removes the row (only if no collector binds it). Burn to retire a compromised one.</span>
-            </div>
-          {/if}
+          <div class="danger-row">
+            <Button variant="destructive" size="sm" disabled={identityView.submitting} onclick={removeIdentity}>Delete identity</Button>
+            <span class="hint">Removes the row (only if no collector binds it). Burn to retire a compromised one.</span>
+          </div>
           {#if identityView.submitMsg}<p class="submitmsg">{identityView.submitMsg}</p>{/if}
         </div>
       </div>
