@@ -82,6 +82,26 @@ async def test_detects_multiple_forms(storage: BaseRepository) -> None:
 
 
 @pytest.mark.unit
+async def test_sql_dump_at_vars_are_not_handles(storage: BaseRepository) -> None:
+    """A regex can't tell a chat @handle from a mysqldump @variable; the SQL-parse
+    gate can. Lines that parse as SQL contribute no @handle candidates; a real
+    handle on a prose line survives."""
+    src = await _source(storage)
+    text = (
+        "/*!40101 SET @saved_cs_client = @@character_set_client */;\n"
+        "SET @old_unique_checks=@@unique_checks, @old_foreign_key_checks=@@foreign_key_checks;\n"
+        "SET @old_time_zone=@@time_zone;\n"
+        "anyway, mirror is @realleaks if the main dies\n"
+    )
+    n = await ChannelReferenceExtractor().process(
+        _ctx(text, source_id=src, observed_in=uuid4(), seed_root=uuid4(), depth=0), storage
+    )
+    assert n == 1  # every @var line is SQL and dropped; only @realleaks remains
+    rows = await storage.list_candidates(limit=50)
+    assert {r.platform_groupid for r in rows} == {"@realleaks"}
+
+
+@pytest.mark.unit
 async def test_depth_propagation(storage: BaseRepository) -> None:
     src = await _source(storage)
     root = uuid4()
