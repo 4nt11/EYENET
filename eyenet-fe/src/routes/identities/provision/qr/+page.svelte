@@ -72,6 +72,7 @@
 </script>
 
 <main>
+  <div class="wrap">
   <div class="head">
     <div>
       <div class="crumb">
@@ -151,10 +152,12 @@
       {/if}
     </div>
   {/if}
+  </div>
 </main>
 
 <style>
-  main { padding: 20px 24px; max-width: 720px; }
+  main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 24px; }
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .crumb { display: flex; align-items: center; gap: 6px; font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
   .slug-link, .back { color: var(--text-secondary); text-decoration: none; }
@@ -165,7 +168,7 @@
   .card { display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-top: 8px; }
   .qr-card { align-items: center; text-align: center; }
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 560px) { .two { grid-template-columns: 1fr; } main { padding: 16px; } }
+  @media (max-width: 560px) { .two { grid-template-columns: 1fr; } .wrap { padding: 16px; } }
   .fld { display: flex; flex-direction: column; gap: 4px; }
   .flabel { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; }
