@@ -4,6 +4,7 @@
 // row flips to joining then monitored on a later reload). "Rescan" POSTs
 // /v1/groups/scan to refresh visibility from running collectors. Svelte 5 runes.
 import { apiGet, apiPost } from './api.js';
+import { realPlatform, foundVia } from './discovery-shape.js';
 
 const short = (id) => (id ? id.slice(0, 8) : '—');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
@@ -34,6 +35,10 @@ function mapGroup(g) {
     platformGroupId: g.platform_groupid,
     kind: g.kind ?? '',
     status: g.status,
+    // The candidate's REAL platform (from its shape), not the observing source's
+    // — a @handle found on a forum is a telegram lead, not a forum group.
+    realPlatform: realPlatform(g.platform_groupid),
+    foundVia: foundVia(g.platform_groupid, g.kind),
     memberDialog: g.member_dialog,
     score: g.score,
     groupId: g.group_id,

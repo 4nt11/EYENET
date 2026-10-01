@@ -12,15 +12,17 @@
   } from '$lib/candidate.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
+  import { PLATFORMS } from '$lib/discovery-shape.js';
 
   // Columns are fields /v1/candidates returns. Platform is dropped from the list
   // (needs a per-row source join — never fabricate) and shown in detail after a
   // single source fetch. No `tier`/severity — the API carries no such field.
   const COLUMNS = [
-    { key: 'idShort', header: 'Candidate', mono: true, width: '96px' },
     { key: 'group', header: 'Group', mono: true },
-    { key: 'state', header: 'State', badge: true, tone: candidateTone, width: '110px' },
-    { key: 'scoreText', header: 'Score', mono: true, align: 'right', width: '80px' }
+    { key: 'realPlatform', header: 'Platform', mono: true, width: '84px' },
+    { key: 'foundVia', header: 'Found via', mono: true, width: '104px' },
+    { key: 'state', header: 'State', badge: true, tone: candidateTone, width: '104px' },
+    { key: 'scoreText', header: 'Score', mono: true, align: 'right', width: '72px' }
   ];
 
   // `memberDialog` = the operator's own account already sits in this group (seen
@@ -29,10 +31,11 @@
   // candidate `state`, which is collector-lifecycle and says nothing about
   // whether YOU are in it.
   let filter = $state('all'); // 'all' | 'member' | 'discovered'
+  let platformFilter = $state(''); // '' | forum | telegram | matrix (derived from shape)
   let rows = $derived(
-    filter === 'all'
-      ? candidateCtx.list
-      : candidateCtx.list.filter((x) => (filter === 'member' ? x.memberDialog : !x.memberDialog))
+    candidateCtx.list
+      .filter((x) => filter === 'all' || (filter === 'member' ? x.memberDialog : !x.memberDialog))
+      .filter((x) => !platformFilter || x.realPlatform === platformFilter)
   );
   let memberCount = $derived(candidateCtx.list.filter((x) => x.memberDialog).length);
 
@@ -105,6 +108,10 @@
         <select class="source-sel" bind:value={sourceFilter} aria-label="Filter by source">
           <option value="">All sources</option>
           {#each sourceCtx.list as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
+        </select>
+        <select class="source-sel" bind:value={platformFilter} aria-label="Filter by platform">
+          <option value="">All platforms</option>
+          {#each PLATFORMS as p}<option value={p}>{p}</option>{/each}
         </select>
         <div class="segs">
           <button class="seg" class:on={filter === 'all'} onclick={() => (filter = 'all')}>All · {candidateCtx.list.length}</button>

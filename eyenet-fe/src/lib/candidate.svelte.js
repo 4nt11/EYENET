@@ -6,6 +6,7 @@
 // collectors which settle off the bus). Svelte 5 runes, same shape as
 // linkage.svelte.js.
 import { apiGet, apiPost } from './api.js';
+import { realPlatform, foundVia } from './discovery-shape.js';
 
 const short = (id) => (id ? id.slice(0, 8) : '—');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
@@ -43,6 +44,10 @@ function mapCandidate(c) {
     group: c.display_name_hint || c.platform_groupid,
     platformGroupId: c.platform_groupid,
     kindHint: c.kind_hint ?? '',
+    // Real platform + discovery method derived from the candidate's shape — a
+    // telegram @handle mentioned on a forum is a telegram lead, not a forum group.
+    realPlatform: realPlatform(c.platform_groupid),
+    foundVia: foundVia(c.platform_groupid, c.kind_hint),
     state: c.state,
     memberDialog: c.member_dialog ?? false, // operator's own account is already in this group
     score: c.score,
