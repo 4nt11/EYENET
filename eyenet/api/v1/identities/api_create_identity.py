@@ -34,7 +34,7 @@ from eyenet.api.deps import (
     get_storage,
 )
 from eyenet.api.v1.schemas.identities import IdentityDetail
-from eyenet.collectors.forum.real import resolve_evasion_pacing
+from eyenet.collectors.forum._timing_presets import resolve_evasion_pacing
 from eyenet.contracts.enums import IdentityRole, SourceKind, SystemUserRole
 from eyenet.contracts.source import SourceRow
 from eyenet.identity_pool._provision import SessionValidationError, provision_identity

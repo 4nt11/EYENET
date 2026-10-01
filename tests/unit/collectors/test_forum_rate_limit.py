@@ -16,12 +16,11 @@ import pytest
 
 from eyenet.api.v1.identities.api_create_identity import _build_source_config
 from eyenet.bus import MemoryBus
-from eyenet.collectors.forum.real import (
-    _DEFAULT_RETRY_AFTER,
-    MyBBForumCollector,
-    RateLimited,
+from eyenet.collectors.forum._timing_presets import (
+    DEFAULT_RETRY_AFTER,
     resolve_evasion_pacing,
 )
+from eyenet.collectors.forum.real import MyBBForumCollector, RateLimited
 from eyenet.contracts.enums import SourceKind
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
@@ -173,7 +172,7 @@ async def test_429_without_retry_after_uses_default(tmp_path: Path) -> None:
         before = time.monotonic()
         with pytest.raises(RateLimited):
             await coll._get("/x")
-        assert coll._cooldown_until - before >= _DEFAULT_RETRY_AFTER
+        assert coll._cooldown_until - before >= DEFAULT_RETRY_AFTER
 
 
 @pytest.mark.unit

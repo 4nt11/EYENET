@@ -42,6 +42,12 @@ from eyenet.collectors.forum import (
     posted_at_to_utc,
     thread_page_count,
 )
+from eyenet.collectors.forum._timing_presets import (
+    DEFAULT_DELAY_MAX,
+    DEFAULT_DELAY_MIN,
+    DEFAULT_RETRY_AFTER,
+    RETRY_AFTER_PAD,
+)
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.actor import actor_key
 from eyenet.contracts.bus import Bus
@@ -66,11 +72,7 @@ _log = get_logger()
 # canary goes falsely-dead - upgrade to a stable per-board element then.
 _LOGGED_IN_MARKERS = ("action=logout", "usercp")
 
-# Not-stupid pacing defaults (seconds). Every request waits a jittered delay in
-# [min, max]; requests are strictly sequential. A live board bans an account that
-# rips flat-out, so these are deliberately browsing-speed, tunable per identity.
-_DEFAULT_DELAY_MIN = 4.0
-_DEFAULT_DELAY_MAX = 12.0
+# Pacing + 429-backoff timing live in _timing_presets (the examinable profiles).
 # One paced discovery sweep, then rest. Re-enumerating 500-page categories every
 # minute would be its own DoS; a category rarely gains threads that fast.
 _DEFAULT_DISCOVERY_INTERVAL = 21_600  # 6h
@@ -109,38 +111,6 @@ _BASE_HEADERS: dict[str, str] = {
     # extras in pyproject), which matches Tor Browser. Advertising a codec we
     # can't inflate would hand us undecodable bodies.
 }
-
-# Fallback cooldown when a 429 carries no (or an unparseable) Retry-After. The
-# measured pwnforums value; a conservative 10 min beats guessing low and poking.
-_DEFAULT_RETRY_AFTER = 600.0
-# The server's cooldown timer RESETS on any request made during cooldown (measured
-# on pwnforums), and resuming on the EXACT second is a robotic tell — so after a
-# 429 we go silent for Retry-After PLUS this jitter pad, and never poke meanwhile.
-_RETRY_AFTER_PAD = (30.0, 120.0)
-
-# Evasion templates (nmap -T analog): operator picks a level per identity; it
-# just seeds the inter-request [min, max] pacing. Explicit forum_delay_min/max
-# still override. Page caps / discovery stay their own knobs. E1 "lurker" is
-# validated live (zero 429s). See investigations/pwnforums/collection-profile.md.
-_EVASION_LEVELS: dict[str, tuple[float, float]] = {
-    "ghost": (90.0, 240.0),  # E0: minutes apart, strict night-owl; hardest targets
-    "lurker": (20.0, 60.0),  # E1: validated on a defended onion forum
-    "regular": (8.0, 15.0),  # E2
-    "brisk": (3.0, 6.0),  # E3
-    "smash": (0.5, 1.5),  # E4: tolerant boards only (no such limiter)
-}
-
-
-def resolve_evasion_pacing(level: str | None) -> tuple[float, float] | None:
-    """Map an evasion level name to its (delay_min, delay_max) pacing, or None for
-    an absent/unknown level. Applied at provision time so the collector only ever
-    sees concrete delays. Case/space-insensitive; also accepts the E0..E4 aliases."""
-    if not level:
-        return None
-    key = level.strip().lower()
-    alias = {"e0": "ghost", "e1": "lurker", "e2": "regular", "e3": "brisk", "e4": "smash"}
-    return _EVASION_LEVELS.get(alias.get(key, key))
-
 
 class RateLimited(Exception):  # noqa: N818 - a control signal, not an error condition
     """A board 429'd us (or we're still inside its cooldown). Caught at the tick
@@ -239,8 +209,8 @@ class MyBBForumCollector(CollectorSkeleton):
         self._base_url = ""  # absolute origin, for building realistic Referers
         self._thread_urls: list[str] = []
         # Pacing / discovery (overridden from the identity in on_subscribe).
-        self._delay_min = _DEFAULT_DELAY_MIN
-        self._delay_max = _DEFAULT_DELAY_MAX
+        self._delay_min = DEFAULT_DELAY_MIN
+        self._delay_max = DEFAULT_DELAY_MAX
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
         self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
@@ -262,9 +232,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._thread_urls = list(entry.forum_thread_urls)
         # Pacing comes pre-resolved on the entry (an evasion level, if the operator
         # picked one, is expanded to forum_delay_min/max at provision time — see
-        # resolve_evasion_pacing / _EVASION_LEVELS). The collector just honours it.
-        self._delay_min = float(getattr(entry, "forum_delay_min", _DEFAULT_DELAY_MIN))
-        self._delay_max = float(getattr(entry, "forum_delay_max", _DEFAULT_DELAY_MAX))
+        # _timing_presets.resolve_evasion_pacing). The collector just honours it.
+        self._delay_min = float(getattr(entry, "forum_delay_min", DEFAULT_DELAY_MIN))
+        self._delay_max = float(getattr(entry, "forum_delay_max", DEFAULT_DELAY_MAX))
         self._discovery_interval = float(
             getattr(entry, "forum_discovery_interval", _DEFAULT_DISCOVERY_INTERVAL)
         )
@@ -358,8 +328,8 @@ class MyBBForumCollector(CollectorSkeleton):
         ra = resp.headers.get("retry-after", "")
         # ponytail: integer-seconds only (what real boards send); an HTTP-date
         # Retry-After falls back to the measured default — add dateparse if ever seen.
-        base = float(ra) if ra.isdigit() else _DEFAULT_RETRY_AFTER
-        pad = random.uniform(*_RETRY_AFTER_PAD)  # noqa: S311 - jitter, not crypto
+        base = float(ra) if ra.isdigit() else DEFAULT_RETRY_AFTER
+        pad = random.uniform(*RETRY_AFTER_PAD)  # noqa: S311 - jitter, not crypto
         self._cooldown_until = time.monotonic() + base + pad
         raise RateLimited(f"429 → silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})")
 
