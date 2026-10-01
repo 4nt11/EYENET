@@ -71,6 +71,10 @@ async def identities_create(
     forum_thread_urls: Annotated[
         str | None, Form(description="comma-separated thread URLs")
     ] = None,
+    forum_user_agent: Annotated[
+        str | None,
+        Form(max_length=1024, description="UA of the browser that minted the cookie jar"),
+    ] = None,
     cooldown_seconds: Annotated[int, Form(ge=0)] = 21_600,
     proxy_uri: Annotated[str | None, Form(max_length=1024)] = None,
     role: Annotated[IdentityRole, Form()] = IdentityRole.MONITOR,
@@ -95,6 +99,7 @@ async def identities_create(
         monitor_groups=monitor_groups,
         forum_base_url=forum_base_url,
         forum_thread_urls=forum_thread_urls,
+        forum_user_agent=forum_user_agent,
     )
 
     try:
@@ -140,6 +145,7 @@ def _build_source_config(
     monitor_groups: str | None,
     forum_base_url: str | None = None,
     forum_thread_urls: str | None = None,
+    forum_user_agent: str | None = None,
 ) -> dict[str, object]:
     """Assemble the non-secret per-source config, keyed by IdentityFileEntry field
     names so the pool can splat it back into an entry. New sources add a branch."""
@@ -172,7 +178,13 @@ def _build_source_config(
                 ]
             )
         urls = [u.strip() for u in (forum_thread_urls or "").split(",") if u.strip()]
-        return {"forum_base_url": forum_base_url, "forum_thread_urls": urls}
+        config: dict[str, object] = {"forum_base_url": forum_base_url, "forum_thread_urls": urls}
+        # Optional: the UA of the browser that minted the cookie jar (Tor Browser
+        # for an .onion board). Omitted → the collector's TB default. Only emit
+        # when set so the pool's entry keeps its own default otherwise.
+        if forum_user_agent:
+            config["forum_user_agent"] = forum_user_agent
+        return config
     raise RequestValidationError(
         [
             {
