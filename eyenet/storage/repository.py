@@ -2485,12 +2485,13 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def delete_identity(self, *, identity_id: UUID) -> None:
-        """Delete an identity not bound to a collector and not ``IN_USE``.
+        """Delete an identity not bound to a collector.
 
         Burn retires a compromised identity in place; delete removes a mistaken
-        / never-wired one. Raises
-        :class:`eyenet.storage.errors.ResourceInUseError` when a collector
-        references it or it is actively claimed, :class:`ValueError` if missing.
+        / never-wired one. The sole hard blocker is a collector binding (the
+        ``IN_USE`` state alone is a stale flag, not a blocker — see the impl).
+        Raises :class:`eyenet.storage.errors.ResourceInUseError` when a collector
+        references it, :class:`ValueError` if missing.
         """
 
     @abstractmethod

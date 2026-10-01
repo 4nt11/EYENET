@@ -108,11 +108,12 @@ async def test_delete_identity_bound_to_collector_is_refused(storage: BaseReposi
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_delete_identity_in_use_is_refused(storage: BaseRepository) -> None:
+async def test_delete_stale_in_use_identity_succeeds(storage: BaseRepository) -> None:
+    # IN_USE with NO collector is a stale claim — deletable (only a collector
+    # binding blocks). Gating on IN_USE alone would deadlock source teardown.
     sid = await _mk_source(storage)
     ident = await storage.create_identity(
         name="id3", source_id=sid, session_path="", state=IdentityState.IN_USE
     )
-    with pytest.raises(ResourceInUseError) as ei:
-        await storage.delete_identity(identity_id=ident.id)
-    assert ei.value.refs.get("state") == IdentityState.IN_USE.value
+    await storage.delete_identity(identity_id=ident.id)
+    assert await storage.get_identity(ident.id) is None

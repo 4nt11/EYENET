@@ -125,21 +125,23 @@ class IdentitiesMixin:
             return _identity_row(table)
 
     async def delete_identity(self, *, identity_id: UUID) -> None:
-        """Delete an identity that is not bound to a collector and not in use.
+        """Delete an identity not bound to a collector.
 
         Burning retires a COMPROMISED identity in place (state=BURNED, keeps the
-        row + history); delete REMOVES a mistaken / never-wired one. Refused
-        (:class:`ResourceInUseError`) when a collector still references it
-        (``collector.identity_id`` is a unique FK — detach/remove that collector
-        first) or when it is actively claimed (``IN_USE``). The append-only
-        identity event log is left intact (audit trail). Guard runs inside the
-        transaction (race-safe). Raises :class:`ValueError` if missing.
+        row + history); delete REMOVES a mistaken / never-wired one. The ONLY
+        hard blocker is a collector binding (``collector.identity_id`` is a
+        unique FK) — that is what "a running collector is using this" actually
+        means, so detach/remove that collector first. The ``IN_USE`` *state* is
+        deliberately NOT a blocker: a claim with no collector row is a stale
+        flag (claimed once, never released), and gating on it only deadlocks
+        teardown (can't delete the identity → can't delete its source). The
+        append-only identity event log is left intact (audit trail). Guard runs
+        inside the transaction (race-safe). Raises :class:`ValueError` if missing.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             ident = await session.get(IdentityTable, identity_id)
             if ident is None:
                 raise ValueError(f"identity {identity_id} not found")
-            refs: dict[str, object] = {}
             bound = int(
                 (
                     await session.exec(
@@ -150,11 +152,7 @@ class IdentitiesMixin:
                 ).one()
             )
             if bound:
-                refs["collector"] = bound
-            if ident.state == IdentityState.IN_USE:
-                refs["state"] = IdentityState.IN_USE.value
-            if refs:
-                raise ResourceInUseError("identity", refs=refs)
+                raise ResourceInUseError("identity", refs={"collector": bound})
             await session.delete(ident)
             await session.commit()
 

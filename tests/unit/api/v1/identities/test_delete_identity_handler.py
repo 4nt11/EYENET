@@ -75,21 +75,21 @@ async def test_delete_identity_bound_is_409(
     assert ei.value.detail["references"]["collector"] == 1  # type: ignore[index]
 
 
-async def test_delete_identity_in_use_is_409(
+async def test_delete_stale_in_use_identity_succeeds(
     storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
 ) -> None:
+    # IN_USE with no collector is a stale flag, not a blocker — deletes cleanly.
     sid = await _source(storage)
     ident = await storage.create_identity(
         name="id3", source_id=sid, session_path="", state=IdentityState.IN_USE
     )
-    with pytest.raises(HTTPException) as ei:
-        await identities_delete(
-            current_user=mkuser("write:identity"),
-            storage=storage,
-            audit=audit,
-            identity_id=str(ident.id),
-        )
-    assert ei.value.status_code == 409
+    await identities_delete(
+        current_user=mkuser("write:identity"),
+        storage=storage,
+        audit=audit,
+        identity_id=str(ident.id),
+    )
+    assert await storage.get_identity(ident.id) is None
 
 
 async def test_delete_identity_bad_id_404(

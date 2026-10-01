@@ -2,10 +2,11 @@
 """DELETE /v1/identities/{identity_id} — delete an unused identity.
 
 Burn (POST .../burn) retires a COMPROMISED identity in place; delete REMOVES a
-mistaken / never-wired one. Refuses with 409 when a collector still references
-it (detach/remove that collector first) or it is actively claimed (IN_USE). An
-unparseable id is a 404, never a 422 (no enumeration oracle — matches the other
-identity routes). 204 on success.
+mistaken / never-wired one. Refuses with 409 only when a collector still binds
+it (detach/remove that collector first); the IN_USE state alone does not block
+(a claim with no collector is stale, and gating on it would deadlock source
+teardown). An unparseable id is a 404, never a 422 (no enumeration oracle —
+matches the other identity routes). 204 on success.
 """
 
 from __future__ import annotations
