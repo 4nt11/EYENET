@@ -21,9 +21,7 @@ def storage() -> BaseRepository:
 
 
 def _records(n: int) -> list[dict]:
-    return [
-        {"actor_key": "a1", "platform_msgid": str(i), "body": f"msg {i}"} for i in range(n)
-    ]
+    return [{"actor_key": "a1", "platform_msgid": str(i), "body": f"msg {i}"} for i in range(n)]
 
 
 @pytest.mark.integration
@@ -73,11 +71,25 @@ def test_recent_incidents_label_filter_finds_rare_regardless_of_recency(storage)
         base = datetime.now(UTC)
         rows = []
         # one OLD rare 'alliance' incident, then many newer 'fraud_ops' ones on top of it
-        rows.append(IncidentRow(message_id=UUID(int=1), labels=["alliance"], scores={},
-                                model_version="v2", classified_at=base))
+        rows.append(
+            IncidentRow(
+                message_id=UUID(int=1),
+                labels=["alliance"],
+                scores={},
+                model_version="v2",
+                classified_at=base,
+            )
+        )
         for i in range(2, 12):
-            rows.append(IncidentRow(message_id=UUID(int=i), labels=["fraud_ops"], scores={},
-                                    model_version="v2", classified_at=base + timedelta(minutes=i)))
+            rows.append(
+                IncidentRow(
+                    message_id=UUID(int=i),
+                    labels=["fraud_ops"],
+                    scores={},
+                    model_version="v2",
+                    classified_at=base + timedelta(minutes=i),
+                )
+            )
         await storage.put_incidents_bulk(rows)
         # recent 3 (no filter) are all fraud_ops — the old alliance one is buried
         top = await storage.recent_incidents(limit=3)
@@ -105,20 +117,38 @@ def test_recent_incidents_group_filter_shows_only_selected(storage) -> None:
         now = datetime.now(UTC)
         # two groups under one source; classify one message in each
         _s, g_a, _a = await seed_telegram_fixture(
-            storage, [{"actor_key": "a", "platform_msgid": "1", "body": "spam"}], now,
-            platform_groupid="-100", group_title="Alpha",
+            storage,
+            [{"actor_key": "a", "platform_msgid": "1", "body": "spam"}],
+            now,
+            platform_groupid="-100",
+            group_title="Alpha",
         )
         _s2, g_b, _b = await seed_telegram_fixture(
-            storage, [{"actor_key": "a", "platform_msgid": "2", "body": "signal"}], now,
-            platform_groupid="-200", group_title="Beta",
+            storage,
+            [{"actor_key": "a", "platform_msgid": "2", "body": "signal"}],
+            now,
+            platform_groupid="-200",
+            group_title="Beta",
         )
         page = {b: mid for mid, b in await storage.messages_without_incidents(limit=10)}
-        await storage.put_incidents_bulk([
-            IncidentRow(message_id=page["spam"], labels=["x"], scores={},
-                        model_version="v", classified_at=now),
-            IncidentRow(message_id=page["signal"], labels=["x"], scores={},
-                        model_version="v", classified_at=now),
-        ])
+        await storage.put_incidents_bulk(
+            [
+                IncidentRow(
+                    message_id=page["spam"],
+                    labels=["x"],
+                    scores={},
+                    model_version="v",
+                    classified_at=now,
+                ),
+                IncidentRow(
+                    message_id=page["signal"],
+                    labels=["x"],
+                    scores={},
+                    model_version="v",
+                    classified_at=now,
+                ),
+            ]
+        )
         assert len(await storage.recent_incidents(limit=10)) == 2  # all by default
         only_b = await storage.recent_incidents(limit=10, group_ids=[g_b])
         assert {r.message_id for r in only_b} == {page["signal"]}  # show-only the chosen group
@@ -127,6 +157,70 @@ def test_recent_incidents_group_filter_shows_only_selected(storage) -> None:
         groups = await storage.incident_groups()
         assert {gid for gid, _t, _sid, _n in groups} == {g_a, g_b}
         assert {t: n for _g, t, _sid, n in groups} == {"Alpha": 1, "Beta": 1}
+
+    asyncio.run(_run())
+
+
+@pytest.mark.integration
+def test_recent_incidents_victim_country_filter_and_countries(storage) -> None:
+    from eyenet.contracts.incident import IncidentRow, MessageGeoRow
+    from tests._seed import seed_telegram_fixture
+
+    async def _run() -> None:
+        now = datetime.now(UTC)
+        await seed_telegram_fixture(
+            storage,
+            [
+                {"actor_key": "a", "platform_msgid": "1", "body": "leak one"},
+                {"actor_key": "a", "platform_msgid": "2", "body": "leak two"},
+                {"actor_key": "a", "platform_msgid": "3", "body": "leak three"},
+            ],
+            now,
+        )
+        by_body = {b: mid for mid, b in await storage.messages_without_incidents(limit=10)}
+        await storage.put_incidents_bulk(
+            [
+                IncidentRow(
+                    message_id=mid, labels=["x"], scores={}, model_version="v", classified_at=now
+                )
+                for mid in by_body.values()
+            ]
+        )
+        # geo verdicts: two CL, one AR, plus (implicitly) none for coverage of the join
+        await storage.put_message_geo_bulk(
+            [
+                MessageGeoRow(
+                    message_id=by_body["leak one"],
+                    country="CL",
+                    status="resolved",
+                    engine_version="g1",
+                    classified_at=now,
+                ),
+                MessageGeoRow(
+                    message_id=by_body["leak two"],
+                    country="CL",
+                    status="resolved",
+                    engine_version="g1",
+                    classified_at=now,
+                ),
+                MessageGeoRow(
+                    message_id=by_body["leak three"],
+                    country="AR",
+                    status="resolved",
+                    engine_version="g1",
+                    classified_at=now,
+                ),
+            ]
+        )
+        # filter keeps only the CL verdicts (q= would never match the geo tag)
+        cl = await storage.recent_incidents(limit=10, victim_countries=["CL"])
+        assert {r.message_id for r in cl} == {by_body["leak one"], by_body["leak two"]}
+        assert await storage.count_incidents(victim_countries=["CL"]) == 2
+        # OR across codes
+        both = await storage.recent_incidents(limit=10, victim_countries=["CL", "AR"])
+        assert len(both) == 3
+        # the countries filter option set, noisiest first
+        assert await storage.incident_countries() == [("CL", 2), ("AR", 1)]
 
     asyncio.run(_run())
 

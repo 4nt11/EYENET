@@ -131,6 +131,21 @@ async def test_list_candidates_filters(
     assert [c.candidate_id for c in queued.items] == [c1]
 
 
+async def test_list_candidates_q_search(
+    storage: BaseRepository, mkuser: Callable[..., CurrentUser]
+) -> None:
+    src = await _source(storage)
+    await _candidate(storage, src, platform_groupid="cryptoleaks")
+    await _candidate(storage, src, platform_groupid="catpics")
+
+    # q is the trailing param (user, storage, page, state, source_id, min_score, q)
+    page = await candidates_list(
+        mkuser("read:candidates"), storage, _page(include_total=True), None, None, None, "CRYPTO"
+    )
+    assert {c.platform_groupid for c in page.items} == {"cryptoleaks"}
+    assert page.estimated_total == 1
+
+
 async def test_get_candidate_detail_eligibility(
     storage: BaseRepository, mkuser: Callable[..., CurrentUser]
 ) -> None:

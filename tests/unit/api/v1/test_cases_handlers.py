@@ -384,3 +384,65 @@ async def test_collaborator_revoke_unknown_404(
             storage,
             audit,
         )
+
+
+async def test_add_actor_with_posts(
+    storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
+) -> None:
+    from datetime import UTC, datetime
+
+    from eyenet.api.v1.cases.api_add_actor import cases_add_actor
+    from eyenet.api.v1.schemas.cases import CaseActorAddRequest
+    from eyenet.contracts.enums import GroupKind, SourceKind
+    from eyenet.models import MessageTable
+    from eyenet.models._base import new_uuid7
+
+    owner = mkuser("write:cases")
+    detail = await _make_case(storage, audit, owner)
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(
+        kind=SourceKind.FORUM, display_name="darkforums", created_at=now
+    )
+    gid = await storage.upsert_group(
+        source_id=sid, platform_groupid="t1", kind=GroupKind.FORUM_THREAD, title="leak", seen_at=now
+    )
+    actor_id = await storage.upsert_actor(
+        source_id=sid,
+        actor_key="holl0w33n",
+        platform_userid="1",
+        handle=None,
+        display_name=None,
+        seen_at=now,
+    )
+    for i in range(3):
+        await storage.put_message(
+            MessageTable(
+                id=new_uuid7(),
+                source_id=sid,
+                group_id=gid,
+                actor_id=actor_id,
+                platform_msgid=f"m{i}",
+                evidence_ref=f"f:{i}",
+                body="dump",
+                length_chars=4,
+                length_words=1,
+                sent_at_source=now,
+                ingested_at=now,
+            )
+        )
+
+    result = await cases_add_actor(
+        detail.case_id,
+        CaseActorAddRequest(
+            actor_id=actor_id, include_posts=True, add_reason="open case on actor here"
+        ),
+        owner,
+        storage,
+        audit,
+    )
+    # 1 actor member + 3 message members.
+    assert len(result.affected_member_ids) == 4
+    members = await storage.list_case_members(detail.case_id)
+    kinds = sorted(m.subject_kind.value for m in members)
+    assert kinds == ["actor", "message", "message", "message"]

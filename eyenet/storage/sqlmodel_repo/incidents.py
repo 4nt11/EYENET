@@ -15,12 +15,18 @@ from uuid import UUID
 from sqlalchemy import String, cast as sql_cast, func, or_
 from sqlmodel import col, select
 
-from eyenet.contracts.incident import IncidentLabelRow, IncidentRow, IncidentRuleRow
+from eyenet.contracts.incident import (
+    IncidentLabelRow,
+    IncidentRow,
+    IncidentRuleRow,
+    MessageGeoRow,
+)
 from eyenet.models import (
     GroupTable,
     IncidentLabelTable,
     IncidentRuleTable,
     IncidentTable,
+    MessageGeoTable,
     MessageTable,
     SourceTable,
 )
@@ -40,6 +46,17 @@ def _label_row(t: IncidentLabelTable) -> IncidentLabelRow:
         reason=t.reason,
         decided_by=t.decided_by,
         decided_at=t.decided_at,
+    )
+
+
+def _geo_row(t: MessageGeoTable) -> MessageGeoRow:
+    return MessageGeoRow(
+        message_id=t.message_id,
+        country=t.country,
+        status=t.status,
+        decided_by=t.decided_by,
+        engine_version=t.engine_version,
+        classified_at=t.classified_at,
     )
 
 
@@ -67,6 +84,73 @@ class IncidentsMixin:
             result = await session.exec(stmt)
             return list(result.all())
 
+    def _apply_incident_filters(
+        self,
+        stmt: Any,
+        *,
+        labels: list[str] | None,
+        q: str | None,
+        group_ids: list[UUID] | None,
+        source_ids: list[UUID] | None,
+        victim_countries: list[str] | None = None,
+        exclude_bodyless: bool = False,
+    ) -> Any:
+        """Apply the triage-feed filters to a SELECT over IncidentTable.
+
+        Shared by :meth:`recent_incidents` and :meth:`count_incidents` so the
+        page and its ``estimated_total`` can never drift apart. The caller owns
+        the projection (rows vs COUNT), ordering, offset and limit; this only
+        adds the WHERE/JOIN that both share.
+
+        ``exclude_bodyless`` drops incidents whose message body is null/blank
+        (pure-quote forum posts strip to empty and classify into content-less
+        "row not retained" rows). Doing it IN SQL — not as a post-fetch Python
+        filter — is what keeps offset paging honest (a page of ``limit`` returns
+        ``limit`` real rows) and the count exact.
+        # ponytail: SQL TRIM strips ASCII spaces; a body of only tabs/newlines
+        # would count as non-blank here where Python str.strip() drops it. Rare
+        # enough to accept; tighten with a char-class trim if it ever matters.
+        """
+        if labels:
+            # labels is a JSON array of clean identifiers; match the quoted token in its
+            # text form. cast + LIKE are ANSI; each pattern is a bound param (no
+            # injection). OR across the selected leaves (checkbox multi-select).
+            stmt = stmt.where(
+                or_(
+                    *(
+                        sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
+                        for lbl in labels
+                    )
+                )
+            )
+        # q, group_ids, source_ids, exclude_bodyless all need the message; join ONCE.
+        if q or group_ids or source_ids or exclude_bodyless:
+            stmt = stmt.join(MessageTable, col(IncidentTable.message_id) == col(MessageTable.id))
+        if q:
+            # the free-text predicate is the dialect seam (_body_match): generic LIKE
+            # here, FTS5 MATCH on SQLite, tsvector on a future Postgres backend.
+            stmt = stmt.where(self._body_match(q))
+        if group_ids:
+            stmt = stmt.where(col(MessageTable.group_id).in_(group_ids))
+        if source_ids:
+            # Source-level filter: a forum's incidents all share one source
+            # ("Darkforums") even though each thread is its own group.
+            stmt = stmt.where(col(MessageTable.source_id).in_(source_ids))
+        if exclude_bodyless:
+            # length(trim(NULL)) is NULL (> 0 → false), so this drops null bodies too.
+            stmt = stmt.where(func.length(func.trim(col(MessageTable.body))) > 0)
+        if victim_countries:
+            # Victim-country (geo) filter: join the message_geo sidecar (unique
+            # message_id, so no row multiplication for the COUNT) and keep only the
+            # resolved verdicts in the set. This is the "show me CL incidents"
+            # filter — distinct from ?q= which is a body full-text search and never
+            # matched the geo verdict.
+            stmt = stmt.join(
+                MessageGeoTable, col(IncidentTable.message_id) == col(MessageGeoTable.message_id)
+            )
+            stmt = stmt.where(col(MessageGeoTable.country).in_(victim_countries))
+        return stmt
+
     async def recent_incidents(
         self,
         limit: int = 50,
@@ -76,47 +160,58 @@ class IncidentsMixin:
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
+        exclude_bodyless: bool = False,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters IN
         the query (OR: an incident matches if it carries ANY of the given leaves) so rare
         leaves are found regardless of overall recency (the old post-fetch filter hid rare
         labels below the limit); ``q`` free-text-matches the message body; ``group_ids``
         restricts to incidents whose message is in ONE of the given groups (show-only
-        channels); ``offset`` pages. Newest first."""
+        channels); ``victim_countries`` keeps only incidents whose geo verdict is one of the
+        given ISO alpha-2 codes; ``exclude_bodyless`` drops content-less rows in SQL;
+        ``offset`` pages. Newest first."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(IncidentTable)
-            if labels:
-                # labels is a JSON array of clean identifiers; match the quoted token in its
-                # text form. cast + LIKE are ANSI; each pattern is a bound param (no
-                # injection). OR across the selected leaves (checkbox multi-select).
-                stmt = stmt.where(
-                    or_(
-                        *(
-                            sql_cast(col(IncidentTable.labels), String).like(f'%"{lbl}"%')
-                            for lbl in labels
-                        )
-                    )
-                )
-            # q, group_ids, source_ids all need the message; join ONCE.
-            if q or group_ids or source_ids:
-                stmt = stmt.join(
-                    MessageTable, col(IncidentTable.message_id) == col(MessageTable.id)
-                )
-            if q:
-                # the free-text predicate is the dialect seam (_body_match): generic LIKE
-                # here, FTS5 MATCH on SQLite, tsvector on a future Postgres backend.
-                stmt = stmt.where(self._body_match(q))
-            if group_ids:
-                stmt = stmt.where(col(MessageTable.group_id).in_(group_ids))
-            if source_ids:
-                # Source-level filter: a forum's incidents all share one source
-                # ("Darkforums") even though each thread is its own group.
-                stmt = stmt.where(col(MessageTable.source_id).in_(source_ids))
+            stmt = self._apply_incident_filters(
+                select(IncidentTable),
+                labels=labels,
+                q=q,
+                group_ids=group_ids,
+                source_ids=source_ids,
+                victim_countries=victim_countries,
+                exclude_bodyless=exclude_bodyless,
+            )
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    async def count_incidents(
+        self,
+        *,
+        labels: list[str] | None = None,
+        q: str | None = None,
+        group_ids: list[UUID] | None = None,
+        source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
+        exclude_bodyless: bool = False,
+    ) -> int:
+        """Total incidents matching the same filters as :meth:`recent_incidents`
+        (no offset/limit) — powers the triage feed's ``estimated_total`` so the
+        operator sees the full match size, not just the capped current page."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = self._apply_incident_filters(
+                select(func.count()).select_from(IncidentTable),
+                labels=labels,
+                q=q,
+                group_ids=group_ids,
+                source_ids=source_ids,
+                victim_countries=victim_countries,
+                exclude_bodyless=exclude_bodyless,
+            )
+            result = await session.exec(stmt)
+            return int(result.one())
 
     async def incident_groups(self) -> list[tuple[UUID, str | None, UUID, int]]:
         """Distinct groups with at least one incident, as (group_id, title, source_id,
@@ -158,6 +253,27 @@ class IncidentsMixin:
             result = await session.exec(stmt)
             return [(UUID(str(sid)), name, int(n)) for sid, name, n in result.all()]
 
+    async def incident_countries(self) -> list[tuple[str, int]]:
+        """Distinct resolved victim countries with at least one incident, as
+        (country_alpha2, count), noisiest first — the feed's victim-country filter.
+        incident → message_geo, GROUP BY country; NULL (mixed/unknown) excluded so
+        the filter only offers codes that actually resolve to something."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            count = func.count()
+            stmt = (
+                select(MessageGeoTable.country, count)
+                .select_from(IncidentTable)
+                .join(
+                    MessageGeoTable,
+                    col(IncidentTable.message_id) == col(MessageGeoTable.message_id),
+                )
+                .where(col(MessageGeoTable.country).is_not(None))
+                .group_by(col(MessageGeoTable.country))
+                .order_by(count.desc())
+            )
+            result = await session.exec(stmt)
+            return [(str(c), int(n)) for c, n in result.all()]
+
     def _body_match(self, q: str) -> Any:
         """Free-text predicate over the joined ``message.body``. Generic ANSI ``LIKE`` —
         full-scans bodies, correct on any backend and the fallback when a backend has no
@@ -180,6 +296,61 @@ class IncidentsMixin:
             stmt = stmt.order_by(col(MessageTable.id)).limit(limit)
             result = await session.exec(stmt)
             return [(mid, body) for mid, body in result]
+
+    # ── victim-country attribution (geo sidecar, incident-flagged messages) ───
+    async def messages_needing_geo(self, *, limit: int = 500) -> list[tuple[UUID, str, str | None]]:
+        """(message_id, body, thread_title) for incident messages that have no geo row yet.
+
+        A message counts as an incident if EITHER the classifier flagged it (a row in
+        ``incident``) OR an operator asserted a non-empty true-label set via the reader (a
+        ``incident_label`` row with labels != []). The operator channel matters: with a
+        young classifier, real incidents are often hand-rescued, and those never get an
+        ``incident`` row. Generic ANSI: message IN (model-flagged OR operator-labeled) and
+        NOT IN the geo set; outer-join the group for its title. Oldest id first."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            model_flagged = select(IncidentTable.message_id)
+            # labels is a JSON array; "[]" is the operator false-positive marker — exclude it.
+            operator_labeled = select(IncidentLabelTable.message_id).where(
+                sql_cast(col(IncidentLabelTable.labels), String) != "[]"
+            )
+            done = select(MessageGeoTable.message_id)
+            stmt = (
+                select(MessageTable.id, MessageTable.body, GroupTable.current_title)
+                .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id), isouter=True)
+                .where(
+                    or_(
+                        col(MessageTable.id).in_(model_flagged),
+                        col(MessageTable.id).in_(operator_labeled),
+                    )
+                )
+                .where(col(MessageTable.id).not_in(done))
+                .order_by(col(MessageTable.id))
+                .limit(limit)
+            )
+            result = await session.exec(stmt)
+            return [(mid, body, title) for mid, body, title in result.all()]
+
+    async def put_message_geo_bulk(self, geo_rows: list[object]) -> None:
+        """Persist many MessageGeoRows in ONE session (the geo service's batch flush).
+        Append-only; ``message_id`` is unique and the work queue only yields un-attributed
+        messages, so a plain ANSI insert never conflicts."""
+        if not geo_rows:
+            return
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            for r in geo_rows:
+                row = cast("MessageGeoRow", r)
+                session.add(MessageGeoTable(**row.model_dump()))
+            await session.commit()
+
+    async def message_geo_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, object]:
+        """Bulk {message_id: MessageGeoRow} for feed enrichment (mirrors the label join)."""
+        if not message_ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageGeoTable).where(col(MessageGeoTable.message_id).in_(message_ids))
+            )
+            return {t.message_id: _geo_row(t) for t in result.all()}
 
     # ── operator ground-truth label corrections (retraining signal) ──────────
     async def set_incident_label(
@@ -235,9 +406,7 @@ class IncidentsMixin:
             return {}
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(
-                select(
-                    IncidentTable.message_id, IncidentTable.labels, IncidentTable.classified_at
-                )
+                select(IncidentTable.message_id, IncidentTable.labels, IncidentTable.classified_at)
                 .where(col(IncidentTable.message_id).in_(message_ids))
                 .order_by(col(IncidentTable.classified_at).desc())
             )

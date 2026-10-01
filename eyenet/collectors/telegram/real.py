@@ -212,6 +212,9 @@ class TelegramCollector(CollectorSkeleton):
         # (the supervisor publishes JoinGroupCommand here for the leased scout).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
+        # Bind our row to the source we actually ingest into (the placeholder
+        # source it was registered against has zero of our messages).
+        await self._bind_collector_row_source(collector, self._source_uuid)
 
         # Seed the monitor set from this collector's active memberships (the
         # groups the operator joined via /monitored-groups), unioned onto any

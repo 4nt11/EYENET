@@ -15,6 +15,26 @@ export function authToken() {
   }
 }
 
+// Fired once whenever an *authenticated* request comes back 401 (token expired
+// or revoked mid-session). The auth store registers a handler that drops the
+// session; the reactive layout gate then falls back to the login form. api.js
+// must NOT import the auth store (that would cycle — see auth.svelte.js), so
+// the dependency is inverted through this setter.
+let onUnauthorized = null;
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn;
+}
+
+// One fetch chokepoint so the 401 guard lives in a single place. `guard401` is
+// true only when the caller sent auth AND did not explicitly accept a 401 as a
+// meaningful response — so the login POST (auth:false) never triggers a
+// redirect loop on a bad password.
+async function doFetch(url, init, guard401) {
+  const res = await fetch(url, init);
+  if (guard401 && res.status === 401) onUnauthorized?.();
+  return res;
+}
+
 // GET JSON. `accept` lists non-2xx statuses whose body is still meaningful
 // (e.g. /v1/readyz returns 503 with a full ReadyStatus body when degraded).
 export async function apiGet(path, { auth = false, accept = [] } = {}) {
@@ -23,7 +43,7 @@ export async function apiGet(path, { auth = false, accept = [] } = {}) {
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;
   }
-  const res = await fetch(`${BASE}${path}`, { headers });
+  const res = await doFetch(`${BASE}${path}`, { headers }, auth && !accept.includes(401));
   if (!res.ok && !accept.includes(res.status)) {
     const err = new Error(`${res.status} ${res.statusText}`);
     err.status = res.status;
@@ -40,11 +60,11 @@ export async function apiPost(path, body, { auth = false, accept = [], headers: 
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;
   }
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  });
+  const res = await doFetch(
+    `${BASE}${path}`,
+    { method: 'POST', headers, body: JSON.stringify(body) },
+    auth && !accept.includes(401)
+  );
   if (!res.ok && !accept.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
     const problem = await res.json().catch(() => null);
@@ -67,7 +87,11 @@ export async function apiPostForm(path, formData, { auth = false, accept = [], h
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;
   }
-  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers, body: formData });
+  const res = await doFetch(
+    `${BASE}${path}`,
+    { method: 'POST', headers, body: formData },
+    auth && !accept.includes(401)
+  );
   if (!res.ok && !accept.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
     const problem = await res.json().catch(() => null);
@@ -88,7 +112,11 @@ export async function apiPut(path, body, { auth = false, accept = [], headers: e
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;
   }
-  const res = await fetch(`${BASE}${path}`, { method: 'PUT', headers, body: JSON.stringify(body) });
+  const res = await doFetch(
+    `${BASE}${path}`,
+    { method: 'PUT', headers, body: JSON.stringify(body) },
+    auth && !accept.includes(401)
+  );
   if (!res.ok && !accept.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
     const problem = await res.json().catch(() => null);
@@ -109,7 +137,11 @@ export async function apiPatch(path, body, { auth = false, accept = [], headers:
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;
   }
-  const res = await fetch(`${BASE}${path}`, { method: 'PATCH', headers, body: JSON.stringify(body) });
+  const res = await doFetch(
+    `${BASE}${path}`,
+    { method: 'PATCH', headers, body: JSON.stringify(body) },
+    auth && !accept.includes(401)
+  );
   if (!res.ok && !accept.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
     const problem = await res.json().catch(() => null);
@@ -130,7 +162,7 @@ export async function apiDelete(path, { auth = false, accept = [] } = {}) {
     const t = authToken();
     if (t) headers.authorization = `Bearer ${t}`;
   }
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers });
+  const res = await doFetch(`${BASE}${path}`, { method: 'DELETE', headers }, auth && !accept.includes(401));
   if (!res.ok && !accept.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
     const problem = await res.json().catch(() => null);

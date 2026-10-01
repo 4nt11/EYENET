@@ -5,25 +5,60 @@
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
+  import Dropdown from '$lib/components/Dropdown.svelte';
   import {
     candidateCtx, candidateView, candidateTone,
     loadCandidates, loadCandidateDetail,
     approveCandidate, rejectCandidate, parkCandidate, retryCandidate
   } from '$lib/candidate.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
+  import { sourceCtx, loadSources } from '$lib/source.svelte.js';
+  import { PLATFORMS } from '$lib/discovery-shape.js';
 
   // Columns are fields /v1/candidates returns. Platform is dropped from the list
   // (needs a per-row source join — never fabricate) and shown in detail after a
   // single source fetch. No `tier`/severity — the API carries no such field.
   const COLUMNS = [
-    { key: 'idShort', header: 'Candidate', mono: true, width: '96px' },
     { key: 'group', header: 'Group', mono: true },
-    { key: 'state', header: 'State', badge: true, tone: candidateTone, width: '110px' },
-    { key: 'scoreText', header: 'Score', mono: true, align: 'right', width: '80px' }
+    { key: 'realPlatform', header: 'Platform', mono: true, width: '84px' },
+    { key: 'foundVia', header: 'Found via', mono: true, width: '104px' },
+    { key: 'state', header: 'State', badge: true, tone: candidateTone, width: '104px' },
+    { key: 'scoreText', header: 'Score', mono: true, align: 'right', width: '72px' }
   ];
 
+  // `memberDialog` = the operator's own account already sits in this group (seen
+  // directly in an identity's dialogs/rooms), vs reachable only via mention
+  // descent. Same signal /v1/groups derives `member_unmonitored` from — NOT the
+  // candidate `state`, which is collector-lifecycle and says nothing about
+  // whether YOU are in it.
+  let filter = $state('all'); // 'all' | 'member' | 'discovered'
+  let platformFilter = $state(''); // '' | forum | telegram | matrix (derived from shape)
+  let rows = $derived(
+    candidateCtx.list
+      .filter((x) => filter === 'all' || (filter === 'member' ? x.memberDialog : !x.memberDialog))
+      .filter((x) => !platformFilter || x.realPlatform === platformFilter)
+  );
+  let memberCount = $derived(candidateCtx.list.filter((x) => x.memberDialog).length);
+
+  // Server-side narrowing: substring search + source filter, debounced. The
+  // member segments above filter client-side on the already-narrowed set.
+  let search = $state('');
+  let sourceFilter = $state('');
+  $effect(() => {
+    const s = search, src = sourceFilter;
+    const t = setTimeout(() => loadCandidates(s, src), 250);
+    return () => clearTimeout(t);
+  });
+
+  // Styled-dropdown option lists ({ v, l }).
+  const sourceOpts = $derived([
+    { v: '', l: 'All sources' },
+    ...sourceCtx.list.map((s) => ({ v: s.id, l: `${s.name} · ${s.platform}` }))
+  ]);
+  const platformOpts = [{ v: '', l: 'All platforms' }, ...PLATFORMS.map((p) => ({ v: p, l: p }))];
+
   let selectedId = $state(null);
-  let sel = $derived(candidateCtx.list.find((x) => x.id === selectedId) ?? candidateCtx.list[0] ?? null);
+  let sel = $derived(rows.find((x) => x.id === selectedId) ?? rows[0] ?? null);
   // Only `queued` (approve/reject) and `joined` (park) carry an operator action.
   let canDecide = $derived(sel?.state === 'queued');
   let canPark = $derived(sel?.state === 'joined');
@@ -42,8 +77,9 @@
   });
 
   onMount(() => {
-    loadCandidates();
+    // candidates load via the debounced $effect (initial empty search = all)
     loadCollectors(); // populates the approve → assigned-collector selector
+    loadSources(); // populates the source filter dropdown
   });
 
   async function approve() {
@@ -74,14 +110,27 @@
 
   <div class="body">
     <div class="table-col">
-      {#if candidateCtx.list.length}
-        <DataTable rowKey="id" columns={COLUMNS} rows={candidateCtx.list}
+      <div class="filter-bar">
+        <input class="search" type="search" placeholder="Search by name or platform id…"
+          bind:value={search} aria-label="Search candidates" />
+        <Dropdown options={sourceOpts} bind:value={sourceFilter} minWidth="190px" />
+        <Dropdown options={platformOpts} bind:value={platformFilter} minWidth="124px" />
+        <div class="segs">
+          <button class="seg" class:on={filter === 'all'} onclick={() => (filter = 'all')}>All · {candidateCtx.list.length}</button>
+          <button class="seg" class:on={filter === 'discovered'} onclick={() => (filter = 'discovered')}>Discovered · {candidateCtx.list.length - memberCount}</button>
+          <button class="seg" class:on={filter === 'member'} onclick={() => (filter = 'member')}>Already a member · {memberCount}</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+      {#if rows.length}
+        <DataTable rowKey="id" columns={COLUMNS} rows={rows}
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
       {:else}
         <p class="pnote">
-          {#if !candidateCtx.loaded}Loading…{:else if candidateCtx.error}Could not load candidates: {candidateCtx.error}{:else}No candidates discovered yet.{/if}
+          {#if !candidateCtx.loaded}Loading…{:else if candidateCtx.error}Could not load candidates: {candidateCtx.error}{:else if candidateCtx.list.length}No candidates in this view.{:else}No candidates discovered yet.{/if}
         </p>
       {/if}
+      </div>
     </div>
 
     {#if sel}
@@ -94,6 +143,7 @@
           <div class="meta">
             <span class="m"><span class="k">Group</span> {sel.group}</span>
             <span class="m"><span class="k">Platform</span> {candidateView.source ?? sel.sourceId.slice(0, 8)}</span>
+            <span class="m"><span class="k">Membership</span> {sel.memberDialog ? 'account is a member' : 'discovered (not joined)'}</span>
             {#if sel.kindHint}<span class="m"><span class="k">Kind</span> {sel.kindHint}</span>{/if}
             <span class="m"><span class="k">Group ID</span> {sel.platformGroupId}</span>
             <span class="m"><span class="k">Score</span> {sel.scoreText}</span>
@@ -175,7 +225,16 @@
   .pending { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
-  .table-col { min-height: 0; overflow: auto; }
+  .table-col { min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .table-scroll { flex: 1; min-height: 0; overflow: auto; }
+  .filter-bar { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
+  .segs { display: flex; gap: 6px; }
+  .search { flex: 1 1 220px; min-width: 160px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .search::placeholder { color: var(--text-faint); }
+  .seg { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; }
+  .seg:hover { color: var(--text-body); border-color: var(--accent); }
+  .seg.on { color: var(--accent-text); border-color: var(--accent); background: var(--panel); }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 

@@ -20,7 +20,7 @@ from pydantic import Field, model_validator
 
 from eyenet.contracts.candidate import GroupCandidateRow
 from eyenet.contracts.enums import CandidateState, GroupKind
-from eyenet.contracts.incident import IncidentLabelRow
+from eyenet.contracts.incident import IncidentLabelRow, MessageGeoRow, ThreadSummaryRow
 from eyenet.models.group import GroupTable
 from eyenet.models.message import MessageTable
 
@@ -49,6 +49,28 @@ def _status(row: GroupCandidateRow) -> str:
         # Direct dialog member vs only reachable via descent.
         return "member_unmonitored" if row.member_dialog else "discovered"
     return _STATUS.get(row.state, row.state.value)
+
+
+# Reverse of `_status`: an operator-facing status -> the candidate filter that
+# selects it, as (states, member_dialog). `member_unmonitored`/`discovered`
+# span DISCOVERED+QUEUED and split on member_dialog; the rest are single-state.
+_STATUS_FILTER: dict[str, tuple[list[CandidateState], bool | None]] = {
+    "monitored": ([CandidateState.JOINED], None),
+    "joining": ([CandidateState.JOINING], None),
+    "requested": ([CandidateState.REQUESTED], None),
+    "approving": ([CandidateState.APPROVED], None),
+    "rejected": ([CandidateState.REJECTED], None),
+    "failed": ([CandidateState.FAILED], None),
+    "parked": ([CandidateState.PARKED], None),
+    "member_unmonitored": ([CandidateState.DISCOVERED, CandidateState.QUEUED], True),
+    "discovered": ([CandidateState.DISCOVERED, CandidateState.QUEUED], False),
+}
+
+
+def status_filter(status: str) -> tuple[list[CandidateState], bool | None]:
+    """Map an operator-facing status to (states, member_dialog). Raises
+    ``KeyError`` for an unknown status (the endpoint turns that into a 400)."""
+    return _STATUS_FILTER[status]
 
 
 class GroupSummary(ApiSchema):
@@ -132,6 +154,7 @@ class GroupMessage(ApiSchema):
     evidence_ref: str
     platform_msgid: str
     ts: datetime
+    actor_id: UUID  # the author, for "open a case on this author"
     author_display: str | None = None
     author_username: str | None = None
     body: str
@@ -143,6 +166,12 @@ class GroupMessage(ApiSchema):
     corrected_labels: list[str] | None = None  # operator ground-truth (None = uncorrected)
     corrected_by: str | None = None
     corrected_at: datetime | None = None
+    victim_country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="WHERE (victim): ISO 3166-1 alpha-2; None if unknown/mixed/unattributed.",
+    )
 
     @classmethod
     def from_message(
@@ -150,6 +179,7 @@ class GroupMessage(ApiSchema):
         msg: MessageTable,
         incident_labels: list[str] | None = None,
         correction: IncidentLabelRow | None = None,
+        geo: MessageGeoRow | None = None,
     ) -> GroupMessage:
         ss = msg.source_specific or {}
         return cls(
@@ -157,6 +187,7 @@ class GroupMessage(ApiSchema):
             evidence_ref=msg.evidence_ref,
             platform_msgid=msg.platform_msgid,
             ts=msg.sent_at_source,
+            actor_id=msg.actor_id,
             author_display=_s(ss.get("author_display")),
             author_username=_s(ss.get("author_username")),
             body=msg.body,
@@ -168,6 +199,7 @@ class GroupMessage(ApiSchema):
             corrected_labels=list(correction.labels) if correction is not None else None,
             corrected_by=correction.decided_by if correction is not None else None,
             corrected_at=correction.decided_at if correction is not None else None,
+            victim_country=geo.country if geo is not None else None,
         )
 
 
@@ -176,25 +208,75 @@ class CursorPageGroupMessage(CursorPage[GroupMessage]):
 
 
 class GroupThread(ApiSchema):
-    """A forum thread under a category — the reader's thread-list row."""
+    """A forum thread under a category — the reader's thread-list row.
+
+    Carries the OP-anchored rollup so the list is scannable and filterable without
+    opening the thread: the thread date (OP post time), the OP's victim country, and
+    the OP's incident labels ("thread X: Y incident from Z country")."""
 
     group_id: UUID
     platform_groupid: str
     title: str | None = None
     last_observed_at: datetime
+    thread_date: datetime | None = None  # OP post time (the real thread date), if summarized
+    victim_country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="WHERE (victim): the OP's ISO 3166-1 alpha-2; None if unknown/unsummarized.",
+    )
+    incident_labels: list[str] = Field(default_factory=list)  # the OP's classifier verdict
 
     @classmethod
-    def from_group(cls, g: GroupTable) -> GroupThread:
+    def from_group(
+        cls,
+        g: GroupTable,
+        summary: ThreadSummaryRow | None = None,
+        incident_labels: list[str] | None = None,
+    ) -> GroupThread:
         return cls(
             group_id=g.id,
             platform_groupid=g.platform_groupid,
             title=g.current_title,
             last_observed_at=g.last_observed_at_ingest,
+            thread_date=summary.op_sent_at if summary is not None else None,
+            victim_country=summary.victim_country if summary is not None else None,
+            incident_labels=incident_labels or [],
         )
 
 
 class CursorPageGroupThread(CursorPage[GroupThread]):
     """200 page response for `GET /v1/groups/{category_id}/threads`."""
+
+
+class CategorySearchHit(ApiSchema):
+    """One body-search match inside a forum category, tagged with the thread it came
+    from — the reader's category-level search result (links back to that thread)."""
+
+    id: UUID
+    ts: datetime
+    author_display: str | None = None
+    body: str
+    thread_group_id: UUID
+    thread_title: str | None = None
+
+    @classmethod
+    def from_row(
+        cls, msg: MessageTable, thread_group_id: UUID, thread_title: str | None
+    ) -> CategorySearchHit:
+        ss = msg.source_specific or {}
+        return cls(
+            id=msg.id,
+            ts=msg.sent_at_source,
+            author_display=_s(ss.get("author_display")),
+            body=msg.body,
+            thread_group_id=thread_group_id,
+            thread_title=thread_title,
+        )
+
+
+class CursorPageCategorySearchHit(CursorPage[CategorySearchHit]):
+    """200 page response for `GET /v1/groups/{category_id}/search`."""
 
 
 class ForumReplyRequest(ApiSchema):
@@ -214,6 +296,8 @@ class ForumReplyResult(ApiSchema):
 
 
 __all__ = [
+    "CategorySearchHit",
+    "CursorPageCategorySearchHit",
     "CursorPageGroupMessage",
     "CursorPageGroupSummary",
     "CursorPageGroupThread",

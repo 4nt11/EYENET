@@ -8,11 +8,12 @@ map — every illegal edge raises ValueError before touching the database.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 from sqlmodel import col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -322,14 +323,33 @@ class CandidatesMixin:
         state: CandidateState | None,
         source_id: UUID | None,
         min_score: float | None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
+        q: str | None = None,
     ) -> SelectOfScalar[GroupCandidateTable]:
         stmt = select(GroupCandidateTable)
         if state is not None:
             stmt = stmt.where(GroupCandidateTable.state == state)
+        if states is not None:
+            stmt = stmt.where(col(GroupCandidateTable.state).in_(list(states)))
         if source_id is not None:
             stmt = stmt.where(GroupCandidateTable.source_id == source_id)
         if min_score is not None:
             stmt = stmt.where(col(GroupCandidateTable.score) >= min_score)
+        if member_dialog is not None:
+            stmt = stmt.where(GroupCandidateTable.member_dialog == member_dialog)
+        if q:
+            # Case-insensitive substring over the group's name + platform id. ANSI
+            # LOWER(col) LIKE '%q%' — portable, no FTS5 (same as _actor_search_clause).
+            # display_name_hint is nullable; LOWER(NULL) LIKE is NULL (unmatched),
+            # so platform_groupid still carries the match.
+            pattern = f"%{q.lower()}%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(col(GroupCandidateTable.display_name_hint)).like(pattern),
+                    func.lower(col(GroupCandidateTable.platform_groupid)).like(pattern),
+                )
+            )
         return stmt
 
     async def list_candidates(
@@ -338,18 +358,32 @@ class CandidatesMixin:
         state: CandidateState | None = None,
         source_id: UUID | None = None,
         min_score: float | None = None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
+        q: str | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[GroupCandidateRow]:
         """Triage queue (API_PLAN §4.12) — generalized over
         :meth:`list_queued_candidates` (which is QUEUED-only).
 
-        Filters compose (AND). Sort: ``score DESC, last_observed_at_ingest
-        DESC`` — the operator's most-signal-first triage order.
+        Filters compose (AND). ``states`` is a state IN (…) set (for derived
+        statuses that span DISCOVERED/QUEUED); ``member_dialog`` filters on the
+        operator-is-a-member flag. ``q`` is a case-insensitive substring over the
+        group name + platform id (the monitored-groups search, to cut through the
+        discovery firehose). Sort: ``score DESC, last_observed_at_ingest DESC`` —
+        the operator's most-signal-first triage order.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
-                self._filtered_stmt(state=state, source_id=source_id, min_score=min_score)
+                self._filtered_stmt(
+                    state=state,
+                    source_id=source_id,
+                    min_score=min_score,
+                    states=states,
+                    member_dialog=member_dialog,
+                    q=q,
+                )
                 .order_by(
                     col(GroupCandidateTable.score).desc(),
                     col(GroupCandidateTable.last_observed_at_ingest).desc(),
@@ -366,11 +400,19 @@ class CandidatesMixin:
         state: CandidateState | None = None,
         source_id: UUID | None = None,
         min_score: float | None = None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
+        q: str | None = None,
     ) -> int:
         """Count candidates matching the same filters as :meth:`list_candidates`."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             inner = self._filtered_stmt(
-                state=state, source_id=source_id, min_score=min_score
+                state=state,
+                source_id=source_id,
+                min_score=min_score,
+                states=states,
+                member_dialog=member_dialog,
+                q=q,
             ).subquery()
             result = await session.exec(select(func.count()).select_from(inner))
             return int(result.one())

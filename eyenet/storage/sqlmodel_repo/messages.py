@@ -28,6 +28,24 @@ from eyenet.models import (
 
 from ._helpers import safe_session
 
+
+@dataclass(frozen=True)
+class DiscoveryBackfillMessage:
+    """One stored message, for the discovery backfill. The observing collector
+    is resolved per-source by the caller (message_observation is not reliably
+    populated for historical rows), and per-group lineage is cached by the
+    caller — so this carries only what is on the message row itself."""
+
+    id: UUID
+    source_id: UUID
+    group_id: UUID
+    actor_id: UUID
+    evidence_ref: str
+    body: str
+    sent_at_source: datetime
+    ingested_at: datetime
+
+
 _log = structlog.get_logger()
 _tracer = trace.get_tracer("eyenet.storage.sqlmodel_repo.messages")
 
@@ -407,17 +425,21 @@ class MessagesMixin:
         *,
         limit: int,
         offset: int = 0,
+        q: str | None = None,
     ) -> list[object]:
         """Messages in a group (a forum thread / chat), OLDEST-first.
 
         A thread reads top-to-bottom, so unlike the actor timeline this orders
         ascending. Returns ``MessageTable`` rows (type-erased) for the reader.
+        ``q`` free-text-matches the body (the reader's in-context search), scoped to
+        this group — FTS5 on SQLite via the ``_body_match`` seam, LIKE elsewhere.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(MessageTable).where(MessageTable.group_id == group_id)
+            if q:
+                stmt = stmt.where(self._body_match(q))  # type: ignore[attr-defined]
             stmt = (
-                select(MessageTable)
-                .where(MessageTable.group_id == group_id)
-                .order_by(col(MessageTable.sent_at_source).asc())
+                stmt.order_by(col(MessageTable.sent_at_source).asc())
                 .order_by(col(MessageTable.id).asc())
                 .limit(limit)
                 .offset(offset)
@@ -425,14 +447,17 @@ class MessagesMixin:
             result = await session.exec(stmt)
             return list(result)
 
-    async def count_messages_for_group(self, group_id: UUID) -> int:
-        """Count messages in a group."""
+    async def count_messages_for_group(self, group_id: UUID, *, q: str | None = None) -> int:
+        """Count messages in a group (``q`` scopes the same body search as
+        :meth:`messages_for_group`, so the reader's estimated_total matches its page)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(func.count())
                 .select_from(MessageTable)
                 .where(MessageTable.group_id == group_id)
             )
+            if q:
+                stmt = stmt.where(self._body_match(q))  # type: ignore[attr-defined]
             result = await session.exec(stmt)
             return int(result.one())
 
@@ -456,5 +481,36 @@ class MessagesMixin:
                 return None
             return UUID(str(row))
 
+    async def messages_for_discovery_backfill(
+        self, *, limit: int, after_id: UUID | None = None
+    ) -> list[DiscoveryBackfillMessage]:
+        """Page the whole corpus (keyset by id ASC) — the one-shot discovery
+        backfill primitive.
 
-__all__ = ["MessagesMixin"]
+        uuid7 ids are time-ordered, so keyset paging on ``id`` is stable and
+        offset-free over hundreds of thousands of rows. Pass the last id back
+        as ``after_id`` to continue; an empty list ends the walk. The observing
+        collector is NOT joined here (message_observation is not reliably
+        populated for historical rows) — the caller attributes the mention to a
+        collector on the message's source."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(MessageTable).order_by(col(MessageTable.id).asc()).limit(limit)
+            if after_id is not None:
+                stmt = stmt.where(col(MessageTable.id) > after_id)
+            result = await session.exec(stmt)
+            return [
+                DiscoveryBackfillMessage(
+                    id=msg.id,
+                    source_id=msg.source_id,
+                    group_id=msg.group_id,
+                    actor_id=msg.actor_id,
+                    evidence_ref=msg.evidence_ref,
+                    body=msg.body,
+                    sent_at_source=msg.sent_at_source,
+                    ingested_at=msg.ingested_at,
+                )
+                for msg in result
+            ]
+
+
+__all__ = ["DiscoveryBackfillMessage", "MessagesMixin"]

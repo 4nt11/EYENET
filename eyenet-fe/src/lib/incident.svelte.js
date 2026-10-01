@@ -1,5 +1,6 @@
-// Incidents triage state. List from GET /v1/incidents (a plain array, newest
-// first; optional ?label= filters to one taxonomy head). Read-only: each row
+// Incidents triage state. List from GET /v1/incidents (a CursorPage envelope:
+// { items, next_cursor, estimated_total }, newest first; optional ?label= filters
+// to one taxonomy head, ?include_total=1 asks for the count). Read-only: each row
 // carries everything the dossier shows (labels, per-head scores, model version,
 // timestamp), so selecting one needs no second fetch. Svelte 5 runes in a module,
 // same shape as linkage.svelte.js.
@@ -18,6 +19,7 @@ function mapIncident(r) {
     groupId: r.group_id ?? null, // group id (drives the group filter)
     actorId: r.actor_id ?? null, // WHO: sender actor (dossier link)
     actorHandle: r.actor_handle ?? null,
+    victimCountry: r.victim_country ?? null, // WHERE (victim): ISO alpha-2, null if unknown
     labels: r.labels ?? [],
     // per-head scores as [label, prob] rows, highest first (for the detail pane)
     scoreRows: Object.entries(scores).sort((a, b) => b[1] - a[1]),
@@ -32,6 +34,9 @@ function mapIncident(r) {
 
 export const incidentCtx = $state({
   list: [],
+  total: null, // estimated_total from the page envelope (null until loaded / if unavailable)
+  nextCursor: null, // opaque cursor for the next page, null when this is the last
+  loadingMore: false, // guards the "Load more" append against double-fire
   loaded: false,
   error: null,
   labels: [],
@@ -39,8 +44,24 @@ export const incidentCtx = $state({
   groupIds: [],
   groups: [], // {id, title, count} for the group filter (full set, not window-limited)
   sourceIds: [],
-  sources: [] // {id, title, count} for the source-level filter (e.g. a whole forum)
+  sources: [], // {id, title, count} for the source-level filter (e.g. a whole forum)
+  countryCodes: [], // selected ISO alpha-2 victim-country filter (show-only)
+  countries: [] // {code, count} options for the victim-country filter
 });
+
+// Build the /v1/incidents query from the current filter set (+ optional cursor for the
+// next page). One builder so loadIncidents and loadMoreIncidents can never diverge on
+// which filters they apply — the pager must page the SAME filtered set.
+function incidentsQuery(cursor) {
+  const params = new URLSearchParams({ limit: '200', include_total: '1' });
+  for (const l of incidentCtx.labels) params.append('label', l); // repeated ?label= (OR)
+  for (const g of incidentCtx.groupIds) params.append('group_id', g); // show-only groups
+  for (const s of incidentCtx.sourceIds) params.append('source_id', s); // show-only sources
+  for (const c of incidentCtx.countryCodes) params.append('victim_country', c); // show-only countries
+  if (incidentCtx.q) params.set('q', incidentCtx.q); // free-text over message body (FTS5)
+  if (cursor) params.set('cursor', cursor); // opaque next-page cursor
+  return `/v1/incidents?${params}`;
+}
 
 // The complete set of groups that have incidents (noisiest first) — populates the group
 // filter independently of the 200-row feed window. Load once; it grows slowly.
@@ -78,27 +99,65 @@ export async function loadIncidentSources() {
   }
 }
 
-// labels: taxonomy leaves (OR filter, repeated ?label=). groupIds: show ONLY these groups
-// (repeated ?group_id=); sourceIds: show ONLY these sources (?source_id=); empty = all.
-export async function loadIncidents(labels = [], q = '', groupIds = [], sourceIds = []) {
+// The complete set of resolved victim COUNTRIES that have incidents (noisiest first) —
+// the victim-country filter's options. ?q= is a body search and never matched the geo
+// verdict, so this is how you actually find "Chile incidents".
+export async function loadIncidentCountries() {
+  try {
+    const rows = await apiGet('/v1/incidents/countries', { auth: true });
+    if (Array.isArray(rows)) {
+      incidentCtx.countries = rows.map((c) => ({ code: c.country, count: c.count }));
+    }
+  } catch {
+    // Non-critical: leaves the country filter empty; feed and other filters unaffected.
+  }
+}
+
+// labels: taxonomy leaves (OR, repeated ?label=). groupIds/sourceIds/countryCodes: show
+// ONLY those groups/sources/victim-countries (repeated params); empty = all. Replaces the
+// list with the first page and resets the cursor.
+export async function loadIncidents(
+  labels = [],
+  q = '',
+  groupIds = [],
+  sourceIds = [],
+  countryCodes = []
+) {
   incidentCtx.labels = labels;
   incidentCtx.q = q;
   incidentCtx.groupIds = groupIds;
   incidentCtx.sourceIds = sourceIds;
-  const params = new URLSearchParams({ limit: '200' });
-  for (const l of labels) params.append('label', l); // repeated ?label=a&label=b (OR)
-  for (const g of groupIds) params.append('group_id', g); // show-only ?group_id=a&group_id=b
-  for (const s of sourceIds) params.append('source_id', s); // show-only ?source_id=a&source_id=b
-  if (q) params.set('q', q); // free-text over message body (FTS5 on the backend)
+  incidentCtx.countryCodes = countryCodes;
   try {
-    const rows = await apiGet(`/v1/incidents?${params}`, { auth: true });
-    incidentCtx.list = rows.map(mapIncident);
+    // GET /v1/incidents is a CursorPage envelope: { items, next_cursor, estimated_total }.
+    const page = await apiGet(incidentsQuery(), { auth: true });
+    incidentCtx.list = (page.items ?? []).map(mapIncident);
+    incidentCtx.total = page.estimated_total ?? null;
+    incidentCtx.nextCursor = page.next_cursor ?? null;
     incidentCtx.error = null;
   } catch (e) {
     incidentCtx.error = e.message ?? String(e);
     incidentCtx.list = [];
+    incidentCtx.total = null;
+    incidentCtx.nextCursor = null;
   } finally {
     incidentCtx.loaded = true;
+  }
+}
+
+// Append the next cursor page (the "Load more" action). Same filter set as loadIncidents
+// via incidentsQuery, so paging never silently changes what's filtered.
+export async function loadMoreIncidents() {
+  if (!incidentCtx.nextCursor || incidentCtx.loadingMore) return;
+  incidentCtx.loadingMore = true;
+  try {
+    const page = await apiGet(incidentsQuery(incidentCtx.nextCursor), { auth: true });
+    incidentCtx.list = [...incidentCtx.list, ...(page.items ?? []).map(mapIncident)];
+    incidentCtx.nextCursor = page.next_cursor ?? null;
+  } catch (e) {
+    incidentCtx.error = e.message ?? String(e);
+  } finally {
+    incidentCtx.loadingMore = false;
   }
 }
 

@@ -158,6 +158,16 @@ class CaseMemberBulkAddRequest(ApiSchema):
     add_reason: str = Field(min_length=16, max_length=1024)
 
 
+class CaseActorAddRequest(ApiSchema):
+    """Body for POST /v1/cases/{case_id}/members/by-actor: add an actor and, optionally,
+    every post we hold by them (server-side, batched). The reader's 'open a case on this
+    author' action."""
+
+    actor_id: UUID
+    include_posts: bool = True
+    add_reason: str = Field(min_length=16, max_length=1024)
+
+
 class CaseMemberBulkRemoveRequest(ApiSchema):
     """Body for POST /v1/cases/{case_id}/members/bulk-remove. Atomic, up to 500 ids."""
 

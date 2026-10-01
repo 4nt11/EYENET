@@ -66,9 +66,7 @@ class ManualCrewsMixin:
                     select(ManualCrewTable).order_by(col(ManualCrewTable.updated_at).desc())
                 )
             ).all()
-            return [
-                (c.id, c.name, c.notes, int(counts.get(c.id, 0)), c.updated_at) for c in crews
-            ]
+            return [(c.id, c.name, c.notes, int(counts.get(c.id, 0)), c.updated_at) for c in crews]
 
     async def get_manual_crew(self, crew_id: UUID) -> ManualCrewDetail | None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
@@ -90,9 +88,7 @@ class ManualCrewsMixin:
             ]
             return (crew.name, crew.notes, crew.created_at, crew.updated_at, members)
 
-    async def add_manual_crew_member(
-        self, *, crew_id: UUID, actor_id: UUID, now: datetime
-    ) -> bool:
+    async def add_manual_crew_member(self, *, crew_id: UUID, actor_id: UUID, now: datetime) -> bool:
         """Add an actor to a crew (idempotent). Returns False if the crew is gone."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             crew = (
@@ -109,9 +105,7 @@ class ManualCrewsMixin:
                 )
             ).first()
             if existing is None:
-                session.add(
-                    ManualCrewMemberTable(crew_id=crew_id, actor_id=actor_id, added_at=now)
-                )
+                session.add(ManualCrewMemberTable(crew_id=crew_id, actor_id=actor_id, added_at=now))
                 crew.updated_at = now
                 session.add(crew)
             await session.commit()
@@ -138,9 +132,7 @@ class ManualCrewsMixin:
     async def delete_manual_crew(self, crew_id: UUID) -> None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             await session.exec(
-                delete(ManualCrewMemberTable).where(
-                    col(ManualCrewMemberTable.crew_id) == crew_id
-                )
+                delete(ManualCrewMemberTable).where(col(ManualCrewMemberTable.crew_id) == crew_id)
             )
             await session.exec(delete(ManualCrewTable).where(col(ManualCrewTable.id) == crew_id))
             await session.commit()

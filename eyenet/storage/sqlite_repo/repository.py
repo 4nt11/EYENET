@@ -32,11 +32,10 @@ from eyenet.models.file_access import FileAccessAcknowledgmentTable
 from eyenet.storage.sqlite_repo.database import (
     get_async_engine,
     get_sync_engine,
-    init_audit_db,
     init_lock,
-    init_main_db,
     open_in_memory_async_engine,
     open_in_memory_sync_engine,
+    upgrade_to_head,
 )
 from eyenet.storage.sqlmodel_repo import SQLModelRepository
 from eyenet.storage.sqlmodel_repo._helpers import safe_session
@@ -46,12 +45,17 @@ from eyenet.storage.sqlmodel_repo.file_access import (
     _PreparedJournalRow,
 )
 
+# The trailing ``seq`` column is the portable monotonic chain-walk order (the
+# READ mixins order by it, not by SQLite rowid). It is NOT a field on
+# AuditLogRow — the append computes it as MAX(seq)+1 inside the serialized
+# BEGIN IMMEDIATE transaction and binds it as the final value, after the
+# AuditLogRow-derived columns in ``_AUDIT_INSERT_COLS``.
 _AUDIT_INSERT_SQL = (
     "INSERT INTO audit_log ("
     "id, event, service, instance_id, system_user_id, subject_kind, "
     "subject_id, evidence_ref, trace_id, span_id, payload, at, "
-    "prev_hash, self_hash"
-    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "prev_hash, self_hash, seq"
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 _AUDIT_INSERT_COLS: tuple[str, ...] = (
     "id",
@@ -75,8 +79,8 @@ _FILE_ACCESS_INSERT_SQL = (
     "access_id, audit_event_id, user_id, grant_id, content_hash, "
     "content_size, content_mime, tier, served_at, served_via, "
     "acknowledgment_id, operator_signature, signing_pubkey_fingerprint, "
-    "prev_journal_hash, self_hash"
-    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "prev_journal_hash, self_hash, seq"
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -99,8 +103,7 @@ class SQLiteRepository(SQLModelRepository):
             audit_name = f"eyenet-audit-{_uuid.uuid4().hex}"
             self.sync_engine = open_in_memory_sync_engine(main_name)
             self.audit_sync_engine = open_in_memory_sync_engine(audit_name)
-            init_main_db(self.sync_engine)
-            init_audit_db(self.audit_sync_engine)
+            upgrade_to_head(self.sync_engine, self.audit_sync_engine)
             self.engine = open_in_memory_async_engine(main_name)
             self.audit_engine = open_in_memory_async_engine(audit_name)
         else:
@@ -110,8 +113,7 @@ class SQLiteRepository(SQLModelRepository):
             with init_lock(data_dir):
                 self.sync_engine = get_sync_engine(data_dir / "main.db")
                 self.audit_sync_engine = get_sync_engine(data_dir / "audit.db")
-                init_main_db(self.sync_engine)
-                init_audit_db(self.audit_sync_engine)
+                upgrade_to_head(self.sync_engine, self.audit_sync_engine)
                 self.engine = get_async_engine(data_dir / "main.db")
                 self.audit_engine = get_async_engine(data_dir / "audit.db")
 
@@ -147,8 +149,15 @@ class SQLiteRepository(SQLModelRepository):
         return row
 
     async def _append_chain(self, row_data: dict[str, Any]) -> AuditLogRow:
-        raw_conn = await self.audit_engine.raw_connection()
-        try:
+        # Async connection context, NOT raw_connection() + a sync close(): on an
+        # aiosqlite engine the pool's reset-on-return runs a rollback that must be
+        # awaited inside a greenlet. `async with connect()` closes via await so the
+        # reset runs in-greenlet; a sync raw_conn.close() cannot, so every audit
+        # write raised MissingGreenlet on reset — caught + logged by SQLAlchemy
+        # (row still persisted) but it invalidated and hard-closed the connection
+        # each time (37k churned connections + tracebacks on the linker).
+        async with self.audit_engine.connect() as conn:
+            raw_conn = await conn.get_raw_connection()
             driver = raw_conn.driver_connection  # aiosqlite.Connection
             if driver is None:  # pragma: no cover
                 raise RuntimeError("audit engine returned no DBAPI connection")
@@ -158,9 +167,14 @@ class SQLiteRepository(SQLModelRepository):
                 cur = await driver.cursor()
                 try:
                     await cur.execute("BEGIN IMMEDIATE")
-                    await cur.execute("SELECT self_hash FROM audit_log ORDER BY rowid DESC LIMIT 1")
+                    await cur.execute(
+                        "SELECT seq, self_hash FROM audit_log ORDER BY seq DESC LIMIT 1"
+                    )
                     last = await cur.fetchone()
-                    prev = last[0] if last is not None else GENESIS_PREV_HASH
+                    # MAX(seq)+1 is race-free INSIDE this serialized BEGIN
+                    # IMMEDIATE transaction (the single-writer invariant).
+                    next_seq = 1 if last is None else int(last[0]) + 1
+                    prev = last[1] if last is not None else GENESIS_PREV_HASH
                     row = AuditLogRow(
                         prev_hash=prev,
                         self_hash="0" * 64,
@@ -178,7 +192,8 @@ class SQLiteRepository(SQLModelRepository):
                         json.dumps(data[c]) if isinstance(data[c], (dict, list)) else data[c]
                         for c in _AUDIT_INSERT_COLS
                     )
-                    await cur.execute(_AUDIT_INSERT_SQL, values)
+                    # seq is not an AuditLogRow field — bind it as the final value.
+                    await cur.execute(_AUDIT_INSERT_SQL, (*values, next_seq))
                     await cur.execute("COMMIT")
                 except BaseException:
                     with contextlib.suppress(Exception):
@@ -189,8 +204,6 @@ class SQLiteRepository(SQLModelRepository):
                 return row
             finally:
                 driver.isolation_level = prior_isolation
-        finally:
-            raw_conn.close()
 
     def _write_ndjson(self, row: AuditLogRow) -> None:
         if self._ndjson is None:
@@ -228,8 +241,10 @@ class SQLiteRepository(SQLModelRepository):
         require_nonce: bool,
         now: datetime,
     ) -> UUID:
-        raw_conn = await self.audit_engine.raw_connection()
-        try:
+        # See _append_chain: async connect() so the pool reset rollback runs
+        # in-greenlet (a sync raw_conn.close() raises MissingGreenlet on aiosqlite).
+        async with self.audit_engine.connect() as conn:
+            raw_conn = await conn.get_raw_connection()
             driver = raw_conn.driver_connection  # aiosqlite.Connection
             if driver is None:  # pragma: no cover
                 raise RuntimeError("audit engine returned no DBAPI connection")
@@ -248,13 +263,15 @@ class SQLiteRepository(SQLModelRepository):
                     if require_nonce:
                         await self._consume_nonce_locked(cur, prepared.acknowledgment_id, now)
                     await cur.execute(
-                        "SELECT self_hash FROM file_access_journal ORDER BY rowid DESC LIMIT 1"
+                        "SELECT seq, self_hash FROM file_access_journal ORDER BY seq DESC LIMIT 1"
                     )
                     last = await cur.fetchone()
-                    prev = bytes(last[0]) if last is not None else GENESIS_JOURNAL_HASH
+                    next_seq = 1 if last is None else int(last[0]) + 1
+                    prev = bytes(last[1]) if last is not None else GENESIS_JOURNAL_HASH
                     self_hash = prepared.self_hash(prev)
                     values = self._file_access_insert_values(prepared, prev, self_hash)
-                    await cur.execute(_FILE_ACCESS_INSERT_SQL, values)
+                    # seq bound as the final value (see _FILE_ACCESS_INSERT_SQL).
+                    await cur.execute(_FILE_ACCESS_INSERT_SQL, (*values, next_seq))
                     await cur.execute("COMMIT")
                 except BaseException:
                     with contextlib.suppress(Exception):
@@ -265,8 +282,6 @@ class SQLiteRepository(SQLModelRepository):
                 return prepared.access_id
             finally:
                 driver.isolation_level = prior_isolation
-        finally:
-            raw_conn.close()
 
     @staticmethod
     async def _consume_nonce_locked(cur: Any, nonce: UUID | None, now: datetime) -> None:

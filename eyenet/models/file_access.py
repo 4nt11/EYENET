@@ -30,7 +30,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Index, LargeBinary, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Index, LargeBinary, UniqueConstraint
 from sqlmodel import Column, Field, SQLModel
 
 from eyenet.contracts.enums import FileServedVia, SensitivityTier
@@ -177,6 +177,10 @@ class FileAccessJournalTable(SQLModel, table=True):
     )
 
     access_id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    # Monotonic insertion sequence — the PORTABLE chain-walk order (mirrors
+    # AuditLogTable.seq; replaces the SQLite-only implicit rowid). Assigned inside
+    # the serialized append. Nullable in the ORM for the add-then-backfill path.
+    seq: int | None = Field(default=None, index=True, sa_type=BigInteger)
     # Cross-store reference to the ``audit_log`` row this access also emitted
     # (main.db audit chain). Nullable for now — no FK across physical stores
     # (mirrors the clearance-grant / signing-key cross-store convention).
@@ -188,7 +192,7 @@ class FileAccessJournalTable(SQLModel, table=True):
     grant_id: UUID | None = None
     # 32-byte sha256 of the served bytes — the exoneration key.
     content_hash: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
-    content_size: int
+    content_size: int = Field(sa_type=BigInteger)  # byte count: 64-bit (see message.attachment)
     content_mime: str
     tier: SensitivityTier
     served_at: datetime

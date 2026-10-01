@@ -51,7 +51,9 @@
   .dossier-head.accent { border-left-color: var(--accent); }
   .head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .dh-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-  .filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex: 1; min-width: 0; }
+  /* Don't shrink below content: a long title wraps to fill the left instead of
+     squeezing the filters into a second row (flex:1 0 auto = grow, never shrink). */
+  .filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex: 1 0 auto; min-width: 0; }
   .body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; }
 
   /* Shared filter-bar helpers so consumers don't re-style the common bits. */

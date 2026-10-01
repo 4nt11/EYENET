@@ -702,12 +702,29 @@ class BaseRepository(ABC):
         q: str | None = None,
         group_ids: list[UUID] | None = None,
         source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
+        exclude_bodyless: bool = False,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters in
         the query (OR across the given leaves; rare leaves found regardless of recency);
         ``q`` free-text-matches the message body; ``group_ids`` restricts to incidents in the
-        given groups (show-only channels); ``source_ids`` restricts to sources; ``offset``
-        pages."""
+        given groups (show-only channels); ``source_ids`` restricts to sources;
+        ``victim_countries`` keeps only incidents whose geo verdict is one of the given ISO
+        alpha-2 codes; ``exclude_bodyless`` drops content-less rows in SQL; ``offset`` pages."""
+
+    @abstractmethod
+    async def count_incidents(
+        self,
+        *,
+        labels: list[str] | None = None,
+        q: str | None = None,
+        group_ids: list[UUID] | None = None,
+        source_ids: list[UUID] | None = None,
+        victim_countries: list[str] | None = None,
+        exclude_bodyless: bool = False,
+    ) -> int:
+        """Total incidents matching the same filters as :meth:`recent_incidents`
+        (no offset/limit) — the triage feed's ``estimated_total``."""
 
     @abstractmethod
     async def incident_groups(self) -> list[tuple[UUID, str | None, UUID, int]]:
@@ -720,6 +737,11 @@ class BaseRepository(ABC):
         noisiest first — the source-level feed filter."""
 
     @abstractmethod
+    async def incident_countries(self) -> list[tuple[str, int]]:
+        """Distinct resolved victim countries with at least one incident as
+        (country_alpha2, count), noisiest first — the victim-country feed filter."""
+
+    @abstractmethod
     async def messages_without_incidents(
         self, *, limit: int = 500, after_id: UUID | None = None
     ) -> list[tuple[UUID, str]]:
@@ -728,6 +750,22 @@ class BaseRepository(ABC):
         The backfill query: classify pre-existing messages that arrived before the
         classifier service was running. Keyset-paginated by ``id`` (UUID7 is time-
         ordered), so pass the last returned id as ``after_id`` for the next page."""
+
+    @abstractmethod
+    async def messages_needing_geo(self, *, limit: int = 500) -> list[tuple[UUID, str, str | None]]:
+        """(message_id, body, thread_title) for incident messages with no geo row yet.
+
+        The geo-attribution service's work queue. A message is an incident if the classifier
+        flagged it OR an operator gave it a non-empty true-label set via the reader (rescued
+        messages the young model missed). Excludes already-attributed messages. Oldest first."""
+
+    @abstractmethod
+    async def put_message_geo_bulk(self, geo_rows: list[object]) -> None:
+        """Persist many :class:`MessageGeoRow` in one session (append-only, unique per msg)."""
+
+    @abstractmethod
+    async def message_geo_by_message_ids(self, message_ids: list[UUID]) -> dict[UUID, object]:
+        """Bulk {message_id: MessageGeoRow} of victim-country verdicts (feed enrichment)."""
 
     @abstractmethod
     async def set_incident_label(
@@ -1140,9 +1178,12 @@ class BaseRepository(ABC):
     @abstractmethod
     async def get_manual_crew(
         self, crew_id: UUID
-    ) -> tuple[
-        str, str | None, datetime, datetime, list[tuple[UUID, str | None, str | None, datetime]]
-    ] | None:
+    ) -> (
+        tuple[
+            str, str | None, datetime, datetime, list[tuple[UUID, str | None, str | None, datetime]]
+        ]
+        | None
+    ):
         """(name, notes, created_at, updated_at, members) or None; member =
         (actor_id, handle, display_name, added_at)."""
 
@@ -1201,13 +1242,25 @@ class BaseRepository(ABC):
         *,
         limit: int,
         offset: int = 0,
+        q: str | None = None,
     ) -> list[object]:
         """Messages in a group (forum thread / chat), oldest-first. Returns
-        MessageTable rows (type-erased) for the thread reader."""
+        MessageTable rows (type-erased) for the thread reader. ``q`` free-text-matches
+        the body, scoped to this group (the reader's in-context search)."""
 
     @abstractmethod
-    async def count_messages_for_group(self, group_id: UUID) -> int:
-        """Count messages in a group."""
+    async def count_messages_for_group(self, group_id: UUID, *, q: str | None = None) -> int:
+        """Count messages in a group (``q`` scopes the same body search as
+        :meth:`messages_for_group`)."""
+
+    @abstractmethod
+    async def messages_for_discovery_backfill(
+        self, *, limit: int, after_id: UUID | None = None
+    ) -> list[object]:
+        """Page the whole corpus (keyset by id ASC) joined to each message's
+        first-sighting collector, for the one-shot discovery backfill. Returns
+        ``DiscoveryBackfillMessage`` rows (type-erased); pass the last id back as
+        ``after_id`` to continue. Empty list ends the walk."""
 
     @abstractmethod
     async def record_forum_thread_link(
@@ -1228,8 +1281,95 @@ class BaseRepository(ABC):
         category_platform_groupid: str,
         limit: int,
         offset: int = 0,
-    ) -> list[object]:
-        """FORUM_THREAD groups discovered under a category, most-recent-first."""
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+        sort: str = "recent",
+    ) -> list[tuple[object, object | None]]:
+        """FORUM_THREAD groups under a category, each with its OP-anchored thread summary.
+
+        Returns (GroupTable, ThreadSummaryRow-like | None). ``sort`` is "recent" (default)
+        or "date" (OP post time). ``countries`` / ``labels`` filter to threads whose OP
+        resolved to one of the ISO codes / carries any of the incident labels."""
+
+    @abstractmethod
+    async def count_threads_for_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        countries: list[str] | None = None,
+        labels: list[str] | None = None,
+    ) -> int:
+        """Total threads under a category matching the same filters as
+        :meth:`list_threads_for_category` — the list's real total, not the page cap."""
+
+    @abstractmethod
+    async def forum_threads_needing_summary(
+        self, *, limit: int = 500
+    ) -> list[tuple[UUID, str | None, UUID, str, datetime]]:
+        """(group_id, title, op_message_id, op_body, op_sent_at) for FORUM_THREAD groups
+        with no summary yet — the geo worker's thread-rollup queue. OP = earliest post."""
+
+    @abstractmethod
+    async def put_thread_summaries_bulk(self, rows: list[object]) -> None:
+        """Persist many :class:`ThreadSummaryRow` in one session (unique per group)."""
+
+    @abstractmethod
+    async def search_messages_in_category(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        q: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[tuple[object, UUID, str | None]]:
+        """Body-search across every FORUM_THREAD under a category (the reader's
+        category-level search). Returns (MessageTable, thread_group_id, thread_title),
+        newest match first."""
+
+    @abstractmethod
+    async def count_messages_in_category(
+        self, *, source_id: UUID, category_platform_groupid: str, q: str
+    ) -> int:
+        """Total matches for :meth:`search_messages_in_category` (no offset/limit)."""
+
+    @abstractmethod
+    async def get_forum_crawl_cursor(
+        self, *, source_id: UUID, category_platform_groupid: str
+    ) -> tuple[int, bool]:
+        """Backfill progress for a category: (next_page, backfill_complete).
+
+        Returns (1, False) when no cursor row exists yet (start from the top).
+        """
+
+    @abstractmethod
+    async def set_forum_crawl_cursor(
+        self,
+        *,
+        source_id: UUID,
+        category_platform_groupid: str,
+        next_page: int,
+        backfill_complete: bool,
+        updated_at: datetime,
+    ) -> None:
+        """Persist (upsert) backfill progress for a category."""
+
+    @abstractmethod
+    async def resolve_or_bind_forum_thread(
+        self,
+        *,
+        source_id: UUID,
+        canonical_tid: str,
+        fallback_platform_groupid: str,
+    ) -> str:
+        """Stable group key for a thread's canonical tid (first-seen wins).
+
+        Returns the ``platform_groupid`` already bound to ``canonical_tid`` for
+        this source; if none, binds ``fallback_platform_groupid`` and returns it.
+        Lets a moved/re-slugged thread (same tid, new slug) resolve to the
+        original thread's key instead of creating a duplicate.
+        """
 
     @abstractmethod
     async def create_forum_reply_request(
@@ -1926,6 +2066,24 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def bind_collector_source(
+        self,
+        *,
+        collector_id: UUID,
+        source_id: UUID,
+    ) -> CollectorRow:
+        """Rebind a collector to the source it actually ingests into.
+
+        System-initiated, NOT operator metadata (so it stays off the PATCH
+        surface): a collector registers against a placeholder source but at
+        connect upserts its real per-identity source and ingests there. Without
+        this rebind, ``collector.source_id`` points at an empty placeholder and
+        any collector→source join (fleet UI, messages-by-collector) reads zero
+        rows for a healthy collector. Idempotent. Raises :class:`ValueError` if
+        the collector is missing.
+        """
+
+    @abstractmethod
     async def collector_fleet_health(self) -> CollectorFleetHealth:
         """Fleet snapshot — counts by observed_state, oldest live heartbeat,
         restart-storm leader (API_PLAN §3.9, M9.D2)."""
@@ -2072,13 +2230,20 @@ class BaseRepository(ABC):
         state: CandidateState | None = None,
         source_id: UUID | None = None,
         min_score: float | None = None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
+        q: str | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[GroupCandidateRow]:
         """Triage queue (API_PLAN §4.12, M9.D3) — generalizes
         :meth:`list_queued_candidates` to any state + score filter.
 
-        Filters compose (AND). Sort: ``score DESC, last_observed_at_ingest
+        ``q`` is a case-insensitive substring over the group name + platform id.
+
+        Filters compose (AND). ``states`` is a state-IN set (derived statuses
+        spanning DISCOVERED/QUEUED); ``member_dialog`` filters the
+        operator-is-a-member flag. Sort: ``score DESC, last_observed_at_ingest
         DESC``.
         """
 
@@ -2089,6 +2254,9 @@ class BaseRepository(ABC):
         state: CandidateState | None = None,
         source_id: UUID | None = None,
         min_score: float | None = None,
+        states: Sequence[CandidateState] | None = None,
+        member_dialog: bool | None = None,
+        q: str | None = None,
     ) -> int:
         """Count candidates matching :meth:`list_candidates` filters (M9.D3)."""
 

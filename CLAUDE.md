@@ -22,8 +22,25 @@ of services is `1`; the design scales out only where explicitly justified.
 audit every access, never hobble the operator. Bodies in `MessageTable`,
 attachments on disk, signed file-access journal for sensitive evidence.
 
-**Pre-public posture**: no Alembic, no migrations. Schema changes =
-`rm data/*.db && eyenet init`. Alembic baseline lands at v0.1.0.
+**Schema posture (as of the v0.1.0 baseline)**: Alembic is now the source of
+truth. `eyenet init` (the `SQLiteRepository` constructor) runs
+`upgrade_to_head` for both DBs — `create_all` is retired. A schema change is a
+new revision:
+
+```
+alembic revision --autogenerate -m "add foo" -x data_dir=data   # from repo root
+alembic upgrade head -x data_dir=data
+```
+
+`rm data/*.db && eyenet init` is dead for any DB you care about — the operating
+DB holds an irreplaceable corpus (see the storage memory). Destructive changes
+migrate in place (SQLite via `render_as_batch`); an existing populated DB is
+brought under Alembic with `alembic stamp 0001_baseline`, never an upgrade.
+Migrations live IN the package (`eyenet/storage/sqlite_repo/migrations/`, multi-
+db: one tree, per-file `alembic_version`) so they ship with the wheel. Raw DDL
+outside `SQLModel.metadata` (FTS5 + triggers, `vector_signature`, the partial
+UNIQUE index) is applied by the baseline and excluded from autogenerate via the
+`_RAW_DDL_OBJECTS` filter in `env.py` — never let `--autogenerate` DROP it.
 
 ---
 

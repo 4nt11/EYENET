@@ -35,16 +35,21 @@ async def candidates_list(
     state: Annotated[CandidateState | None, Query()] = None,
     source_id: Annotated[UUID | None, Query()] = None,
     min_score: Annotated[float | None, Query(ge=0.0)] = None,
+    q: Annotated[
+        str | None,
+        Query(description="Case-insensitive substring over the group name + platform id."),
+    ] = None,
 ) -> CursorPageCandidateSummary:
     rows = await storage.list_candidates(
         state=state,
         source_id=source_id,
         min_score=min_score,
+        q=q,
         limit=page.fetch_limit,
         offset=page.offset,
     )
     estimated_total = (
-        await storage.count_candidates(state=state, source_id=source_id, min_score=min_score)
+        await storage.count_candidates(state=state, source_id=source_id, min_score=min_score, q=q)
         if page.include_total
         else None
     )

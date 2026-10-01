@@ -26,16 +26,20 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
+from sqlalchemy.exc import OperationalError
 
 from eyenet.collectors.base._credentials import materialize_forum_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.collectors.forum import (
     ParsedPost,
+    parse_canonical_tid,
     parse_forum_links,
     parse_reply_form,
+    parse_subforum_links,
     parse_thread,
     parse_thread_links,
     parse_thread_title,
+    posted_at_to_utc,
     thread_page_count,
 )
 from eyenet.contracts._base import TraceContext
@@ -78,6 +82,10 @@ _DEFAULT_MAX_CATEGORY_PAGES = 0
 # So default shallow for breadth; the operator backfills a specific thread deeper
 # on demand (POST .../backfill). 0 = all pages.
 _DEFAULT_MAX_THREAD_PAGES = 1
+# How many subforum levels to descend when ENUMERATING the board tree (discovery
+# only, never crawling). 0 = index categories only (legacy). >=1 fetches each
+# forum's page to surface its child subforums as their own monitorable units.
+_DEFAULT_DISCOVERY_DEPTH = 2
 
 
 def _zero_traceparent() -> str:
@@ -116,6 +124,30 @@ def _thread_id_from_url(url: str) -> str:
     return slug
 
 
+# Section prefixes DarkForums prepends to a thread slug per forum; dropped when a
+# thread is MOVED (e.g. to Removed Content), which re-slugs it. Normalizing them
+# away lets a moved tid-less thread dedupe to its captured copy. This is the
+# FALLBACK path only (used when a thread page yields no canonical tid, which is
+# rare); the primary dedup key is the page's tid via the alias table.
+# ponytail: a short known-prefix list, extend as new sections surface. Anchored to
+# the ``Thread-`` head so an in-title "DATABASE-" mid-slug is never touched.
+_SECTION_SLUG_PREFIXES = ("DATABASE-", "STEALER-LOGS-", "STEALER-")
+
+
+def _normalize_thread_slug(key: str) -> str:
+    """Strip a leading section prefix from a ``Thread-<section>-<title>`` slug.
+
+    No-op for a numeric tid key or a slug without a known section prefix.
+    """
+    if not key.startswith("Thread-"):
+        return key
+    rest = key[len("Thread-") :]
+    for prefix in _SECTION_SLUG_PREFIXES:
+        if rest.startswith(prefix):
+            return "Thread-" + rest[len(prefix) :]
+    return key
+
+
 class MyBBForumCollector(CollectorSkeleton):
     """Cookie-session MyBB collector: fetch -> parse -> store -> publish."""
 
@@ -152,6 +184,7 @@ class MyBBForumCollector(CollectorSkeleton):
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
         self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
+        self._discovery_depth = _DEFAULT_DISCOVERY_DEPTH
         # When we last swept (monotonic) + the monitored set that sweep was for
         # (so a newly-monitored category triggers a re-sweep next tick instead of
         # waiting out the interval).
@@ -174,6 +207,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._max_thread_pages = int(
             getattr(entry, "forum_max_thread_pages", _DEFAULT_MAX_THREAD_PAGES)
         )
+        self._discovery_depth = int(
+            getattr(entry, "forum_discovery_depth", _DEFAULT_DISCOVERY_DEPTH)
+        )
 
         if self._client is None:
             cookies = materialize_forum_session(entry, self._session_key)
@@ -195,6 +231,9 @@ class MyBBForumCollector(CollectorSkeleton):
         # empty and we crawl nothing (fail-closed).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
+        # Bind our row to the source we actually ingest into (the placeholder
+        # source it was registered against has zero of our messages).
+        await self._bind_collector_row_source(collector, self._source_uuid)
         # Populate /monitored-groups with the board's categories so the operator
         # can pick which to monitor. Read-only page fetch, nothing joined.
         if await self._check_session():
@@ -224,16 +263,27 @@ class MyBBForumCollector(CollectorSkeleton):
         return await self._client.post(url, **kw)
 
     async def enumerate_visible_groups(self) -> list[VisibleGroup]:
-        """The board's categories (GroupKind.FORUM_CATEGORY) from the index.
+        """The board's forums (GroupKind.FORUM_CATEGORY), index + subforum tree.
 
-        Read-only: fetches the index and lists forums. Monitoring one is a
-        purely internal membership the operator opens by hand; nothing here (or
-        anywhere in this collector) performs a forum-side join.
+        Read-only. Lists the index's top-level forums, then descends into each
+        forum's child SUBFORUMS up to ``forum_discovery_depth`` levels, surfacing
+        every one (e.g. "Databases Removed Content") as its own monitorable unit.
+        DISCOVERY only: monitoring any of them is a purely internal membership the
+        operator opens by hand; nothing here performs a forum-side join, and the
+        crawl loop stays flat + fail-closed regardless of what is discovered.
         """
         index = await self._get("/")
         out: list[VisibleGroup] = []
-        for url in parse_forum_links(index.text):
-            slug = _last_segment(url)
+        seen: set[str] = set()
+        # BFS over the forum tree: (slug, depth). Roots are the index's forums.
+        frontier: list[tuple[str, int]] = [
+            (_last_segment(url), 0) for url in parse_forum_links(index.text)
+        ]
+        while frontier:
+            slug, depth = frontier.pop(0)
+            if slug in seen:
+                continue  # cycle guard: a subforum linking back up never loops
+            seen.add(slug)
             out.append(
                 VisibleGroup(
                     platform_groupid=slug,
@@ -242,6 +292,23 @@ class MyBBForumCollector(CollectorSkeleton):
                     is_member=True,
                 )
             )
+            if depth >= self._discovery_depth:
+                continue
+            try:
+                page = await self._get(slug)
+            except httpx.HTTPError as exc:
+                # One forum failing to enumerate must not abort the whole tree
+                # walk (a blocked/removed forum just contributes no children).
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.subforum_enumerate_failed",
+                    message=f"{self._identity_name}: {slug} subforum scan failed ({exc!r})",
+                )
+                continue
+            for child_url in parse_subforum_links(page.text):
+                child = _last_segment(child_url)
+                if child not in seen:
+                    frontier.append((child, depth + 1))
         return out
 
     async def _check_session(self) -> bool:
@@ -297,7 +364,19 @@ class MyBBForumCollector(CollectorSkeleton):
         # as we discover them (newest-first on MyBB) so posts flow from the first
         # minute instead of after a full multi-hour enumeration.
         for slug in sorted(monitored):
-            await self._crawl_category(slug)
+            try:
+                await self._crawl_category(slug)
+            except OperationalError as exc:
+                # A DB lock (SQLITE_BUSY past busy_timeout) on ONE category must not
+                # abort the whole sweep and starve the others — that is exactly what
+                # left "Stealer Logs" at 0 threads while "Databases" (swept first,
+                # alphabetically) kept dying mid-crawl. Log this pass and move on;
+                # the next tick retries the category from the top.
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.category_crawl_locked",
+                    message=f"{self._identity_name}: {slug} DB-locked, skipping pass ({exc!r})",
+                )
 
     async def _monitored_categories(self) -> list[str]:
         """Category slugs the operator chose to monitor (fail-closed if none).
@@ -314,56 +393,149 @@ class MyBBForumCollector(CollectorSkeleton):
                 slugs.append(grp.platform_groupid)
         return slugs
 
-    async def _crawl_category(self, slug: str) -> None:
-        """Walk one MONITORED category newest-page-first, scraping as we go.
+    async def _process_category_page(self, slug: str, html: str) -> int:
+        """Poll every thread linked on one category page. Returns count polled.
 
-        Read-only. Each page's threads are polled immediately (interleaved), so
-        the most recently active threads surface first and a huge category still
-        streams posts from the start instead of after a full enumeration.
+        Read-only; each thread is polled immediately (interleaved). A per-thread
+        DB lock is skipped, not fatal: the category still finishes and the next
+        sweep re-polls (newest-first, so a skip is re-picked-up promptly).
+        """
+        threads = 0
+        for thread_url in parse_thread_links(html):
+            try:
+                # Poll first: it resolves the thread's STABLE key (canonical tid
+                # via the alias) from the page, so the category->thread link is
+                # recorded under the same key the thread ingests under, not the
+                # (re-sluggable) listing URL.
+                key = await self._poll_thread(thread_url)
+                if key is not None and self._source_uuid is not None:
+                    await self._storage.record_forum_thread_link(
+                        source_id=self._source_uuid,
+                        category_platform_groupid=slug,
+                        thread_platform_groupid=key,
+                        seen_at=datetime.now(tz=UTC),
+                    )
+                threads += 1
+            except OperationalError as exc:
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.thread_crawl_locked",
+                    message=f"{self._identity_name}: {thread_url} DB-locked, skipped ({exc!r})",
+                )
+        return threads
+
+    async def _crawl_category(self, slug: str) -> None:
+        """Sweep one MONITORED category: page 1 always, deep pages by resume cursor.
+
+        Page 1 (newest, MyBB last-post-desc) is swept every time so freshly
+        active threads are never missed. Historical pages are backfilled FORWARD
+        from a persisted cursor: a restart or scheduled re-sweep resumes where it
+        left off instead of re-paying the throttle to re-scrape already-stored top
+        pages. Once the last page is reached the category latches complete and
+        later sweeps stay page-1-only (the archive is compiled; from then on we
+        only track the newest). To re-backfill, reset the cursor row by hand.
         """
         _log.info("forum.category_sweep_start", identity=self._identity_name, category=slug)
-        page = 1
-        last = 1
-        threads = 0
-        while True:
+        cursor_page, complete = 1, False
+        if self._source_uuid is not None:
+            cursor_page, complete = await self._storage.get_forum_crawl_cursor(
+                source_id=self._source_uuid, category_platform_groupid=slug
+            )
+        # Page 1 first: newest threads, and it tells us the total page count.
+        try:
+            first = await self._get(slug)
+        except httpx.HTTPError as exc:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.category_fetch_failed",
+                message=f"{self._identity_name}: {slug} p1 failed ({exc!r})",
+            )
+            return
+        last = thread_page_count(first.text)
+        if self._max_category_pages > 0:
+            last = min(last, self._max_category_pages)
+        threads = await self._process_category_page(slug, first.text)
+
+        if complete:
+            # Steady state: archive already backfilled, page 1 is all we track.
+            _log.info(
+                "forum.category_sweep_done",
+                identity=self._identity_name,
+                category=slug,
+                threads=threads,
+                pages=last,
+                mode="page1",
+            )
+            return
+
+        # Backfill forward from the cursor (page 1 handled above).
+        page = max(2, cursor_page)
+        while page <= last:
             try:
-                resp = await self._get(slug, params={"page": page} if page > 1 else None)
+                resp = await self._get(slug, params={"page": page})
             except httpx.HTTPError as exc:
+                # Persist progress so the next sweep resumes here, not at page 1.
+                await self._save_cursor(slug, next_page=page, complete=False)
                 await self.syslog(
                     level=SystemLogLevel.WARN,
                     event="forum.category_fetch_failed",
                     message=f"{self._identity_name}: {slug} p{page} failed ({exc!r})",
                 )
                 return
-            if page == 1:
-                last = thread_page_count(resp.text)
-                if self._max_category_pages > 0:
-                    last = min(last, self._max_category_pages)
-            for thread_url in parse_thread_links(resp.text):
-                if self._source_uuid is not None:
-                    await self._storage.record_forum_thread_link(
-                        source_id=self._source_uuid,
-                        category_platform_groupid=slug,
-                        thread_platform_groupid=_thread_id_from_url(thread_url),
-                        seen_at=datetime.now(tz=UTC),
-                    )
-                await self._poll_thread(thread_url)
-                threads += 1
-            if page >= last:
-                break
+            threads += await self._process_category_page(slug, resp.text)
+            # Advance + persist after each page: a crash loses at most one page.
+            await self._save_cursor(slug, next_page=page + 1, complete=page >= last)
             page += 1
+
         _log.info(
             "forum.category_sweep_done",
             identity=self._identity_name,
             category=slug,
             threads=threads,
             pages=last,
+            mode="backfill",
         )
 
-    async def _poll_thread(self, url: str) -> None:
-        tid = _thread_id_from_url(url)
+    async def _save_cursor(self, slug: str, *, next_page: int, complete: bool) -> None:
+        if self._source_uuid is None:
+            return
+        await self._storage.set_forum_crawl_cursor(
+            source_id=self._source_uuid,
+            category_platform_groupid=slug,
+            next_page=next_page,
+            backfill_complete=complete,
+            updated_at=datetime.now(tz=UTC),
+        )
+
+    async def _poll_thread(self, url: str) -> str | None:
+        """Fetch + ingest a thread; return the STABLE group key it ingested under.
+
+        The key is resolved from the thread PAGE, not the (re-sluggable) URL: the
+        page's canonical tid is bound through the alias (first-seen wins), so a
+        moved/re-slugged copy resolves to the original thread's key. When a page
+        yields no tid (rare), fall back to a section-prefix-normalized slug.
+        Returns None if the first fetch fails (nothing ingested).
+        """
+        url_key = _thread_id_from_url(url)
         try:
             first = await self._get(url)
+        except httpx.HTTPError as exc:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.fetch_failed",
+                message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
+            )
+            return None
+        canonical_tid = parse_canonical_tid(first.text)
+        if canonical_tid is not None and self._source_uuid is not None:
+            key = await self._storage.resolve_or_bind_forum_thread(
+                source_id=self._source_uuid,
+                canonical_tid=canonical_tid,
+                fallback_platform_groupid=url_key,
+            )
+        else:
+            key = _normalize_thread_slug(url_key)
+        try:
             pages = thread_page_count(first.text)
             # Cap per-thread depth: the leak announcement + download live on page 1;
             # deep pages are "thanks for the share" noise. Capping gets breadth
@@ -371,16 +543,17 @@ class MyBBForumCollector(CollectorSkeleton):
             if self._max_thread_pages > 0:
                 pages = min(pages, self._max_thread_pages)
             title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
-            await self._ingest_page(tid, title, first.text)
+            await self._ingest_page(key, title, first.text)
             for page in range(2, pages + 1):
                 resp = await self._get(url, params={"page": page})
-                await self._ingest_page(tid, title, resp.text)
+                await self._ingest_page(key, title, resp.text)
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
                 event="forum.fetch_failed",
                 message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
             )
+        return key
 
     # -- operator-triggered reply-to-unlock (write path) ----------------------
 
@@ -554,10 +727,10 @@ class MyBBForumCollector(CollectorSkeleton):
         # Board-scope the userid: MyBB slugs collide across boards.
         platform_userid = f"{self._board}|{post.author_username}"
         key = actor_key(SourceKind.FORUM, platform_userid)
-        # post_date is board-local NAIVE; assume board-UTC and fall back to now()
-        # for a relative/unparsed date.
-        # ponytail: swap the UTC assumption for the source's configured tz offset.
-        sent_at = post.posted_at.replace(tzinfo=UTC) if post.posted_at is not None else now
+        # Normalize to UTC engine-agnostically (naive MyBB -> attach UTC; aware ->
+        # convert, never clobber the offset); fall back to now() for a
+        # relative/unparsed date. The per-source tz offset remains a calibration knob.
+        sent_at = posted_at_to_utc(post.posted_at) or now
 
         group_id = await self._storage.upsert_group(
             source_id=source_uuid,

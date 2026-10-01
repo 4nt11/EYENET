@@ -4,6 +4,7 @@
 // row flips to joining then monitored on a later reload). "Rescan" POSTs
 // /v1/groups/scan to refresh visibility from running collectors. Svelte 5 runes.
 import { apiGet, apiPost } from './api.js';
+import { realPlatform, foundVia } from './discovery-shape.js';
 
 const short = (id) => (id ? id.slice(0, 8) : '—');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
@@ -34,6 +35,10 @@ function mapGroup(g) {
     platformGroupId: g.platform_groupid,
     kind: g.kind ?? '',
     status: g.status,
+    // The candidate's REAL platform (from its shape), not the observing source's
+    // — a @handle found on a forum is a telegram lead, not a forum group.
+    realPlatform: realPlatform(g.platform_groupid, g.kind),
+    foundVia: foundVia(g.platform_groupid, g.kind, g.member_dialog),
     memberDialog: g.member_dialog,
     score: g.score,
     groupId: g.group_id,
@@ -43,10 +48,25 @@ function mapGroup(g) {
 
 export const groupCtx = $state({ list: [], loaded: false, error: null });
 
-export async function loadGroups() {
+export async function loadGroups(search = '', sourceId = '') {
   try {
-    const page = await apiGet('/v1/groups?limit=200', { auth: true });
-    groupCtx.list = page.items.map(mapGroup);
+    // Server-side substring search (name + platform id) + source filter cut
+    // through the discovery firehose. Page through the opaque cursor so a source
+    // with >500 groups isn't silently truncated (the old fixed limit=200 was).
+    const base = new URLSearchParams({ limit: '500' });
+    if (search.trim()) base.set('q', search.trim());
+    if (sourceId) base.set('source_id', sourceId);
+    const all = [];
+    let cursor = null;
+    for (let i = 0; i < 50; i++) {
+      const params = new URLSearchParams(base);
+      if (cursor) params.set('cursor', cursor);
+      const page = await apiGet(`/v1/groups?${params}`, { auth: true });
+      all.push(...page.items);
+      cursor = page.next_cursor;
+      if (!cursor) break;
+    }
+    groupCtx.list = all.map(mapGroup);
     groupCtx.error = null;
   } catch (e) {
     groupCtx.error = e.message ?? String(e);

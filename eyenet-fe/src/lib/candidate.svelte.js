@@ -6,6 +6,7 @@
 // collectors which settle off the bus). Svelte 5 runes, same shape as
 // linkage.svelte.js.
 import { apiGet, apiPost } from './api.js';
+import { realPlatform, foundVia } from './discovery-shape.js';
 
 const short = (id) => (id ? id.slice(0, 8) : '—');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
@@ -43,7 +44,12 @@ function mapCandidate(c) {
     group: c.display_name_hint || c.platform_groupid,
     platformGroupId: c.platform_groupid,
     kindHint: c.kind_hint ?? '',
+    // Real platform + discovery method derived from the candidate's shape — a
+    // telegram @handle mentioned on a forum is a telegram lead, not a forum group.
+    realPlatform: realPlatform(c.platform_groupid, c.kind_hint),
+    foundVia: foundVia(c.platform_groupid, c.kind_hint, c.member_dialog),
     state: c.state,
+    memberDialog: c.member_dialog ?? false, // operator's own account is already in this group
     score: c.score,
     scoreText: c.score.toFixed(2),
     firstObserved: shortTs(c.first_observed_at_ingest),
@@ -53,10 +59,29 @@ function mapCandidate(c) {
 
 export const candidateCtx = $state({ list: [], loaded: false, error: null });
 
-export async function loadCandidates() {
+export async function loadCandidates(search = '', sourceId = '') {
   try {
-    const page = await apiGet('/v1/candidates?limit=200', { auth: true });
-    candidateCtx.list = page.items.map(mapCandidate);
+    // Page through all candidates via the opaque cursor — the operator can be in
+    // hundreds of groups, and a single fixed limit silently truncated the view.
+    // Once fully drained, list.length is the true total (no count() needed).
+    // ponytail: 50-page ceiling (×500 = 25k rows) guards a server that never
+    // stops handing out cursors; lift it if a real operator ever exceeds it.
+    // Server-side q (name/platform-id substring) + source_id narrow the firehose
+    // before it reaches the browser — essential past ~2k groups.
+    const base = new URLSearchParams({ limit: '500' });
+    if (search.trim()) base.set('q', search.trim());
+    if (sourceId) base.set('source_id', sourceId);
+    const all = [];
+    let cursor = null;
+    for (let i = 0; i < 50; i++) {
+      const params = new URLSearchParams(base);
+      if (cursor) params.set('cursor', cursor);
+      const page = await apiGet(`/v1/candidates?${params}`, { auth: true });
+      all.push(...page.items);
+      cursor = page.next_cursor;
+      if (!cursor) break;
+    }
+    candidateCtx.list = all.map(mapCandidate);
     candidateCtx.error = null;
   } catch (e) {
     candidateCtx.error = e.message ?? String(e);

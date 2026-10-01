@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 
 from eyenet.collectors.forum import (
+    parse_canonical_tid,
     parse_forum_links,
     parse_reply_form,
+    parse_subforum_links,
     parse_thread,
     parse_thread_links,
     thread_page_count,
@@ -67,6 +69,43 @@ def test_parse_forum_links_dedupes_and_orders() -> None:
         "<a href='Thread-x--1'>not a forum</a>"
     )
     assert parse_forum_links(html) == ["Forum-Databases", "https://b.test/Forum-Leaks--3"]
+
+
+def test_parse_subforum_links_scopes_to_subforum_block() -> None:
+    # Mirrors the real DarkForums forum-display DOM: Forum-* links live in the
+    # nav, breadcrumb, pagination and sort headers too — only the subforum table
+    # holds actual children. The scoped parser must return ONLY the child.
+    html = (
+        "<ul class='sidenav__menu nav'><a href='Forum-Databases'>Databases</a></ul>"
+        "<li class='breadcrumb__bit'><a href='Forum-Leaks'>Leaks</a></li>"
+        "<table class='forum-display__subforums tborder'><tbody><tr>"
+        "<td class='trow1'><a href='Forum-Databases-Removed-Content'>Removed Content</a></td>"
+        "</tr></tbody></table>"
+        "<div class='pagination'><a href='Forum-Databases?page=2'>2</a></div>"
+        "<span class='smalltext'><a href='Forum-Databases?datecut=9999&sortby=x'>Thread</a></span>"
+    )
+    assert parse_subforum_links(html) == ["Forum-Databases-Removed-Content"]
+
+
+def test_parse_subforum_links_empty_when_no_subforum_block() -> None:
+    # A leaf forum (no children) and a blocked/empty page both yield nothing.
+    html = "<ul class='sidenav__menu nav'><a href='Forum-Databases'>x</a></ul>"
+    assert parse_subforum_links(html) == []
+
+
+def test_parse_canonical_tid_from_hidden_input() -> None:
+    html = "<form><input type='hidden' name='tid' value='92204'></form>"
+    assert parse_canonical_tid(html) == "92204"
+
+
+def test_parse_canonical_tid_from_newreply_link() -> None:
+    # No hidden input; fall back to the per-post reply link.
+    html = "<a href='newreply.php?tid=164660&replyto=5'>Reply</a>"
+    assert parse_canonical_tid(html) == "164660"
+
+
+def test_parse_canonical_tid_none_when_absent() -> None:
+    assert parse_canonical_tid("<p>a tid-less listing page</p>") is None
 
 
 def test_parse_thread_links_strips_query_and_dedupes() -> None:
@@ -161,7 +200,7 @@ def test_unparseable_date_yields_none_not_crash() -> None:
     assert post.posted_raw == "Today, 10:56 PM"
 
 
-def _cf_encode(email: str, key: int = 0x2b) -> str:
+def _cf_encode(email: str, key: int = 0x2B) -> str:
     return bytes([key, *[ord(c) ^ key for c in email]]).hex()
 
 
@@ -173,7 +212,7 @@ def test_cloudflare_email_decoded() -> None:
         '<span class="post_date">01-02-26, 09:30 AM</span>'
         '<div class="post_body">contact <a class="__cf_email__" '
         f'href="/cdn-cgi/l/email-protection" data-cfemail="{_cf_encode(email)}">'
-        '[email\u00a0protected]</a></div></div>'
+        "[email\u00a0protected]</a></div></div>"
     )
     (post,) = parse_thread(html)
     assert email in post.body_text
