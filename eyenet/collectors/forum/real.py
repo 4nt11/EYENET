@@ -87,6 +87,29 @@ _DEFAULT_MAX_THREAD_PAGES = 1
 # forum's page to surface its child subforums as their own monitorable units.
 _DEFAULT_DISCOVERY_DEPTH = 2
 
+# Impersonate the browser that logs in over Tor and mints the cookie jar (Tor
+# Browser = Firefox ESR). Matching its header profile keeps the collector's
+# requests CONSISTENT with the session those cookies were minted under — a
+# UA/Accept flip mid-session is itself a ban signal. The UA is per-identity
+# (forum_user_agent) so it tracks the operator's actual Tor Browser build; the
+# rest are TB-uniform. Sec-Fetch-Site is per-request (set in _get: "none" for a
+# fresh navigation, "same-origin" once a Referer chains it).
+_DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+_BASE_HEADERS: dict[str, str] = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Sec-GPC": "1",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-User": "?1",
+    "Priority": "u=0, i",
+    # Accept-Encoding is deliberately NOT set: httpx advertises exactly the
+    # codecs it can decode (gzip, deflate, br, zstd — with the brotli + zstandard
+    # extras in pyproject), which matches Tor Browser. Advertising a codec we
+    # can't inflate would hand us undecodable bodies.
+}
+
 
 def _zero_traceparent() -> str:
     return "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
@@ -177,6 +200,7 @@ class MyBBForumCollector(CollectorSkeleton):
         self._source_uuid: UUID | None = None
         self._collector_id: UUID | None = None
         self._board = ""
+        self._base_url = ""  # absolute origin, for building realistic Referers
         self._thread_urls: list[str] = []
         # Pacing / discovery (overridden from the identity in on_subscribe).
         self._delay_min = _DEFAULT_DELAY_MIN
@@ -195,6 +219,7 @@ class MyBBForumCollector(CollectorSkeleton):
         await super().on_subscribe()
         entry = cast("IdentityFileEntry", self._claimed)
         self._board = urlparse(entry.forum_base_url or "").netloc or (entry.forum_base_url or "")
+        self._base_url = (entry.forum_base_url or "").rstrip("/")
         self._thread_urls = list(entry.forum_thread_urls)
         self._delay_min = float(getattr(entry, "forum_delay_min", _DEFAULT_DELAY_MIN))
         self._delay_max = float(getattr(entry, "forum_delay_max", _DEFAULT_DELAY_MAX))
@@ -213,12 +238,22 @@ class MyBBForumCollector(CollectorSkeleton):
 
         if self._client is None:
             cookies = materialize_forum_session(entry, self._session_key)
+            # proxy_uri routes this board's fetches through a proxy when the
+            # identity carries one — `socks5h://tor:9050` for .onion mirrors, so
+            # the whole crawl (incl. DNS/.onion resolution, hence socks5*h*) goes
+            # via Tor and sidesteps the Cloudflare JS-challenge wall that blocks
+            # the clearnet host. None = direct, unchanged behaviour. Needs the
+            # httpx[socks] extra (socksio), declared in pyproject.
+            proxy = getattr(entry, "proxy_uri", None) or None
+            # Tor Browser header profile (see _BASE_HEADERS); UA per-identity.
+            user_agent = getattr(entry, "forum_user_agent", None) or _DEFAULT_USER_AGENT
             self._client = httpx.AsyncClient(
                 base_url=entry.forum_base_url or "",
                 cookies=cookies,
-                headers={"User-Agent": "Mozilla/5.0"},
+                headers={**_BASE_HEADERS, "User-Agent": user_agent},
                 timeout=30.0,
                 follow_redirects=True,
+                proxy=proxy,
             )
 
         self._source_uuid = await self._storage.upsert_source(
@@ -244,23 +279,45 @@ class MyBBForumCollector(CollectorSkeleton):
             await self._client.aclose()
         await super().stop()
 
-    async def _get(self, url: str, **kw: Any) -> httpx.Response:
+    def _abs(self, path: str) -> str:
+        """Absolute origin URL for a board-relative ``path`` (for Referer)."""
+        if not self._base_url:
+            return path
+        return f"{self._base_url}/{path.lstrip('/')}"
+
+    @staticmethod
+    def _nav_headers(referer: str | None) -> dict[str, str]:
+        """Per-request navigation headers that complete the browser profile.
+
+        A fresh navigation (no Referer) sends ``Sec-Fetch-Site: none``; once a
+        Referer chains the request within the same origin it becomes
+        ``same-origin`` — mirroring a human clicking index -> category -> thread
+        rather than a crawler hitting deep URLs cold.
+        """
+        if referer:
+            return {"Referer": referer, "Sec-Fetch-Site": "same-origin"}
+        return {"Sec-Fetch-Site": "none"}
+
+    async def _get(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
         """Every board request funnels through here: sequential + jittered delay.
 
         This is the single choke point that keeps the collector browsing-speed.
-        There is deliberately no un-throttled request path.
+        There is deliberately no un-throttled request path. ``referer`` threads a
+        realistic navigation chain (see :meth:`_nav_headers`).
         """
         if self._client is None:  # pragma: no cover - guarded by callers
             raise RuntimeError("forum collector http client not initialized")
+        headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
-        return await self._client.get(url, **kw)
+        return await self._client.get(url, headers=headers, **kw)
 
-    async def _post(self, url: str, **kw: Any) -> httpx.Response:
+    async def _post(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
         """Throttled POST — the ONLY write path, same jittered pacing as reads."""
         if self._client is None:  # pragma: no cover - guarded by callers
             raise RuntimeError("forum collector http client not initialized")
+        headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
-        return await self._client.post(url, **kw)
+        return await self._client.post(url, headers=headers, **kw)
 
     async def enumerate_visible_groups(self) -> list[VisibleGroup]:
         """The board's forums (GroupKind.FORUM_CATEGORY), index + subforum tree.
@@ -295,7 +352,7 @@ class MyBBForumCollector(CollectorSkeleton):
             if depth >= self._discovery_depth:
                 continue
             try:
-                page = await self._get(slug)
+                page = await self._get(slug, referer=self._base_url or None)
             except httpx.HTTPError as exc:
                 # One forum failing to enumerate must not abort the whole tree
                 # walk (a blocked/removed forum just contributes no children).
@@ -401,13 +458,14 @@ class MyBBForumCollector(CollectorSkeleton):
         sweep re-polls (newest-first, so a skip is re-picked-up promptly).
         """
         threads = 0
+        category_ref = self._abs(slug)  # Referer for each thread: its category page
         for thread_url in parse_thread_links(html):
             try:
                 # Poll first: it resolves the thread's STABLE key (canonical tid
                 # via the alias) from the page, so the category->thread link is
                 # recorded under the same key the thread ingests under, not the
                 # (re-sluggable) listing URL.
-                key = await self._poll_thread(thread_url)
+                key = await self._poll_thread(thread_url, referer=category_ref)
                 if key is not None and self._source_uuid is not None:
                     await self._storage.record_forum_thread_link(
                         source_id=self._source_uuid,
@@ -443,7 +501,7 @@ class MyBBForumCollector(CollectorSkeleton):
             )
         # Page 1 first: newest threads, and it tells us the total page count.
         try:
-            first = await self._get(slug)
+            first = await self._get(slug, referer=self._base_url or None)
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
@@ -472,7 +530,7 @@ class MyBBForumCollector(CollectorSkeleton):
         page = max(2, cursor_page)
         while page <= last:
             try:
-                resp = await self._get(slug, params={"page": page})
+                resp = await self._get(slug, params={"page": page}, referer=self._abs(slug))
             except httpx.HTTPError as exc:
                 # Persist progress so the next sweep resumes here, not at page 1.
                 await self._save_cursor(slug, next_page=page, complete=False)
@@ -507,7 +565,7 @@ class MyBBForumCollector(CollectorSkeleton):
             updated_at=datetime.now(tz=UTC),
         )
 
-    async def _poll_thread(self, url: str) -> str | None:
+    async def _poll_thread(self, url: str, *, referer: str | None = None) -> str | None:
         """Fetch + ingest a thread; return the STABLE group key it ingested under.
 
         The key is resolved from the thread PAGE, not the (re-sluggable) URL: the
@@ -518,7 +576,7 @@ class MyBBForumCollector(CollectorSkeleton):
         """
         url_key = _thread_id_from_url(url)
         try:
-            first = await self._get(url)
+            first = await self._get(url, referer=referer)
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
@@ -545,7 +603,7 @@ class MyBBForumCollector(CollectorSkeleton):
             title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
             await self._ingest_page(key, title, first.text)
             for page in range(2, pages + 1):
-                resp = await self._get(url, params={"page": page})
+                resp = await self._get(url, params={"page": page}, referer=self._abs(url))
                 await self._ingest_page(key, title, resp.text)
         except httpx.HTTPError as exc:
             await self.syslog(

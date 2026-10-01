@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# eyenet:tor — a minimal Tor SOCKS proxy for the stack.
+#
+# Lets the forum collectors reach .onion mirrors (e.g. pwnforums' onion, which
+# is plain MyBB with NO Cloudflare, unlike its clearnet host). Self-contained:
+# the operator does not run Tor on the host. SOCKS listens on the INTERNAL
+# compose network only (never host-published); services point an identity's
+# proxy_uri at socks5h://tor:9050.
+#
+# ponytail: pinned alpine + distro tor, ephemeral DataDirectory in /tmp (no
+# persistent descriptors needed for an outbound SOCKS client). Bump the pin to
+# rotate tor.
+FROM alpine:3.20
+
+RUN apk add --no-cache tor
+
+# Drop to the unprivileged tor user the package creates.
+USER tor
+
+EXPOSE 9050
+
+# SocksPort on all interfaces so sibling containers can reach it (the network is
+# private to the compose project). Ephemeral datadir avoids any volume/perms fuss.
+CMD ["tor", "--SocksPort", "0.0.0.0:9050", "--DataDirectory", "/tmp/tor", "--Log", "notice stdout"]
