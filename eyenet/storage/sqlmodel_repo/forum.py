@@ -7,7 +7,7 @@ requests, executes each write under its own throttle, then marks the outcome.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from eyenet.models import (
     ForumBackfillRequestTable,
     ForumCrawlCursorTable,
     ForumReplyRequestTable,
+    ForumThreadAliasTable,
     ForumThreadLinkTable,
     GroupTable,
     IncidentTable,
@@ -348,6 +349,40 @@ class ForumMixin:
                 row.updated_at = updated_at
                 session.add(row)
             await session.commit()
+
+    async def resolve_or_bind_forum_thread(
+        self,
+        *,
+        source_id: UUID,
+        canonical_tid: str,
+        fallback_platform_groupid: str,
+    ) -> str:
+        """Stable group key for a thread's canonical tid (first-seen wins).
+
+        ponytail: SELECT-then-insert, no ON CONFLICT. One collector process polls
+        a source's threads sequentially under its throttle, so there is no
+        concurrent writer to race the bind. If that ever changes, add a dialect
+        upsert (or catch IntegrityError and re-select) in the SQLite backend.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(ForumThreadAliasTable)
+                .where(ForumThreadAliasTable.source_id == source_id)
+                .where(col(ForumThreadAliasTable.canonical_tid) == canonical_tid)
+            )
+            row = result.first()
+            if row is not None:
+                return row.platform_groupid
+            session.add(
+                ForumThreadAliasTable(
+                    source_id=source_id,
+                    canonical_tid=canonical_tid,
+                    platform_groupid=fallback_platform_groupid,
+                    first_seen_at=datetime.now(tz=UTC),
+                )
+            )
+            await session.commit()
+            return fallback_platform_groupid
 
     async def create_forum_reply_request(
         self,

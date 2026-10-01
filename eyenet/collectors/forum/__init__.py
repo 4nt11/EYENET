@@ -11,6 +11,7 @@ from __future__ import annotations
 from eyenet.collectors.forum._mybb import (
     ParsedPost,
     ReplyForm,
+    parse_canonical_tid,
     parse_forum_links,
     parse_reply_form,
     parse_subforum_links,
@@ -23,6 +24,7 @@ from eyenet.collectors.forum._mybb import (
 __all__ = [
     "ParsedPost",
     "ReplyForm",
+    "parse_canonical_tid",
     "parse_forum_links",
     "parse_reply_form",
     "parse_subforum_links",
