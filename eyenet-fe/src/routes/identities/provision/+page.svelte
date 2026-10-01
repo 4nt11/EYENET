@@ -18,6 +18,7 @@
   // forum
   let forumBaseUrl = $state('');
   let forumThreadUrls = $state('');
+  let forumUserAgent = $state('');
   let cookiesText = $state('');
   // shared
   let cooldown = $state('21600');
@@ -67,6 +68,7 @@
       fd.append('session', blob);
       fd.append('forum_base_url', forumBaseUrl.trim());
       if (forumThreadUrls.trim()) fd.append('forum_thread_urls', forumThreadUrls.trim());
+      if (forumUserAgent.trim()) fd.append('forum_user_agent', forumUserAgent.trim());
     }
 
     if (cooldown.trim()) fd.append('cooldown_seconds', cooldown.trim());
@@ -81,6 +83,7 @@
       monitorGroups = '';
       forumBaseUrl = '';
       forumThreadUrls = '';
+      forumUserAgent = '';
       cookiesText = '';
       proxyUri = '';
       notes = '';
@@ -146,10 +149,14 @@
       </label>
 
       <label class="fld"><span class="flabel">Forum base URL</span>
-        <input class="fin" type="text" bind:value={forumBaseUrl} placeholder="https://forum.example" /></label>
+        <input class="fin" type="text" bind:value={forumBaseUrl} placeholder="https://forum.example — or http://xxx.onion for a Tor mirror" /></label>
 
       <label class="fld"><span class="flabel">Thread URLs (optional, comma-separated)</span>
         <input class="fin" type="text" bind:value={forumThreadUrls} placeholder="Thread-slug--123, Thread-other--456" /></label>
+
+      <label class="fld"><span class="flabel">User-Agent (optional)</span>
+        <input class="fin" type="text" bind:value={forumUserAgent} placeholder="Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0" />
+        <span class="hint">Match the browser that exported these cookies (Tor Browser for an .onion board) — a UA mismatch vs the session is a ban signal. Blank = Tor Browser default.</span></label>
     {:else if sourceId}
       <p class="hint">This source kind can't be provisioned from this form.</p>
     {/if}
@@ -158,7 +165,7 @@
       <label class="fld"><span class="flabel">Cooldown seconds</span>
         <input class="fin" type="number" bind:value={cooldown} placeholder="21600" /></label>
       <label class="fld"><span class="flabel">Proxy URI (optional)</span>
-        <input class="fin" type="text" bind:value={proxyUri} placeholder="socks5://…" /></label>
+        <input class="fin" type="text" bind:value={proxyUri} placeholder="socks5h://tor:9050 for an .onion board" /></label>
     </div>
 
     <label class="fld"><span class="flabel">Notes (optional)</span>
