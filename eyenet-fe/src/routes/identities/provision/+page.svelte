@@ -26,6 +26,19 @@
   let notes = $state('');
   let files = $state(null);
 
+  // The stack's self-contained Tor SOCKS proxy (eyenet:tor service). An .onion
+  // board is only reachable through it, so default to it automatically — until
+  // the operator edits the proxy field, after which we never touch it again.
+  const TOR_PROXY = 'socks5h://tor:9050';
+  let proxyTouched = $state(false);
+  const isOnion = $derived(/\.onion(?:[:/]|$)/i.test(forumBaseUrl.trim()));
+  $effect(() => {
+    // Managed only while untouched: .onion → Tor proxy, otherwise clear. Reads
+    // proxyTouched + isOnion; writes proxyUri (not read here, so no loop).
+    if (proxyTouched) return;
+    proxyUri = isOnion ? TOR_PROXY : '';
+  });
+
   const fileSources = $derived(
     sourceCtx.list.filter((s) => s.platform === 'telegram' || s.platform === 'forum')
   );
@@ -86,6 +99,7 @@
       forumUserAgent = '';
       cookiesText = '';
       proxyUri = '';
+      proxyTouched = false; // re-enable auto-manage for the next identity
       notes = '';
       files = null;
     }
@@ -165,7 +179,8 @@
       <label class="fld"><span class="flabel">Cooldown seconds</span>
         <input class="fin" type="number" bind:value={cooldown} placeholder="21600" /></label>
       <label class="fld"><span class="flabel">Proxy URI (optional)</span>
-        <input class="fin" type="text" bind:value={proxyUri} placeholder="socks5h://tor:9050 for an .onion board" /></label>
+        <input class="fin" type="text" bind:value={proxyUri} oninput={() => (proxyTouched = true)} placeholder="socks5h://tor:9050 for an .onion board" />
+        {#if isOnion && !proxyTouched}<span class="hint">Auto-set to the stack's Tor proxy for this .onion board — edit to override.</span>{/if}</label>
     </div>
 
     <label class="fld"><span class="flabel">Notes (optional)</span>
