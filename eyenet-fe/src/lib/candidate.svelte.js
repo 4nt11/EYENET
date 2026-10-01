@@ -46,8 +46,8 @@ function mapCandidate(c) {
     kindHint: c.kind_hint ?? '',
     // Real platform + discovery method derived from the candidate's shape — a
     // telegram @handle mentioned on a forum is a telegram lead, not a forum group.
-    realPlatform: realPlatform(c.platform_groupid),
-    foundVia: foundVia(c.platform_groupid, c.kind_hint),
+    realPlatform: realPlatform(c.platform_groupid, c.kind_hint),
+    foundVia: foundVia(c.platform_groupid, c.kind_hint, c.member_dialog),
     state: c.state,
     memberDialog: c.member_dialog ?? false, // operator's own account is already in this group
     score: c.score,

@@ -37,8 +37,8 @@ function mapGroup(g) {
     status: g.status,
     // The candidate's REAL platform (from its shape), not the observing source's
     // — a @handle found on a forum is a telegram lead, not a forum group.
-    realPlatform: realPlatform(g.platform_groupid),
-    foundVia: foundVia(g.platform_groupid, g.kind),
+    realPlatform: realPlatform(g.platform_groupid, g.kind),
+    foundVia: foundVia(g.platform_groupid, g.kind, g.member_dialog),
     memberDialog: g.member_dialog,
     score: g.score,
     groupId: g.group_id,
