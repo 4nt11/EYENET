@@ -110,6 +110,42 @@ _BASE_HEADERS: dict[str, str] = {
     # can't inflate would hand us undecodable bodies.
 }
 
+# Fallback cooldown when a 429 carries no (or an unparseable) Retry-After. The
+# measured pwnforums value; a conservative 10 min beats guessing low and poking.
+_DEFAULT_RETRY_AFTER = 600.0
+# The server's cooldown timer RESETS on any request made during cooldown (measured
+# on pwnforums), and resuming on the EXACT second is a robotic tell — so after a
+# 429 we go silent for Retry-After PLUS this jitter pad, and never poke meanwhile.
+_RETRY_AFTER_PAD = (30.0, 120.0)
+
+# Evasion templates (nmap -T analog): operator picks a level per identity; it
+# just seeds the inter-request [min, max] pacing. Explicit forum_delay_min/max
+# still override. Page caps / discovery stay their own knobs. E1 "lurker" is
+# validated live (zero 429s). See investigations/pwnforums/collection-profile.md.
+_EVASION_LEVELS: dict[str, tuple[float, float]] = {
+    "ghost": (90.0, 240.0),  # E0: minutes apart, strict night-owl; hardest targets
+    "lurker": (20.0, 60.0),  # E1: validated on a defended onion forum
+    "regular": (8.0, 15.0),  # E2
+    "brisk": (3.0, 6.0),  # E3
+    "smash": (0.5, 1.5),  # E4: tolerant boards only (no such limiter)
+}
+
+
+def resolve_evasion_pacing(level: str | None) -> tuple[float, float] | None:
+    """Map an evasion level name to its (delay_min, delay_max) pacing, or None for
+    an absent/unknown level. Applied at provision time so the collector only ever
+    sees concrete delays. Case/space-insensitive; also accepts the E0..E4 aliases."""
+    if not level:
+        return None
+    key = level.strip().lower()
+    alias = {"e0": "ghost", "e1": "lurker", "e2": "regular", "e3": "brisk", "e4": "smash"}
+    return _EVASION_LEVELS.get(alias.get(key, key))
+
+
+class RateLimited(Exception):  # noqa: N818 - a control signal, not an error condition
+    """A board 429'd us (or we're still inside its cooldown). Caught at the tick
+    boundary to abort the sweep SILENTLY — never retried, never polled."""
+
 
 def _zero_traceparent() -> str:
     return "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
@@ -209,6 +245,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
         self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
         self._discovery_depth = _DEFAULT_DISCOVERY_DEPTH
+        # Monotonic deadline: while now < this, every request is refused BEFORE it
+        # hits the wire (poking during a 429 cooldown re-arms the server's timer).
+        self._cooldown_until = 0.0
         # When we last swept (monotonic) + the monitored set that sweep was for
         # (so a newly-monitored category triggers a re-sweep next tick instead of
         # waiting out the interval).
@@ -221,6 +260,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._board = urlparse(entry.forum_base_url or "").netloc or (entry.forum_base_url or "")
         self._base_url = (entry.forum_base_url or "").rstrip("/")
         self._thread_urls = list(entry.forum_thread_urls)
+        # Pacing comes pre-resolved on the entry (an evasion level, if the operator
+        # picked one, is expanded to forum_delay_min/max at provision time — see
+        # resolve_evasion_pacing / _EVASION_LEVELS). The collector just honours it.
         self._delay_min = float(getattr(entry, "forum_delay_min", _DEFAULT_DELAY_MIN))
         self._delay_max = float(getattr(entry, "forum_delay_max", _DEFAULT_DELAY_MAX))
         self._discovery_interval = float(
@@ -298,26 +340,56 @@ class MyBBForumCollector(CollectorSkeleton):
             return {"Referer": referer, "Sec-Fetch-Site": "same-origin"}
         return {"Sec-Fetch-Site": "none"}
 
+    def _guard_cooldown(self) -> None:
+        """Refuse a request while inside a 429 cooldown — BEFORE it hits the wire.
+
+        Poking a rate-limited board (even one request, even a refresh) re-arms its
+        timer, so a naive backoff that keeps probing never recovers. We stay fully
+        silent until the deadline, then the next request goes through normally."""
+        remaining = self._cooldown_until - time.monotonic()
+        if remaining > 0:
+            raise RateLimited(f"in cooldown, ~{remaining:.0f}s of silence left")
+
+    def _note_rate_limit(self, resp: httpx.Response) -> None:
+        """Arm the silent cooldown on a 429 and abort the sweep. We wait the
+        Retry-After PADDED with jitter (never the exact second — a robotic tell)."""
+        if resp.status_code != httpx.codes.TOO_MANY_REQUESTS:
+            return
+        ra = resp.headers.get("retry-after", "")
+        # ponytail: integer-seconds only (what real boards send); an HTTP-date
+        # Retry-After falls back to the measured default — add dateparse if ever seen.
+        base = float(ra) if ra.isdigit() else _DEFAULT_RETRY_AFTER
+        pad = random.uniform(*_RETRY_AFTER_PAD)  # noqa: S311 - jitter, not crypto
+        self._cooldown_until = time.monotonic() + base + pad
+        raise RateLimited(f"429 → silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})")
+
     async def _get(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
         """Every board request funnels through here: sequential + jittered delay.
 
         This is the single choke point that keeps the collector browsing-speed.
         There is deliberately no un-throttled request path. ``referer`` threads a
-        realistic navigation chain (see :meth:`_nav_headers`).
+        realistic navigation chain (see :meth:`_nav_headers`). A 429 (or being mid
+        cooldown) raises :class:`RateLimited` — caught at the tick boundary.
         """
         if self._client is None:  # pragma: no cover - guarded by callers
             raise RuntimeError("forum collector http client not initialized")
+        self._guard_cooldown()
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
-        return await self._client.get(url, headers=headers, **kw)
+        resp = await self._client.get(url, headers=headers, **kw)
+        self._note_rate_limit(resp)
+        return resp
 
     async def _post(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
         """Throttled POST — the ONLY write path, same jittered pacing as reads."""
         if self._client is None:  # pragma: no cover - guarded by callers
             raise RuntimeError("forum collector http client not initialized")
+        self._guard_cooldown()
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
-        return await self._client.post(url, headers=headers, **kw)
+        resp = await self._client.post(url, headers=headers, **kw)
+        self._note_rate_limit(resp)
+        return resp
 
     async def enumerate_visible_groups(self) -> list[VisibleGroup]:
         """The board's forums (GroupKind.FORUM_CATEGORY), index + subforum tree.
@@ -397,6 +469,21 @@ class MyBBForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
+        try:
+            await self._tick_body()
+        except RateLimited as exc:
+            # The board 429'd us (or we're still mid-cooldown). Abort this sweep
+            # SILENTLY — no retry, no poll. Force a re-sweep next tick so we resume
+            # the moment the cooldown lapses; until then _guard_cooldown makes each
+            # tick a no-op (it raises before any request touches the wire).
+            self._last_discovery = 0.0
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.rate_limited",
+                message=f"{self._identity_name}: {exc}",
+            )
+
+    async def _tick_body(self) -> None:
         # Operator-queued actions first, so they're prompt (still throttled).
         await self._process_reply_requests()
         await self._process_backfill_requests()

@@ -90,6 +90,10 @@ class IdentityFileEntry(BaseModel):
     # — a UA flip mid-session is a ban signal. None → the Tor Browser default
     # baked into the collector (_DEFAULT_USER_AGENT).
     forum_user_agent: str | None = None
+    # Evasion level the operator picked (ghost/lurker/regular/brisk/smash, i.e.
+    # E0..E4). Expanded to forum_delay_min/max at provision time; kept here for the
+    # record/display. None → whatever the delay knobs say. See the forum collector.
+    forum_evasion_level: str | None = None
 
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
@@ -206,6 +210,8 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
         out.append(f"forum_discovery_depth = {entry.forum_discovery_depth}")
         if entry.forum_user_agent is not None:
             out.append(f"forum_user_agent = {_q(entry.forum_user_agent)}")
+        if entry.forum_evasion_level is not None:
+            out.append(f"forum_evasion_level = {_q(entry.forum_evasion_level)}")
     return out
 
 

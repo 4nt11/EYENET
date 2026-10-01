@@ -19,6 +19,7 @@
   let forumBaseUrl = $state('');
   let forumThreadUrls = $state('');
   let forumUserAgent = $state('');
+  let forumEvasion = $state('');
   let cookiesText = $state('');
   // shared
   let cooldown = $state('21600');
@@ -82,6 +83,7 @@
       fd.append('forum_base_url', forumBaseUrl.trim());
       if (forumThreadUrls.trim()) fd.append('forum_thread_urls', forumThreadUrls.trim());
       if (forumUserAgent.trim()) fd.append('forum_user_agent', forumUserAgent.trim());
+      if (forumEvasion) fd.append('forum_evasion_level', forumEvasion);
     }
 
     if (cooldown.trim()) fd.append('cooldown_seconds', cooldown.trim());
@@ -97,6 +99,7 @@
       forumBaseUrl = '';
       forumThreadUrls = '';
       forumUserAgent = '';
+      forumEvasion = '';
       cookiesText = '';
       proxyUri = '';
       proxyTouched = false; // re-enable auto-manage for the next identity
@@ -172,6 +175,17 @@
       <label class="fld"><span class="flabel">User-Agent (optional)</span>
         <input class="fin" type="text" bind:value={forumUserAgent} placeholder="Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0" />
         <span class="hint">Match the browser that exported these cookies (Tor Browser for an .onion board) — a UA mismatch vs the session is a ban signal. Blank = Tor Browser default.</span></label>
+
+      <label class="fld"><span class="flabel">Evasion level (optional)</span>
+        <select class="fin" bind:value={forumEvasion}>
+          <option value="">default pacing (4-12s)</option>
+          <option value="ghost">ghost (E0) · minutes apart, hardest targets</option>
+          <option value="lurker">lurker (E1) · 20-60s, validated on defended boards</option>
+          <option value="regular">regular (E2) · 8-15s</option>
+          <option value="brisk">brisk (E3) · 3-6s</option>
+          <option value="smash">smash (E4) · sub-second, tolerant boards only</option>
+        </select>
+        <span class="hint">nmap-style pacing preset. Sets the inter-request delay; on a 429 the collector always goes silent for the padded Retry-After regardless of level.</span></label>
     {:else if sourceId}
       <p class="hint">This source kind can't be provisioned from this form.</p>
     {/if}

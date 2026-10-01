@@ -34,6 +34,7 @@ from eyenet.api.deps import (
     get_storage,
 )
 from eyenet.api.v1.schemas.identities import IdentityDetail
+from eyenet.collectors.forum.real import resolve_evasion_pacing
 from eyenet.contracts.enums import IdentityRole, SourceKind, SystemUserRole
 from eyenet.contracts.source import SourceRow
 from eyenet.identity_pool._provision import SessionValidationError, provision_identity
@@ -75,6 +76,10 @@ async def identities_create(
         str | None,
         Form(max_length=1024, description="UA of the browser that minted the cookie jar"),
     ] = None,
+    forum_evasion_level: Annotated[
+        str | None,
+        Form(max_length=16, description="ghost|lurker|regular|brisk|smash (E0..E4); sets pacing"),
+    ] = None,
     cooldown_seconds: Annotated[int, Form(ge=0)] = 21_600,
     proxy_uri: Annotated[str | None, Form(max_length=1024)] = None,
     role: Annotated[IdentityRole, Form()] = IdentityRole.MONITOR,
@@ -100,6 +105,7 @@ async def identities_create(
         forum_base_url=forum_base_url,
         forum_thread_urls=forum_thread_urls,
         forum_user_agent=forum_user_agent,
+        forum_evasion_level=forum_evasion_level,
     )
 
     try:
@@ -146,6 +152,7 @@ def _build_source_config(
     forum_base_url: str | None = None,
     forum_thread_urls: str | None = None,
     forum_user_agent: str | None = None,
+    forum_evasion_level: str | None = None,
 ) -> dict[str, object]:
     """Assemble the non-secret per-source config, keyed by IdentityFileEntry field
     names so the pool can splat it back into an entry. New sources add a branch."""
@@ -184,6 +191,23 @@ def _build_source_config(
         # when set so the pool's entry keeps its own default otherwise.
         if forum_user_agent:
             config["forum_user_agent"] = forum_user_agent
+        # Evasion level is a pacing preset: expand it to the delay knobs the
+        # collector actually reads, and keep the level itself for the record.
+        # Unknown level → rejected (operator typo shouldn't silently fall back).
+        if forum_evasion_level:
+            pacing = resolve_evasion_pacing(forum_evasion_level)
+            if pacing is None:
+                raise RequestValidationError(
+                    [
+                        {
+                            "loc": ("body", "forum_evasion_level"),
+                            "msg": "unknown evasion level (ghost|lurker|regular|brisk|smash)",
+                            "type": "value_error",
+                        }
+                    ]
+                )
+            config["forum_evasion_level"] = forum_evasion_level.strip().lower()
+            config["forum_delay_min"], config["forum_delay_max"] = pacing
         return config
     raise RequestValidationError(
         [
