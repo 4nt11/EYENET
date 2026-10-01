@@ -3,7 +3,7 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, freezeAll } from '$lib/identity.svelte.js';
+  import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll } from '$lib/identity.svelte.js';
 
   // Columns are the fields /v1/identities returns. No `platform` or `claimed by`
   // (the read schema has neither; platform would need a source join, and there
@@ -51,6 +51,13 @@
     const r = window.prompt('Reason for freezing ALL identities:');
     if (r && r.trim()) freezeAll(r.trim());
   }
+
+  async function removeIdentity() {
+    if (!sel) return;
+    if (!confirm(`Delete identity "${sel.name}"? Removes it entirely — use Burn to retire a compromised one.`)) return;
+    const gone = await deleteIdentity(sel.id);
+    if (gone) selectedId = null;
+  }
 </script>
 
 <main>
@@ -90,8 +97,14 @@
             {#if sel.state === 'in_use'}<Button variant="ghost" size="sm" disabled={identityView.submitting || !reason.trim()} onclick={() => act('release')}>Release</Button>{/if}
             {#if sel.state !== 'burned' && sel.state !== 'frozen'}<Button variant="ghost" size="sm" disabled={identityView.submitting || !reason.trim()} onclick={() => act('freeze')}>Freeze</Button>{/if}
             {#if sel.state !== 'burned'}<Button variant="destructive" size="sm" disabled={identityView.submitting || !reason.trim()} onclick={() => act('burn')}>Burn</Button>{/if}
-            {#if sel.state === 'burned'}<span class="terminal">Burned · terminal, no actions.</span>{/if}
+            {#if sel.state === 'burned'}<span class="terminal">Burned · terminal lifecycle.</span>{/if}
           </div>
+          {#if sel.state !== 'in_use'}
+            <div class="danger-row">
+              <Button variant="destructive" size="sm" disabled={identityView.submitting} onclick={removeIdentity}>Delete identity</Button>
+              <span class="hint">Removes the row (only if no collector binds it). Burn to retire a compromised one.</span>
+            </div>
+          {/if}
           {#if identityView.submitMsg}<p class="submitmsg">{identityView.submitMsg}</p>{/if}
         </div>
       </div>
@@ -124,6 +137,8 @@
   .field:disabled { opacity: 0.6; }
   .actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .terminal { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
+  .danger-row { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .submitmsg { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
 
   @media (max-width: 900px) { .body { grid-template-columns: 1fr; overflow: auto; } }

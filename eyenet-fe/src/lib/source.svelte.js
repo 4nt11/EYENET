@@ -2,7 +2,7 @@
 // selecting a source fetches GET /v1/sources/{id} for its inlined active
 // domains + resolved-artifact count. Svelte 5 runes in a module = universal
 // reactive state, same shape as case.svelte.js.
-import { apiGet, apiPost } from './api.js';
+import { apiDelete, apiGet, apiPost } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '');
 
@@ -97,5 +97,40 @@ export async function createSource({ kind, display_name, notes }) {
     return null;
   } finally {
     sourceCreate.submitting = false;
+  }
+}
+
+// Delete-source action (DELETE /v1/sources/{id}, write:sources). Only an UNUSED
+// source deletes; the backend returns 409 (with the blocking relations) when it
+// still holds data/wiring. accept:[409] lets us read that body instead of
+// throwing — apiDelete returns null on 204 (deleted) and the body on 409.
+export const sourceDelete = $state({ submitting: false, error: null, ok: null });
+
+export async function deleteSource(id) {
+  sourceDelete.submitting = true;
+  sourceDelete.error = null;
+  sourceDelete.ok = null;
+  try {
+    const res = await apiDelete(`/v1/sources/${id}`, { auth: true, accept: [409] });
+    if (res !== null) {
+      const refs = res?.detail?.references ?? res?.references ?? null;
+      sourceDelete.error = refs
+        ? `In use — ${Object.entries(refs).map(([k, v]) => `${k} (${v})`).join(', ')}. Remove those first.`
+        : 'Source is still in use and cannot be deleted.';
+      return false;
+    }
+    sourceDelete.ok = 'Source deleted.';
+    await loadSources();
+    return true;
+  } catch (e) {
+    if (e.status === 404) {
+      sourceDelete.ok = 'Source already gone.';
+      await loadSources();
+      return true;
+    }
+    sourceDelete.error = e.message ?? String(e);
+    return false;
+  } finally {
+    sourceDelete.submitting = false;
   }
 }
