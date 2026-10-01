@@ -42,6 +42,7 @@ from .file_access import (
 from .forum_backfill import ForumBackfillRequestTable
 from .forum_crawl_cursor import ForumCrawlCursorTable
 from .forum_reply import ForumReplyRequestTable
+from .forum_thread_alias import ForumThreadAliasTable
 from .forum_thread_link import ForumThreadLinkTable
 from .graph import GraphEdgeTable, GraphEdgeType, GraphNodeTable, GraphNodeType
 from .group import GroupSnapshotTable, GroupTable
@@ -98,6 +99,7 @@ __all__ = [
     "ForumBackfillRequestTable",
     "ForumCrawlCursorTable",
     "ForumReplyRequestTable",
+    "ForumThreadAliasTable",
     "ForumThreadLinkTable",
     "GraphEdgeTable",
     "GraphEdgeType",
