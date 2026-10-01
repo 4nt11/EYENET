@@ -4,6 +4,7 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
+  import Dropdown from '$lib/components/Dropdown.svelte';
   import {
     groupCtx, groupView, groupStatusTone, isJoinable, loadGroups, joinGroup, leaveGroup, scanGroups, short
   } from '$lib/group.svelte.js';
@@ -76,6 +77,13 @@
     return () => clearTimeout(t);
   });
 
+  // Styled-dropdown option lists ({ v, l }).
+  const sourceOpts = $derived([
+    { v: '', l: 'All sources' },
+    ...sourceCtx.list.map((s) => ({ v: s.id, l: `${s.name} · ${s.platform}` }))
+  ]);
+  const platformOpts = [{ v: '', l: 'All platforms' }, ...PLATFORMS.map((p) => ({ v: p, l: p }))];
+
   onMount(() => {
     loadCollectors();
     loadSources();
@@ -104,14 +112,8 @@
       <div class="filter-bar">
         <input class="search" type="search" placeholder="Search by name or platform id…"
           bind:value={search} aria-label="Search groups" />
-        <select class="source-sel" bind:value={sourceFilter} aria-label="Filter by source">
-          <option value="">All sources</option>
-          {#each sourceCtx.list as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
-        </select>
-        <select class="source-sel" bind:value={platformFilter} aria-label="Filter by platform">
-          <option value="">All platforms</option>
-          {#each PLATFORMS as p}<option value={p}>{p}</option>{/each}
-        </select>
+        <Dropdown options={sourceOpts} bind:value={sourceFilter} minWidth="190px" />
+        <Dropdown options={platformOpts} bind:value={platformFilter} minWidth="124px" />
         <div class="segs">
           <button class="seg" class:on={member === 'all'} onclick={() => (member = 'all')}>All · {groupCtx.list.length}</button>
           <button class="seg" class:on={member === 'discovered'} onclick={() => (member = 'discovered')}>Discovered · {groupCtx.list.length - memberCount}</button>
@@ -165,8 +167,6 @@
   .search { flex: 1 1 220px; min-width: 160px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; }
   .search:focus { outline: none; border-color: var(--accent); }
   .search::placeholder { color: var(--text-faint); }
-  .source-sel { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; max-width: 220px; }
-  .source-sel:focus { outline: none; border-color: var(--accent); }
   .seg { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; }
   .seg:hover { color: var(--text-body); border-color: var(--accent); }
   .seg.on { color: var(--accent-text); border-color: var(--accent); background: var(--panel); }
