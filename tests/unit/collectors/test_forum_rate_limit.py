@@ -176,6 +176,43 @@ async def test_429_without_retry_after_uses_default(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_identity_detail_surfaces_running_profile() -> None:
+    # The read surface must show which pacing profile a collector is running.
+    from uuid import uuid4
+
+    from eyenet.api.v1.schemas.identities import IdentityDetail
+    from eyenet.contracts.identity import IdentityRow
+
+    row = IdentityRow(
+        name="pwn",
+        source_id=uuid4(),
+        session_path="/x",
+        source_config={
+            "forum_base_url": "http://host.onion",
+            "forum_evasion_level": "lurker",
+            "forum_delay_min": 20.0,
+            "forum_delay_max": 60.0,
+        },
+    )
+    detail = IdentityDetail.from_domain(row)
+    assert detail.forum_evasion_level == "lurker"
+    assert (detail.forum_delay_min, detail.forum_delay_max) == (20.0, 60.0)
+
+
+@pytest.mark.unit
+def test_identity_detail_profile_none_for_non_forum() -> None:
+    from uuid import uuid4
+
+    from eyenet.api.v1.schemas.identities import IdentityDetail
+    from eyenet.contracts.identity import IdentityRow
+
+    row = IdentityRow(name="tg", source_id=uuid4(), session_path="/x")
+    detail = IdentityDetail.from_domain(row)
+    assert detail.forum_evasion_level is None
+    assert detail.forum_delay_min is None
+
+
+@pytest.mark.unit
 def test_identity_entry_round_trips_evasion_level(tmp_path: Path) -> None:
     entry = IdentityFileEntry(
         name="pwn",

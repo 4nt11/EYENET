@@ -28,6 +28,13 @@
           { label: 'Source', value: sel.sourceId.slice(0, 8) },
           { label: 'Last used', value: sel.lastUsed },
           { label: 'Cooldown', value: identityView.cooldown != null ? `${identityView.cooldown}s` : '—' },
+          ...(identityView.delayMin != null
+            ? [{
+                label: 'Profile',
+                value: `${identityView.evasion ?? 'custom'} · ${identityView.delayMin}-${identityView.delayMax}s/req`,
+                tone: 'accent'
+              }]
+            : []),
           ...(identityView.notes ? [{ label: 'Notes', value: identityView.notes, mono: false }] : [])
         ]
       : []

@@ -50,14 +50,24 @@ class IdentitySummary(ApiSchema):
 
 
 class IdentityDetail(IdentitySummary):
-    """Detail view (GET /v1/identities/{id}) — same OPSEC omissions."""
+    """Detail view (GET /v1/identities/{id}) — same OPSEC omissions.
+
+    Surfaces the forum collector's PACING profile so the operator can see what an
+    identity's collector is actually running: the named evasion level (if one was
+    chosen) and the resolved inter-request delay window. Non-secret config, read
+    from ``source_config``; ``None`` for non-forum identities.
+    """
 
     cooldown_seconds: int
     graduated_at: datetime | None = None
     notes: str | None = None
+    forum_evasion_level: str | None = None
+    forum_delay_min: float | None = None
+    forum_delay_max: float | None = None
 
     @classmethod
     def from_domain(cls, row: IdentityRow) -> IdentityDetail:
+        cfg = row.source_config or {}
         return cls(
             identity_id=row.id,
             name=row.name,
@@ -68,6 +78,9 @@ class IdentityDetail(IdentitySummary):
             cooldown_seconds=row.cooldown_seconds,
             graduated_at=row.graduated_at,
             notes=row.notes,
+            forum_evasion_level=cfg.get("forum_evasion_level"),
+            forum_delay_min=cfg.get("forum_delay_min"),
+            forum_delay_max=cfg.get("forum_delay_max"),
         )
 
 

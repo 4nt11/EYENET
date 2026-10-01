@@ -42,6 +42,9 @@ export const identityView = $state({
   id: null,
   cooldown: null,
   notes: null,
+  evasion: null,
+  delayMin: null,
+  delayMax: null,
   loading: false,
   error: null,
   submitting: false,
@@ -56,6 +59,9 @@ export async function loadIdentityDetail(id) {
   identityView.id = id;
   identityView.cooldown = null;
   identityView.notes = null;
+  identityView.evasion = null;
+  identityView.delayMin = null;
+  identityView.delayMax = null;
   identityView.error = null;
   identityView.submitMsg = null;
   try {
@@ -63,6 +69,9 @@ export async function loadIdentityDetail(id) {
     if (mine !== detailSeq) return;
     identityView.cooldown = d.cooldown_seconds;
     identityView.notes = d.notes;
+    identityView.evasion = d.forum_evasion_level;
+    identityView.delayMin = d.forum_delay_min;
+    identityView.delayMax = d.forum_delay_max;
     identityView.error = null;
   } catch (e) {
     if (mine !== detailSeq) return;

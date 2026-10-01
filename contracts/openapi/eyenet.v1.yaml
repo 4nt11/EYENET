@@ -4429,6 +4429,9 @@ components:
         cooldown_seconds: { type: integer }
         graduated_at:     { type: string, format: date-time, nullable: true }
         notes:            { type: string, nullable: true }
+        forum_evasion_level: { type: string, nullable: true, description: 'running pacing profile (ghost|lurker|regular|brisk|smash); null if none/non-forum' }
+        forum_delay_min:  { type: number, nullable: true, description: resolved inter-request delay floor (seconds) }
+        forum_delay_max:  { type: number, nullable: true, description: resolved inter-request delay ceiling (seconds) }
     Body_identities_create:
       description: |
         Multipart form for POST /v1/identities. `session` is the uploaded
@@ -4444,6 +4447,10 @@ components:
         telegram_api_id:  { type: integer, nullable: true }
         telegram_api_hash: { type: string, maxLength: 256, nullable: true }
         monitor_groups:   { type: string, nullable: true, description: comma-separated }
+        forum_base_url:   { type: string, maxLength: 1024, nullable: true }
+        forum_thread_urls: { type: string, nullable: true, description: comma-separated thread URLs }
+        forum_user_agent: { type: string, maxLength: 1024, nullable: true, description: UA of the browser that minted the cookie jar }
+        forum_evasion_level: { type: string, maxLength: 16, nullable: true, description: 'ghost|lurker|regular|brisk|smash (E0..E4); sets pacing' }
         cooldown_seconds: { type: integer, minimum: 0, default: 21600 }
         proxy_uri:        { type: string, maxLength: 1024, nullable: true }
         role:             { $ref: '#/components/schemas/IdentityRole' }
