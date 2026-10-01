@@ -22,8 +22,17 @@
     { key: 'lastSeen', header: 'Last seen', mono: true, align: 'right', width: '170px' }
   ];
 
-  // Rows enriched with the resolved platform label.
-  const rows = $derived(groupCtx.list.map((g) => ({ ...g, platform: platformOf(g.sourceId) })));
+  // Client-side membership segment (All / Discovered / Already a member) over the
+  // server-narrowed set — same control the candidates page carries. memberDialog
+  // = the operator's own account already sits in the group.
+  let member = $state('all'); // 'all' | 'member' | 'discovered'
+  let memberCount = $derived(groupCtx.list.filter((g) => g.memberDialog).length);
+  // Rows: membership segment + resolved platform label.
+  const rows = $derived(
+    groupCtx.list
+      .filter((g) => member === 'all' || (member === 'member' ? g.memberDialog : !g.memberDialog))
+      .map((g) => ({ ...g, platform: platformOf(g.sourceId) }))
+  );
 
   let selectedId = $state(null);
   let sel = $derived(rows.find((g) => g.id === selectedId) ?? rows[0] ?? null);
@@ -50,12 +59,13 @@
       : []
   );
 
-  // Server-side search over the group name + platform id, debounced so each
-  // keystroke doesn't hammer the API. The initial run (empty search) loads all.
+  // Server-side narrowing: substring search + source filter, debounced so each
+  // keystroke doesn't hammer the API. The initial run (empty) loads all.
   let search = $state('');
+  let sourceFilter = $state('');
   $effect(() => {
-    const q = search;
-    const t = setTimeout(() => loadGroups(q), 250);
+    const s = search, src = sourceFilter;
+    const t = setTimeout(() => loadGroups(s, src), 250);
     return () => clearTimeout(t);
   });
 
@@ -84,21 +94,29 @@
 
   <div class="body">
     <div class="table-col">
-      <input
-        class="search"
-        type="search"
-        placeholder="Search groups by name or platform id…"
-        bind:value={search}
-        aria-label="Search groups"
-      />
+      <div class="filter-bar">
+        <input class="search" type="search" placeholder="Search by name or platform id…"
+          bind:value={search} aria-label="Search groups" />
+        <select class="source-sel" bind:value={sourceFilter} aria-label="Filter by source">
+          <option value="">All sources</option>
+          {#each sourceCtx.list as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
+        </select>
+        <div class="segs">
+          <button class="seg" class:on={member === 'all'} onclick={() => (member = 'all')}>All · {groupCtx.list.length}</button>
+          <button class="seg" class:on={member === 'discovered'} onclick={() => (member = 'discovered')}>Discovered · {groupCtx.list.length - memberCount}</button>
+          <button class="seg" class:on={member === 'member'} onclick={() => (member = 'member')}>Already a member · {memberCount}</button>
+        </div>
+      </div>
+      <div class="table-scroll">
       {#if rows.length}
         <DataTable rowKey="id" columns={COLUMNS} rows={rows}
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
       {:else}
         <p class="pnote">
-          {#if !groupCtx.loaded}Loading…{:else if groupCtx.error}Could not load groups: {groupCtx.error}{:else if search.trim()}No groups match "{search.trim()}".{:else}No groups visible yet. Run a collector (it scans its identity's groups on start), or Rescan.{/if}
+          {#if !groupCtx.loaded}Loading…{:else if groupCtx.error}Could not load groups: {groupCtx.error}{:else if groupCtx.list.length}No groups in this view.{:else if search.trim() || sourceFilter}No groups match the current filters.{:else}No groups visible yet. Run a collector (it scans its identity's groups on start), or Rescan.{/if}
         </p>
       {/if}
+      </div>
     </div>
 
     {#if sel}
@@ -129,9 +147,18 @@
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-right: 20px; }
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
-  .table-col { min-height: 0; overflow: auto; }
-  .search { width: 100%; box-sizing: border-box; margin-bottom: 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 8px 12px; }
+  .table-col { min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .table-scroll { flex: 1; min-height: 0; overflow: auto; }
+  .filter-bar { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
+  .segs { display: flex; gap: 6px; }
+  .search { flex: 1 1 220px; min-width: 160px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; }
   .search:focus { outline: none; border-color: var(--accent); }
+  .search::placeholder { color: var(--text-faint); }
+  .source-sel { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; max-width: 220px; }
+  .source-sel:focus { outline: none; border-color: var(--accent); }
+  .seg { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; }
+  .seg:hover { color: var(--text-body); border-color: var(--accent); }
+  .seg.on { color: var(--accent-text); border-color: var(--accent); background: var(--panel); }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .actions { display: flex; flex-direction: column; gap: 8px; }
   .actions-label { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }

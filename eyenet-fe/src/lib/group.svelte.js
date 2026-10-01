@@ -43,13 +43,25 @@ function mapGroup(g) {
 
 export const groupCtx = $state({ list: [], loaded: false, error: null });
 
-export async function loadGroups(q = '') {
+export async function loadGroups(search = '', sourceId = '') {
   try {
-    // Server-side substring search over name + platform id — cuts through the
-    // discovery firehose so the operator can find the group they mean to join.
-    const query = q.trim() ? `&q=${encodeURIComponent(q.trim())}` : '';
-    const page = await apiGet(`/v1/groups?limit=200${query}`, { auth: true });
-    groupCtx.list = page.items.map(mapGroup);
+    // Server-side substring search (name + platform id) + source filter cut
+    // through the discovery firehose. Page through the opaque cursor so a source
+    // with >500 groups isn't silently truncated (the old fixed limit=200 was).
+    const base = new URLSearchParams({ limit: '500' });
+    if (search.trim()) base.set('q', search.trim());
+    if (sourceId) base.set('source_id', sourceId);
+    const all = [];
+    let cursor = null;
+    for (let i = 0; i < 50; i++) {
+      const params = new URLSearchParams(base);
+      if (cursor) params.set('cursor', cursor);
+      const page = await apiGet(`/v1/groups?${params}`, { auth: true });
+      all.push(...page.items);
+      cursor = page.next_cursor;
+      if (!cursor) break;
+    }
+    groupCtx.list = all.map(mapGroup);
     groupCtx.error = null;
   } catch (e) {
     groupCtx.error = e.message ?? String(e);

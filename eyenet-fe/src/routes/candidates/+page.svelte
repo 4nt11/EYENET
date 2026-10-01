@@ -11,6 +11,7 @@
     approveCandidate, rejectCandidate, parkCandidate, retryCandidate
   } from '$lib/candidate.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
+  import { sourceCtx, loadSources } from '$lib/source.svelte.js';
 
   // Columns are fields /v1/candidates returns. Platform is dropped from the list
   // (needs a per-row source join — never fabricate) and shown in detail after a
@@ -35,6 +36,16 @@
   );
   let memberCount = $derived(candidateCtx.list.filter((x) => x.memberDialog).length);
 
+  // Server-side narrowing: substring search + source filter, debounced. The
+  // member segments above filter client-side on the already-narrowed set.
+  let search = $state('');
+  let sourceFilter = $state('');
+  $effect(() => {
+    const s = search, src = sourceFilter;
+    const t = setTimeout(() => loadCandidates(s, src), 250);
+    return () => clearTimeout(t);
+  });
+
   let selectedId = $state(null);
   let sel = $derived(rows.find((x) => x.id === selectedId) ?? rows[0] ?? null);
   // Only `queued` (approve/reject) and `joined` (park) carry an operator action.
@@ -55,8 +66,9 @@
   });
 
   onMount(() => {
-    loadCandidates();
+    // candidates load via the debounced $effect (initial empty search = all)
     loadCollectors(); // populates the approve → assigned-collector selector
+    loadSources(); // populates the source filter dropdown
   });
 
   async function approve() {
@@ -88,9 +100,17 @@
   <div class="body">
     <div class="table-col">
       <div class="filter-bar">
-        <button class="seg" class:on={filter === 'all'} onclick={() => (filter = 'all')}>All · {candidateCtx.list.length}</button>
-        <button class="seg" class:on={filter === 'discovered'} onclick={() => (filter = 'discovered')}>Discovered · {candidateCtx.list.length - memberCount}</button>
-        <button class="seg" class:on={filter === 'member'} onclick={() => (filter = 'member')}>Already a member · {memberCount}</button>
+        <input class="search" type="search" placeholder="Search by name or platform id…"
+          bind:value={search} aria-label="Search candidates" />
+        <select class="source-sel" bind:value={sourceFilter} aria-label="Filter by source">
+          <option value="">All sources</option>
+          {#each sourceCtx.list as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
+        </select>
+        <div class="segs">
+          <button class="seg" class:on={filter === 'all'} onclick={() => (filter = 'all')}>All · {candidateCtx.list.length}</button>
+          <button class="seg" class:on={filter === 'discovered'} onclick={() => (filter = 'discovered')}>Discovered · {candidateCtx.list.length - memberCount}</button>
+          <button class="seg" class:on={filter === 'member'} onclick={() => (filter = 'member')}>Already a member · {memberCount}</button>
+        </div>
       </div>
       <div class="table-scroll">
       {#if rows.length}
@@ -198,7 +218,13 @@
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .table-col { min-height: 0; display: flex; flex-direction: column; gap: 10px; }
   .table-scroll { flex: 1; min-height: 0; overflow: auto; }
-  .filter-bar { display: flex; gap: 6px; flex-shrink: 0; }
+  .filter-bar { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
+  .segs { display: flex; gap: 6px; }
+  .search { flex: 1 1 220px; min-width: 160px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .search::placeholder { color: var(--text-faint); }
+  .source-sel { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 10px; max-width: 220px; }
+  .source-sel:focus { outline: none; border-color: var(--accent); }
   .seg { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; }
   .seg:hover { color: var(--text-body); border-color: var(--accent); }
   .seg.on { color: var(--accent-text); border-color: var(--accent); background: var(--panel); }
