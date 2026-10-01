@@ -7,20 +7,30 @@
 
 const isMatrixAlias = (id) => /^#[^:\s]+:[^:\s]+$/.test(id);
 
-// telegram (@handle / joinchat invite) | matrix (#room:server) | forum (native).
-export function realPlatform(platformGroupId) {
+// The GroupKind IS the platform signal — forums ONLY have forum_category (and
+// forum_thread); chat/channel/dm are Telegram, matrix_room is Matrix. A Telegram
+// chat has a numeric id (no @), so the id SHAPE can't be trusted; kind can. Shape
+// is only the fallback for an unresolved mention that has no kind yet.
+export function realPlatform(platformGroupId, kind) {
+  const k = (kind ?? '').toLowerCase();
+  if (k === 'forum_category' || k === 'forum_thread') return 'forum';
+  if (k === 'matrix_room') return 'matrix';
+  if (k === 'chat' || k === 'channel' || k === 'dm') return 'telegram';
+  if (k === 'irc_channel') return 'irc';
   const id = platformGroupId ?? '';
-  if (id.startsWith('@') || id.startsWith('joinchat:')) return 'telegram';
   if (isMatrixAlias(id)) return 'matrix';
-  return 'forum';
+  // forum is forum_category ONLY, so a bare un-kinded mention is never forum.
+  return 'telegram';
 }
 
-// How the candidate surfaced. kind_hint is set only by forum subforum
-// enumeration; mentions/invite links carry none. member_dialog is a separate
-// axis (the member segment), not a discovery method, so it is NOT folded in.
-export function foundVia(platformGroupId, kindHint) {
+// How the candidate surfaced. forum_category/thread came from subforum
+// enumeration; a group the operator's own account is in was seen in dialogs; the
+// rest are post references (invite link / matrix alias / @mention).
+export function foundVia(platformGroupId, kind, memberDialog) {
+  const k = (kind ?? '').toLowerCase();
+  if (k === 'forum_category' || k === 'forum_thread') return 'subforum';
+  if (memberDialog) return 'dialog';
   const id = platformGroupId ?? '';
-  if (kindHint) return 'subforum';
   if (id.startsWith('joinchat:')) return 'invite link';
   if (isMatrixAlias(id)) return 'matrix alias';
   return 'mention';
