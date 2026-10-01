@@ -54,18 +54,24 @@ function mapCandidate(c) {
 
 export const candidateCtx = $state({ list: [], loaded: false, error: null });
 
-export async function loadCandidates() {
+export async function loadCandidates(search = '', sourceId = '') {
   try {
     // Page through all candidates via the opaque cursor — the operator can be in
     // hundreds of groups, and a single fixed limit silently truncated the view.
     // Once fully drained, list.length is the true total (no count() needed).
     // ponytail: 50-page ceiling (×500 = 25k rows) guards a server that never
     // stops handing out cursors; lift it if a real operator ever exceeds it.
+    // Server-side q (name/platform-id substring) + source_id narrow the firehose
+    // before it reaches the browser — essential past ~2k groups.
+    const base = new URLSearchParams({ limit: '500' });
+    if (search.trim()) base.set('q', search.trim());
+    if (sourceId) base.set('source_id', sourceId);
     const all = [];
     let cursor = null;
     for (let i = 0; i < 50; i++) {
-      const q = cursor ? `?limit=500&cursor=${encodeURIComponent(cursor)}` : '?limit=500';
-      const page = await apiGet(`/v1/candidates${q}`, { auth: true });
+      const params = new URLSearchParams(base);
+      if (cursor) params.set('cursor', cursor);
+      const page = await apiGet(`/v1/candidates?${params}`, { auth: true });
       all.push(...page.items);
       cursor = page.next_cursor;
       if (!cursor) break;
