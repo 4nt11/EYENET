@@ -45,6 +45,10 @@ async def groups_list(
             "|member_unmonitored|discovered|rejected|failed|parked"
         ),
     ] = None,
+    q: Annotated[
+        str | None,
+        Query(description="Case-insensitive substring over the group name + platform id."),
+    ] = None,
 ) -> CursorPageGroupSummary:
     states: list[CandidateState] | None = None
     member_dialog: bool | None = None
@@ -58,12 +62,13 @@ async def groups_list(
         source_id=source_id,
         states=states,
         member_dialog=member_dialog,
+        q=q,
         limit=page.fetch_limit,
         offset=page.offset,
     )
     estimated_total = (
         await storage.count_candidates(
-            state=state, source_id=source_id, states=states, member_dialog=member_dialog
+            state=state, source_id=source_id, states=states, member_dialog=member_dialog, q=q
         )
         if page.include_total
         else None

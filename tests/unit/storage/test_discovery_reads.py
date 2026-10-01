@@ -416,6 +416,33 @@ async def test_list_candidates_filters_by_state_and_source(
 
 
 @pytest.mark.unit
+async def test_list_candidates_search_q(storage: BaseRepository) -> None:
+    """q substring-matches the group name (display_name_hint) OR platform id,
+    case-insensitively — the monitored-groups search over the discovery firehose."""
+    src = await _make_source(storage, "cand_q")
+    await storage.ensure_candidate(
+        source_id=src, platform_groupid="chan_abc", seen_at=_NOW, title="Crypto Leaks Market"
+    )
+    await storage.ensure_candidate(
+        source_id=src, platform_groupid="random999", seen_at=_NOW, title="Cat Photos"
+    )
+
+    # matches on display_name_hint (title), case-insensitive
+    assert [r.platform_groupid for r in await storage.list_candidates(q="crypto", limit=10)] == [
+        "chan_abc"
+    ]
+    # matches on platform_groupid, case-insensitive
+    assert [r.platform_groupid for r in await storage.list_candidates(q="RANDOM", limit=10)] == [
+        "random999"
+    ]
+    # count tracks the same filter; empty / None q means no filter
+    assert await storage.count_candidates(q="crypto") == 1
+    assert await storage.count_candidates(q="zzz") == 0
+    assert await storage.count_candidates(q="") == 2
+    assert await storage.count_candidates(q=None) == 2
+
+
+@pytest.mark.unit
 async def test_list_candidates_min_score_and_sort(storage: BaseRepository) -> None:
     src = await _make_source(storage, "score")
     # Insert candidates with explicit scores via the escape hatch (no public

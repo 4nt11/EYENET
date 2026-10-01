@@ -186,6 +186,34 @@ async def test_list_groups_status_filter(storage: BaseRepository) -> None:
 
 
 @pytest.mark.unit
+async def test_list_groups_q_search(storage: BaseRepository) -> None:
+    from eyenet.api.deps_paging import CursorParams
+
+    sid = await _source(storage)
+    await storage.ensure_candidate(
+        source_id=sid,
+        platform_groupid="@cryptoleaks",
+        seen_at=datetime.now(tz=UTC),
+        title="Crypto Leaks",
+    )
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@catpics", seen_at=datetime.now(tz=UTC), title="Cat Pics"
+    )
+
+    page = await groups_list(
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=True),
+        source_id=None,
+        state=None,
+        status=None,
+        q="crypto",
+    )
+    assert {i.platform_groupid for i in page.items} == {"@cryptoleaks"}
+    assert page.estimated_total == 1
+
+
+@pytest.mark.unit
 async def test_leave_parks_and_closes_membership(storage: BaseRepository) -> None:
     sid = await _source(storage)
     coll = await _seed_collector(storage, sid)
