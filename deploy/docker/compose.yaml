@@ -45,6 +45,18 @@ services:
       timeout: 3s
       retries: 10
 
+  # Self-contained Tor SOCKS proxy. Forum collectors reach .onion mirrors
+  # through it (identity proxy_uri = socks5h://tor:9050) — e.g. pwnforums'
+  # onion, plain MyBB with NO Cloudflare, unlike its JS-challenged clearnet
+  # host. SOCKS is reachable only on this private compose network (no ports:).
+  # The operator no longer runs Tor on the host.
+  tor:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.tor
+    image: eyenet:tor
+    restart: unless-stopped
+
   # The API owns first-boot schema creation (create_all) and binds the only
   # host-published port. Every worker depends on it being healthy.
   api:
