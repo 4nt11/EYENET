@@ -1356,6 +1356,22 @@ class BaseRepository(ABC):
         """Persist (upsert) backfill progress for a category."""
 
     @abstractmethod
+    async def resolve_or_bind_forum_thread(
+        self,
+        *,
+        source_id: UUID,
+        canonical_tid: str,
+        fallback_platform_groupid: str,
+    ) -> str:
+        """Stable group key for a thread's canonical tid (first-seen wins).
+
+        Returns the ``platform_groupid`` already bound to ``canonical_tid`` for
+        this source; if none, binds ``fallback_platform_groupid`` and returns it.
+        Lets a moved/re-slugged thread (same tid, new slug) resolve to the
+        original thread's key instead of creating a duplicate.
+        """
+
+    @abstractmethod
     async def create_forum_reply_request(
         self,
         *,

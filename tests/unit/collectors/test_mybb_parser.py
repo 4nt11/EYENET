@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from eyenet.collectors.forum import (
+    parse_canonical_tid,
     parse_forum_links,
     parse_reply_form,
     parse_subforum_links,
@@ -90,6 +91,21 @@ def test_parse_subforum_links_empty_when_no_subforum_block() -> None:
     # A leaf forum (no children) and a blocked/empty page both yield nothing.
     html = "<ul class='sidenav__menu nav'><a href='Forum-Databases'>x</a></ul>"
     assert parse_subforum_links(html) == []
+
+
+def test_parse_canonical_tid_from_hidden_input() -> None:
+    html = "<form><input type='hidden' name='tid' value='92204'></form>"
+    assert parse_canonical_tid(html) == "92204"
+
+
+def test_parse_canonical_tid_from_newreply_link() -> None:
+    # No hidden input; fall back to the per-post reply link.
+    html = "<a href='newreply.php?tid=164660&replyto=5'>Reply</a>"
+    assert parse_canonical_tid(html) == "164660"
+
+
+def test_parse_canonical_tid_none_when_absent() -> None:
+    assert parse_canonical_tid("<p>a tid-less listing page</p>") is None
 
 
 def test_parse_thread_links_strips_query_and_dedupes() -> None:
