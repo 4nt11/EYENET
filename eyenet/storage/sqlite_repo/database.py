@@ -88,6 +88,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "forum_backfill_request",
         # per-category backfill page cursor (resume, don't re-scrape from page 1)
         "forum_crawl_cursor",
+        # canonical-tid -> stable group key, for move/re-slug thread dedup
+        "forum_thread_alias",
         # corpus cursors
         "corpus_cursor",
         # profiles / linkage / persona / feedback

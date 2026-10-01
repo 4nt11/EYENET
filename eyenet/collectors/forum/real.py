@@ -32,6 +32,7 @@ from eyenet.collectors.base._credentials import materialize_forum_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.collectors.forum import (
     ParsedPost,
+    parse_canonical_tid,
     parse_forum_links,
     parse_reply_form,
     parse_subforum_links,
@@ -120,6 +121,30 @@ def _thread_id_from_url(url: str) -> str:
         if tail.isdigit():
             return tail
     return slug
+
+
+# Section prefixes DarkForums prepends to a thread slug per forum; dropped when a
+# thread is MOVED (e.g. to Removed Content), which re-slugs it. Normalizing them
+# away lets a moved tid-less thread dedupe to its captured copy. This is the
+# FALLBACK path only (used when a thread page yields no canonical tid, which is
+# rare); the primary dedup key is the page's tid via the alias table.
+# ponytail: a short known-prefix list, extend as new sections surface. Anchored to
+# the ``Thread-`` head so an in-title "DATABASE-" mid-slug is never touched.
+_SECTION_SLUG_PREFIXES = ("DATABASE-", "STEALER-LOGS-", "STEALER-")
+
+
+def _normalize_thread_slug(key: str) -> str:
+    """Strip a leading section prefix from a ``Thread-<section>-<title>`` slug.
+
+    No-op for a numeric tid key or a slug without a known section prefix.
+    """
+    if not key.startswith("Thread-"):
+        return key
+    rest = key[len("Thread-") :]
+    for prefix in _SECTION_SLUG_PREFIXES:
+        if rest.startswith(prefix):
+            return "Thread-" + rest[len(prefix) :]
+    return key
 
 
 class MyBBForumCollector(CollectorSkeleton):
@@ -377,14 +402,18 @@ class MyBBForumCollector(CollectorSkeleton):
         threads = 0
         for thread_url in parse_thread_links(html):
             try:
-                if self._source_uuid is not None:
+                # Poll first: it resolves the thread's STABLE key (canonical tid
+                # via the alias) from the page, so the category->thread link is
+                # recorded under the same key the thread ingests under, not the
+                # (re-sluggable) listing URL.
+                key = await self._poll_thread(thread_url)
+                if key is not None and self._source_uuid is not None:
                     await self._storage.record_forum_thread_link(
                         source_id=self._source_uuid,
                         category_platform_groupid=slug,
-                        thread_platform_groupid=_thread_id_from_url(thread_url),
+                        thread_platform_groupid=key,
                         seen_at=datetime.now(tz=UTC),
                     )
-                await self._poll_thread(thread_url)
                 threads += 1
             except OperationalError as exc:
                 await self.syslog(
@@ -477,10 +506,35 @@ class MyBBForumCollector(CollectorSkeleton):
             updated_at=datetime.now(tz=UTC),
         )
 
-    async def _poll_thread(self, url: str) -> None:
-        tid = _thread_id_from_url(url)
+    async def _poll_thread(self, url: str) -> str | None:
+        """Fetch + ingest a thread; return the STABLE group key it ingested under.
+
+        The key is resolved from the thread PAGE, not the (re-sluggable) URL: the
+        page's canonical tid is bound through the alias (first-seen wins), so a
+        moved/re-slugged copy resolves to the original thread's key. When a page
+        yields no tid (rare), fall back to a section-prefix-normalized slug.
+        Returns None if the first fetch fails (nothing ingested).
+        """
+        url_key = _thread_id_from_url(url)
         try:
             first = await self._get(url)
+        except httpx.HTTPError as exc:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.fetch_failed",
+                message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
+            )
+            return None
+        canonical_tid = parse_canonical_tid(first.text)
+        if canonical_tid is not None and self._source_uuid is not None:
+            key = await self._storage.resolve_or_bind_forum_thread(
+                source_id=self._source_uuid,
+                canonical_tid=canonical_tid,
+                fallback_platform_groupid=url_key,
+            )
+        else:
+            key = _normalize_thread_slug(url_key)
+        try:
             pages = thread_page_count(first.text)
             # Cap per-thread depth: the leak announcement + download live on page 1;
             # deep pages are "thanks for the share" noise. Capping gets breadth
@@ -488,16 +542,17 @@ class MyBBForumCollector(CollectorSkeleton):
             if self._max_thread_pages > 0:
                 pages = min(pages, self._max_thread_pages)
             title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
-            await self._ingest_page(tid, title, first.text)
+            await self._ingest_page(key, title, first.text)
             for page in range(2, pages + 1):
                 resp = await self._get(url, params={"page": page})
-                await self._ingest_page(tid, title, resp.text)
+                await self._ingest_page(key, title, resp.text)
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
                 event="forum.fetch_failed",
                 message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
             )
+        return key
 
     # -- operator-triggered reply-to-unlock (write path) ----------------------
 

@@ -237,6 +237,25 @@ def parse_subforum_links(html: str) -> list[str]:
     return out
 
 
+def parse_canonical_tid(html: str) -> str | None:
+    """The board's stable numeric thread id (tid) from a thread page, or None.
+
+    DarkForums thread URLs are mostly tid-less SEO slugs, but the PAGE always
+    carries the tid: the reply form's ``<input name="tid">`` and the per-post
+    ``newreply.php?tid=<n>`` links. The tid is invariant across a move/re-slug,
+    so it is the thread's true identity. Prefer the hidden input (exact), fall
+    back to the first ``tid=<n>`` in a newreply link.
+    """
+    soup = BeautifulSoup(html, "html5lib")
+    el = soup.select_one('input[name="tid"]')
+    if el is not None:
+        val = str(el.get("value", "")).strip()
+        if val.isdigit():
+            return val
+    m = re.search(r"newreply\.php\?tid=(\d+)", html)
+    return m.group(1) if m else None
+
+
 def parse_thread_links(html: str) -> list[str]:
     """Thread URLs from a MyBB forum/category page, in order, deduped.
 
