@@ -9,29 +9,35 @@
   } from '$lib/group.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
+  import { PLATFORMS } from '$lib/discovery-shape.js';
 
-  // Resolve a group's source_id -> platform label for the Platform column.
+  // Resolve a group's source_id -> platform label (the SOURCE's platform, used
+  // for the join-collector lease — not the candidate's own platform).
   const platformOf = (sourceId) =>
     sourceCtx.list.find((s) => s.id === sourceId)?.platform ?? short(sourceId);
 
   const COLUMNS = [
-    { key: 'platform', header: 'Platform', mono: true, width: '90px' },
-    { key: 'kind', header: 'Kind', mono: true, width: '90px' },
+    { key: 'platform', header: 'Platform', mono: true, width: '88px' },
+    { key: 'foundVia', header: 'Found via', mono: true, width: '104px' },
+    { key: 'kind', header: 'Kind', mono: true, width: '84px' },
     { key: 'title', header: 'Group', mono: true },
     { key: 'status', header: 'Status', badge: true, tone: groupStatusTone, width: '150px' },
     { key: 'lastSeen', header: 'Last seen', mono: true, align: 'right', width: '170px' }
   ];
 
-  // Client-side membership segment (All / Discovered / Already a member) over the
-  // server-narrowed set — same control the candidates page carries. memberDialog
-  // = the operator's own account already sits in the group.
+  // Client-side membership + real-platform filters over the server-narrowed set.
+  // realPlatform is derived from the candidate shape (a telegram @handle found on
+  // a forum is a telegram lead), so it can't be a server param — filter here.
   let member = $state('all'); // 'all' | 'member' | 'discovered'
+  let platformFilter = $state(''); // '' | forum | telegram | matrix
   let memberCount = $derived(groupCtx.list.filter((g) => g.memberDialog).length);
-  // Rows: membership segment + resolved platform label.
+  // Platform column shows the candidate's REAL platform (its shape), not the
+  // observing source's.
   const rows = $derived(
     groupCtx.list
       .filter((g) => member === 'all' || (member === 'member' ? g.memberDialog : !g.memberDialog))
-      .map((g) => ({ ...g, platform: platformOf(g.sourceId) }))
+      .filter((g) => !platformFilter || g.realPlatform === platformFilter)
+      .map((g) => ({ ...g, platform: g.realPlatform }))
   );
 
   let selectedId = $state(null);
@@ -48,12 +54,13 @@
     sel
       ? [
           { label: 'Group', value: sel.title },
-          { label: 'Platform', value: platformOf(sel.sourceId) },
+          { label: 'Platform', value: sel.realPlatform },
+          { label: 'Found via', value: sel.foundVia },
           { label: 'Kind', value: sel.kind || '—' },
           { label: 'Platform id', value: sel.platformGroupId },
           { label: 'Status', value: sel.status, tone: sel.status === 'monitored' ? 'accent' : undefined },
           { label: 'Member (dialog)', value: sel.memberDialog ? 'yes' : 'no' },
-          { label: 'Source', value: short(sel.sourceId) },
+          { label: 'Source', value: `${platformOf(sel.sourceId)} · ${short(sel.sourceId)}` },
           ...(sel.groupId ? [{ label: 'Group id', value: short(sel.groupId) }] : [])
         ]
       : []
@@ -100,6 +107,10 @@
         <select class="source-sel" bind:value={sourceFilter} aria-label="Filter by source">
           <option value="">All sources</option>
           {#each sourceCtx.list as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
+        </select>
+        <select class="source-sel" bind:value={platformFilter} aria-label="Filter by platform">
+          <option value="">All platforms</option>
+          {#each PLATFORMS as p}<option value={p}>{p}</option>{/each}
         </select>
         <div class="segs">
           <button class="seg" class:on={member === 'all'} onclick={() => (member = 'all')}>All · {groupCtx.list.length}</button>
