@@ -39,6 +39,7 @@ from eyenet.collectors.forum import (
     parse_thread,
     parse_thread_links,
     parse_thread_title,
+    posted_at_to_utc,
     thread_page_count,
 )
 from eyenet.contracts._base import TraceContext
@@ -726,10 +727,10 @@ class MyBBForumCollector(CollectorSkeleton):
         # Board-scope the userid: MyBB slugs collide across boards.
         platform_userid = f"{self._board}|{post.author_username}"
         key = actor_key(SourceKind.FORUM, platform_userid)
-        # post_date is board-local NAIVE; assume board-UTC and fall back to now()
-        # for a relative/unparsed date.
-        # ponytail: swap the UTC assumption for the source's configured tz offset.
-        sent_at = post.posted_at.replace(tzinfo=UTC) if post.posted_at is not None else now
+        # Normalize to UTC engine-agnostically (naive MyBB -> attach UTC; aware ->
+        # convert, never clobber the offset); fall back to now() for a
+        # relative/unparsed date. The per-source tz offset remains a calibration knob.
+        sent_at = posted_at_to_utc(post.posted_at) or now
 
         group_id = await self._storage.upsert_group(
             source_id=source_uuid,
