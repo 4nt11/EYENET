@@ -1986,6 +1986,22 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def source_usage(self, source_id: UUID) -> dict[str, int]:
+        """Per-relation count of what references ``source_id`` (nonzero only).
+
+        Empty dict ⇒ the source is unused and safe to :meth:`delete_source`.
+        """
+
+    @abstractmethod
+    async def delete_source(self, source_id: UUID) -> None:
+        """Delete an UNUSED source + its SourceDomains (one transaction).
+
+        Raises :class:`eyenet.storage.errors.ResourceInUseError` if anything
+        still references it (re-checked in-transaction), :class:`ValueError` if
+        the source does not exist.
+        """
+
+    @abstractmethod
     async def source_bridge_summary(self, *, source_id: UUID) -> SourceBridgeSummary:
         """Bridge-resolution counts for a Source (API_PLAN §3.8, M9.D1).
 
@@ -2466,6 +2482,16 @@ class BaseRepository(ABC):
     async def burn_identity(self, *, identity_id: UUID) -> IdentityRow:
         """Quarantine a burned identity: ``state=BURNED``, ``role=QUARANTINE``
         (§4.12.5, M9.E4)."""
+
+    @abstractmethod
+    async def delete_identity(self, *, identity_id: UUID) -> None:
+        """Delete an identity not bound to a collector and not ``IN_USE``.
+
+        Burn retires a compromised identity in place; delete removes a mistaken
+        / never-wired one. Raises
+        :class:`eyenet.storage.errors.ResourceInUseError` when a collector
+        references it or it is actively claimed, :class:`ValueError` if missing.
+        """
 
     @abstractmethod
     async def freeze_all_identities(

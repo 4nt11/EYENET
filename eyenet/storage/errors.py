@@ -78,11 +78,28 @@ class SourceDomainOverlapError(Exception):
         super().__init__(f"source_domain overlaps existing {conflict_kind} row ({conflicting_id})")
 
 
+class ResourceInUseError(Exception):
+    """A delete was refused because the resource is still referenced/active.
+
+    ``refs`` maps each blocking relation to its count (e.g. ``{"message": 12,
+    "group_": 1}`` for a source, or ``{"collector": 1}`` / ``{"state": "in_use"}``
+    for an identity). Raised INSIDE the delete transaction so the guard is
+    race-safe; the API layer renders it as a 409 whose body names what blocks
+    the delete, so the operator knows what to detach first.
+    """
+
+    def __init__(self, resource: str, *, refs: dict[str, object]) -> None:
+        self.resource = resource
+        self.refs = refs
+        super().__init__(f"{resource} is in use and cannot be deleted: {refs}")
+
+
 __all__ = [
     "MAX_GRANT_DURATION",
     "CaseError",
     "ClearanceGrantError",
     "ReclassifyDemotionError",
+    "ResourceInUseError",
     "SourceCanonicalUrlError",
     "SourceDomainOverlapError",
 ]

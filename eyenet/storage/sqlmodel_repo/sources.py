@@ -14,6 +14,7 @@ per-source advisory lock — see the TODO inside
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -24,13 +25,42 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from eyenet.contracts.enums import ResolutionState, SourceDomainPatternKind
 from eyenet.contracts.source import SourceBridgeSummary, SourceRow
 from eyenet.contracts.source_domain import SourceDomainRow
+from eyenet.models.actor import ActorTable
+from eyenet.models.candidates import GroupCandidateTable
+from eyenet.models.collector import CollectorTable
+from eyenet.models.group import GroupTable
+from eyenet.models.identity import IdentityTable
 from eyenet.models.infrastructure import InfrastructureArtifactTable
+from eyenet.models.message import MessageTable
+from eyenet.models.relation import ActorRelationTable
 from eyenet.models.source import SourceTable
 from eyenet.models.source_domain import SourceDomainTable
-from eyenet.storage.errors import SourceCanonicalUrlError, SourceDomainOverlapError
+from eyenet.storage.errors import (
+    ResourceInUseError,
+    SourceCanonicalUrlError,
+    SourceDomainOverlapError,
+)
 from eyenet.util.domain import normalize_host, pattern_matches_host, patterns_intersect
 
 from ._helpers import safe_session
+
+# Relations that make a Source "in use" (evidence + wiring). A source is
+# deletable iff every count here is zero. SourceDomains are deliberately absent
+# — they're owned by the source and cascade on delete. (label, table, fk-column.)
+_SOURCE_REFS: tuple[tuple[str, Any, Any], ...] = (
+    ("message", MessageTable, col(MessageTable.source_id)),
+    ("group", GroupTable, col(GroupTable.source_id)),
+    ("actor", ActorTable, col(ActorTable.source_id)),
+    ("collector", CollectorTable, col(CollectorTable.source_id)),
+    ("identity", IdentityTable, col(IdentityTable.source_id)),
+    ("group_candidate", GroupCandidateTable, col(GroupCandidateTable.source_id)),
+    ("actor_relation", ActorRelationTable, col(ActorRelationTable.source_id)),
+    (
+        "infrastructure_artifact",
+        InfrastructureArtifactTable,
+        col(InfrastructureArtifactTable.resolved_to_source_id),
+    ),
+)
 
 
 def _coerce_utc(value: datetime | None) -> datetime | None:
@@ -385,6 +415,49 @@ class SourcesMixin:
                     conflicting_id=row.id,
                     conflict_kind=row.pattern_kind.value,
                 )
+
+    async def source_usage(self, source_id: UUID) -> dict[str, int]:
+        """Per-relation count of what references ``source_id`` (nonzero only).
+
+        Empty dict ⇒ the source is unused and safe to delete. See
+        :data:`_SOURCE_REFS` for which relations count.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            counts: dict[str, int] = {}
+            for label, table, column in _SOURCE_REFS:
+                stmt = select(func.count()).select_from(table).where(column == source_id)
+                n = int((await session.exec(stmt)).one())
+                if n:
+                    counts[label] = n
+            return counts
+
+    async def delete_source(self, source_id: UUID) -> None:
+        """Delete an UNUSED source + its SourceDomains, in one transaction.
+
+        References are re-counted INSIDE the transaction (race-safe): raises
+        :class:`ResourceInUseError` if anything still references the source, so a
+        concurrent insert can't orphan evidence. The source's own SourceDomains
+        cascade (no standalone meaning). Raises :class:`ValueError` if missing.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            src = await session.get(SourceTable, source_id)
+            if src is None:
+                raise ValueError(f"source {source_id} not found")
+            refs: dict[str, object] = {}
+            for label, table, column in _SOURCE_REFS:
+                stmt = select(func.count()).select_from(table).where(column == source_id)
+                n = int((await session.exec(stmt)).one())
+                if n:
+                    refs[label] = n
+            if refs:
+                raise ResourceInUseError("source", refs=refs)
+            domains = await session.exec(
+                select(SourceDomainTable).where(col(SourceDomainTable.source_id) == source_id)
+            )
+            for dom in list(domains):
+                await session.delete(dom)
+            await session.delete(src)
+            await session.commit()
 
 
 def _validate_url_host(url: str, *, source_id: UUID) -> str:

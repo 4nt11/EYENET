@@ -69,10 +69,10 @@ from eyenet.api.v1.candidates.api_list_candidates import router as candidates_li
 from eyenet.api.v1.candidates.api_park_candidate import router as candidates_park_router
 from eyenet.api.v1.candidates.api_reject_candidate import router as candidates_reject_router
 from eyenet.api.v1.candidates.api_retry_candidate import router as candidates_retry_router
+from eyenet.api.v1.cases.api_add_actor import router as cases_add_actor_router
 
 # === cases ===
 from eyenet.api.v1.cases.api_add_collaborator import router as cases_add_collaborator_router
-from eyenet.api.v1.cases.api_add_actor import router as cases_add_actor_router
 from eyenet.api.v1.cases.api_add_member import router as cases_add_member_router
 from eyenet.api.v1.cases.api_archive_case import router as cases_archive_router
 from eyenet.api.v1.cases.api_bulk_add_members import router as cases_bulk_add_members_router
@@ -145,6 +145,7 @@ from eyenet.api.v1.health.api_readyz import router as health_ready_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
+from eyenet.api.v1.identities.api_delete_identity import router as identities_delete_router
 from eyenet.api.v1.identities.api_freeze_all import router as identities_freeze_all_router
 from eyenet.api.v1.identities.api_freeze_identity import router as identities_freeze_router
 from eyenet.api.v1.identities.api_get_identity import router as identities_get_router
@@ -200,6 +201,7 @@ from eyenet.api.v1.schemas.errors import ProblemDetail
 # === sources (M9.D1 discovery) ===
 from eyenet.api.v1.sources.api_add_source_domain import router as sources_add_domain_router
 from eyenet.api.v1.sources.api_create_source import router as sources_create_router
+from eyenet.api.v1.sources.api_delete_source import router as sources_delete_router
 from eyenet.api.v1.sources.api_get_bridge_summary import router as sources_bridge_summary_router
 from eyenet.api.v1.sources.api_get_source import router as sources_get_router
 from eyenet.api.v1.sources.api_list_source_domains import router as sources_list_domains_router
@@ -363,6 +365,7 @@ v1_router.include_router(sources_list_router)
 v1_router.include_router(sources_create_router)
 v1_router.include_router(sources_get_router)
 v1_router.include_router(sources_update_router)
+v1_router.include_router(sources_delete_router)
 v1_router.include_router(sources_list_domains_router)
 v1_router.include_router(sources_add_domain_router)
 v1_router.include_router(sources_update_domain_router)
@@ -398,6 +401,7 @@ v1_router.include_router(identities_claim_router)
 v1_router.include_router(identities_release_router)
 v1_router.include_router(identities_freeze_router)
 v1_router.include_router(identities_burn_router)
+v1_router.include_router(identities_delete_router)
 v1_router.include_router(identities_freeze_all_router)
 v1_router.include_router(control_panic_router)
 
