@@ -27,6 +27,9 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.collector import compute_instance_id
 from eyenet.contracts.enums import (
@@ -55,6 +58,23 @@ if TYPE_CHECKING:
     from eyenet.storage.repository import BaseRepository
 
 _log = get_logger()
+_tracer = trace.get_tracer("eyenet.collector_supervisor")
+
+
+def _event(name: str, *, error: bool = False, **attrs: object) -> None:
+    """Emit a discrete observability span for a supervisor lifecycle event, so
+    every spawn / crash / backfill / join decision is a searchable trace in Tempo
+    (not just a log line). Zero-duration marker span; attrs become span attributes.
+    The supervisor is the fleet's heartbeat — we want to see all of it."""
+    span = _tracer.start_span(name)
+    for k, v in attrs.items():
+        if v is not None:
+            span.set_attribute(k, v if isinstance(v, str | bool | int | float) else str(v))
+    if error:
+        span.set_status(Status(StatusCode.ERROR))
+    span.end()
+
+
 _APPROVED_BATCH = 1000
 
 # Post-crash backoff: a crashed collector cools for min(2^restart_count, 600)s
@@ -164,6 +184,7 @@ class CollectorSupervisor(ServiceBase):
         ident = await self._storage.get_identity(collector.identity_id)
         if ident is None:
             _log.error("supervisor.spawn_no_identity", collector_id=str(collector.id))
+            _event("supervisor.spawn_no_identity", error=True, collector_id=str(collector.id))
             return None
         # Stale-claim recovery: the identity claim (IdentityState.IN_USE) has no
         # liveness lease, so a hard-killed child (e.g. on supervisor restart)
@@ -176,6 +197,11 @@ class CollectorSupervisor(ServiceBase):
         # default cardinality 1); a multi-supervisor deployment needs a real lease.
         if ident.state is IdentityState.IN_USE:
             _log.info(
+                "supervisor.stale_claim_cleared",
+                identity=ident.name,
+                collector_id=str(collector.id),
+            )
+            _event(
                 "supervisor.stale_claim_cleared",
                 identity=ident.name,
                 collector_id=str(collector.id),
@@ -196,8 +222,23 @@ class CollectorSupervisor(ServiceBase):
             )
         except OSError as exc:
             _log.error("supervisor.spawn_failed", collector_id=str(collector.id), error=str(exc))
+            _event(
+                "supervisor.spawn_failed",
+                error=True,
+                collector_id=str(collector.id),
+                identity=ident.name,
+                kind=collector.kind.value,
+                error_detail=str(exc),
+            )
             return None
         _log.info(
+            "supervisor.collector_spawned",
+            collector_id=str(collector.id),
+            pid=proc.pid,
+            identity=ident.name,
+            kind=collector.kind.value,
+        )
+        _event(
             "supervisor.collector_spawned",
             collector_id=str(collector.id),
             pid=proc.pid,
@@ -283,6 +324,7 @@ class CollectorSupervisor(ServiceBase):
             cleared = {k: v for k, v in collector.config.items() if k != "_backfill_pending"}
             await self._storage.update_collector(collector_id=collector.id, config=cleared)
             _log.info("supervisor.backfill_dispatched", collector_id=str(collector.id))
+            _event("supervisor.backfill_dispatched", collector_id=str(collector.id))
 
     async def reconcile_collectors(self) -> None:
         """Drive each collector toward its desired_state by spawning/terminating
@@ -304,6 +346,13 @@ class CollectorSupervisor(ServiceBase):
                     self._cooling_until[cid] = now + min(2.0**rc, _MAX_COOLING_S)
                     _log.warning(
                         "supervisor.collector_crashed",
+                        collector_id=str(cid),
+                        exit_code=proc.returncode,
+                        restart_count=rc,
+                    )
+                    _event(
+                        "supervisor.collector_crashed",
+                        error=True,
                         collector_id=str(cid),
                         exit_code=proc.returncode,
                         restart_count=rc,
@@ -424,11 +473,18 @@ class CollectorSupervisor(ServiceBase):
                 result=verdict.result.value,
                 reason=verdict.reason,
             )
+            _event(
+                "supervisor.join_skipped",
+                candidate_id=str(candidate.id),
+                result=verdict.result.value,
+                reason=verdict.reason,
+            )
             return
         scout = await self._storage.lease_scout(candidate.source_id)
         if scout is None:
             # Lost the scout to a concurrent lease — retry next tick.
             _log.info("supervisor.scout_lease_lost", candidate_id=str(candidate.id))
+            _event("supervisor.scout_lease_lost", candidate_id=str(candidate.id))
             return
         # E5.5: pick the cheapest usable access artifact (invite link, etc.);
         # None → the public-identifier path on platform_groupid.
@@ -465,10 +521,16 @@ class CollectorSupervisor(ServiceBase):
         collector = await self._storage.get_collector(candidate.assigned_collector_id)  # type: ignore[arg-type]
         if collector is None:
             _log.warning("supervisor.operator_join_no_collector", candidate_id=str(candidate.id))
+            _event(
+                "supervisor.operator_join_no_collector", error=True, candidate_id=str(candidate.id)
+            )
             return
         identity = await self._storage.get_identity(collector.identity_id)
         if identity is None:
             _log.warning("supervisor.operator_join_no_identity", candidate_id=str(candidate.id))
+            _event(
+                "supervisor.operator_join_no_identity", error=True, candidate_id=str(candidate.id)
+            )
             return
         artifacts = await self._storage.list_group_access_artifacts_for_candidate(candidate.id)
         selected = select_access_artifact(artifacts)
@@ -508,6 +570,12 @@ class CollectorSupervisor(ServiceBase):
         if source is None:
             _log.warning(
                 "supervisor.join_command_unpublished",
+                candidate_id=str(command.candidate_id),
+                reason="scout source missing",
+            )
+            _event(
+                "supervisor.join_command_unpublished",
+                error=True,
                 candidate_id=str(command.candidate_id),
                 reason="scout source missing",
             )
