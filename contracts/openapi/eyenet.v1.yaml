@@ -5872,6 +5872,8 @@ components:
         score:        { type: number, minimum: 0.0 }
         group_id:     { type: string, format: uuid, nullable: true }
         last_observed_at_ingest: { type: string, format: date-time }
+        source_url:   { type: string, nullable: true, description: 'Forum base URL this group belongs to (null for non-forum sources); disambiguates slug-colliding categories.' }
+        source_label: { type: string, nullable: true, description: 'Source display name (e.g. forum:pf.1).' }
     CursorPageGroupSummary:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }

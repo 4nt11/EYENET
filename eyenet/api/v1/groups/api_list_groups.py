@@ -8,7 +8,7 @@ dialogs/rooms (member_dialog). Sorted score DESC, last_observed DESC.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,7 +20,9 @@ from eyenet.api.v1.schemas.groups import (
     GroupSummary,
     status_filter,
 )
+from eyenet.api.v1.sources._detail import resolve_forum_base_url
 from eyenet.contracts.enums import CandidateState
+from eyenet.contracts.source import SourceRow
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["groups"])
@@ -73,8 +75,22 @@ async def groups_list(
         if page.include_total
         else None
     )
+    items = [GroupSummary.from_domain(r) for r in rows[: page.limit]]
+    # Tag each item with its forum (label + base URL) so the reader can tell apart
+    # categories whose slugs collide across forums. Resolve ONCE per distinct
+    # source on the page (a handful), not per row.
+    # ponytail: linear per-distinct-source resolve; fine for monitored reads.
+    for sid in {it.source_id for it in items}:
+        src = cast("SourceRow | None", await storage.get_source(sid))
+        if src is None:
+            continue
+        url = await resolve_forum_base_url(storage, src)
+        for it in items:
+            if it.source_id == sid:
+                it.source_label = src.display_name
+                it.source_url = url
     return CursorPageGroupSummary(
-        items=[GroupSummary.from_domain(r) for r in rows[: page.limit]],
+        items=items,
         next_cursor=page.next_cursor(fetched=len(rows)),
         estimated_total=estimated_total,
     )

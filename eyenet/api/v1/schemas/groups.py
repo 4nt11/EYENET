@@ -88,6 +88,10 @@ class GroupSummary(ApiSchema):
     score: float = Field(ge=0.0)
     group_id: UUID | None = None
     last_observed_at_ingest: datetime
+    # Which forum this group belongs to — resolved by the endpoint (None for
+    # non-forum sources). Disambiguates slug-colliding categories across forums.
+    source_url: str | None = None
+    source_label: str | None = None
 
     @classmethod
     def from_domain(cls, row: GroupCandidateRow) -> GroupSummary:
