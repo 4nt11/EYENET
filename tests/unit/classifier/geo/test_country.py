@@ -34,6 +34,40 @@ def test_title_cctld_resolves() -> None:
     assert v.country == "BR"
 
 
+def test_leading_bracket_iso_resolves_without_body_pii() -> None:
+    # The exact bug: [FR] tag, .com domain (no ccTLD signal), zero body PII.
+    v = classify_country(
+        "sharing the krys-group.com database for free. Lines: 9,537",
+        title="[FR] krys-group.com - 9,537 - PwnForums",
+    )
+    assert v.country == "FR"
+    assert v.decided_by == "bracket_iso"
+
+
+def test_bracket_uk_maps_to_gb() -> None:
+    v = classify_country("x", title="[UK] some-shop.com - 10,000")
+    assert v.country == "GB"
+
+
+def test_non_iso_bracket_tag_is_not_a_country() -> None:
+    # [HQ] is a two-letter tag but not an ISO alpha-2 — must not vote.
+    v = classify_country("no body signals", title="[HQ] internal.com dump")
+    assert v.status == "unknown"
+
+
+def test_three_letter_bracket_tag_never_matches() -> None:
+    # [NEW] is not a 2-letter code; the anchor requires exactly two letters.
+    v = classify_country("no body signals", title="[NEW] fresh.com leak")
+    assert v.status == "unknown"
+
+
+def test_bracket_tag_outweighs_conflicting_body_phone() -> None:
+    # Operator victim tag [FR] beats a lone US phone in the body (ground truth).
+    v = classify_country("call +1 202 555 0147", title="[FR] victim.com - 500")
+    assert v.country == "FR"
+    assert v.decided_by == "bracket_iso"
+
+
 def test_body_corroborates_matching_title() -> None:
     # Title CL + body RUT both point at CL: still CL, decided by the heavier check.
     v = classify_country("rut 12.345.678-5", title="RedClinica CHILE 120gb")

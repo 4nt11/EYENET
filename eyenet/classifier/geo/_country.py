@@ -51,7 +51,7 @@ __all__ = ["ENGINE_VERSION", "CountrySignal", "CountryVerdict", "classify_countr
 
 # Bump when the checks, weights, or gates change — lets the store detect stale
 # verdicts and recompute (parallels the incident model_version).
-ENGINE_VERSION = "geo-1"
+ENGINE_VERSION = "geo-2"
 
 _log = structlog.get_logger()
 
@@ -61,12 +61,14 @@ _log = structlog.get_logger()
 # amount of saturated body evidence — that is what stops a dump full of foreign
 # national IDs from out-voting its own "Russia"/"Peru" title.
 _WEIGHTS: dict[str, float] = {
+    "bracket_iso": 100.0,  # leading [XX] ISO-3166 victim tag — explicit poster label
     "country_name": 100.0,  # explicit country name/alias/demonym in the title
     "cctld": 40.0,  # ccTLD of a domain named in the title
     "national_id": 20.0,  # checksummed national ID in the body (CL RUT, ...)
     "iban": 20.0,
     "phone": 10.0,
 }
+_W_BRACKET = _WEIGHTS["bracket_iso"]
 _W_NAME = _WEIGHTS["country_name"]
 _W_CCTLD = _WEIGHTS["cctld"]
 _W_IBAN = _WEIGHTS["iban"]
@@ -179,6 +181,10 @@ _CCTLD_STOPLIST = frozenset({"IO", "AI", "ME", "TV", "CC", "FM", "GG", "TO", "WS
 _CCTLD_EXCEPTIONS = {"uk": "GB"}
 _CCTLD_LEN = 2  # a ccTLD is a two-letter code
 _DOMAIN_RE = re2.compile(r"(?i)\b[a-z0-9-]+(?:\.[a-z0-9-]+)+\b", _RE2_OPTIONS)
+# Leading victim tag on PwnForums-style titles: "[FR] domain - lines". Anchored to
+# the start so a mid-title "[IT]" meaning the IT department can't masquerade as Italy.
+# Exactly two letters -> "[FREE]"/"[NEW]" never match; the ISO lookup drops "[HQ]"/"[EU]".
+_BRACKET_RE = re2.compile(r"(?i)^\s*\[([a-z]{2})\]", _RE2_OPTIONS)
 
 # --- Body signals ---------------------------------------------------------------
 
@@ -209,6 +215,24 @@ def _rut_check_digit(body: str) -> str:
     total = sum(int(ch) * f for ch, f in zip(reversed(body), cycle((2, 3, 4, 5, 6, 7))))
     remainder = (11 - total % 11) % 11  # 0..10; 0 stays '0', 10 -> 'K'
     return "K" if remainder == _RUT_K_REMAINDER else str(remainder)
+
+
+def _bracket_signals(title: str) -> Iterable[tuple[str, str]]:
+    """Yield (ISO, evidence) for a leading ``[XX]`` ISO-3166 victim tag, if any.
+
+    ``[FR]`` -> FR, ``[UK]`` -> GB (the one non-ISO alias forums use). A bracketed
+    two-letter token that is not a real alpha-2 (``[HQ]``, ``[EU]``) resolves to
+    nothing and is dropped."""
+    m = _BRACKET_RE.search(title)
+    if m is None:
+        return
+    code = m.group(1).lower()
+    iso = _CCTLD_EXCEPTIONS.get(code)
+    if iso is None:
+        country = pycountry.countries.get(alpha_2=code.upper())
+        iso = country.alpha_2 if country else None
+    if iso:
+        yield iso, m.group(0)
 
 
 def _name_signals(title: str) -> Iterable[tuple[str, str]]:
@@ -270,7 +294,7 @@ class CountrySignal:
     """One geo signal firing: the country it points at, how, and masked evidence."""
 
     iso: str  # ISO 3166-1 alpha-2
-    kind: str  # "country_name" | "cctld" | "national_id" | "iban" | "phone"
+    kind: str  # "bracket_iso" | "country_name" | "cctld" | "national_id" | "iban" | "phone"
     weight: float
     evidence: str
 
@@ -297,6 +321,8 @@ class CountryVerdict:
 def _all_checks(text: str, title: str) -> list[CountrySignal]:
     """Run every check and return the pooled signals (title + body, one list)."""
     signals: list[CountrySignal] = []
+    for iso, ev in _bracket_signals(title):
+        signals.append(CountrySignal(iso=iso, kind="bracket_iso", weight=_W_BRACKET, evidence=ev))
     for iso, ev in _name_signals(title):
         signals.append(CountrySignal(iso=iso, kind="country_name", weight=_W_NAME, evidence=ev))
     for iso, ev in _cctld_signals(title):
