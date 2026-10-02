@@ -168,7 +168,7 @@
             <Button variant="destructive" size="sm" disabled={tokenCtx.busy} onclick={doRevoke}>Revoke token</Button>
           </div>
         {/if}
-      {:else}
+      {:else if !showMint}
         <div class="empty">
           {#if !tokenCtx.loaded}
             <p class="empty-main">Loading…</p>
