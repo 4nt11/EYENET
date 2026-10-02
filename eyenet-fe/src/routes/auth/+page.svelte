@@ -135,8 +135,8 @@
           <div class="fld"><span class="flabel">Scopes — pick per resource; a token carries only scopes you hold</span>
             <div class="scopesecs">
               {#each scopeTree as { res, verbs }}
-                <div class="scopesec">
-                  <span class="resname">{res}</span>
+                <div class="scard">
+                  <span class="scard-res">{res.replaceAll('_', ' ')}</span>
                   <div class="verbs">
                     {#each verbs as v}
                       {@const full = `${v}:${res}`}
@@ -147,7 +147,7 @@
                 </div>
               {/each}
             </div>
-            {#if mintScopes.size}<span class="picked">{mintScopes.size} selected: {[...mintScopes].sort().join(', ')}</span>{/if}
+            {#if mintScopes.size}<span class="picked">{mintScopes.size} selected · {[...mintScopes].sort().join('  ')}</span>{/if}
           </div>
           <label class="fld"><span class="flabel">Expiry (optional)</span>
             <input class="fin" type="date" bind:value={mintExpiry} /></label>
@@ -209,14 +209,15 @@
   .flabel { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; max-width: 420px; }
   .fin:focus { outline: none; border-color: var(--accent); }
-  .scopesecs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 20px; }
-  .scopesec { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
-  .resname { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); min-width: 130px; text-align: right; }
+  .scopesecs { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 8px; }
+  .scard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.12s; }
+  .scard:has(.verbchip.on) { border-color: var(--accent); }
+  .scard-res { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .verbs { display: flex; flex-wrap: wrap; gap: 5px; }
-  .verbchip { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 10px; cursor: pointer; transition: border-color 0.1s, color 0.1s; }
+  .verbchip { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-secondary); background: var(--black); border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 11px; cursor: pointer; transition: all 0.12s; }
   .verbchip:hover { border-color: var(--accent); color: var(--text-body); }
   .verbchip.on { color: #fff; background: var(--accent); border-color: var(--accent); }
-  .picked { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); }
+  .picked { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); word-break: break-word; }
   .mint-actions, .revoke-row { display: flex; align-items: center; gap: 10px; }
   .revoke-row { padding-top: 10px; }
   .sel-note { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
