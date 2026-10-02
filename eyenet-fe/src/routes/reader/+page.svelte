@@ -42,6 +42,15 @@
   const kindLabel = (k) => KIND[k] ?? k ?? '—';
   const href = (g) =>
     g.kind === 'forum_category' ? `/reader/category/${g.group_id}` : `/reader/group/${g.group_id}`;
+
+  // Compact display of a forum URL: drop scheme + trailing slash, and collapse a
+  // 56-char v3 onion host to a readable stub (full URL stays in the title attr).
+  const shortUrl = (u) => {
+    if (!u) return null;
+    const s = u.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const m = s.match(/^([a-z2-7]{56})(\.onion.*)$/i);
+    return m ? `${m[1].slice(0, 10)}…${m[2]}` : s;
+  };
 </script>
 
 <main>
@@ -67,7 +76,7 @@
               <span class="title">{g.title || g.platform_groupid}</span>
               <span class="pid">{g.platform_groupid}</span>
               {#if g.source_url || g.source_label}
-                <span class="src" title={g.source_url || g.source_label}>{g.source_url || g.source_label}</span>
+                <span class="src" title={g.source_url || g.source_label}>{shortUrl(g.source_url) || g.source_label}</span>
               {/if}
             </a>
           </li>
@@ -91,7 +100,8 @@
   .kind { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); }
   .title { color: var(--text-body); font-size: var(--fs-14); word-break: break-word; }
   .pid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); word-break: break-all; }
-  .src { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent); opacity: 0.75; word-break: break-all; }
+  /* brighter than --accent so the disambiguating forum URL pops */
+  .src { font-family: var(--font-mono); font-size: var(--fs-11); color: #c88bff; word-break: break-all; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   .pnote.err { color: var(--red-text); }
   a { color: var(--accent); }
