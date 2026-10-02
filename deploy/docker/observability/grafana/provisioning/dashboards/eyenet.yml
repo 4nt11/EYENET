@@ -1,0 +1,14 @@
+# File-provisioning the committed EYENET dashboards (operations/dashboards/ is
+# mounted read-only at /etc/grafana/dashboards). The dashboard's datasource
+# template var binds to the default Prometheus datasource provisioned alongside.
+apiVersion: 1
+providers:
+  - name: eyenet
+    orgId: 1
+    folder: EYENET
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

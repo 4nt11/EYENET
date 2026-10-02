@@ -21,23 +21,34 @@ hasn't deliberately enabled monitoring leaks no label-cardinality recon.
 
 ## Prometheus scrape — least-privilege PAT
 
-`/v1/metrics` is never anonymous. Run Prometheus as a service-account
-`SystemUser` holding a PAT with **only** `read:metrics`:
+`/v1/metrics` is never anonymous. Scrape it with a **Personal Access Token
+scoped to only `read:metrics`** — not a dedicated user. Mint it from the
+console **System → Auth & tokens → Mint token** (an admin already holds
+`read:metrics`; the PAT carries only that one scope, so a leaked scrape
+credential exposes metric values and nothing else — no evidence, no writes).
+The full token is shown ONCE at mint time; copy it then.
+
+**Docker stack** (`deploy/docker/`, `--profile observability`): the Prometheus +
+Grafana services are already wired — Prometheus scrapes `https://api:8443/v1/metrics`
+with the PAT, loads `alerts/eyenet-api.rules.yml`, and Grafana auto-provisions a
+Prometheus datasource + the dashboard below. One-time setup:
 
 ```bash
-# One-time: create the scrape account and mint a read:metrics-only PAT.
-eyenet user create --username prometheus-scrape --role viewer
-eyenet token mint --username prometheus-scrape --scopes read:metrics --name prom > prom.pat
+cd deploy/docker
+cp observability/eyenet.pat.example observability/eyenet.pat
+# paste the console-minted read:metrics PAT into observability/eyenet.pat, then:
+docker compose --profile observability up -d prometheus grafana
 ```
 
-Then in `prometheus.yml` — note HTTP/2 + TLS are mandatory (§12.1), so the
-scrape target is `https` and h2:
+**Standalone Prometheus** (HTTP/2 + TLS are mandatory, §12.1 — target is `https`):
 
 ```yaml
 scrape_configs:
   - job_name: eyenet-api
     scheme: https
     metrics_path: /v1/metrics
+    tls_config:
+      insecure_skip_verify: true   # self-signed cert; swap a real CA to verify
     authorization:
       type: Bearer
       credentials_file: /etc/prometheus/eyenet.pat   # the read:metrics PAT
@@ -47,9 +58,6 @@ scrape_configs:
 rule_files:
   - /etc/prometheus/rules/eyenet-api.rules.yml
 ```
-
-The PAT holds `read:metrics` and nothing else: a leaked scrape credential
-exposes metric values only — no evidence, no writes.
 
 ## Cardinality discipline (§11.7.3)
 

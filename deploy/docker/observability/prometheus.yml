@@ -1,0 +1,28 @@
+# EYENET — Prometheus scrape config (Docker stack, --profile observability).
+#
+# /v1/metrics is auth-gated (scope read:metrics) AND HTTPS with a self-signed
+# cert, so the scrape is https + insecure_skip_verify + a Bearer PAT. Mint a
+# least-privilege token (scope = read:metrics ONLY) from the console
+# "Auth & tokens" page, then paste it into ./observability/eyenet.pat
+# (gitignored, mounted read-only at /etc/prometheus/eyenet.pat).
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/rules/eyenet-api.rules.yml
+
+scrape_configs:
+  - job_name: eyenet-api
+    scheme: https
+    metrics_path: /v1/metrics
+    tls_config:
+      # Self-signed Ed25519 cert (CN=localhost); the scrape target is the service
+      # name `api`, which won't match the CN — so skip verification on the private
+      # compose network. (Swap in a real CA + server_name to verify.)
+      insecure_skip_verify: true
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/eyenet.pat
+    static_configs:
+      - targets: ["api:8443"]

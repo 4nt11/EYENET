@@ -1,0 +1,10 @@
+# Auto-provisioned Prometheus datasource for the EYENET Grafana (Docker stack).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: eyenet-prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

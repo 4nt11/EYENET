@@ -206,6 +206,47 @@ services:
           devices:
             - { driver: nvidia, count: 1, capabilities: [gpu] }
 
+  # ---- opt-in: observability backend (metrics). --profile observability -------
+  # Prometheus scrapes the auth-gated /v1/metrics with a read:metrics-only PAT
+  # (mint it from the console Auth & tokens page, paste into ./observability/
+  # eyenet.pat — copy eyenet.pat.example first). Grafana auto-provisions a
+  # Prometheus datasource + the committed operations/ dashboard.
+  #   docker compose --profile observability up -d prometheus grafana
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - ../../operations/alerts/eyenet-api.rules.yml:/etc/prometheus/rules/eyenet-api.rules.yml:ro,Z
+      # The read:metrics PAT (gitignored). Must exist before `up` — a missing
+      # source makes Docker create a directory, which breaks the scrape.
+      - ./observability/eyenet.pat:/etc/prometheus/eyenet.pat:ro,Z
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${EYENET_GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+      # Committed dashboards (source of truth under operations/), read-only.
+      - ../../operations/dashboards:/etc/grafana/dashboards:ro,Z
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${EYENET_GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+
   # ---- collectors (the data plane) -------------------------------------------
   # NOT a static compose service. The CollectorSupervisor spawns one collector
   # child process per CollectorTable row whose desired_state is RUNNING (created
@@ -216,3 +257,5 @@ services:
 
 volumes:
   eyenet-data:
+  prometheus-data:
+  grafana-data:
