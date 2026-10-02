@@ -14,6 +14,7 @@ function mapSource(s) {
     name: s.display_name,
     domainCount: s.active_domain_count ?? 0,
     canonicalUrl: s.canonical_url ?? null,
+    forumBaseUrl: s.forum_base_url ?? null,
     created: shortTs(s.created_at)
   };
 }

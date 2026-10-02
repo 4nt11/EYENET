@@ -5533,6 +5533,7 @@ components:
         canonical_url: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
         active_domain_count: { type: integer, minimum: 0 }
+        forum_base_url: { type: string, nullable: true, description: 'forum sources only: the board base URL (from the collecting identity); disambiguates colliding category slugs' }
     SourceDetail:
       type: object
       additionalProperties: false
@@ -5544,6 +5545,7 @@ components:
         canonical_url: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
         active_domain_count: { type: integer, minimum: 0 }
+        forum_base_url: { type: string, nullable: true, description: 'forum sources only: the board base URL (from the collecting identity); disambiguates colliding category slugs' }
         notes: { type: string, nullable: true }
         domains:
           type: array

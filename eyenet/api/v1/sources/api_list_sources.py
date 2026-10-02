@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params
 from eyenet.api.v1.schemas.sources import CursorPageSourceSummary, SourceSummary
+from eyenet.api.v1.sources._detail import resolve_forum_base_url
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["sources"])
@@ -32,7 +33,13 @@ async def sources_list(
         # active SourceDomain count per row (§3.8). N+1 over a small-operator
         # source list is acceptable; revisit if a deployment grows many Sources.
         active = await storage.list_source_domains(source_id=row.id)
-        items.append(SourceSummary.from_domain(row, active_domain_count=len(active)))
+        items.append(
+            SourceSummary.from_domain(
+                row,
+                active_domain_count=len(active),
+                forum_base_url=await resolve_forum_base_url(storage, row),
+            )
+        )
     estimated_total = await storage.count_sources() if page.include_total else None
     return CursorPageSourceSummary(
         items=items,

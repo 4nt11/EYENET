@@ -61,9 +61,19 @@ class SourceSummary(ApiSchema):
     canonical_url: str | None = None
     created_at: datetime
     active_domain_count: int = Field(ge=0)
+    # Forum sources only: the board base URL (lives on the collecting identity's
+    # source_config). Lets the UI disambiguate two forums with colliding category
+    # slugs. None for non-forum sources or a forum not yet provisioned.
+    forum_base_url: str | None = None
 
     @classmethod
-    def from_domain(cls, row: SourceRow, *, active_domain_count: int) -> SourceSummary:
+    def from_domain(
+        cls,
+        row: SourceRow,
+        *,
+        active_domain_count: int,
+        forum_base_url: str | None = None,
+    ) -> SourceSummary:
         return cls(
             source_id=row.id,
             kind=row.kind,
@@ -71,6 +81,7 @@ class SourceSummary(ApiSchema):
             canonical_url=row.canonical_url,
             created_at=row.created_at,
             active_domain_count=active_domain_count,
+            forum_base_url=forum_base_url,
         )
 
 

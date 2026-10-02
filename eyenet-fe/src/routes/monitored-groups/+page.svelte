@@ -14,14 +14,25 @@
 
   // Resolve a group's source_id -> platform label (the SOURCE's platform, used
   // for the join-collector lease — not the candidate's own platform).
-  const platformOf = (sourceId) =>
-    sourceCtx.list.find((s) => s.id === sourceId)?.platform ?? short(sourceId);
+  const srcOf = (sourceId) => sourceCtx.list.find((s) => s.id === sourceId) ?? null;
+  const platformOf = (sourceId) => srcOf(sourceId)?.platform ?? short(sourceId);
+  // Forum base URL (if the source is a forum) -> host, and the full category URL.
+  // Two forums have the SAME category slugs, so the host is the disambiguator.
+  const forumHostOf = (sourceId) => {
+    const u = srcOf(sourceId)?.forumBaseUrl;
+    return u ? u.replace(/^https?:\/\//, '').split('/')[0] : '';
+  };
+  const urlOf = (sourceId, slug) => {
+    const u = srcOf(sourceId)?.forumBaseUrl;
+    return u ? `${u.replace(/\/$/, '')}/${slug}` : '';
+  };
 
   const COLUMNS = [
     { key: 'platform', header: 'Platform', mono: true, width: '88px' },
     { key: 'foundVia', header: 'Found via', mono: true, width: '104px' },
     { key: 'kind', header: 'Kind', mono: true, width: '84px' },
     { key: 'title', header: 'Group', mono: true },
+    { key: 'forum', header: 'Forum', mono: true, width: '150px' },
     { key: 'status', header: 'Status', badge: true, tone: groupStatusTone, width: '150px' },
     { key: 'lastSeen', header: 'Last seen', mono: true, align: 'right', width: '170px' }
   ];
@@ -38,7 +49,7 @@
     groupCtx.list
       .filter((g) => member === 'all' || (member === 'member' ? g.memberDialog : !g.memberDialog))
       .filter((g) => !platformFilter || g.realPlatform === platformFilter)
-      .map((g) => ({ ...g, platform: g.realPlatform }))
+      .map((g) => ({ ...g, platform: g.realPlatform, forum: forumHostOf(g.sourceId) || '—' }))
   );
 
   let selectedId = $state(null);
@@ -62,6 +73,9 @@
           { label: 'Status', value: sel.status, tone: sel.status === 'monitored' ? 'accent' : undefined },
           { label: 'Member (dialog)', value: sel.memberDialog ? 'yes' : 'no' },
           { label: 'Source', value: `${platformOf(sel.sourceId)} · ${short(sel.sourceId)}` },
+          ...(urlOf(sel.sourceId, sel.platformGroupId)
+            ? [{ label: 'URL', value: urlOf(sel.sourceId, sel.platformGroupId), mono: true }]
+            : []),
           ...(sel.groupId ? [{ label: 'Group id', value: short(sel.groupId) }] : [])
         ]
       : []

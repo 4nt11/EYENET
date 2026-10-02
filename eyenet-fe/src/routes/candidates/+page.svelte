@@ -15,11 +15,23 @@
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
   import { PLATFORMS } from '$lib/discovery-shape.js';
 
-  // Columns are fields /v1/candidates returns. Platform is dropped from the list
-  // (needs a per-row source join — never fabricate) and shown in detail after a
-  // single source fetch. No `tier`/severity — the API carries no such field.
+  // Forum base URL (if the source is a forum) -> host + full category URL. Two
+  // forums share the same category slugs, so the host disambiguates the list.
+  const srcOf = (sourceId) => sourceCtx.list.find((s) => s.id === sourceId) ?? null;
+  const forumHostOf = (sourceId) => {
+    const u = srcOf(sourceId)?.forumBaseUrl;
+    return u ? u.replace(/^https?:\/\//, '').split('/')[0] : '';
+  };
+  const urlOf = (sourceId, slug) => {
+    const u = srcOf(sourceId)?.forumBaseUrl;
+    return u ? `${u.replace(/\/$/, '')}/${slug}` : '';
+  };
+
+  // Columns are fields /v1/candidates returns, plus a per-row source join for the
+  // forum host (never fabricated — empty when the source isn't a loaded forum).
   const COLUMNS = [
     { key: 'group', header: 'Group', mono: true },
+    { key: 'forum', header: 'Forum', mono: true, width: '150px' },
     { key: 'realPlatform', header: 'Platform', mono: true, width: '84px' },
     { key: 'foundVia', header: 'Found via', mono: true, width: '104px' },
     { key: 'state', header: 'State', badge: true, tone: candidateTone, width: '104px' },
@@ -37,6 +49,7 @@
     candidateCtx.list
       .filter((x) => filter === 'all' || (filter === 'member' ? x.memberDialog : !x.memberDialog))
       .filter((x) => !platformFilter || x.realPlatform === platformFilter)
+      .map((x) => ({ ...x, forum: forumHostOf(x.sourceId) || '—' }))
   );
   let memberCount = $derived(candidateCtx.list.filter((x) => x.memberDialog).length);
 
@@ -146,6 +159,7 @@
             <span class="m"><span class="k">Membership</span> {sel.memberDialog ? 'account is a member' : 'discovered (not joined)'}</span>
             {#if sel.kindHint}<span class="m"><span class="k">Kind</span> {sel.kindHint}</span>{/if}
             <span class="m"><span class="k">Group ID</span> {sel.platformGroupId}</span>
+            {#if urlOf(sel.sourceId, sel.platformGroupId)}<span class="m"><span class="k">URL</span> {urlOf(sel.sourceId, sel.platformGroupId)}</span>{/if}
             <span class="m"><span class="k">Score</span> {sel.scoreText}</span>
             <span class="m"><span class="k">First seen</span> {sel.firstObserved}</span>
             <span class="m"><span class="k">Last seen</span> {sel.lastObserved}</span>
