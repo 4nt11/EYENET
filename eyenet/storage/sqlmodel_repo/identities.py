@@ -180,6 +180,28 @@ class IdentitiesMixin:
             await session.refresh(table)
             return _identity_row(table)
 
+    async def update_identity_session_path(
+        self,
+        *,
+        identity_id: UUID,
+        session_path: str,
+    ) -> tuple[IdentityRow, str]:
+        """Swap an identity's encrypted-session blob path (credential rotation).
+
+        Returns the updated row + the PREVIOUS path (so the caller can delete the
+        stale blob). Nothing else on the row changes. Raises if it doesn't exist.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(IdentityTable, identity_id)
+            if table is None:
+                raise ValueError(f"identity {identity_id} not found")
+            old_path = table.session_path
+            table.session_path = session_path
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _identity_row(table), old_path
+
     async def graduate_identity(
         self,
         *,

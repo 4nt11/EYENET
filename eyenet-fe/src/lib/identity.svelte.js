@@ -3,7 +3,7 @@
 // (claim/release/freeze/burn + freeze_all) persist synchronously in the handler
 // (the operator-under-attack invariant), so a reload shows the new state — no
 // polling. Every action requires a reason (IdentityActionRequest).
-import { apiDelete, apiGet, apiPost, apiPostForm } from './api.js';
+import { apiDelete, apiGet, apiPost, apiPostForm, apiPutForm } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
 
@@ -138,6 +138,28 @@ export async function deleteIdentity(id) {
     identityView.submitMsg = e.status === 404 ? 'Identity already gone.' : `Failed: ${e.message ?? e}`;
     if (e.status === 404) await loadIdentities();
     return e.status === 404;
+  } finally {
+    identityView.submitting = false;
+  }
+}
+
+// Rotate an identity's credential (PUT /v1/identities/{id}/session). Replaces
+// ONLY the encrypted session blob (fresh cookies after a logout); name, source,
+// pacing, evasion level are untouched. `cookiesText` is the Netscape cookies.txt
+// body. Returns true on success.
+export async function replaceSession(id, cookiesText) {
+  identityView.submitting = true;
+  identityView.submitMsg = null;
+  try {
+    const fd = new FormData();
+    fd.append('session', new Blob([cookiesText], { type: 'text/plain' }), 'cookies.txt');
+    await apiPutForm(`/v1/identities/${id}/session`, fd, { auth: true });
+    identityView.submitMsg = 'Cookies replaced.';
+    await loadIdentityDetail(id);
+    return true;
+  } catch (e) {
+    identityView.submitMsg = `Failed: ${e.message ?? e}`;
+    return false;
   } finally {
     identityView.submitting = false;
   }

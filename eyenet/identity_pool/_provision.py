@@ -14,6 +14,7 @@ decrypts the blob back into an in-memory ``StringSession`` at boot.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -120,6 +121,14 @@ def _write_encrypted_blob(data_dir: Path, ciphertext: bytes) -> str:
     return str(dest)
 
 
+def _delete_blob(path: str) -> None:
+    """Best-effort remove an orphaned credential blob (sync file I/O, like the
+    write helper above). A leftover is harmless — encrypted + unreferenced — so a
+    missing/locked file must never fail the operation that replaced it."""
+    with contextlib.suppress(OSError):
+        Path(path).unlink()
+
+
 async def provision_identity(
     *,
     storage: BaseRepository,
@@ -224,8 +233,37 @@ async def _persist_identity(
     )
 
 
+async def replace_identity_session(
+    *,
+    storage: BaseRepository,
+    session_key: Fernet,
+    data_dir: Path,
+    identity_id: UUID,
+    source_kind: SourceKind,
+    secret_blob: bytes,
+) -> IdentityRow:
+    """Rotate an existing identity's credential IN PLACE — only the session changes.
+
+    Validates + encrypts the new ``secret_blob`` (same source-dispatched validation
+    as provisioning: a forum cookies.txt must be UTF-8 and carry cookies), writes a
+    fresh 0600 blob, points the row at it, and deletes the now-orphaned old blob.
+    Name, source, pacing, evasion level, role — everything else is untouched. This
+    is the "I logged out, here are fresh cookies" path; no re-provisioning.
+    """
+    secret_string = _materialize_secret(source_kind, secret_blob)
+    ciphertext = encrypt_session(session_key, secret_string)
+    new_path = _write_encrypted_blob(data_dir, ciphertext)
+    row, old_path = await storage.update_identity_session_path(
+        identity_id=identity_id, session_path=new_path
+    )
+    if old_path and old_path != new_path:
+        _delete_blob(old_path)
+    return row
+
+
 __all__ = [
     "SessionValidationError",
     "provision_identity",
     "provision_identity_from_session",
+    "replace_identity_session",
 ]

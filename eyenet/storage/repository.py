@@ -2470,6 +2470,19 @@ class BaseRepository(ABC):
         ``last_used_at``, when given, is stamped too (pool cooldown accounting)."""
 
     @abstractmethod
+    async def update_identity_session_path(
+        self,
+        *,
+        identity_id: UUID,
+        session_path: str,
+    ) -> tuple[IdentityRow, str]:
+        """Point an identity at a new encrypted-session blob (credential rotation).
+
+        Returns the updated row and the PREVIOUS ``session_path`` (so the caller can
+        delete the now-orphaned blob). Nothing else about the identity changes.
+        Raises if it doesn't exist."""
+
+    @abstractmethod
     async def graduate_identity(
         self,
         *,

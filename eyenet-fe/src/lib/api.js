@@ -104,6 +104,31 @@ export async function apiPostForm(path, formData, { auth = false, accept = [], h
   return res.json();
 }
 
+// PUT multipart/form-data. Twin of apiPostForm for idempotent file-replace
+// endpoints (e.g. PUT /v1/identities/{id}/session — credential rotation).
+export async function apiPutForm(path, formData, { auth = false, accept = [], headers: extra = {} } = {}) {
+  const headers = { accept: 'application/json', ...extra };
+  if (auth) {
+    const t = authToken();
+    if (t) headers.authorization = `Bearer ${t}`;
+  }
+  const res = await doFetch(
+    `${BASE}${path}`,
+    { method: 'PUT', headers, body: formData },
+    auth && !accept.includes(401)
+  );
+  if (!res.ok && !accept.includes(res.status)) {
+    let detail = `${res.status} ${res.statusText}`;
+    const problem = await res.json().catch(() => null);
+    if (problem?.detail) detail = problem.detail;
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
 // PUT JSON. Same contract as apiPost (surfaces problem+json `detail`), for
 // idempotent replace endpoints (e.g. PUT /v1/actors/{id}/assessment).
 export async function apiPut(path, body, { auth = false, accept = [], headers: extra = {} } = {}) {

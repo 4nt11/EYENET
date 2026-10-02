@@ -1239,6 +1239,33 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /v1/identities/{identity_id}/session:
+    put:
+      tags: [identities]
+      operationId: identities_replace_session
+      summary: >-
+        Rotate an identity's credential (write:identity, admin-only). Replaces ONLY
+        the encrypted session blob (forum cookies.txt / Telegram .session); name,
+        source, pacing and evasion level are untouched. The old blob is deleted.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/Body_identities_replace_session' }
+      responses:
+        "200":
+          description: The identity with its new credential (OPSEC fields omitted).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "413": { description: Session file exceeds the size limit. }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/identities/{identity_id}/claim:
     post:
       tags: [identities]
@@ -4433,6 +4460,16 @@ components:
         forum_delay_min:  { type: number, nullable: true, description: resolved inter-request delay floor (seconds) }
         forum_delay_max:  { type: number, nullable: true, description: resolved inter-request delay ceiling (seconds) }
         forum_discovery_depth: { type: integer, nullable: true, description: 'subforum-discovery depth (0 = index top-level categories only)' }
+    Body_identities_replace_session:
+      description: |
+        Multipart form for PUT /v1/identities/{identity_id}/session. `session` is
+        the NEW credential file (forum cookies.txt / Telegram .session) that
+        replaces the identity's encrypted blob. No other fields — everything else
+        about the identity is unchanged.
+      type: object
+      required: [session]
+      properties:
+        session: { type: string, format: binary, description: the new credential file }
     Body_identities_create:
       description: |
         Multipart form for POST /v1/identities. `session` is the uploaded

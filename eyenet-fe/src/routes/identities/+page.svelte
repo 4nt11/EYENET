@@ -3,7 +3,9 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll } from '$lib/identity.svelte.js';
+  import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll, replaceSession } from '$lib/identity.svelte.js';
+  import { sourceCtx, loadSources } from '$lib/source.svelte.js';
+  import { curlToNetscape, hostFromUrl } from '$lib/curl-cookies.js';
 
   // Columns are the fields /v1/identities returns. No `platform` or `claimed by`
   // (the read schema has neither; platform would need a source join, and there
@@ -44,12 +46,43 @@
   );
 
   let reason = $state('');
+  // Credential rotation (fresh cookies after a logout) — only the session changes.
+  let cookieInput = $state('');
+  let showReplace = $state(false);
+  // The forum host backing this identity's source, for Copy-as-cURL extraction.
+  const forumHost = $derived(
+    hostFromUrl(sourceCtx.list.find((s) => s.id === sel?.sourceId)?.forumBaseUrl ?? '')
+  );
 
   $effect(() => {
     if (sel) loadIdentityDetail(sel.id);
   });
 
-  onMount(loadIdentities);
+  onMount(() => {
+    loadIdentities();
+    loadSources(); // resolve the forum host for cURL cookie extraction
+  });
+
+  async function doReplaceSession() {
+    if (!sel || !cookieInput.trim()) return;
+    let text = cookieInput.trim();
+    // Already a Netscape jar (tab-delimited rows)? send as-is. Otherwise treat the
+    // input as a DevTools "Copy as cURL" / Cookie header and extract, scoped to the
+    // source's forum host.
+    if (!text.includes('\t')) {
+      try {
+        text = curlToNetscape(cookieInput, forumHost).text;
+      } catch (e) {
+        identityView.submitMsg = `✗ ${e.message ?? e}`;
+        return;
+      }
+    }
+    const ok = await replaceSession(sel.id, text);
+    if (ok) {
+      cookieInput = '';
+      showReplace = false;
+    }
+  }
 
   async function act(action) {
     if (!reason.trim() || !sel) return;
@@ -109,6 +142,20 @@
             {#if sel.state !== 'burned'}<Button variant="destructive" size="sm" disabled={identityView.submitting || !reason.trim()} onclick={() => act('burn')}>Burn</Button>{/if}
             {#if sel.state === 'burned'}<span class="terminal">Burned · terminal lifecycle.</span>{/if}
           </div>
+          <div class="session-row">
+            <div class="actions-label">Session</div>
+            {#if !showReplace}
+              <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => (showReplace = true)}>Replace cookies</Button>
+              <span class="hint">Swap the credential (fresh cookies after a logout). Nothing else changes.</span>
+            {:else}
+              <textarea class="field mono" rows="3" bind:value={cookieInput} placeholder={'Paste DevTools "Copy as cURL", a Cookie header, or a Netscape cookies.txt'}></textarea>
+              <div class="actions-row">
+                <Button variant="primary" size="sm" disabled={identityView.submitting || !cookieInput.trim()} onclick={doReplaceSession}>Replace</Button>
+                <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; cookieInput = ''; }}>Cancel</Button>
+              </div>
+              <span class="hint">{forumHost ? `cURL cookies will be scoped to ${forumHost}.` : 'Netscape cookies.txt or a Cookie header (no forum host known for cURL scoping).'}</span>
+            {/if}
+          </div>
           <div class="danger-row">
             <Button variant="destructive" size="sm" disabled={identityView.submitting} onclick={removeIdentity}>Delete identity</Button>
             <span class="hint">Removes the row (only if no collector binds it). Burn to retire a compromised one.</span>
@@ -145,6 +192,8 @@
   .field:disabled { opacity: 0.6; }
   .actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .terminal { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
+  .field.mono { font-family: var(--font-mono); font-size: var(--fs-12); resize: vertical; }
+  .session-row { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
   .danger-row { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .submitmsg { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }

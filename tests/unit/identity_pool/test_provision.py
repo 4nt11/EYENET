@@ -15,6 +15,7 @@ from eyenet.identity_pool._provision import (
     SessionValidationError,
     provision_identity,
     provision_identity_from_session,
+    replace_identity_session,
 )
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -124,3 +125,82 @@ async def test_provision_from_session_string_encrypts_and_persists(
     on_disk = Path(row.session_path).read_bytes()
     assert on_disk[:6] != b"SQLite"  # ciphertext, not a raw session
     assert decrypt_session(session_key, on_disk) == string  # round-trips
+
+
+_COOKIES_A = "# Netscape HTTP Cookie File\nhost.onion\tFALSE\t/\tFALSE\t9999999999\tsid\tAAA111\n"
+_COOKIES_B = (
+    "# Netscape HTTP Cookie File\n"
+    "host.onion\tFALSE\t/\tFALSE\t9999999999\tsid\tBBB222\n"
+    "host.onion\tFALSE\t/\tFALSE\t9999999999\tmybbuser\tZZZ\n"
+)
+
+
+@pytest.mark.unit
+async def test_replace_identity_session_rotates_cookies(
+    storage: BaseRepository, tmp_path: Path
+) -> None:
+    session_key = load_session_key(tmp_path)
+    source_id = uuid.uuid4()
+    row = await provision_identity(
+        storage=storage,
+        session_key=session_key,
+        data_dir=tmp_path,
+        name="pwn",
+        source_id=source_id,
+        source_kind=SourceKind.FORUM,
+        secret_blob=_COOKIES_A.encode(),
+        source_config={"forum_base_url": "http://host.onion", "forum_evasion_level": "lurker"},
+    )
+    old_path = row.session_path
+    assert decrypt_session(session_key, Path(old_path).read_bytes()) == _COOKIES_A
+
+    rotated = await replace_identity_session(
+        storage=storage,
+        session_key=session_key,
+        data_dir=tmp_path,
+        identity_id=row.id,
+        source_kind=SourceKind.FORUM,
+        secret_blob=_COOKIES_B.encode(),
+    )
+
+    # Same identity, config untouched — ONLY the credential changed.
+    assert rotated.id == row.id
+    assert rotated.name == "pwn"
+    assert rotated.source_config == {
+        "forum_base_url": "http://host.onion",
+        "forum_evasion_level": "lurker",
+    }
+    assert rotated.session_path != old_path
+    assert decrypt_session(session_key, Path(rotated.session_path).read_bytes()) == _COOKIES_B
+    # Old blob is cleaned up.
+    assert not Path(old_path).exists()
+
+
+@pytest.mark.unit
+async def test_replace_identity_session_rejects_bad_blob(
+    storage: BaseRepository, tmp_path: Path
+) -> None:
+    session_key = load_session_key(tmp_path)
+    row = await provision_identity(
+        storage=storage,
+        session_key=session_key,
+        data_dir=tmp_path,
+        name="pwn2",
+        source_id=uuid.uuid4(),
+        source_kind=SourceKind.FORUM,
+        secret_blob=_COOKIES_A.encode(),
+        source_config={"forum_base_url": "http://host.onion"},
+    )
+    good_path = row.session_path
+    with pytest.raises(SessionValidationError):
+        await replace_identity_session(
+            storage=storage,
+            session_key=session_key,
+            data_dir=tmp_path,
+            identity_id=row.id,
+            source_kind=SourceKind.FORUM,
+            secret_blob=b"\xff\xfe not cookies and not utf8",
+        )
+    # Rejected before any swap: the original credential is intact.
+    assert Path(good_path).exists()
+    assert decrypt_session(session_key, Path(good_path).read_bytes()) == _COOKIES_A

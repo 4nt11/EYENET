@@ -154,6 +154,9 @@ from eyenet.api.v1.identities.api_qr_password import router as identities_qr_pas
 from eyenet.api.v1.identities.api_qr_start import router as identities_qr_start_router
 from eyenet.api.v1.identities.api_qr_status import router as identities_qr_status_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
+from eyenet.api.v1.identities.api_replace_identity_session import (
+    router as identities_replace_session_router,
+)
 
 # === identities ===
 from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
@@ -393,6 +396,7 @@ v1_router.include_router(groups_scan_router)
 # identities + panic
 v1_router.include_router(identities_list_router)
 v1_router.include_router(identities_create_router)
+v1_router.include_router(identities_replace_session_router)
 v1_router.include_router(identities_qr_start_router)
 v1_router.include_router(identities_qr_status_router)
 v1_router.include_router(identities_qr_password_router)
