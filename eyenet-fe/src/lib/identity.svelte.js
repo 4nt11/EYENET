@@ -49,7 +49,8 @@ export const identityView = $state({
   loading: false,
   error: null,
   submitting: false,
-  submitMsg: null
+  submitMsg: null,
+  submitTone: null // 'ok' | 'err' — colours submitMsg
 });
 
 let detailSeq = 0;
@@ -66,6 +67,7 @@ export async function loadIdentityDetail(id) {
   identityView.discoveryDepth = null;
   identityView.error = null;
   identityView.submitMsg = null;
+  identityView.submitTone = null;
   try {
     const d = await apiGet(`/v1/identities/${id}`, { auth: true });
     if (mine !== detailSeq) return;
@@ -147,18 +149,23 @@ export async function deleteIdentity(id) {
 // the encrypted session blob; name, source, pacing, evasion level are untouched.
 // `file` is a Blob/File for the `session` part — a forum cookies.txt blob or a
 // Telegram .session file (the backend validates by the identity's source kind).
-export async function replaceSession(id, file) {
+export async function replaceSession(id, file, { note = '' } = {}) {
   identityView.submitting = true;
   identityView.submitMsg = null;
+  identityView.submitTone = null;
   try {
     const fd = new FormData();
     fd.append('session', file, file.name ?? 'session');
     await apiPutForm(`/v1/identities/${id}/session`, fd, { auth: true });
-    identityView.submitMsg = 'Credential replaced.';
+    // Reload FIRST — loadIdentityDetail clears submitMsg — THEN set the confirmation
+    // so it survives (this is why the message used to vanish instantly).
     await loadIdentityDetail(id);
+    identityView.submitMsg = `✓ Credential replaced${note ? ` — ${note}` : ''}. All good.`;
+    identityView.submitTone = 'ok';
     return true;
   } catch (e) {
-    identityView.submitMsg = `Failed: ${e.message ?? e}`;
+    identityView.submitMsg = `✗ Replace failed: ${e.message ?? e}`;
+    identityView.submitTone = 'err';
     return false;
   } finally {
     identityView.submitting = false;

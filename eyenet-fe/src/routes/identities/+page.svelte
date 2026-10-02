@@ -5,7 +5,7 @@
   import Button from '$lib/components/Button.svelte';
   import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll, replaceSession } from '$lib/identity.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
-  import { curlToNetscape, hostFromUrl } from '$lib/curl-cookies.js';
+  import { curlToNetscape, extractCookieString, hostFromUrl } from '$lib/curl-cookies.js';
 
   // Columns are the fields /v1/identities returns. No `platform` or `claimed by`
   // (the read schema has neither; platform would need a source join, and there
@@ -56,6 +56,20 @@
   const sourceKind = $derived(sourceOf?.platform ?? '');
   const forumHost = $derived(hostFromUrl(sourceOf?.forumBaseUrl ?? ''));
 
+  // Live classification of the pasted cookie blob, so the operator sees it parsed
+  // BEFORE pressing Replace: Netscape jar vs cURL/Cookie-header, and the count.
+  const cookiePreview = $derived.by(() => {
+    const t = cookieInput.trim();
+    if (!t) return null;
+    if (t.includes('\t')) {
+      const n = t.split('\n').filter((l) => l.includes('\t') && !l.trimStart().startsWith('#')).length;
+      return n ? { kind: 'Netscape jar', n } : { kind: 'unparsed', n: 0 };
+    }
+    const cs = extractCookieString(cookieInput);
+    const n = cs ? cs.split(';').filter((p) => p.includes('=')).length : 0;
+    return n ? { kind: 'cURL / Cookie header', n } : { kind: 'unparsed', n: 0 };
+  });
+
   $effect(() => {
     if (sel) loadIdentityDetail(sel.id);
   });
@@ -95,7 +109,13 @@
       }
       file = new File([text], 'cookies.txt', { type: 'text/plain' });
     }
-    const ok = await replaceSession(sel.id, file);
+    const note =
+      sourceKind === 'telegram'
+        ? sessionFile?.name
+        : cookiePreview?.n
+          ? `${cookiePreview.n} cookie${cookiePreview.n === 1 ? '' : 's'}`
+          : '';
+    const ok = await replaceSession(sel.id, file, { note });
     if (ok) {
       cookieInput = '';
       sessionFile = null;
@@ -176,18 +196,25 @@
               <span class="hint">Upload a fresh Telegram .session, or re-login live via QR (reuses this identity's api credentials).</span>
             {:else}
               <textarea class="field mono" rows="3" bind:value={cookieInput} placeholder={'Paste DevTools "Copy as cURL", a Cookie header, or a Netscape cookies.txt'}></textarea>
+              {#if cookiePreview}
+                {#if cookiePreview.n > 0}
+                  <span class="preview ok">✓ {cookiePreview.kind} detected · {cookiePreview.n} cookie{cookiePreview.n === 1 ? '' : 's'}{cookiePreview.kind.startsWith('cURL') ? (forumHost ? ` → ${forumHost}` : ' (set the forum base URL to scope cURL)') : ''}</span>
+                {:else}
+                  <span class="preview err">✗ couldn't read cookies — paste a Copy-as-cURL, a Cookie header, or a Netscape cookies.txt</span>
+                {/if}
+              {/if}
               <div class="actions-row">
-                <Button variant="primary" size="sm" disabled={identityView.submitting || !cookieInput.trim()} onclick={doReplaceSession}>Replace</Button>
+                <Button variant="primary" size="sm" disabled={identityView.submitting || !cookiePreview || cookiePreview.n === 0} onclick={doReplaceSession}>Replace</Button>
                 <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; cookieInput = ''; }}>Cancel</Button>
               </div>
-              <span class="hint">{forumHost ? `cURL cookies will be scoped to ${forumHost}.` : 'Netscape cookies.txt or a Cookie header (no forum host known for cURL scoping).'}</span>
+              <span class="hint">cURL is auto-converted to a Netscape jar{forumHost ? ` scoped to ${forumHost}` : ''}. Already-Netscape text is sent as-is.</span>
             {/if}
           </div>
           <div class="danger-row">
             <Button variant="destructive" size="sm" disabled={identityView.submitting} onclick={removeIdentity}>Delete identity</Button>
             <span class="hint">Removes the row (only if no collector binds it). Burn to retire a compromised one.</span>
           </div>
-          {#if identityView.submitMsg}<p class="submitmsg">{identityView.submitMsg}</p>{/if}
+          {#if identityView.submitMsg}<p class="submitmsg" class:ok={identityView.submitTone === 'ok'} class:err={identityView.submitTone === 'err'}>{identityView.submitMsg}</p>{/if}
         </div>
       </div>
     {/if}
@@ -227,6 +254,11 @@
   .danger-row { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .submitmsg { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
+  .submitmsg.ok { color: var(--accent-text); }
+  .submitmsg.err { color: var(--red-text); }
+  .preview { margin: -2px 0 0; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); }
+  .preview.ok { color: var(--accent-text); }
+  .preview.err { color: var(--red-text); }
 
   @media (max-width: 900px) { .body { grid-template-columns: 1fr; overflow: auto; } }
 </style>
