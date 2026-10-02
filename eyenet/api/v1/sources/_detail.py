@@ -12,6 +12,14 @@ from eyenet.contracts.source import SourceRow
 from eyenet.storage.repository import BaseRepository
 
 
+def _base_url_of(idents: object) -> str | None:
+    for ident in idents:  # type: ignore[attr-defined]
+        base = ident.source_config.get("forum_base_url")
+        if base:
+            return str(base)
+    return None
+
+
 async def resolve_forum_base_url(storage: BaseRepository, src: SourceRow) -> str | None:
     """A forum source's base URL — it physically lives on the collecting identity's
     ``source_config`` but is logically a property of the forum. Surfacing it lets the
@@ -19,10 +27,17 @@ async def resolve_forum_base_url(storage: BaseRepository, src: SourceRow) -> str
     non-forum source, or a forum with no identity carrying a base URL yet."""
     if src.kind != SourceKind.FORUM:
         return None
-    for ident in await storage.list_identities(source_id=src.id):
-        base = ident.source_config.get("forum_base_url")
-        if base:
-            return str(base)
+    # 1. An identity bound directly to this source (the clean same-source case).
+    direct = _base_url_of(await storage.list_identities(source_id=src.id))
+    if direct is not None:
+        return direct
+    # 2. The collector's DISCOVERY source is named "forum:<identity-name>", but the
+    #    identity can live under a different INGEST source (the DarkForums two-source
+    #    split: groups under forum:darkforums-1, identity under darkforums.as-1).
+    #    Identity names are globally unique (UNIQUE constraint), so resolve by name.
+    if src.display_name.startswith("forum:"):
+        want = src.display_name[len("forum:") :]
+        return _base_url_of(i for i in await storage.list_identities() if i.name == want)
     return None
 
 

@@ -47,6 +47,30 @@ async def test_resolve_forum_base_url_from_identity(storage: BaseRepository) -> 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_resolve_forum_base_url_via_name_when_identity_on_other_source(
+    storage: BaseRepository,
+) -> None:
+    # The DarkForums two-source split: the discovery source "forum:<name>" holds the
+    # groups but NO identity; the identity (same name, globally unique) lives under a
+    # separate ingest source. Resolve the base URL by name.
+    ingest = await storage.upsert_source(
+        kind=SourceKind.FORUM, display_name="darkforums.as-1", created_at=_NOW
+    )
+    await storage.create_identity(
+        name="darkforums-1",
+        source_id=ingest,
+        session_path="/tmp/df",  # noqa: S108
+        source_config={"forum_base_url": "https://darkforums.as/"},
+    )
+    discovery = await storage.upsert_source(
+        kind=SourceKind.FORUM, display_name="forum:darkforums-1", created_at=_NOW
+    )
+    row = await storage.get_source(discovery)
+    assert await resolve_forum_base_url(storage, row) == "https://darkforums.as/"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_resolve_forum_base_url_none_for_non_forum(storage: BaseRepository) -> None:
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
     row = await storage.get_source(src)
