@@ -41,6 +41,13 @@ processors:
           key: eyenet.subject
           values: ["attribution\\.linkage\\.proposed"]
           enabled_regex_matching: true
+      # Always keep every collector-supervisor event (the fleet heartbeat — spawn,
+      # crash, backfill, join decisions all carry eyenet.keep=supervisor).
+      - name: keep-supervisor
+        type: string_attribute
+        string_attribute:
+          key: eyenet.keep
+          values: ["supervisor"]
       # Everything else: keep 10%.
       - name: default-10pct
         type: probabilistic

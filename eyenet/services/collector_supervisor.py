@@ -67,6 +67,10 @@ def _event(name: str, *, error: bool = False, **attrs: object) -> None:
     (not just a log line). Zero-duration marker span; attrs become span attributes.
     The supervisor is the fleet's heartbeat — we want to see all of it."""
     span = _tracer.start_span(name)
+    # Marker so the collector's tail-sampler KEEPS every supervisor event (it
+    # otherwise 10%-samples non-error spans — but the fleet heartbeat is the one
+    # service we want in full). See operations/otel-collector.sample.yaml.
+    span.set_attribute("eyenet.keep", "supervisor")
     for k, v in attrs.items():
         if v is not None:
             span.set_attribute(k, v if isinstance(v, str | bool | int | float) else str(v))
