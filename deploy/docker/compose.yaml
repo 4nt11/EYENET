@@ -228,7 +228,8 @@ services:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
       - ../../operations/alerts/eyenet-api.rules.yml:/etc/prometheus/rules/eyenet-api.rules.yml:ro,Z
       # The read:metrics PAT (gitignored). Must exist before `up` — a missing
-      # source makes Docker create a directory, which breaks the scrape.
+      # source makes Docker create a directory, which breaks the scrape. And
+      # `chmod 644` it: Prometheus runs non-root and must read the bind-mounted file.
       - ./observability/eyenet.pat:/etc/prometheus/eyenet.pat:ro,Z
       - prometheus-data:/prometheus
     depends_on:

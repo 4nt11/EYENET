@@ -37,8 +37,16 @@ Prometheus datasource + the dashboard below. One-time setup:
 cd deploy/docker
 cp observability/eyenet.pat.example observability/eyenet.pat
 # paste the console-minted read:metrics PAT into observability/eyenet.pat, then:
+chmod 644 observability/eyenet.pat          # Prometheus runs non-root; it must read the file
 docker compose --profile observability up -d prometheus grafana
 ```
+
+Grafana is on `:3000` (admin / `EYENET_GRAFANA_PASSWORD`, default `admin`); the
+Prometheus datasource + the dashboard below are auto-provisioned. To also ship
+**traces** (OTel collector + Tempo), set `EYENET_OTEL_ENDPOINT=http://otel-collector:4317`
+(in `.env` or inline), rebuild `eyenet:base`, and bring up the full profile:
+`docker compose --profile observability up -d` (this recreates the app services
+so they export spans).
 
 **Standalone Prometheus** (HTTP/2 + TLS are mandatory, §12.1 — target is `https`):
 
