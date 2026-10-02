@@ -69,6 +69,26 @@
     const n = cs ? cs.split(';').filter((p) => p.includes('=')).length : 0;
     return n ? { kind: 'cURL / Cookie header', n } : { kind: 'unparsed', n: 0 };
   });
+  // Set when we auto-converted a pasted cURL into the Netscape jar now in the box.
+  let converted = $state(false);
+
+  // Auto-convert a pasted cURL / Cookie header into a Netscape jar IN PLACE, so the
+  // box shows exactly what gets sent. Needs the forum host to scope; already-Netscape
+  // (has tabs) and un-parseable input are left untouched.
+  function onCookieInput(e) {
+    const v = e.currentTarget.value;
+    if (v.trim() && !v.includes('\t') && forumHost) {
+      try {
+        cookieInput = curlToNetscape(v, forumHost).text;
+        converted = true;
+        return;
+      } catch {
+        /* leave as typed; the preview line explains */
+      }
+    }
+    cookieInput = v;
+    converted = false;
+  }
 
   $effect(() => {
     if (sel) loadIdentityDetail(sel.id);
@@ -80,6 +100,7 @@
     showReplace = false;
     cookieInput = '';
     sessionFile = null;
+    converted = false;
   });
 
   onMount(() => {
@@ -120,6 +141,7 @@
       cookieInput = '';
       sessionFile = null;
       showReplace = false;
+      converted = false;
     }
   }
 
@@ -195,17 +217,17 @@
               </div>
               <span class="hint">Upload a fresh Telegram .session, or re-login live via QR (reuses this identity's api credentials).</span>
             {:else}
-              <textarea class="field mono" rows="3" bind:value={cookieInput} placeholder={'Paste DevTools "Copy as cURL", a Cookie header, or a Netscape cookies.txt'}></textarea>
+              <textarea class="field mono" rows="4" value={cookieInput} oninput={onCookieInput} placeholder={'Paste DevTools "Copy as cURL", a Cookie header, or a Netscape cookies.txt'}></textarea>
               {#if cookiePreview}
                 {#if cookiePreview.n > 0}
-                  <span class="preview ok">✓ {cookiePreview.kind} detected · {cookiePreview.n} cookie{cookiePreview.n === 1 ? '' : 's'}{cookiePreview.kind.startsWith('cURL') ? (forumHost ? ` → ${forumHost}` : ' (set the forum base URL to scope cURL)') : ''}</span>
+                  <span class="preview ok">{converted ? `✓ cURL detected → auto-converted to a Netscape jar · ${cookiePreview.n} cookie${cookiePreview.n === 1 ? '' : 's'} → ${forumHost}` : `✓ ${cookiePreview.kind} detected · ${cookiePreview.n} cookie${cookiePreview.n === 1 ? '' : 's'}`}</span>
                 {:else}
                   <span class="preview err">✗ couldn't read cookies — paste a Copy-as-cURL, a Cookie header, or a Netscape cookies.txt</span>
                 {/if}
               {/if}
               <div class="actions-row">
                 <Button variant="primary" size="sm" disabled={identityView.submitting || !cookiePreview || cookiePreview.n === 0} onclick={doReplaceSession}>Replace</Button>
-                <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; cookieInput = ''; }}>Cancel</Button>
+                <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; cookieInput = ''; converted = false; }}>Cancel</Button>
               </div>
               <span class="hint">cURL is auto-converted to a Netscape jar{forumHost ? ` scoped to ${forumHost}` : ''}. Already-Netscape text is sent as-is.</span>
             {/if}
