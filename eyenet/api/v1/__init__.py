@@ -112,6 +112,9 @@ from eyenet.api.v1.collectors.api_delete_collector import router as collectors_d
 from eyenet.api.v1.collectors.api_get_collector import router as collectors_get_router
 from eyenet.api.v1.collectors.api_list_collectors import router as collectors_list_router
 from eyenet.api.v1.collectors.api_list_memberships import router as collectors_memberships_router
+from eyenet.api.v1.collectors.api_rediscover_collector import (
+    router as collectors_rediscover_router,
+)
 from eyenet.api.v1.collectors.api_start_collector import router as collectors_start_router
 from eyenet.api.v1.collectors.api_stop_collector import router as collectors_stop_router
 from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
@@ -360,6 +363,7 @@ v1_router.include_router(collectors_create_router)
 v1_router.include_router(collectors_get_router)
 v1_router.include_router(collectors_update_router)
 v1_router.include_router(collectors_start_router)
+v1_router.include_router(collectors_rediscover_router)
 v1_router.include_router(collectors_stop_router)
 v1_router.include_router(collectors_memberships_router)
 v1_router.include_router(collectors_delete_router)

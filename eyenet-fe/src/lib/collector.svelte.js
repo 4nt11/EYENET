@@ -130,6 +130,23 @@ export async function requestBackfill(id) {
   }
 }
 
+// Re-scan this collector's visible groups on demand (POST .../rediscover).
+// Discovery otherwise runs only once per source — this is the explicit refresh.
+export async function rediscover(id) {
+  collectorView.submitting = true;
+  collectorView.submitMsg = null;
+  try {
+    const r = await apiPost(`/v1/collectors/${id}/rediscover`, {}, { auth: true });
+    collectorView.submitMsg = r?.collectors_signaled
+      ? 'rediscovery triggered — new categories show up in Monitored groups shortly.'
+      : 'not signaled — start the collector first (only a running collector can rescan).';
+  } catch (e) {
+    collectorView.submitMsg = `rediscover failed: ${e.message ?? e}`;
+  } finally {
+    collectorView.submitting = false;
+  }
+}
+
 export async function collectorAction(id, action) {
   collectorView.submitting = true;
   collectorView.submitMsg = null;

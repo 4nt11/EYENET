@@ -245,3 +245,40 @@ async def test_fleet_health(
     health = await collectors_health(mkuser("read:collectors"), storage)
     assert health.total == 1
     assert health.counts_by_observed_state[CollectorObservedState.STOPPED] == 1
+
+
+# --- rediscover -------------------------------------------------------------
+
+
+async def test_rediscover_unknown_404(
+    storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
+) -> None:
+    from eyenet.api.v1.collectors.api_rediscover_collector import collectors_rediscover
+
+    with pytest.raises(ResourceNotFound):
+        await collectors_rediscover(uuid4(), mkuser("write:groups"), storage, MemoryBus(), audit)
+
+
+async def test_rediscover_stopped_signals_zero(
+    storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
+) -> None:
+    from eyenet.api.v1.collectors.api_rediscover_collector import collectors_rediscover
+
+    cid = await _make(storage, audit, mkuser("write:collectors"))  # observed STOPPED by default
+    res = await collectors_rediscover(cid, mkuser("write:groups"), storage, MemoryBus(), audit)
+    assert res.collectors_signaled == 0
+
+
+async def test_rediscover_running_signals_one(
+    storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
+) -> None:
+    from eyenet.api.v1.collectors.api_rediscover_collector import collectors_rediscover
+
+    cid = await _make(storage, audit, mkuser("write:collectors"))
+    await storage.record_collector_observed_state(
+        collector_id=cid,
+        observed_state=CollectorObservedState.RUNNING,
+        last_heartbeat_at=datetime.now(tz=UTC),
+    )
+    res = await collectors_rediscover(cid, mkuser("write:groups"), storage, MemoryBus(), audit)
+    assert res.collectors_signaled == 1

@@ -3093,6 +3093,25 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  /v1/collectors/{collector_id}/rediscover:
+    post:
+      tags: [collectors]
+      operationId: collectors_rediscover
+      summary: >-
+        Rescan this collector's visible groups (write:groups). Per-collector twin
+        of /v1/groups/scan; only a RUNNING collector is signaled.
+      parameters:
+        - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: Rediscovery command published (collectors_signaled is 1, or 0 if not running).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanGroupsResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
   /v1/collectors/{collector_id}/stop:
     post:
       tags: [collectors]

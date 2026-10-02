@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import random
 import time
 from datetime import UTC, datetime
@@ -55,6 +56,7 @@ from eyenet.contracts.bus import Bus
 from eyenet.contracts.enums import GroupKind, SourceKind, SystemLogLevel
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
+from eyenet.contracts.supervisor import ScanVisibleGroupsCommand, command_subject_for
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.storage.repository import BaseRepository
@@ -283,6 +285,29 @@ class MyBBForumCollector(CollectorSkeleton):
         # Bind our row to the source we actually ingest into (the placeholder
         # source it was registered against has zero of our messages).
         await self._bind_collector_row_source(collector, self._source_uuid)
+
+        # Listen for an operator-triggered rediscovery (POST /v1/collectors/{id}/
+        # rediscover or /v1/groups/scan). This is the ONLY way discovery re-runs
+        # after the one-time startup scan — an explicit refresh, never automatic.
+        # Subscribed BEFORE the discovery gate's early-return so an already-mapped
+        # collector still responds to the command.
+        async def _on_command(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
+            try:
+                if json.loads(payload).get("kind") == "scan_visible_groups":
+                    ScanVisibleGroupsCommand.model_validate_json(payload)
+                    if self._source_uuid is not None:
+                        await self.scan_visible_groups(source_id=self._source_uuid)
+            except (RateLimited, OperationalError, httpx.HTTPError) as exc:
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.rediscover_incomplete",
+                    message=f"{self._identity_name}: rediscover hit {type(exc).__name__} ({exc})",
+                )
+            except Exception as exc:
+                _log.error("forum.command_error", identity=self._identity_name, error=str(exc))
+
+        await self.bus.subscribe(command_subject_for(self.instance_id), _on_command)
+
         # Populate /monitored-groups with the board's categories so the operator
         # can pick which to monitor. Read-only page fetch, nothing joined.
         #
