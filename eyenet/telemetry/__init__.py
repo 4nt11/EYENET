@@ -42,6 +42,11 @@ _initialized: dict[tuple[str, str], TracerProvider] = {}
 
 _DISABLED_ENV = "EYENET_TRACING_DISABLED"
 _OTEL_DISABLED_ENV = "OTEL_SDK_DISABLED"
+# The ONE OTLP endpoint for this process — drives both the trace span exporter
+# (here) and the metrics OTLP reader (eyenet/telemetry/metrics.py). The legacy
+# EYENET_OTLP_ENDPOINT (read into RuntimeConfig but never wired to an exporter)
+# is retired in favour of this single var.
+_OTEL_ENDPOINT_ENV = "EYENET_OTEL_ENDPOINT"
 _TRUTHY = {"1", "true", "yes"}
 
 
@@ -54,6 +59,20 @@ def tracing_disabled() -> bool:
     )
 
 
+def _span_exporter_from_env() -> SpanExporter | None:
+    """Build an OTLP/gRPC span exporter from ``EYENET_OTEL_ENDPOINT``, or ``None``
+    when it is unset (dev/test → console exporter). Lazy-imports the heavy grpc
+    stack only when an endpoint is actually configured."""
+    endpoint = os.environ.get(_OTEL_ENDPOINT_ENV, "").strip()
+    if not endpoint:
+        return None
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415
+        OTLPSpanExporter,
+    )
+
+    return OTLPSpanExporter(endpoint=endpoint)
+
+
 def init_telemetry(
     *,
     service: str,
@@ -63,9 +82,10 @@ def init_telemetry(
     """Initialize OTel + structlog for a service. Idempotent per (service,
     instance_id) pair within a process.
 
-    M1: span exporter defaults to ConsoleSpanExporter. Real OTLP gRPC export
-    can be wired by the caller (passing `exporter=`); the env var
-    `EYENET_OTLP_ENDPOINT` is read by `eyenet.cli.config`.
+    Span export: an explicit ``exporter=`` wins (tests inject one); otherwise an
+    OTLP/gRPC exporter is built from ``EYENET_OTEL_ENDPOINT`` when that is set
+    (the production path — points every service at the OTel collector), and falls
+    back to ConsoleSpanExporter when it is not (dev/test).
 
     Returns ``None`` when tracing is disabled via env var. Logging is still
     configured in that case.
@@ -78,6 +98,9 @@ def init_telemetry(
     key = (service, instance_id)
     if key in _initialized:
         return _initialized[key]
+
+    if exporter is None:
+        exporter = _span_exporter_from_env()
 
     resource = Resource.create({"service.name": service, "service.instance.id": instance_id})
     # M9.6: head sampling is ParentBased(ALWAYS_ON) — keep every span the SDK sees

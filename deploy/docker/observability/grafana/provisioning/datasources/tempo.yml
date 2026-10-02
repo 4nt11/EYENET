@@ -1,0 +1,9 @@
+# Auto-provisioned Tempo datasource (traces) for the EYENET Grafana.
+apiVersion: 1
+datasources:
+  - name: Tempo
+    type: tempo
+    uid: eyenet-tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false

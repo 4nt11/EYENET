@@ -20,6 +20,11 @@
 x-eyenet-env: &eyenet-env
   EYENET_DATA_DIR: /var/lib/eyenet
   EYENET_NATS_URL: nats://nats:4222
+  # OTLP push endpoint (traces for every service + metrics from the API). Empty =
+  # off (spans go to the console, current default). Set it to the collector when
+  # running --profile observability, e.g. in .env:
+  #   EYENET_OTEL_ENDPOINT=http://otel-collector:4317
+  EYENET_OTEL_ENDPOINT: ${EYENET_OTEL_ENDPOINT:-}
 
 # Shared config for the bus workers (everything except api/nats): reuse the built
 # image, wait for the API (which owns first-boot schema creation) to be healthy.
@@ -247,6 +252,29 @@ services:
     depends_on:
       - prometheus
 
+  # OTel collector (traces): OTLP gRPC receiver on :4317, tail-sampling (keep
+  # errors / panic / auth-failure / linkage-proposed + 10% of the rest, §11.6),
+  # exports to Tempo. Services push here when EYENET_OTEL_ENDPOINT is set. Reuses
+  # the committed operations/ sample verbatim (its traces exporter targets tempo).
+  otel-collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../../operations/otel-collector.sample.yaml:/etc/otelcol/config.yaml:ro,Z
+    depends_on:
+      - tempo
+
+  tempo:
+    profiles: ["observability"]
+    image: grafana/tempo:2.6.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro,Z
+      - tempo-data:/var/tempo
+
   # ---- collectors (the data plane) -------------------------------------------
   # NOT a static compose service. The CollectorSupervisor spawns one collector
   # child process per CollectorTable row whose desired_state is RUNNING (created
@@ -259,3 +287,4 @@ volumes:
   eyenet-data:
   prometheus-data:
   grafana-data:
+  tempo-data:
