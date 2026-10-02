@@ -117,10 +117,13 @@ def parse_thread(html: str) -> list[ParsedPost]:
         if not pid:
             continue
 
-        author_link = container.select_one(".post_user-profile a")
-        # A post_user-profile block can lead with an icon-only <a>; prefer the
-        # first anchor whose href actually points at a /User- profile.
-        for anchor in container.select(".post_user-profile a"):
+        # Author profile anchor. Themes vary the block class between
+        # ``post_user-profile`` (darkforums) and the BEM ``post__user-profile``
+        # (pwnforums) — match both or every post collapses to one empty author.
+        author_link = container.select_one(".post_user-profile a, .post__user-profile a")
+        # A user-profile block can lead with an icon-only <a>; prefer the first
+        # anchor whose href actually points at a /User- profile.
+        for anchor in container.select(".post_user-profile a, .post__user-profile a"):
             href = str(anchor.get("href", ""))
             if "User-" in href:
                 author_link = anchor

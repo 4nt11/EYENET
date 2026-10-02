@@ -39,6 +39,27 @@ def test_author_username_is_the_user_slug(posts: list) -> None:
     assert posts[0].author_display == "alice"
 
 
+def test_bem_double_underscore_author_theme_parses() -> None:
+    # pwnforums renders the author block with the BEM `post__user-profile` class
+    # while keeping single-underscore `post_body`/`post_date`. The author must
+    # still resolve, else every post collapses to one empty "unknown" actor.
+    html = (
+        '<div class="post" id="post_27137">'
+        '<div class="post__author">'
+        '<span class="post__user-profile largetext">'
+        '<a href="https://pwnforums.st/User-John">John</a></span>'
+        '<a class="post__user" href="https://pwnforums.st/member.php?action=profile&amp;uid=1"></a>'
+        "</div>"
+        '<span class="post_date">01-02-26, 09:30 AM</span>'
+        '<div class="post_body">hello from pwnforums</div>'
+        "</div>"
+    )
+    posts = parse_thread(html)
+    assert len(posts) == 1
+    assert posts[0].author_username == "John"
+    assert posts[0].author_display == "John"
+
+
 def test_board_local_date_is_day_first(posts: list) -> None:
     # 01-02-26 -> 1 Feb 2026 (DD-MM-YY), naive/board-local
     assert posts[0].posted_at == datetime(2026, 2, 1, 9, 30)  # noqa: DTZ001
