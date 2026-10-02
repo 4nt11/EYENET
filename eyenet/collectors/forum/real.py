@@ -272,19 +272,26 @@ class MyBBForumCollector(CollectorSkeleton):
                 proxy=proxy,
             )
 
-        self._source_uuid = await self._storage.upsert_source(
-            kind=SourceKind.FORUM,
-            display_name=f"forum:{entry.name}",
-            created_at=datetime.now(tz=UTC),
-        )
         # Our own collector row: the operator's monitored-category memberships are
         # keyed to it (list_active_memberships). Without it the monitor set stays
         # empty and we crawl nothing (fail-closed).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
-        # Bind our row to the source we actually ingest into (the placeholder
-        # source it was registered against has zero of our messages).
-        await self._bind_collector_row_source(collector, self._source_uuid)
+        # Ingest into the source the OPERATOR CHOSE when creating this collector
+        # (collector.source_id). Do NOT auto-create a forum:<identity-name> source
+        # and rebind to it — that spawned a SECOND, divergent source: the operator's
+        # monitored categories (+ the reader) landed on their picked source while
+        # the crawl stored threads into the auto-created one, so the reader showed
+        # an empty category. Fall back to a per-identity source only when there is
+        # no collector row (standalone / tests).
+        if collector is not None:
+            self._source_uuid = collector.source_id
+        else:
+            self._source_uuid = await self._storage.upsert_source(
+                kind=SourceKind.FORUM,
+                display_name=f"forum:{entry.name}",
+                created_at=datetime.now(tz=UTC),
+            )
 
         # Listen for an operator-triggered rediscovery (POST /v1/collectors/{id}/
         # rediscover or /v1/groups/scan). This is the ONLY way discovery re-runs
