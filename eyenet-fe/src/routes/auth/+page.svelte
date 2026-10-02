@@ -26,6 +26,26 @@
   // Scopes the operator holds — the ceiling for a new PAT (server re-enforces).
   const heldScopes = $derived([...(auth.user?.scopes ?? [])].sort());
 
+  // Group `verb:resource` scopes by RESOURCE, with the held verbs as toggles —
+  // a flat grid of `read:audit` etc. is unreadable at 30+ scopes.
+  const VERB_ORDER = ['read', 'write', 'stream', 'admin'];
+  const scopeTree = $derived.by(() => {
+    const byRes = new Map();
+    for (const s of heldScopes) {
+      const i = s.indexOf(':');
+      if (i < 0) continue;
+      const res = s.slice(i + 1);
+      if (!byRes.has(res)) byRes.set(res, new Set());
+      byRes.get(res).add(s.slice(0, i));
+    }
+    return [...byRes.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([res, verbs]) => ({
+        res,
+        verbs: [...verbs].sort((a, b) => VERB_ORDER.indexOf(a) - VERB_ORDER.indexOf(b))
+      }));
+  });
+
   let showMint = $state(false);
   let mintName = $state('');
   let mintScopes = $state(new Set());
@@ -112,15 +132,22 @@
         <div class="mint">
           <label class="fld"><span class="flabel">Label</span>
             <input class="fin" type="text" bind:value={mintName} placeholder="prometheus-scrape" /></label>
-          <div class="fld"><span class="flabel">Scopes (a token can carry only scopes you hold)</span>
-            <div class="scopegrid">
-              {#each heldScopes as s}
-                <label class="scopepick" class:on={mintScopes.has(s)}>
-                  <input type="checkbox" checked={mintScopes.has(s)} onchange={() => toggleScope(s)} />
-                  <span>{s}</span>
-                </label>
+          <div class="fld"><span class="flabel">Scopes — pick per resource; a token carries only scopes you hold</span>
+            <div class="scopesecs">
+              {#each scopeTree as { res, verbs }}
+                <div class="scopesec">
+                  <span class="resname">{res}</span>
+                  <div class="verbs">
+                    {#each verbs as v}
+                      {@const full = `${v}:${res}`}
+                      <button type="button" class="verbchip" class:on={mintScopes.has(full)}
+                        onclick={() => toggleScope(full)}>{v}</button>
+                    {/each}
+                  </div>
+                </div>
               {/each}
             </div>
+            {#if mintScopes.size}<span class="picked">{mintScopes.size} selected: {[...mintScopes].sort().join(', ')}</span>{/if}
           </div>
           <label class="fld"><span class="flabel">Expiry (optional)</span>
             <input class="fin" type="date" bind:value={mintExpiry} /></label>
@@ -182,9 +209,14 @@
   .flabel { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; max-width: 420px; }
   .fin:focus { outline: none; border-color: var(--accent); }
-  .scopegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 12px; }
-  .scopepick { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-secondary); cursor: pointer; padding: 2px 0; }
-  .scopepick.on { color: var(--accent-text); }
+  .scopesecs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 4px 20px; }
+  .scopesec { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
+  .resname { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); min-width: 130px; text-align: right; }
+  .verbs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .verbchip { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 2px 10px; cursor: pointer; transition: border-color 0.1s, color 0.1s; }
+  .verbchip:hover { border-color: var(--accent); color: var(--text-body); }
+  .verbchip.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .picked { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); }
   .mint-actions, .revoke-row { display: flex; align-items: center; gap: 10px; }
   .revoke-row { padding-top: 10px; }
   .sel-note { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
