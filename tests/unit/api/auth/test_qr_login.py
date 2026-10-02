@@ -175,3 +175,52 @@ async def test_shutdown_disconnects_live_clients(storage: BaseRepository, tmp_pa
     await _await_status(state, QrLoginStatus.PASSWORD_NEEDED)
     await reg.shutdown()
     assert state.client.disconnected is True
+
+
+@pytest.mark.unit
+async def test_relogin_replaces_existing_identity_in_place(
+    storage: BaseRepository, tmp_path: Path
+) -> None:
+    # Seed an existing Telegram identity with a known session blob + config.
+    from eyenet.identity_pool._provision import provision_identity_from_session
+
+    src = await _source(storage)
+    cfg = {"telegram_api_id": 42, "telegram_api_hash": "hash", "monitor_groups": ["@g"]}
+    existing = await provision_identity_from_session(
+        storage=storage,
+        session_key=load_session_key(tmp_path),
+        data_dir=tmp_path,
+        name="tg_reuse",
+        source_id=src,
+        session_string=str(StringSession.save(StringSession())),
+        source_config=cfg,
+    )
+    old_path = existing.session_path
+
+    reg = _registry(storage, tmp_path, _FakeQr())
+    state = await reg.start(
+        user_id=uuid4(),
+        api_id=42,
+        api_hash="hash",
+        name=existing.name,
+        source_id=src,
+        source_config=cfg,
+        role=existing.role,
+        cooldown_seconds=existing.cooldown_seconds,
+        proxy_uri=None,
+        notes=None,
+        target_identity_id=existing.id,
+    )
+    await state.driver_task
+
+    assert state.status is QrLoginStatus.COMPLETE
+    assert state.identity_id == existing.id  # SAME identity, not a new one
+    # No duplicate identity was created.
+    rows = await storage.list_identities(source_id=src)
+    assert [r.id for r in rows] == [existing.id]
+    # Credential swapped (new blob), config untouched.
+    rotated = await storage.get_identity(existing.id)
+    assert rotated is not None
+    assert rotated.session_path != old_path  # fresh blob written
+    assert rotated.source_config == cfg  # config untouched
+    assert not Path(old_path).exists()  # old blob cleaned up

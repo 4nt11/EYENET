@@ -151,6 +151,7 @@ from eyenet.api.v1.identities.api_freeze_identity import router as identities_fr
 from eyenet.api.v1.identities.api_get_identity import router as identities_get_router
 from eyenet.api.v1.identities.api_list_identities import router as identities_list_router
 from eyenet.api.v1.identities.api_qr_password import router as identities_qr_password_router
+from eyenet.api.v1.identities.api_qr_relogin import router as identities_qr_relogin_router
 from eyenet.api.v1.identities.api_qr_start import router as identities_qr_start_router
 from eyenet.api.v1.identities.api_qr_status import router as identities_qr_status_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
@@ -398,6 +399,7 @@ v1_router.include_router(identities_list_router)
 v1_router.include_router(identities_create_router)
 v1_router.include_router(identities_replace_session_router)
 v1_router.include_router(identities_qr_start_router)
+v1_router.include_router(identities_qr_relogin_router)
 v1_router.include_router(identities_qr_status_router)
 v1_router.include_router(identities_qr_password_router)
 v1_router.include_router(identities_get_router)

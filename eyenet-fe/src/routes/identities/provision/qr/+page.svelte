@@ -1,9 +1,15 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import QRCode from 'qrcode';
   import Button from '$lib/components/Button.svelte';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
-  import { qrCtx, startQrLogin, pollQrStatus, submitQrPassword, resetQr } from '$lib/identity.svelte.js';
+  import { qrCtx, startQrLogin, startQrRelogin, pollQrStatus, submitQrPassword, resetQr } from '$lib/identity.svelte.js';
+
+  // Re-login mode: ?identity=<id> swaps a fresh session onto an EXISTING Telegram
+  // identity (reusing its api creds) instead of provisioning a new one. Same QR
+  // render + poll + 2FA; no provision form.
+  const reloginId = $derived($page.url.searchParams.get('identity'));
 
   // QR login: provide api credentials + metadata, scan the QR with your Telegram
   // app (Settings > Devices > Link Desktop Device), enter 2FA if set, done. The
@@ -29,6 +35,7 @@
   onMount(() => {
     resetQr();
     loadSources();
+    if (reloginId) startQrRelogin(reloginId); // auto-start; no form in re-login mode
   });
 
   // Render the current QR url as an inline SVG whenever it changes.
@@ -80,18 +87,26 @@
         <a class="slug-link" href="/identities">identities</a><span class="sep">/</span>
         <span class="slug">QR login</span>
       </div>
-      <h1>Provision via QR login</h1>
+      <h1>{reloginId ? 'Re-login via QR' : 'Provision via QR login'}</h1>
     </div>
-    <a class="back" href="/identities/provision">Upload a file instead</a>
+    <a class="back" href="/identities">{reloginId ? 'Back to the pool' : ''}</a>
   </div>
 
   <p class="lede">
-    Scan a Telegram QR with your phone to mint a <strong>user</strong> session (not a bot).
-    The session is minted server-side and encrypted at rest. Provide your API credentials,
-    then scan from Telegram: Settings <span class="arrow">›</span> Devices <span class="arrow">›</span> Link Desktop Device.
+    {#if reloginId}
+      Scan a Telegram QR to mint a fresh <strong>user</strong> session and swap it onto this
+      identity — api credentials, name, source and pacing are reused unchanged. Scan from
+      Telegram: Settings <span class="arrow">›</span> Devices <span class="arrow">›</span> Link Desktop Device.
+    {:else}
+      Scan a Telegram QR with your phone to mint a <strong>user</strong> session (not a bot).
+      The session is minted server-side and encrypted at rest. Provide your API credentials,
+      then scan from Telegram: Settings <span class="arrow">›</span> Devices <span class="arrow">›</span> Link Desktop Device.
+    {/if}
   </p>
 
-  {#if !started}
+  {#if !started && reloginId}
+    <p class="lede">Starting QR re-login…{#if qrCtx.error} failed: {qrCtx.error}{/if}</p>
+  {:else if !started}
     <form class="card" onsubmit={generate}>
       <label class="fld"><span class="flabel">Source</span>
         <select class="fin" bind:value={sourceId}>
@@ -133,7 +148,7 @@
   {:else}
     <div class="card qr-card">
       {#if qrCtx.status === 'complete'}
-        <p class="ok">✓ Provisioned. <a class="slug-link" href="/identities">Back to the pool</a></p>
+        <p class="ok">✓ {reloginId ? 'Session replaced' : 'Provisioned'}. <a class="slug-link" href="/identities">Back to the pool</a></p>
       {:else if qrCtx.status === 'error' || qrCtx.status === 'expired'}
         <p class="err">Login {qrCtx.status}{qrCtx.detail ? `: ${qrCtx.detail}` : ''}.</p>
         <Button variant="primary" size="sm" onclick={resetQr}>Start over</Button>

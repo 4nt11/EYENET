@@ -46,40 +46,59 @@
   );
 
   let reason = $state('');
-  // Credential rotation (fresh cookies after a logout) — only the session changes.
+  // Credential rotation (fresh cookies / .session after a logout) — only the
+  // session changes. Kind-aware: forum = cookie paste, telegram = .session upload
+  // (or QR re-login). Resolved from the identity's source.
   let cookieInput = $state('');
+  let sessionFile = $state(null);
   let showReplace = $state(false);
-  // The forum host backing this identity's source, for Copy-as-cURL extraction.
-  const forumHost = $derived(
-    hostFromUrl(sourceCtx.list.find((s) => s.id === sel?.sourceId)?.forumBaseUrl ?? '')
-  );
+  const sourceOf = $derived(sourceCtx.list.find((s) => s.id === sel?.sourceId) ?? null);
+  const sourceKind = $derived(sourceOf?.platform ?? '');
+  const forumHost = $derived(hostFromUrl(sourceOf?.forumBaseUrl ?? ''));
 
   $effect(() => {
     if (sel) loadIdentityDetail(sel.id);
   });
 
+  // Reset the replace control whenever the selected identity changes.
+  $effect(() => {
+    void sel?.id;
+    showReplace = false;
+    cookieInput = '';
+    sessionFile = null;
+  });
+
   onMount(() => {
     loadIdentities();
-    loadSources(); // resolve the forum host for cURL cookie extraction
+    loadSources(); // resolve the source kind + forum host for the replace control
   });
 
   async function doReplaceSession() {
-    if (!sel || !cookieInput.trim()) return;
-    let text = cookieInput.trim();
-    // Already a Netscape jar (tab-delimited rows)? send as-is. Otherwise treat the
-    // input as a DevTools "Copy as cURL" / Cookie header and extract, scoped to the
-    // source's forum host.
-    if (!text.includes('\t')) {
-      try {
-        text = curlToNetscape(cookieInput, forumHost).text;
-      } catch (e) {
-        identityView.submitMsg = `✗ ${e.message ?? e}`;
-        return;
+    if (!sel) return;
+    let file;
+    if (sourceKind === 'telegram') {
+      if (!sessionFile) return;
+      file = sessionFile; // a File with its own .session name
+    } else {
+      if (!cookieInput.trim()) return;
+      let text = cookieInput.trim();
+      // Already a Netscape jar (tab-delimited rows)? send as-is. Otherwise treat
+      // the input as a DevTools "Copy as cURL" / Cookie header and extract, scoped
+      // to the source's forum host.
+      if (!text.includes('\t')) {
+        try {
+          text = curlToNetscape(cookieInput, forumHost).text;
+        } catch (e) {
+          identityView.submitMsg = `✗ ${e.message ?? e}`;
+          return;
+        }
       }
+      file = new File([text], 'cookies.txt', { type: 'text/plain' });
     }
-    const ok = await replaceSession(sel.id, text);
+    const ok = await replaceSession(sel.id, file);
     if (ok) {
       cookieInput = '';
+      sessionFile = null;
       showReplace = false;
     }
   }
@@ -143,10 +162,18 @@
             {#if sel.state === 'burned'}<span class="terminal">Burned · terminal lifecycle.</span>{/if}
           </div>
           <div class="session-row">
-            <div class="actions-label">Session</div>
+            <div class="actions-label">Credential</div>
             {#if !showReplace}
-              <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => (showReplace = true)}>Replace cookies</Button>
-              <span class="hint">Swap the credential (fresh cookies after a logout). Nothing else changes.</span>
+              <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => (showReplace = true)}>Replace credential</Button>
+              <span class="hint">Swap the session after a logout — fresh cookies (forum) or a new .session / QR re-login (Telegram). Nothing else changes.</span>
+            {:else if sourceKind === 'telegram'}
+              <input class="field file" type="file" accept=".session" onchange={(e) => (sessionFile = e.currentTarget.files?.[0] ?? null)} />
+              <div class="actions-row">
+                <Button variant="primary" size="sm" disabled={identityView.submitting || !sessionFile} onclick={doReplaceSession}>Replace .session</Button>
+                <a class="relogin-link" href={`/identities/provision/qr?identity=${sel.id}`}>…or re-login via QR</a>
+                <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; sessionFile = null; }}>Cancel</Button>
+              </div>
+              <span class="hint">Upload a fresh Telegram .session, or re-login live via QR (reuses this identity's api credentials).</span>
             {:else}
               <textarea class="field mono" rows="3" bind:value={cookieInput} placeholder={'Paste DevTools "Copy as cURL", a Cookie header, or a Netscape cookies.txt'}></textarea>
               <div class="actions-row">
@@ -193,6 +220,9 @@
   .actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .terminal { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
   .field.mono { font-family: var(--font-mono); font-size: var(--fs-12); resize: vertical; }
+  .field.file { padding: 6px 8px; font-family: var(--font-sans); font-size: var(--fs-12); }
+  .relogin-link { font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-secondary); text-decoration: none; }
+  .relogin-link:hover { color: var(--accent); }
   .session-row { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
   .danger-row { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }

@@ -32,7 +32,10 @@ from telethon import TelegramClient
 from telethon.errors import PasswordHashInvalidError, SessionPasswordNeededError
 from telethon.sessions import StringSession
 
-from eyenet.identity_pool._provision import provision_identity_from_session
+from eyenet.identity_pool._provision import (
+    provision_identity_from_session,
+    replace_identity_session_from_string,
+)
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
@@ -103,6 +106,9 @@ class QrLoginState:
     cooldown_seconds: int
     proxy_uri: str | None
     notes: str | None
+    # When set, the minted session REPLACES this existing identity's credential
+    # (QR re-login) instead of provisioning a new identity.
+    target_identity_id: UUID | None = None
     password_event: asyncio.Event = field(default_factory=asyncio.Event)
     password: str | None = None
     identity_id: UUID | None = None
@@ -147,8 +153,13 @@ class QrLoginRegistry:
         cooldown_seconds: int,
         proxy_uri: str | None,
         notes: str | None,
+        target_identity_id: UUID | None = None,
     ) -> QrLoginState:
-        """Open a live client, mint the first QR, and launch its driver task."""
+        """Open a live client, mint the first QR, and launch its driver task.
+
+        ``target_identity_id`` set → the minted session REPLACES that identity's
+        credential (re-login) instead of provisioning a new one.
+        """
         proxy = _parse_proxy(proxy_uri)
         client = self._client_factory(StringSession(), api_id, api_hash, proxy)
         await client.connect()
@@ -167,6 +178,7 @@ class QrLoginRegistry:
             cooldown_seconds=cooldown_seconds,
             proxy_uri=proxy_uri,
             notes=notes,
+            target_identity_id=target_identity_id,
         )
         state.driver_task = asyncio.create_task(self._drive(state, qr))
         async with self._lock:
@@ -242,20 +254,33 @@ class QrLoginRegistry:
 
     async def _mint(self, state: QrLoginState) -> None:
         session_string = str(StringSession.save(state.client.session))
+        relogin = state.target_identity_id is not None
         try:
-            identity = await provision_identity_from_session(
-                storage=self._storage,
-                session_key=self._session_key,
-                data_dir=self._data_dir,
-                name=state.name,
-                source_id=state.source_id,
-                session_string=session_string,
-                source_config=state.source_config,
-                role=state.role,
-                cooldown_seconds=state.cooldown_seconds,
-                proxy_uri=state.proxy_uri,
-                notes=state.notes,
-            )
+            if relogin:
+                # Re-login: swap the freshly-minted session onto the existing
+                # identity (config/name/pacing untouched). No re-validation — the
+                # string came straight off a live authenticated client.
+                identity = await replace_identity_session_from_string(
+                    storage=self._storage,
+                    session_key=self._session_key,
+                    data_dir=self._data_dir,
+                    identity_id=state.target_identity_id,  # type: ignore[arg-type]
+                    session_string=session_string,
+                )
+            else:
+                identity = await provision_identity_from_session(
+                    storage=self._storage,
+                    session_key=self._session_key,
+                    data_dir=self._data_dir,
+                    name=state.name,
+                    source_id=state.source_id,
+                    session_string=session_string,
+                    source_config=state.source_config,
+                    role=state.role,
+                    cooldown_seconds=state.cooldown_seconds,
+                    proxy_uri=state.proxy_uri,
+                    notes=state.notes,
+                )
         except Exception as exc:
             state.status = QrLoginStatus.ERROR
             state.error = f"provision_failed: {exc}"
@@ -265,14 +290,14 @@ class QrLoginRegistry:
         state.status = QrLoginStatus.COMPLETE
         if self._audit is not None:
             await self._audit.emit(
-                event="identity.provisioned",
+                event="identity.session_replaced" if relogin else "identity.provisioned",
                 subject_kind="identity",
                 subject_id=identity.id,
                 system_user_id=state.user_id,
                 payload={
                     "name": state.name,
                     "source_id": str(state.source_id),
-                    "via": "qr_login",
+                    "via": "qr_relogin" if relogin else "qr_login",
                 },
             )
 

@@ -143,18 +143,18 @@ export async function deleteIdentity(id) {
   }
 }
 
-// Rotate an identity's credential (PUT /v1/identities/{id}/session). Replaces
-// ONLY the encrypted session blob (fresh cookies after a logout); name, source,
-// pacing, evasion level are untouched. `cookiesText` is the Netscape cookies.txt
-// body. Returns true on success.
-export async function replaceSession(id, cookiesText) {
+// Rotate an identity's credential (PUT /v1/identities/{id}/session). Replaces ONLY
+// the encrypted session blob; name, source, pacing, evasion level are untouched.
+// `file` is a Blob/File for the `session` part — a forum cookies.txt blob or a
+// Telegram .session file (the backend validates by the identity's source kind).
+export async function replaceSession(id, file) {
   identityView.submitting = true;
   identityView.submitMsg = null;
   try {
     const fd = new FormData();
-    fd.append('session', new Blob([cookiesText], { type: 'text/plain' }), 'cookies.txt');
+    fd.append('session', file, file.name ?? 'session');
     await apiPutForm(`/v1/identities/${id}/session`, fd, { auth: true });
-    identityView.submitMsg = 'Cookies replaced.';
+    identityView.submitMsg = 'Credential replaced.';
     await loadIdentityDetail(id);
     return true;
   } catch (e) {
@@ -222,6 +222,27 @@ export async function startQrLogin(payload) {
   qrCtx.detail = null;
   try {
     const r = await apiPost('/v1/identities/qr-login', payload, { auth: true });
+    qrCtx.loginId = r.login_id;
+    qrCtx.qrUrl = r.qr_url;
+    qrCtx.status = r.status;
+    return r.login_id;
+  } catch (e) {
+    qrCtx.error = e.message ?? String(e);
+    return null;
+  } finally {
+    qrCtx.busy = false;
+  }
+}
+
+// QR RE-LOGIN of an existing Telegram identity (POST /v1/identities/{id}/qr-login).
+// Reuses the identity's own api creds server-side; same polling as startQrLogin.
+export async function startQrRelogin(identityId) {
+  qrCtx.busy = true;
+  qrCtx.error = null;
+  qrCtx.identityId = null;
+  qrCtx.detail = null;
+  try {
+    const r = await apiPost(`/v1/identities/${identityId}/qr-login`, {}, { auth: true });
     qrCtx.loginId = r.login_id;
     qrCtx.qrUrl = r.qr_url;
     qrCtx.status = r.status;

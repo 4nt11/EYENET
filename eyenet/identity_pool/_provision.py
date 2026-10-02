@@ -233,24 +233,17 @@ async def _persist_identity(
     )
 
 
-async def replace_identity_session(
+async def _replace_session_tail(
     *,
     storage: BaseRepository,
     session_key: Fernet,
     data_dir: Path,
     identity_id: UUID,
-    source_kind: SourceKind,
-    secret_blob: bytes,
+    secret_string: str,
 ) -> IdentityRow:
-    """Rotate an existing identity's credential IN PLACE — only the session changes.
-
-    Validates + encrypts the new ``secret_blob`` (same source-dispatched validation
-    as provisioning: a forum cookies.txt must be UTF-8 and carry cookies), writes a
-    fresh 0600 blob, points the row at it, and deletes the now-orphaned old blob.
-    Name, source, pacing, evasion level, role — everything else is untouched. This
-    is the "I logged out, here are fresh cookies" path; no re-provisioning.
-    """
-    secret_string = _materialize_secret(source_kind, secret_blob)
+    """Encrypt the (already-validated) secret, write a fresh 0600 blob, repoint the
+    row, and delete the orphaned old blob. Shared tail of both replace entry points
+    (uploaded blob + QR-minted string) — mirrors ``_persist_identity``."""
     ciphertext = encrypt_session(session_key, secret_string)
     new_path = _write_encrypted_blob(data_dir, ciphertext)
     row, old_path = await storage.update_identity_session_path(
@@ -261,9 +254,57 @@ async def replace_identity_session(
     return row
 
 
+async def replace_identity_session(
+    *,
+    storage: BaseRepository,
+    session_key: Fernet,
+    data_dir: Path,
+    identity_id: UUID,
+    source_kind: SourceKind,
+    secret_blob: bytes,
+) -> IdentityRow:
+    """Rotate an existing identity's credential IN PLACE from an UPLOADED blob.
+
+    Validates + encrypts the new ``secret_blob`` (same source-dispatched validation
+    as provisioning: a forum cookies.txt must be UTF-8 and carry cookies; a Telegram
+    .session must carry an auth_key), then swaps it in. Name, source, pacing,
+    evasion level, role — everything else is untouched. The "I logged out, here are
+    fresh cookies / a fresh .session" path; no re-provisioning.
+    """
+    secret_string = _materialize_secret(source_kind, secret_blob)
+    return await _replace_session_tail(
+        storage=storage,
+        session_key=session_key,
+        data_dir=data_dir,
+        identity_id=identity_id,
+        secret_string=secret_string,
+    )
+
+
+async def replace_identity_session_from_string(
+    *,
+    storage: BaseRepository,
+    session_key: Fernet,
+    data_dir: Path,
+    identity_id: UUID,
+    session_string: str,
+) -> IdentityRow:
+    """Rotate an existing identity's credential from an already-materialized session
+    string (the QR re-login path — the StringSession is freshly minted and valid, so
+    it skips re-validation, mirroring ``provision_identity_from_session``)."""
+    return await _replace_session_tail(
+        storage=storage,
+        session_key=session_key,
+        data_dir=data_dir,
+        identity_id=identity_id,
+        secret_string=session_string,
+    )
+
+
 __all__ = [
     "SessionValidationError",
     "provision_identity",
     "provision_identity_from_session",
     "replace_identity_session",
+    "replace_identity_session_from_string",
 ]

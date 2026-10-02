@@ -1266,6 +1266,28 @@ paths:
         "413": { description: Session file exceeds the size limit. }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/identities/{identity_id}/qr-login:
+    post:
+      tags: [identities]
+      operationId: identities_qr_relogin
+      summary: >-
+        Re-login an existing Telegram identity via QR (write:identity, admin-only).
+        Mints a session live and swaps it onto the identity, reusing its own
+        api_id/api_hash and config. Poll qr-login/{login_id}; 2FA via its password
+        endpoint. The QR twin of PUT .../session.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+      responses:
+        "201":
+          description: QR challenge; render qr_url and poll for completion.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrLoginChallenge' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/identities/{identity_id}/claim:
     post:
       tags: [identities]
