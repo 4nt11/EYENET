@@ -285,8 +285,30 @@ class MyBBForumCollector(CollectorSkeleton):
         await self._bind_collector_row_source(collector, self._source_uuid)
         # Populate /monitored-groups with the board's categories so the operator
         # can pick which to monitor. Read-only page fetch, nothing joined.
-        if await self._check_session():
-            await self.scan_visible_groups(source_id=self._source_uuid)
+        #
+        # Discovery is BEST-EFFORT: it must NEVER crash the collector. A failure
+        # here used to propagate out of on_subscribe and kill the process, so the
+        # supervisor respawned it in a tight loop (the 7-restart "COOLING" state) —
+        # which, for a rate-limited board, also hammered it toward a ban. The core
+        # job (crawling monitored categories in tick()) does not need discovery to
+        # have succeeded. Catch the transient vectors — a 429 (RateLimited), a DB
+        # lock from a sibling collector's bulk ingest (OperationalError), a Tor/
+        # network hiccup (httpx) — log the cause, and start anyway. The index-first
+        # scan persists the top-level categories before any 429 trips, so
+        # /monitored-groups stays populated; a later (re)subscribe re-attempts the
+        # full scan behind the cooldown gate.
+        try:
+            if await self._check_session():
+                await self.scan_visible_groups(source_id=self._source_uuid)
+        except (RateLimited, OperationalError, httpx.HTTPError) as exc:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.discovery_failed_at_startup",
+                message=(
+                    f"{self._identity_name}: startup discovery failed "
+                    f"({type(exc).__name__}: {exc}) — collector starting anyway"
+                ),
+            )
 
     async def stop(self) -> None:
         if self._owns_client and self._client is not None:
