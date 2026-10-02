@@ -169,7 +169,21 @@
           </div>
         {/if}
       {:else}
-        <p class="note">{#if !tokenCtx.loaded}Loading…{:else if tokenCtx.error}Could not load tokens: {tokenCtx.error}{:else}No personal access tokens yet. Mint one for a scraper or CI consumer.{/if}</p>
+        <div class="empty">
+          {#if !tokenCtx.loaded}
+            <p class="empty-main">Loading…</p>
+          {:else if tokenCtx.error}
+            <p class="empty-main err">Could not load tokens</p>
+            <p class="empty-sub">{tokenCtx.error}</p>
+          {:else}
+            <svg class="empty-ico" width="26" height="26" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="7.5" cy="15.5" r="4.5" /><path d="m21 2-9.6 9.6" /><path d="m15.5 7.5 3 3L22 7l-3-3" />
+            </svg>
+            <p class="empty-main">No personal access tokens yet</p>
+            <p class="empty-sub">Mint one for a scraper or CI consumer — e.g. a <code>read:metrics</code> token for Prometheus.</p>
+          {/if}
+        </div>
       {/if}
     </Panel>
 
@@ -225,4 +239,11 @@
   .err { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red-text); }
 
   .note { margin: 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); line-height: var(--lh-normal); max-width: 80ch; }
+
+  .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 36px 16px; text-align: center; }
+  .empty-ico { color: var(--text-faint); opacity: 0.7; margin-bottom: 2px; }
+  .empty-main { margin: 0; font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-secondary); }
+  .empty-main.err { color: var(--red-text); }
+  .empty-sub { margin: 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); max-width: 52ch; line-height: var(--lh-normal); }
+  .empty-sub code { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; }
 </style>
