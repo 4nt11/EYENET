@@ -72,6 +72,48 @@ def _collector(tmp_path: Path, depth: int) -> MyBBForumCollector:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_scan_persists_index_before_descending(tmp_path: Path) -> None:
+    # The fix: scan_visible_groups must persist the index's top-level categories
+    # BEFORE it fetches any subforum page — so top-level visibility appears after
+    # the single index request, not after the whole (slow, paced) depth-N walk.
+    from datetime import UTC, datetime
+
+    coll = _collector(tmp_path, depth=1)
+    events: list[tuple[str, str]] = []
+
+    orig_get = coll._get
+
+    async def rec_get(url: str, **kw: object) -> httpx.Response:
+        events.append(("GET", url))
+        return await orig_get(url, **kw)  # type: ignore[arg-type]
+
+    coll._get = rec_get  # type: ignore[method-assign]
+    storage = coll._storage
+    orig_ensure = storage.ensure_candidate
+
+    async def rec_ensure(**kw: object) -> object:
+        events.append(("PERSIST", str(kw["platform_groupid"])))
+        return await orig_ensure(**kw)  # type: ignore[arg-type]
+
+    storage.ensure_candidate = rec_ensure  # type: ignore[method-assign]
+
+    sid = await storage.upsert_source(
+        kind=SourceKind.FORUM, display_name="df", created_at=datetime.now(tz=UTC)
+    )
+    n = await coll.scan_visible_groups(source_id=sid)
+
+    assert n == 3  # Databases, Stealer-Logs (roots) + Databases-Removed-Content (depth 1)
+    assert events[0] == ("GET", "/")  # the single index request comes first
+    # Both top-level roots are persisted before the FIRST subforum-page fetch.
+    first_subforum_get = next(i for i, e in enumerate(events) if e[0] == "GET" and e[1] != "/")
+    roots = {("PERSIST", "Forum-Databases"), ("PERSIST", "Forum-Stealer-Logs")}
+    root_persists = [i for i, e in enumerate(events) if e in roots]
+    assert len(root_persists) == 2
+    assert all(p < first_subforum_get for p in root_persists), events
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_depth_2_surfaces_full_tree(tmp_path: Path) -> None:
     groups = await _collector(tmp_path, depth=2).enumerate_visible_groups()
     slugs = {g.platform_groupid for g in groups}

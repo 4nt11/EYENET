@@ -62,6 +62,8 @@ from eyenet.telemetry.logging import get_logger
 from eyenet.telemetry.propagation import current_traceparent
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from cryptography.fernet import Fernet
 
     from eyenet.identity_pool.loader import IdentityFileEntry
@@ -361,36 +363,47 @@ class MyBBForumCollector(CollectorSkeleton):
         self._note_rate_limit(resp)
         return resp
 
-    async def enumerate_visible_groups(self) -> list[VisibleGroup]:
-        """The board's forums (GroupKind.FORUM_CATEGORY), index + subforum tree.
+    @staticmethod
+    def _visible_group(slug: str) -> VisibleGroup:
+        return VisibleGroup(
+            platform_groupid=slug,
+            kind=GroupKind.FORUM_CATEGORY,
+            title=slug.replace("Forum-", "").replace("-", " "),
+            is_member=True,
+        )
 
-        Read-only. Lists the index's top-level forums, then descends into each
-        forum's child SUBFORUMS up to ``forum_discovery_depth`` levels, surfacing
-        every one (e.g. "Databases Removed Content") as its own monitorable unit.
-        DISCOVERY only: monitoring any of them is a purely internal membership the
-        operator opens by hand; nothing here performs a forum-side join, and the
-        crawl loop stays flat + fail-closed regardless of what is discovered.
+    async def _iter_visible_groups(self) -> AsyncIterator[VisibleGroup]:
+        """Stream the board's forums (GroupKind.FORUM_CATEGORY), INDEX FIRST.
+
+        The index is a SINGLE request that already lists every top-level category,
+        so we yield all of those up front — before descending for subforums — and
+        the caller (:meth:`scan_visible_groups`) persists each as it is yielded.
+        That is the whole point: top-level visibility appears after one request,
+        not after the entire depth-N walk completes. Then we descend into each
+        forum's child SUBFORUMS up to ``forum_discovery_depth`` levels, streaming
+        each as found. Every fetch goes through ``_get`` so the walk is paced by
+        the identity's evasion preset (and the 429 gate). DISCOVERY only: nothing
+        here joins anything; the crawl loop stays flat + fail-closed.
         """
         index = await self._get("/")
-        out: list[VisibleGroup] = []
         seen: set[str] = set()
-        # BFS over the forum tree: (slug, depth). Roots are the index's forums.
-        frontier: list[tuple[str, int]] = [
-            (_last_segment(url), 0) for url in parse_forum_links(index.text)
-        ]
+        frontier: list[tuple[str, int]] = []
+        # Top-level categories from the single index request — yield them ALL now.
+        for url in parse_forum_links(index.text):
+            slug = _last_segment(url)
+            if slug not in seen:
+                seen.add(slug)
+                yield self._visible_group(slug)
+                frontier.append((slug, 0))
+        await self.syslog(
+            level=SystemLogLevel.NOTICE,
+            event="forum.discovery_index_listed",
+            message=f"{self._identity_name}: index listed {len(frontier)} top-level categories",
+        )
+        # Descend for subforums (paced), streaming each as found. A cycle guard
+        # (seen) stops a subforum that links back up from looping.
         while frontier:
             slug, depth = frontier.pop(0)
-            if slug in seen:
-                continue  # cycle guard: a subforum linking back up never loops
-            seen.add(slug)
-            out.append(
-                VisibleGroup(
-                    platform_groupid=slug,
-                    kind=GroupKind.FORUM_CATEGORY,
-                    title=slug.replace("Forum-", "").replace("-", " "),
-                    is_member=True,
-                )
-            )
             if depth >= self._discovery_depth:
                 continue
             try:
@@ -404,11 +417,76 @@ class MyBBForumCollector(CollectorSkeleton):
                     message=f"{self._identity_name}: {slug} subforum scan failed ({exc!r})",
                 )
                 continue
+            new = 0
             for child_url in parse_subforum_links(page.text):
                 child = _last_segment(child_url)
                 if child not in seen:
+                    seen.add(child)
+                    yield self._visible_group(child)
                     frontier.append((child, depth + 1))
-        return out
+                    new += 1
+            if new:
+                _log.info(
+                    "forum.discovery_subforum_listed",
+                    identity=self._identity_name,
+                    instance_id=self._instance_id,
+                    parent=slug,
+                    new_subforums=new,
+                    depth=depth + 1,
+                )
+
+    async def enumerate_visible_groups(self) -> list[VisibleGroup]:
+        """Full list of visible categories (collects the incremental stream).
+
+        Kept for callers that want the whole set at once; live discovery uses
+        :meth:`scan_visible_groups`, which persists each category as it streams.
+        """
+        return [g async for g in self._iter_visible_groups()]
+
+    async def scan_visible_groups(self, *, source_id: UUID) -> int:
+        """Incremental discovery: persist each category the MOMENT it is discovered.
+
+        Overrides the generic (collect-then-persist) scan so the index's top-level
+        categories land in the candidate set after the single index request, not
+        after the whole depth-N walk — which over Tor at a slow evasion preset can
+        be the better part of an hour. Emits NOTICE events so the walk is traceable
+        in the system log.
+        """
+        await self.syslog(
+            level=SystemLogLevel.NOTICE,
+            event="forum.discovery_started",
+            message=f"{self._identity_name}: discovery (depth={self._discovery_depth})",
+        )
+        n = 0
+        async for g in self._iter_visible_groups():
+            await self._storage.ensure_candidate(
+                source_id=source_id,
+                platform_groupid=g.platform_groupid,
+                seen_at=datetime.now(tz=UTC),
+                kind=g.kind,
+                title=g.title,
+                member_dialog=g.is_member,
+            )
+            n += 1
+            if n % 25 == 0:
+                _log.info(
+                    "forum.discovery_progress",
+                    identity=self._identity_name,
+                    instance_id=self._instance_id,
+                    persisted=n,
+                )
+        await self.syslog(
+            level=SystemLogLevel.NOTICE,
+            event="forum.discovery_complete",
+            message=f"{self._identity_name}: {n} categories persisted",
+        )
+        _log.info(
+            "collector.visible_groups_scanned",
+            identity=self._identity_name,
+            instance_id=self._instance_id,
+            count=n,
+        )
+        return n
 
     async def _check_session(self) -> bool:
         """Boot canary: is the imported cookie jar still logged in?"""
