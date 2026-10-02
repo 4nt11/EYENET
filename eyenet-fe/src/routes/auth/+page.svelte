@@ -218,7 +218,7 @@
   .secret-row { display: flex; align-items: center; gap: 10px; }
   .secret { flex: 1; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 8px 10px; overflow-x: auto; white-space: nowrap; }
 
-  .mint { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 14px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+  .mint { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
   .fld { display: flex; flex-direction: column; gap: 6px; }
   .flabel { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; max-width: 420px; }
@@ -228,7 +228,7 @@
   .scard:has(.verbchip.on) { border-color: var(--accent); }
   .scard-res { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .verbs { display: flex; flex-wrap: wrap; gap: 5px; }
-  .verbchip { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-secondary); background: var(--black); border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 11px; cursor: pointer; transition: all 0.12s; }
+  .verbchip { font-family: var(--font-mono); font-size: var(--fs-11); text-transform: capitalize; color: var(--text-secondary); background: var(--black); border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 11px; cursor: pointer; transition: all 0.12s; }
   .verbchip:hover { border-color: var(--accent); color: var(--text-body); }
   .verbchip.on { color: #fff; background: var(--accent); border-color: var(--accent); }
   .picked { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); word-break: break-word; }
