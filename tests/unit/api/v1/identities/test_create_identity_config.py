@@ -4,11 +4,39 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.exceptions import RequestValidationError
 
 from eyenet.api.v1.identities.api_create_identity import _build_source_config
 from eyenet.contracts.enums import SourceKind
 
 pytestmark = pytest.mark.unit
+
+
+def test_forum_config_accepts_valid_tls_impersonate() -> None:
+    cfg = _build_source_config(
+        SourceKind.FORUM,
+        telegram_api_id=None,
+        telegram_api_hash=None,
+        monitor_groups=None,
+        forum_base_url="https://raidforums.im/",
+        forum_thread_urls=None,
+        forum_tls_impersonate="firefox147",
+    )
+    assert cfg["forum_tls_impersonate"] == "firefox147"
+
+
+def test_forum_config_rejects_unknown_tls_impersonate() -> None:
+    # A typo'd target must 422 — never silently ship an OpenSSL/bot fingerprint.
+    with pytest.raises(RequestValidationError):
+        _build_source_config(
+            SourceKind.FORUM,
+            telegram_api_id=None,
+            telegram_api_hash=None,
+            monitor_groups=None,
+            forum_base_url="https://raidforums.im/",
+            forum_thread_urls=None,
+            forum_tls_impersonate="chrome999",
+        )
 
 
 def test_forum_config_includes_user_agent_when_set() -> None:

@@ -94,6 +94,12 @@ class IdentityFileEntry(BaseModel):
     # E0..E4). Expanded to forum_delay_min/max at provision time; kept here for the
     # record/display. None → whatever the delay knobs say. See the forum collector.
     forum_evasion_level: str | None = None
+    # curl-cffi Firefox TLS-impersonation target for a CLEARNET https board behind a
+    # JA3/JA4-fingerprinting WAF (DDoS-Guard/Cloudflare). e.g. "firefox147". None →
+    # plain httpx (the default; correct for onion/Tor boards). The target MUST track
+    # the cookie-mint browser — see CLAUDE.md "load-bearing TLS/evasion defaults" and
+    # _TLS_IMPERSONATE_TARGETS in the forum collector.
+    forum_tls_impersonate: str | None = None
 
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
@@ -212,6 +218,8 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
             out.append(f"forum_user_agent = {_q(entry.forum_user_agent)}")
         if entry.forum_evasion_level is not None:
             out.append(f"forum_evasion_level = {_q(entry.forum_evasion_level)}")
+        if entry.forum_tls_impersonate is not None:
+            out.append(f"forum_tls_impersonate = {_q(entry.forum_tls_impersonate)}")
     return out
 
 

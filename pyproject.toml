@@ -60,6 +60,7 @@ dependencies = [
   "httpx[socks]>=0.27",     # used by fastapi TestClient and any outbound http; [socks] (socksio) routes forum collectors over Tor to .onion mirrors (Cloudflare bypass)
   "brotli>=1.1",            # lets httpx DECODE br responses -> the Tor-Browser Accept-Encoding (gzip,deflate,br,zstd) is honest, not advertising a codec we can't inflate
   "zstandard>=0.22",        # ditto for zstd (Tor Browser advertises it); httpx auto-uses it when present
+  "curl-cffi>=0.16,<0.17",  # forum collector TLS impersonation on CLEARNET WAF boards (DDoS-Guard/Cloudflare): speaks a real Firefox JA3/JA4 instead of httpx's OpenSSL tell. Lazy-imported, only the forum_tls_impersonate path uses it. Target set + FF-version coupling: eyenet/collectors/forum/_timing_presets.py + CLAUDE.md
   "python-multipart>=0.0.9",  # fastapi multipart/form-data (identity session upload)
   # telemetry
   "opentelemetry-api>=1.27",

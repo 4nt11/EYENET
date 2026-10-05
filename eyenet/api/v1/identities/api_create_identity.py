@@ -34,7 +34,10 @@ from eyenet.api.deps import (
     get_storage,
 )
 from eyenet.api.v1.schemas.identities import IdentityDetail
-from eyenet.collectors.forum._timing_presets import resolve_evasion_profile
+from eyenet.collectors.forum._timing_presets import (
+    FORUM_TLS_IMPERSONATE_TARGETS,
+    resolve_evasion_profile,
+)
 from eyenet.contracts.enums import IdentityRole, SourceKind, SystemUserRole
 from eyenet.contracts.source import SourceRow
 from eyenet.identity_pool._provision import SessionValidationError, provision_identity
@@ -80,6 +83,13 @@ async def identities_create(
         str | None,
         Form(max_length=16, description="ghost|lurker|regular|brisk|smash (E0..E4); sets pacing"),
     ] = None,
+    forum_tls_impersonate: Annotated[
+        str | None,
+        Form(
+            max_length=64,
+            description="curl-cffi Firefox target for a clearnet WAF board (e.g. firefox147)",
+        ),
+    ] = None,
     cooldown_seconds: Annotated[int, Form(ge=0)] = 21_600,
     proxy_uri: Annotated[str | None, Form(max_length=1024)] = None,
     role: Annotated[IdentityRole, Form()] = IdentityRole.MONITOR,
@@ -106,6 +116,7 @@ async def identities_create(
         forum_thread_urls=forum_thread_urls,
         forum_user_agent=forum_user_agent,
         forum_evasion_level=forum_evasion_level,
+        forum_tls_impersonate=forum_tls_impersonate,
     )
 
     try:
@@ -153,6 +164,7 @@ def _build_source_config(
     forum_thread_urls: str | None = None,
     forum_user_agent: str | None = None,
     forum_evasion_level: str | None = None,
+    forum_tls_impersonate: str | None = None,
 ) -> dict[str, object]:
     """Assemble the non-secret per-source config, keyed by IdentityFileEntry field
     names so the pool can splat it back into an entry. New sources add a branch."""
@@ -210,6 +222,22 @@ def _build_source_config(
             config["forum_delay_min"] = prof.delay_min
             config["forum_delay_max"] = prof.delay_max
             config["forum_discovery_depth"] = prof.discovery_depth
+        # curl-cffi TLS-impersonation target for a clearnet WAF board. Validate
+        # against the allow-set (a typo must not silently ship an OpenSSL/bot
+        # fingerprint) and keep the value in source_config for the collector.
+        if forum_tls_impersonate:
+            if forum_tls_impersonate not in FORUM_TLS_IMPERSONATE_TARGETS:
+                raise RequestValidationError(
+                    [
+                        {
+                            "loc": ("body", "forum_tls_impersonate"),
+                            "msg": f"unknown impersonation target; allowed: "
+                            f"{sorted(FORUM_TLS_IMPERSONATE_TARGETS)}",
+                            "type": "value_error",
+                        }
+                    ]
+                )
+            config["forum_tls_impersonate"] = forum_tls_impersonate
         return config
     raise RequestValidationError(
         [

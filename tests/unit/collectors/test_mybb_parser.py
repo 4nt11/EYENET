@@ -17,6 +17,7 @@ from eyenet.collectors.forum import (
     parse_thread_links,
     thread_page_count,
 )
+from eyenet.collectors.forum._mybb import _parse_date
 
 pytestmark = pytest.mark.unit
 
@@ -65,6 +66,20 @@ def test_board_local_date_is_day_first(posts: list) -> None:
     assert posts[0].posted_at == datetime(2026, 2, 1, 9, 30)  # noqa: DTZ001
     assert posts[1].posted_at == datetime(2026, 2, 2, 23, 45)  # noqa: DTZ001
     assert posts[0].posted_raw == "01-02-26, 09:30 AM"
+
+
+def test_parse_date_absolute_and_relative() -> None:
+    # raidforums renders fresh posts as relative dates; a REAL parsed value keeps
+    # the collector's recency guard quiet. Fixed clock so the assertions are stable.
+    ref = datetime(2026, 10, 5, 15, 0)  # noqa: DTZ001 - naive board-local, matches _DATE_FMT
+    assert _parse_date("16-07-26, 08:00 PM") == datetime(2026, 7, 16, 20, 0)  # noqa: DTZ001
+    assert _parse_date("Today, 03:20 PM", now=ref) == datetime(2026, 10, 5, 15, 20)  # noqa: DTZ001
+    assert _parse_date("Yesterday, 11:30 AM", now=ref) == datetime(2026, 10, 4, 11, 30)  # noqa: DTZ001
+    assert _parse_date("1 hour ago", now=ref) == datetime(2026, 10, 5, 14, 0)  # noqa: DTZ001
+    assert _parse_date("17 minutes ago", now=ref) == datetime(2026, 10, 5, 14, 43)  # noqa: DTZ001
+    assert _parse_date("an hour ago", now=ref) == datetime(2026, 10, 5, 14, 0)  # noqa: DTZ001
+    assert _parse_date("3 days ago", now=ref) == datetime(2026, 10, 2, 15, 0)  # noqa: DTZ001
+    assert _parse_date("just now", now=ref) is None  # unhandled -> recency-unreliable, by design
 
 
 def test_edited_flag(posts: list) -> None:
@@ -213,12 +228,12 @@ def test_unparseable_date_yields_none_not_crash() -> None:
     html = (
         '<div class="post classic" id="post_9">'
         '<div class="post_user-profile"><a href="User-x">x</a></div>'
-        '<span class="post_date">Today, 10:56 PM</span>'
+        '<span class="post_date">whenever o_O</span>'  # neither absolute nor a known relative form
         '<div class="post_body">hi</div></div>'
     )
     (post,) = parse_thread(html)
     assert post.posted_at is None
-    assert post.posted_raw == "Today, 10:56 PM"
+    assert post.posted_raw == "whenever o_O"
 
 
 def _cf_encode(email: str, key: int = 0x2B) -> str:

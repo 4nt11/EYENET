@@ -35,6 +35,20 @@ RETRY_AFTER_PAD = (30.0, 120.0)
 # subforums (one request PER forum, which is what makes discovery expensive).
 DEFAULT_DISCOVERY_DEPTH = 2
 
+# -- TLS impersonation targets (clearnet WAF boards) --------------------------
+# LOAD-BEARING DEFAULT — see CLAUDE.md "Forum collector — load-bearing TLS/evasion
+# defaults". curl-cffi Firefox targets accepted for `forum_tls_impersonate`. On a
+# clearnet https board behind a JA3/JA4-fingerprinting WAF (DDoS-Guard/Cloudflare)
+# the collector speaks TLS as one of these real Firefoxes instead of OpenSSL/httpx.
+# The chosen target MUST track the browser that MINTS the cookie jars: our jars are
+# Firefox 152; firefox147 is the closest curl-cffi target (extension list identical,
+# cipher+sigalg drift only — fine for volumetric DDoS-Guard, NOT an exact JA4 match
+# for a strict Cloudflare wall; use curl-cffi extra_fp for that). Validated against
+# this set at BOTH the create-identity API and collector boot so a typo fails loud
+# rather than silently shipping a bot fingerprint. Re-run
+# development/poc-browser/capture_ja3.py before changing it.
+FORUM_TLS_IMPERSONATE_TARGETS = frozenset({"firefox133", "firefox135", "firefox144", "firefox147"})
+
 # -- evasion templates (nmap -T analog) ---------------------------------------
 # Operator picks a level per identity; expanded to concrete knobs (forum_delay_
 # min/max + forum_discovery_depth) at provision time. E1 "lurker" is validated

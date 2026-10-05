@@ -38,6 +38,28 @@ def test_round_trip(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_forum_tls_impersonate_round_trips(tmp_path: Path) -> None:
+    # The per-identity curl-cffi target must survive a TOML dump/load so the live
+    # collector reads back exactly what the operator set (see CLAUDE.md §4a).
+    cfg = IdentityFile(
+        identities=[
+            IdentityFileEntry(
+                name="rf",
+                source="forum",  # type: ignore[arg-type]
+                forum_base_url="https://raidforums.im/",
+                forum_evasion_level="smash",
+                forum_tls_impersonate="firefox147",
+            )
+        ]
+    )
+    cfg_path = tmp_path / "identities.toml"
+    dump(cfg, cfg_path)
+    back = load(cfg_path).identities[0]
+    assert back.forum_tls_impersonate == "firefox147"
+    assert back.forum_evasion_level == "smash"
+
+
+@pytest.mark.unit
 def test_missing_session_file_refused(tmp_path: Path) -> None:
     cfg = IdentityFile(
         identities=[

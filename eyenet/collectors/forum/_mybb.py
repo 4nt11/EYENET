@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
@@ -41,10 +41,25 @@ _HIDE_GATE = re.compile(r"reply to (?:this )?thread to view", re.IGNORECASE)
 # unauthenticated/guest collector we get the board default; the true UTC offset
 # is a per-source calibration knob, not a parser concern. We parse to a NAIVE
 # datetime and let the collector attach the source tz.
-# ponytail: absolute-date format only. MyBB also emits relative dates
-# ("Today, 10:56 PM" / "2 hours ago") under some settings; parse_date returns
-# None + the raw string for those. Add a relative-date branch when a save shows one.
+# MyBB also emits RELATIVE dates ("Today, 10:56 PM" / "Yesterday, ..." / "2 hours
+# ago") under some settings — raidforums does for fresh posts. _parse_date handles
+# these too; a real parsed value means the collector's date-fallback-to-now() ERROR
+# guard (recency is load-bearing) does NOT fire on the newest, highest-value posts.
 _DATE_FMT = "%d-%m-%y, %I:%M %p"
+_TIME_FMT = "%I:%M %p"  # the time tail shared by "Today,"/"Yesterday," forms
+_REL_UNITS = {
+    "second": 1,
+    "sec": 1,
+    "minute": 60,
+    "min": 60,
+    "hour": 3600,
+    "day": 86400,
+    "week": 604800,
+}
+# "3 hours ago" / "1 minute ago" / "a day ago" / "an hour ago"
+_REL_RE = re.compile(
+    r"^(?:(?P<n>\d+)|an?)\s+(?P<unit>second|sec|minute|min|hour|day|week)s?\s+ago$", re.I
+)
 
 
 def _cf_decode(hexs: str) -> str:
@@ -86,11 +101,35 @@ def _username_slug(href: str) -> str:
     return tail.split("User-", 1)[-1] if "User-" in tail else tail
 
 
-def _parse_date(raw: str) -> datetime | None:
+def _parse_date(raw: str, *, now: datetime | None = None) -> datetime | None:
+    """Parse a MyBB post timestamp to a NAIVE board-local datetime, or None.
+
+    Absolute (`_DATE_FMT`) first, then the relative renderings ("Today, HH:MM AM/PM",
+    "Yesterday, ...", "N minutes/hours/days ago", "an hour ago"). A relative parse
+    yields a REAL timestamp (not a now()-substitution), so the collector's recency
+    guard stays quiet. `now` is injectable for tests; defaults to the board-local
+    naive clock to match `_DATE_FMT`.
+    """
+    raw = raw.strip()
     try:
         return datetime.strptime(raw, _DATE_FMT)  # noqa: DTZ007 - board-local naive, see module note
     except ValueError:
-        return None
+        pass
+    ref = now or datetime.now()  # noqa: DTZ005 - board-local naive, matches _DATE_FMT
+    low = raw.lower()
+    for word, days_back in (("today", 0), ("yesterday", 1)):
+        if low.startswith(word):
+            try:
+                t = datetime.strptime(raw[len(word) :].lstrip(" ,"), _TIME_FMT)  # noqa: DTZ007
+            except ValueError:
+                return None
+            d = (ref - timedelta(days=days_back)).date()
+            return datetime(d.year, d.month, d.day, t.hour, t.minute)  # noqa: DTZ001 - naive
+    m = _REL_RE.match(low)
+    if m:
+        n = int(m.group("n")) if m.group("n") else 1
+        return ref - timedelta(seconds=n * _REL_UNITS[m.group("unit")])
+    return None
 
 
 def _direct_text(node: Tag) -> str:

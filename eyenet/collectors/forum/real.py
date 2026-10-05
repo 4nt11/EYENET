@@ -48,6 +48,7 @@ from eyenet.collectors.forum._timing_presets import (
     DEFAULT_DELAY_MIN,
     DEFAULT_DISCOVERY_DEPTH,
     DEFAULT_RETRY_AFTER,
+    FORUM_TLS_IMPERSONATE_TARGETS,
     RETRY_AFTER_PAD,
 )
 from eyenet.contracts._base import TraceContext
@@ -112,8 +113,23 @@ _BASE_HEADERS: dict[str, str] = {
     # Accept-Encoding is deliberately NOT set: httpx advertises exactly the
     # codecs it can decode (gzip, deflate, br, zstd — with the brotli + zstandard
     # extras in pyproject), which matches Tor Browser. Advertising a codec we
-    # can't inflate would hand us undecodable bodies.
+    # can't inflate would hand us undecodable bodies. curl-cffi (the impersonation
+    # path) sets its own Accept-Encoding too, so leaving it unset is correct for
+    # BOTH clients — do not add it here.
 }
+
+
+def _validate_impersonate(target: str) -> None:
+    """Fail closed on an unknown impersonation target (never fall back to httpx's
+    OpenSSL fingerprint — that would defeat the whole point and get us banned). The
+    allowed set + the FF-version coupling live in _timing_presets +
+    FORUM_TLS_IMPERSONATE_TARGETS; see CLAUDE.md 'load-bearing TLS/evasion defaults'."""
+    if target not in FORUM_TLS_IMPERSONATE_TARGETS:
+        raise RuntimeError(
+            f"forum_tls_impersonate={target!r} is not an allowed Firefox target "
+            f"{sorted(FORUM_TLS_IMPERSONATE_TARGETS)}; it must track the cookie-mint browser "
+            "(see CLAUDE.md 'load-bearing TLS/evasion defaults')"
+        )
 
 
 class RateLimited(Exception):  # noqa: N818 - a control signal, not an error condition
@@ -205,7 +221,10 @@ class MyBBForumCollector(CollectorSkeleton):
         # plaintext cookies.txt (file pool). An injected client is for tests
         # (httpx.MockTransport) and bypasses cookie materialization.
         self._session_key = session_key
-        self._client = http_client
+        # Any, not httpx.AsyncClient: on the clearnet-WAF path this holds a
+        # curl-cffi AsyncSession instead (duck-compatible: .get/.post ->
+        # .status_code/.headers/.text). Tests still inject an httpx client.
+        self._client: Any = http_client
         self._owns_client = http_client is None
         self._source_uuid: UUID | None = None
         self._collector_id: UUID | None = None
@@ -253,24 +272,7 @@ class MyBBForumCollector(CollectorSkeleton):
         )
 
         if self._client is None:
-            cookies = materialize_forum_session(entry, self._session_key)
-            # proxy_uri routes this board's fetches through a proxy when the
-            # identity carries one — `socks5h://tor:9050` for .onion mirrors, so
-            # the whole crawl (incl. DNS/.onion resolution, hence socks5*h*) goes
-            # via Tor and sidesteps the Cloudflare JS-challenge wall that blocks
-            # the clearnet host. None = direct, unchanged behaviour. Needs the
-            # httpx[socks] extra (socksio), declared in pyproject.
-            proxy = getattr(entry, "proxy_uri", None) or None
-            # Tor Browser header profile (see _BASE_HEADERS); UA per-identity.
-            user_agent = getattr(entry, "forum_user_agent", None) or _DEFAULT_USER_AGENT
-            self._client = httpx.AsyncClient(
-                base_url=entry.forum_base_url or "",
-                cookies=cookies,
-                headers={**_BASE_HEADERS, "User-Agent": user_agent},
-                timeout=30.0,
-                follow_redirects=True,
-                proxy=proxy,
-            )
+            self._client = await self._build_forum_client(entry)
 
         # Our own collector row: the operator's monitored-category memberships are
         # keyed to it (list_active_memberships). Without it the monitor set stays
@@ -353,9 +355,52 @@ class MyBBForumCollector(CollectorSkeleton):
                 ),
             )
 
+    async def _build_forum_client(self, entry: IdentityFileEntry) -> Any:
+        """Per-identity HTTP client. curl-cffi (real-Firefox TLS via
+        ``forum_tls_impersonate``) for a CLEARNET https board behind a JA3/JA4 WAF;
+        httpx for the onion/Tor + default path (``proxy_uri`` = socks5h://tor:9050
+        routes the crawl via Tor, which wraps the TLS so impersonation is moot).
+        See CLAUDE.md "4a. load-bearing TLS/evasion defaults"."""
+        cookies = materialize_forum_session(entry, self._session_key)
+        proxy = getattr(entry, "proxy_uri", None) or None
+        user_agent = getattr(entry, "forum_user_agent", None) or _DEFAULT_USER_AGENT
+        headers = {**_BASE_HEADERS, "User-Agent": user_agent}
+        impersonate = getattr(entry, "forum_tls_impersonate", None)
+        base_url = entry.forum_base_url or ""
+        if impersonate and proxy:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.tls_impersonate_ignored_on_proxy",
+                message=f"{self._identity_name}: forum_tls_impersonate={impersonate} "
+                "ignored - Tor/proxy path uses httpx",
+            )
+        if impersonate and not proxy and base_url.startswith("https"):
+            _validate_impersonate(impersonate)
+            # lazy import: only the clearnet-WAF path needs curl-cffi
+            from curl_cffi.requests import AsyncSession  # noqa: PLC0415
+
+            return AsyncSession(
+                base_url=base_url,
+                cookies={c.name: c.value for c in cookies.jar if c.value is not None},
+                headers=headers,
+                impersonate=impersonate,
+                timeout=30.0,
+                allow_redirects=True,
+            )
+        return httpx.AsyncClient(
+            base_url=base_url,
+            cookies=cookies,
+            headers=headers,
+            timeout=30.0,
+            follow_redirects=True,
+            proxy=proxy,
+        )
+
     async def stop(self) -> None:
         if self._owns_client and self._client is not None:
-            await self._client.aclose()
+            # httpx uses aclose(); curl-cffi's AsyncSession uses close(). Both async.
+            closer = getattr(self._client, "aclose", None) or self._client.close
+            await closer()
         await super().stop()
 
     def _abs(self, path: str) -> str:
@@ -400,7 +445,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._cooldown_until = time.monotonic() + base + pad
         raise RateLimited(f"429 -> silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})")
 
-    async def _get(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
+    # -> Any: the response is an httpx.Response OR a curl-cffi Response (impersonation
+    # path); both expose .status_code/.headers/.text, which is all callers touch.
+    async def _get(self, url: str, *, referer: str | None = None, **kw: Any) -> Any:
         """Every board request funnels through here: sequential + jittered delay.
 
         This is the single choke point that keeps the collector browsing-speed.
@@ -417,7 +464,9 @@ class MyBBForumCollector(CollectorSkeleton):
         self._note_rate_limit(resp)
         return resp
 
-    async def _post(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
+    async def _post(
+        self, url: str, *, referer: str | None = None, **kw: Any
+    ) -> Any:  # -> Any: see _get
         """Throttled POST — the ONLY write path, same jittered pacing as reads."""
         if self._client is None:  # pragma: no cover - guarded by callers
             raise RuntimeError("forum collector http client not initialized")

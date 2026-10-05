@@ -312,6 +312,60 @@ operator knob. See `[[feedback_matrix_collector_offline_only]]`.
 
 ---
 
+## 4a. Forum collector — load-bearing TLS/evasion defaults
+
+These are **measured, coupled constants** — not knobs to tidy. Changing one
+silently (e.g. a dependency bump, a "cleanup") desyncs the live clearnet
+collectors from the sessions they ride and gets the accounts banned. Each has a
+why; respect it or re-measure with `development/poc-browser/capture_ja3.py`.
+
+**TLS impersonation (`forum_tls_impersonate`).** On a **clearnet https** board
+behind a JA3/JA4-fingerprinting WAF (DDoS-Guard, Cloudflare), the forum collector
+speaks TLS as a real Firefox via **curl-cffi** instead of httpx (whose OpenSSL
+ClientHello is the unmistakable "Python" tell: 35 ciphers, HTTP/1.1). The onion/Tor
+path keeps httpx — Tor wraps the TLS so impersonation is moot there. The single
+construction site is `eyenet/collectors/forum/real.py` `on_subscribe` (the
+`if self._client is None:` block); curl-cffi is **lazy-imported** only on that path.
+
+- **The target MUST track the cookie-mint browser.** Our warmed jars are minted on
+  **Firefox 152**; the collector ships **`firefox147`** (curl-cffi's closest target).
+  Measured: its extension list is *identical* to real FF, only the cipher + sigalg
+  lists drift by a version — **fine for volumetric DDoS-Guard (proven live, rides
+  clean), NOT an exact JA4 match for a strict Cloudflare wall.** For Cloudflare use
+  curl-cffi `extra_fp` to force FF152's exact cipher+sigalg lists (capture them with
+  `capture_ja3.py` first). Do **not** bump the target without re-running that reflector
+  and confirming it still matches the mint. UA ↔ JA3/JA4 ↔ cookie-mint browser must
+  all be the **same** Firefox — a mismatch is more detectable than no impersonation.
+- Allowed targets + the coupling live in **one place**:
+  `FORUM_TLS_IMPERSONATE_TARGETS` in `eyenet/collectors/forum/_timing_presets.py`,
+  validated at BOTH the create-identity API and collector boot (a typo fails **loud**,
+  never a silent fall back to the OpenSSL fingerprint).
+
+**`forum_user_agent`** must equal the exact UA of the browser that exported the
+cookie jar (and be coherent with the impersonate target). A UA flip mid-session is
+itself a ban signal.
+
+**Evasion level (`forum_evasion_level`).** Measured on raidforums/DDoS-Guard:
+`smash`/T4 (0.5–1.5s) rides clean, but **sustained near-max is the untested
+account-flood risk** — DDoS-Guard is volumetric-only; the wall is the forum's own
+per-account rate logic, and it bans the *account*, not the IP. The real mitigation is
+bursty human-hours windowing (`[[project_collector_human_hours_todo]]`, not yet
+built). Do not run a board 24/7 flat-out; keep a spare warmed jar.
+
+**`_BASE_HEADERS` deliberately omits `Accept-Encoding`** — each HTTP client advertises
+only the codecs it can actually inflate (httpx: gzip/deflate/br/zstd; curl-cffi sets
+its own). Advertising one we can't decode hands us undecodable bodies. Do not add it.
+
+**Dates:** `_parse_date` (`_mybb.py`) handles relative renderings ("Today, …",
+"N hours ago") as well as absolute — because a `now()`-substituted timestamp
+manufactures false recency and the collector raises an `ERROR` on it (recency is
+load-bearing: an old leak mis-stamped "today" can start a false incident). Keep
+relative parsing; keep the ERROR guard.
+
+See `[[project_raidforums_ddosguard_clearnet]]` for the full measurements.
+
+---
+
 ## 5. Locale + language-agnostic primitives
 
 EYENET ships locale-aware primitives, not Spanish-specific ones.

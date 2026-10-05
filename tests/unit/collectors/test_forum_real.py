@@ -173,3 +173,52 @@ async def test_canary_detects_dead_session(tmp_path: Path) -> None:
         assert await alive._check_session() is True
 
     await storage.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_build_forum_client_selects_tls_impersonation(tmp_path: Path) -> None:
+    # forum_tls_impersonate on a CLEARNET https board -> curl-cffi (real-Firefox
+    # TLS); onion/Tor (proxy) -> httpx, even if impersonate is set (moot under Tor).
+    ck = tmp_path / "cookies.txt"
+    ck.write_text("raidforums.im\tFALSE\t/\tFALSE\t9999999999\tRF_sid\tabc\n", encoding="utf-8")
+    pool = _pool(tmp_path, "rf")
+    storage = get_repository(in_memory=True)
+    coll = MyBBForumCollector(
+        bus=MemoryBus(), storage=storage, pool=pool, identity_name="rf", session_key=None
+    )
+
+    clearnet = IdentityFileEntry(
+        name="rf",
+        source=SourceKind.FORUM,
+        session_path=str(ck),
+        forum_base_url="https://raidforums.im/",
+        forum_tls_impersonate="firefox147",
+    )
+    c1 = await coll._build_forum_client(clearnet)
+    assert type(c1).__name__ == "AsyncSession"  # curl-cffi, not httpx
+    await (getattr(c1, "aclose", None) or c1.close)()
+
+    onion = IdentityFileEntry(
+        name="rf",
+        source=SourceKind.FORUM,
+        session_path=str(ck),
+        forum_base_url="http://x.onion/",
+        proxy_uri="socks5h://tor:9050",
+        forum_tls_impersonate="firefox147",  # ignored on the Tor path
+    )
+    c2 = await coll._build_forum_client(onion)
+    assert isinstance(c2, httpx.AsyncClient)
+    await c2.aclose()
+
+    bad = IdentityFileEntry(
+        name="rf",
+        source=SourceKind.FORUM,
+        session_path=str(ck),
+        forum_base_url="https://raidforums.im/",
+        forum_tls_impersonate="chrome999",  # not an allowed target
+    )
+    with pytest.raises(RuntimeError, match="not an allowed Firefox target"):
+        await coll._build_forum_client(bad)
+
+    await storage.close()
