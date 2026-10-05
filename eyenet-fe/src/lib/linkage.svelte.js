@@ -45,18 +45,58 @@ function mapLinkage(l) {
   };
 }
 
-export const linkageCtx = $state({ list: [], loaded: false, error: null });
+// Default to the actionable queue (proposed) — the full unfiltered list was an
+// unusable wall. `state`/`method` are server-side filters; paging is the
+// backend's opaque cursor. include_total only on the first page so the header
+// can show the queue size.
+export const linkageCtx = $state({
+  list: [],
+  loaded: false,
+  error: null,
+  state: 'proposed',
+  method: '',
+  nextCursor: null,
+  total: null,
+  loadingMore: false
+});
+
+function linkageQuery(cursor) {
+  const p = new URLSearchParams({ limit: '50' });
+  if (linkageCtx.state) p.set('state', linkageCtx.state);
+  if (linkageCtx.method.trim()) p.set('method', linkageCtx.method.trim());
+  if (cursor) p.set('cursor', cursor);
+  else p.set('include_total', '1');
+  return p.toString();
+}
 
 export async function loadLinkages() {
+  linkageCtx.loaded = false;
   try {
-    const page = await apiGet('/v1/linkages?limit=200', { auth: true });
+    const page = await apiGet(`/v1/linkages?${linkageQuery()}`, { auth: true });
     linkageCtx.list = page.items.map(mapLinkage);
+    linkageCtx.nextCursor = page.next_cursor ?? null;
+    linkageCtx.total = page.estimated_total ?? null;
     linkageCtx.error = null;
   } catch (e) {
     linkageCtx.error = e.message ?? String(e);
     linkageCtx.list = [];
+    linkageCtx.nextCursor = null;
   } finally {
     linkageCtx.loaded = true;
+  }
+}
+
+export async function loadMoreLinkages() {
+  if (!linkageCtx.nextCursor || linkageCtx.loadingMore) return;
+  linkageCtx.loadingMore = true;
+  try {
+    const page = await apiGet(`/v1/linkages?${linkageQuery(linkageCtx.nextCursor)}`, { auth: true });
+    linkageCtx.list = [...linkageCtx.list, ...page.items.map(mapLinkage)];
+    linkageCtx.nextCursor = page.next_cursor ?? null;
+  } catch (e) {
+    linkageCtx.error = e.message ?? String(e);
+  } finally {
+    linkageCtx.loadingMore = false;
   }
 }
 

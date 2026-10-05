@@ -6,7 +6,9 @@
   import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
   import { linkageTone } from '$lib/data.js';
-  import { linkageCtx, linkageView, loadLinkages, loadLinkageDetail, decideLinkage } from '$lib/linkage.svelte.js';
+  import { linkageCtx, linkageView, loadLinkages, loadMoreLinkages, loadLinkageDetail, decideLinkage } from '$lib/linkage.svelte.js';
+
+  const STATES = ['proposed', 'suspected', 'confirmed', 'rejected', 'superseded'];
 
   // Columns are the fields /v1/linkages returns. No `tier` (severity) — the API
   // carries no such field; the pair is UUID-short (handles resolve in detail).
@@ -19,9 +21,28 @@
   ];
 
   let selectedId = $state(null);
-  let sel = $derived(linkageCtx.list.find((x) => x.id === selectedId) ?? linkageCtx.list[0] ?? null);
+  // Client-side quick-filter over the loaded page: matches linkage id, either
+  // actor UUID, or method. Handle search would need a backend join (the list
+  // carries only UUIDs) — not built yet.
+  let query = $state('');
+  let rows = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return linkageCtx.list;
+    return linkageCtx.list.filter(
+      (r) =>
+        r.id.toLowerCase().includes(q) ||
+        r.actorAId.toLowerCase().includes(q) ||
+        r.actorBId.toLowerCase().includes(q) ||
+        (r.method ?? '').toLowerCase().includes(q)
+    );
+  });
+  let sel = $derived(rows.find((x) => x.id === selectedId) ?? rows[0] ?? null);
   let open = $derived(sel && (sel.state === 'proposed' || sel.state === 'suspected'));
-  let pending = $derived(linkageCtx.list.filter((x) => x.state === 'proposed' || x.state === 'suspected').length);
+
+  function applyFilters() {
+    selectedId = null;
+    loadLinkages();
+  }
 
   let reason = $state('');
   let note = $state('');
@@ -43,17 +64,35 @@
 
 <main>
   <SectionHeader group="Investigate" slug="linkages" title="Linkages">
-    <span class="pending">{pending} awaiting decision</span>
+    <span class="pending">
+      {#if linkageCtx.total != null}{linkageCtx.total} {linkageCtx.state}{:else}{linkageCtx.list.length} loaded{/if}
+    </span>
   </SectionHeader>
 
   <div class="body">
     <div class="table-col">
-      {#if linkageCtx.list.length}
-        <DataTable rowKey="id" columns={COLUMNS} rows={linkageCtx.list}
+      <div class="controls">
+        <select class="ctl" bind:value={linkageCtx.state} onchange={applyFilters} aria-label="State filter">
+          {#each STATES as s}<option value={s}>{s}</option>{/each}
+        </select>
+        <input class="ctl" type="text" bind:value={linkageCtx.method} onchange={applyFilters}
+          placeholder="method (e.g. shared_infra)" aria-label="Method filter" />
+        <input class="ctl grow" type="search" bind:value={query}
+          placeholder="filter loaded rows: linkage id / actor UUID / method" aria-label="Quick filter" />
+      </div>
+      {#if rows.length}
+        <DataTable rowKey="id" columns={COLUMNS} {rows}
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
+        {#if linkageCtx.nextCursor && !query.trim()}
+          <div class="more">
+            <Button variant="ghost" size="sm" disabled={linkageCtx.loadingMore} onclick={loadMoreLinkages}>
+              {linkageCtx.loadingMore ? 'Loading…' : 'Load more'}
+            </Button>
+          </div>
+        {/if}
       {:else}
         <p class="pnote">
-          {#if !linkageCtx.loaded}Loading…{:else if linkageCtx.error}Could not load linkages: {linkageCtx.error}{:else}No linkages proposed yet.{/if}
+          {#if !linkageCtx.loaded}Loading…{:else if linkageCtx.error}Could not load linkages: {linkageCtx.error}{:else if query.trim()}No loaded rows match “{query.trim()}”.{:else}No {linkageCtx.state} linkages.{/if}
         </p>
       {/if}
     </div>
@@ -134,7 +173,12 @@
   .pending { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
-  .table-col { min-height: 0; overflow: auto; }
+  .table-col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ctl { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); padding: 6px 9px; }
+  .ctl:focus { outline: none; border-color: var(--accent); }
+  .ctl.grow { flex: 1; min-width: 200px; }
+  .more { display: flex; justify-content: center; padding: 6px 0 2px; }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 
