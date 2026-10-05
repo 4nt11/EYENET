@@ -1,7 +1,42 @@
 # GLOBAL_SEARCH.md — unified cross-entity search ("global query")
 
 Status: DESIGN. Phase 1 approved to start. Author target: operator-facing
-investigation UX. Supersedes the scattered per-entity search surface
+investigation UX.
+
+## As-built (Phase 1, SQLite path) — read this first
+
+What SHIPPED in the `phase1-global-search` work (deviations from the design
+below are deliberate and were decided with the operator):
+
+- **Store placement:** `search_document` lives in the **main store**, NOT a
+  separate `search.db`/schema. Only `main`/`audit` stores exist and a third
+  store is large, nonexistent plumbing; `message_fts` proves in-main FTS +
+  in-place rebuild. (So §2.4's "own search.db / schema" is NOT what shipped.)
+- **SQLite FTS:** two FTS5 externalcontent tables — `search_fts_prose`
+  (unicode61, diacritics folded) + `search_fts_handles` (trigram, substring).
+  FTS5 tokenizer is table-level, hence two tables (correcting §3's "one table,
+  two tokenizers"). Migration `0006_search_document`.
+- **API:** `GET /v1/search` with `types`/`status`/`source` + `by_type`/
+  `by_source` facets, `read:search` scope. Documented in the OpenAPI contract.
+- **FE:** global box in `TopBar` (+`/` focus) + `/search` grouped results.
+- **Population:** a read-only one-shot **backfill** (`eyenet search-backfill`)
+  covers actor/group/message/persona/case/document/artifact/crew. This is what
+  makes search return results today; re-run to refresh.
+
+**Deferred (to finish WITH the operator — need live NATS / Postgres to validate,
+or touch the hot ingest path):**
+
+- The live **`SearchIndexer` bus service** and the new **actor/group/case domain
+  events** (§2.4). Instrumenting the ~8 ingest-path `upsert_actor`/`upsert_group`
+  call sites with publishes was judged too risky to land unattended. Until it
+  lands, re-run the backfill for freshness.
+- **Postgres FTS** (`tsvector`/GIN/`pg_trgm`, §2.2): the PG backend currently
+  serves search via the generic ANSI `LIKE` fallback (the table is created by the
+  PG baseline since it is in `_MAIN_TABLES`). The FTS optimization is unwritten.
+- **Phase 1.5 query DSL** (§9) and **Phase 2** (graph pivot, create-case-from-
+  query) remain as designed below.
+
+Supersedes the scattered per-entity search surface
 (`search_actors`, `search_messages_in_category`, `/v1/graph/search`), which it
 absorbs over time rather than deleting on day one.
 
