@@ -96,6 +96,56 @@ async def test_ingests_and_publishes(tmp_path: Path) -> None:
     await storage.close()
 
 
+_AUTHORLESS_THREAD = (
+    "<html><body>"
+    "<div class='post' id='post_9001'>"
+    "<span class='post_date'>01-02-26, 09:30 AM</span>"
+    "<div class='post_body'>orphan dump, no author anchor</div>"
+    "</div></body></html>"
+)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_blank_author_post_is_refused(tmp_path: Path) -> None:
+    # A post whose author selector MISSES (no profile anchor) must NOT be ingested
+    # as a phantom "<board>|" actor — the row is refused and nothing publishes.
+    # Guards feedback_forum_theme_variants_break_selectors: a blank author is a
+    # parse failure, not valid data.
+    pool = _pool(tmp_path, "blank_forum")
+    bus = MemoryBus()
+    storage = get_repository(data_dir=tmp_path / "data")
+    captured: list[bytes] = []
+
+    async def _recorder(_s: str, payload: bytes, _h: dict[str, str]) -> None:
+        captured.append(payload)
+
+    await bus.subscribe("raw.message.>", _recorder)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/":
+            return httpx.Response(200, text=_LOGGED_IN_INDEX)
+        if "Thread-" in path:
+            return httpx.Response(200, text=_AUTHORLESS_THREAD)
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://forum.test"
+    ) as client:
+        coll = MyBBForumCollector(
+            bus=bus, storage=storage, pool=pool, identity_name="blank_forum", http_client=client
+        )
+        task = asyncio.create_task(run_service(coll, tick_interval=0.02))
+        await asyncio.sleep(0.2)
+        await coll.shutdown()
+        await task
+
+    # Blank-author row refused: nothing published, no phantom actor minted.
+    assert captured == []
+    await storage.close()
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_canary_detects_dead_session(tmp_path: Path) -> None:

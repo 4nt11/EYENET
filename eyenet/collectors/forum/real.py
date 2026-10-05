@@ -981,6 +981,22 @@ class MyBBForumCollector(CollectorSkeleton):
         source_uuid = self._source_uuid
         if source_uuid is None:
             return
+        # A blank author means our theme selector MISSED (see
+        # feedback_forum_theme_variants_break_selectors). Minting an actor from an
+        # empty slug yields "<board>|" and collapses every such post into ONE
+        # phantom actor, silently poisoning the actor graph + stylometry. Treat it
+        # as the parse failure it is: refuse the row and WARN loudly so a broken
+        # theme shows up as a flood of countable syslogs, not silent bad data. The
+        # post is recovered by a re-crawl once the selector is fixed (put_message
+        # is insert-only, so nothing here to purge).
+        if not post.author_username.strip():
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.post_skipped_no_author",
+                message=f"{self._identity_name}: tid={tid} pid={post.pid} parsed a blank "
+                "author — selector miss, row refused",
+            )
+            return
         now = datetime.now(tz=UTC)
         # Board-scope the userid: MyBB slugs collide across boards.
         platform_userid = f"{self._board}|{post.author_username}"
