@@ -146,6 +146,13 @@ services:
     <<: *eyenet-worker
     command: ["geo", "--interval", "2"]
 
+  # Global-search indexer (GLOBAL_SEARCH.md): reindexes search_document off the
+  # bus (entity.> / raw.message.> / persona.updated / document.uploaded). Event-
+  # driven; run `search-backfill` once to bootstrap the index on first deploy.
+  search-indexer:
+    <<: *eyenet-worker
+    command: ["search-indexer"]
+
   # ---- opt-in: classifier (M10). REQUIRES TUNING (nsjail-in-Docker). ----------
   # Enable with:  docker compose --profile classifier up -d
   classifier:
