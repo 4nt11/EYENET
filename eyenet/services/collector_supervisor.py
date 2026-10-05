@@ -170,6 +170,12 @@ class CollectorSupervisor(ServiceBase):
         # still beats. Collector self-report (last actual ingest) is the upgrade
         # path if we ever need to distinguish "up" from "up and pulling".
         """
+        # A collector that self-reported FAULTED (fail-closed halt) is still alive
+        # but deliberately idle. Liveness must NOT mask that: leave the state + its
+        # last_error untouched (re-stamping RUNNING, or even re-writing FAULTED with
+        # no error, would wipe the reason). It clears only on an operator stop/start.
+        if collector.observed_state is CollectorObservedState.FAULTED:
+            return
         now = self._wall_now()
         if collector.observed_state is not CollectorObservedState.RUNNING:
             await self._set_observed(

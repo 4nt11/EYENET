@@ -8,9 +8,10 @@ const short = (id) => (id ? id.slice(0, 8) : '—');
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// observed_state ∈ stopped|starting|running|cooling|crashed. Badge tone: live
-// = purple, transitional = amber, crashed = red, stopped = quiet.
-const OBSERVED_TONE = { running: 'high', starting: 'warn', cooling: 'warn', crashed: 'critical', stopped: 'low' };
+// observed_state ∈ stopped|starting|running|cooling|crashed|faulted. Badge tone:
+// live = purple, transitional = amber, crashed/faulted = red, stopped = quiet.
+// faulted = a fail-closed halt (e.g. unparseable date); the reason is last_error.
+const OBSERVED_TONE = { running: 'high', starting: 'warn', cooling: 'warn', crashed: 'critical', faulted: 'critical', stopped: 'low' };
 export const observedTone = (s) => OBSERVED_TONE[s] ?? 'neutral';
 
 function mapCollector(c) {
@@ -21,7 +22,8 @@ function mapCollector(c) {
     desired: c.desired_state,
     observed: c.observed_state,
     restartCount: c.restart_count,
-    heartbeat: shortTs(c.last_heartbeat_at)
+    heartbeat: shortTs(c.last_heartbeat_at),
+    lastError: c.last_error_message ?? null
   };
 }
 

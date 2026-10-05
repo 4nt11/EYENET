@@ -33,7 +33,7 @@
           { label: 'ID', value: sel.id },
           { label: 'Kind', value: sel.kind },
           { label: 'Desired', value: sel.desired },
-          { label: 'Observed', value: sel.observed, tone: sel.observed === 'running' ? 'accent' : sel.observed === 'crashed' ? 'critical' : undefined },
+          { label: 'Observed', value: sel.observed, tone: sel.observed === 'running' ? 'accent' : (sel.observed === 'crashed' || sel.observed === 'faulted') ? 'critical' : undefined },
           { label: 'Identity', value: collectorView.identity },
           { label: 'Groups', value: String(collectorView.groups) },
           { label: 'Restarts', value: String(sel.restartCount) },
@@ -91,7 +91,9 @@
             {/if}
             <Button variant="destructive" size="sm" disabled={collectorView.submitting} onclick={() => collectorAction(sel.id, 'delete')}>Delete</Button>
           </div>
-          {#if collectorView.lastError}
+          {#if sel.observed === 'faulted'}
+            <p class="hint err">Faulted (fail-closed halt): {collectorView.lastError ?? 'refused to ingest malformed data'}. It will NOT auto-restart. Fix the cause, then Stop and Start it.</p>
+          {:else if collectorView.lastError}
             <p class="hint err">Last error: {collectorView.lastError}</p>
           {:else if sel.observed === 'crashed' || sel.observed === 'cooling'}
             <p class="hint">{sel.observed === 'cooling' ? 'Cooling down after a fault; the supervisor will retry.' : 'Crashed. The supervisor will restart it per policy.'}</p>

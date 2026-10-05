@@ -54,7 +54,13 @@ from eyenet.contracts._base import TraceContext
 from eyenet.contracts.actor import actor_key
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.collector import CollectorHealth
-from eyenet.contracts.enums import CollectorState, GroupKind, SourceKind, SystemLogLevel
+from eyenet.contracts.enums import (
+    CollectorObservedState,
+    CollectorState,
+    GroupKind,
+    SourceKind,
+    SystemLogLevel,
+)
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import ScanVisibleGroupsCommand, command_subject_for
@@ -727,6 +733,17 @@ class ForumCollector(CollectorSkeleton):
                     "Add the board's date format to _mybb._parse_date and restart."
                 ),
             )
+            # Surface the fault on the fleet view: write observed_state=FAULTED +
+            # the reason to our own collector row. The supervisor preserves it
+            # (liveness won't re-stamp RUNNING), so the operator sees FAULTED on
+            # the list instead of a misleading "running".
+            if self._collector_id is not None:
+                await self._storage.record_collector_observed_state(
+                    collector_id=self._collector_id,
+                    observed_state=CollectorObservedState.FAULTED,
+                    last_error_type="unparseable_date",
+                    last_error_message=self._faulted,
+                )
 
     async def _tick_body(self) -> None:
         # Operator-queued actions first, so they're prompt (still throttled).

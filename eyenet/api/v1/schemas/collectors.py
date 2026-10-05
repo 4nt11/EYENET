@@ -48,6 +48,10 @@ class CollectorSummary(ApiSchema):
     observed_state: CollectorObservedState
     restart_count: int = Field(ge=0)
     last_heartbeat_at: datetime | None = None
+    # Why a collector is CRASHED or FAULTED, shown on the fleet list so a halted
+    # collector isn't a mystery (e.g. "unparseable_date" + the raw string).
+    last_error_type: str | None = None
+    last_error_message: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -61,6 +65,8 @@ class CollectorSummary(ApiSchema):
             observed_state=row.observed_state,
             restart_count=row.restart_count,
             last_heartbeat_at=row.last_heartbeat_at,
+            last_error_type=row.last_error_type,
+            last_error_message=row.last_error_message,
             config=redact_config(row.config, has_read_grant=has_config_grant),
         )
 
@@ -69,8 +75,6 @@ class CollectorDetail(CollectorSummary):
     """Projection for `GET /v1/collectors/{id}` — adds identity + error/audit fields."""
 
     identity_id: UUID
-    last_error_type: str | None = None
-    last_error_message: str | None = None
     created_at: datetime
     notes: str | None = None
 

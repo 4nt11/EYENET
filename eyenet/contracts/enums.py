@@ -352,6 +352,11 @@ class CollectorObservedState(StrEnum):
     RUNNING = "running"
     COOLING = "cooling"
     CRASHED = "crashed"
+    # Collector self-reported a fail-closed halt (e.g. an unparseable post date it
+    # refused to ingest). The process is still ALIVE but idle; unlike CRASHED it is
+    # NOT auto-respawned (respawning re-hits the bad data). Sticky until the operator
+    # stops/restarts it. Written by the collector, preserved by the supervisor.
+    FAULTED = "faulted"
 
 
 class IdentityRole(StrEnum):
