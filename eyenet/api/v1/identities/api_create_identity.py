@@ -34,6 +34,7 @@ from eyenet.api.deps import (
     get_storage,
 )
 from eyenet.api.v1.schemas.identities import IdentityDetail
+from eyenet.collectors.forum import get_parser
 from eyenet.collectors.forum._timing_presets import (
     FORUM_TLS_IMPERSONATE_TARGETS,
     resolve_evasion_profile,
@@ -75,6 +76,9 @@ async def identities_create(
     forum_thread_urls: Annotated[
         str | None, Form(description="comma-separated thread URLs")
     ] = None,
+    forum_engine: Annotated[
+        str | None, Form(max_length=32, description="board engine: mybb (default) | xenforo")
+    ] = None,
     forum_user_agent: Annotated[
         str | None,
         Form(max_length=1024, description="UA of the browser that minted the cookie jar"),
@@ -114,6 +118,7 @@ async def identities_create(
         monitor_groups=monitor_groups,
         forum_base_url=forum_base_url,
         forum_thread_urls=forum_thread_urls,
+        forum_engine=forum_engine,
         forum_user_agent=forum_user_agent,
         forum_evasion_level=forum_evasion_level,
         forum_tls_impersonate=forum_tls_impersonate,
@@ -162,6 +167,7 @@ def _build_source_config(
     monitor_groups: str | None,
     forum_base_url: str | None = None,
     forum_thread_urls: str | None = None,
+    forum_engine: str | None = None,
     forum_user_agent: str | None = None,
     forum_evasion_level: str | None = None,
     forum_tls_impersonate: str | None = None,
@@ -198,6 +204,16 @@ def _build_source_config(
             )
         urls = [u.strip() for u in (forum_thread_urls or "").split(",") if u.strip()]
         config: dict[str, object] = {"forum_base_url": forum_base_url, "forum_thread_urls": urls}
+        # Board engine selects the parser. Validate against the registry so a typo
+        # fails here, not with silent empty parses at crawl time. Omitted → MyBB.
+        if forum_engine:
+            try:
+                get_parser(forum_engine)
+            except ValueError as exc:
+                raise RequestValidationError(
+                    [{"loc": ("body", "forum_engine"), "msg": str(exc), "type": "value_error"}]
+                ) from exc
+            config["forum_engine"] = forum_engine.strip().lower()
         # Optional: the UA of the browser that minted the cookie jar (Tor Browser
         # for an .onion board). Omitted → the collector's TB default. Only emit
         # when set so the pool's entry keeps its own default otherwise.

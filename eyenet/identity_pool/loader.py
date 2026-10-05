@@ -68,6 +68,9 @@ class IdentityFileEntry(BaseModel):
     # ?page=N to the last page).
     forum_base_url: str | None = None
     forum_thread_urls: list[str] = Field(default_factory=list)
+    # Board engine, selects the parser (DOM selectors + URL/sort syntax). One of
+    # the get_parser registry keys: "mybb" (default) or "xenforo".
+    forum_engine: str = "mybb"
     # Pacing / timing control. Every board request waits a jittered delay in
     # [min, max] seconds (sequential, browsing-speed) so the account is not
     # banned for ripping. forum_discovery_interval throttles how often the
@@ -78,6 +81,10 @@ class IdentityFileEntry(BaseModel):
     forum_discovery_interval: int = 21_600
     forum_max_category_pages: int = 0
     forum_max_thread_pages: int = 1  # per-thread depth on a sweep; 0 = all pages
+    # Steady-state breadth: top N creation-sorted category pages re-swept each
+    # pass once the archive is backfilled (0 = page 1 only). Catches a fresh leak
+    # that board spam pushed off page 1 between sweeps.
+    forum_steady_pages: int = 3
     # How many levels of SUBFORUMS to descend when ENUMERATING the board tree
     # (discovery only, never crawling). 0 = top-level categories from the index
     # only (legacy). >=1 fetches each forum's page to surface its child subforums
@@ -208,11 +215,13 @@ def _forum_lines(entry: IdentityFileEntry) -> list[str]:
         urls_str = ", ".join(f'"{u}"' for u in entry.forum_thread_urls)
         out.append(f"forum_thread_urls = [{urls_str}]")
     if entry.forum_base_url is not None:  # pacing only meaningful for a forum entry
+        out.append(f"forum_engine = {_q(entry.forum_engine)}")
         out.append(f"forum_delay_min = {entry.forum_delay_min}")
         out.append(f"forum_delay_max = {entry.forum_delay_max}")
         out.append(f"forum_discovery_interval = {entry.forum_discovery_interval}")
         out.append(f"forum_max_category_pages = {entry.forum_max_category_pages}")
         out.append(f"forum_max_thread_pages = {entry.forum_max_thread_pages}")
+        out.append(f"forum_steady_pages = {entry.forum_steady_pages}")
         out.append(f"forum_discovery_depth = {entry.forum_discovery_depth}")
         if entry.forum_user_agent is not None:
             out.append(f"forum_user_agent = {_q(entry.forum_user_agent)}")

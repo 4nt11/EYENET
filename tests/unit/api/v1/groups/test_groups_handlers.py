@@ -626,3 +626,63 @@ async def test_groups_backfill_enqueues_pending(storage: BaseRepository) -> None
     )
     assert res.state == "pending"
     assert len(await storage.list_pending_forum_backfill_requests(sid)) == 1
+
+
+@pytest.mark.unit
+async def test_groups_backfill_category_page_range(storage: BaseRepository) -> None:
+    from eyenet.api.v1.groups.api_backfill_group import BackfillRequest, groups_backfill
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    cat = await storage.upsert_group(
+        source_id=sid,
+        platform_groupid="Forum-Databases",
+        kind=GroupKind.FORUM_CATEGORY,
+        title="Databases",
+        seen_at=now,
+    )
+    res = await groups_backfill(
+        group_id=cat,
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+        body=BackfillRequest(from_page=2, to_page=3),
+    )
+    assert res.state == "pending"
+    pending = await storage.list_pending_forum_backfill_requests(sid)
+    assert len(pending) == 1
+    assert (pending[0].from_page, pending[0].to_page) == (2, 3)
+
+
+@pytest.mark.unit
+async def test_groups_backfill_category_requires_from_page(storage: BaseRepository) -> None:
+    from eyenet.api.v1.groups.api_backfill_group import groups_backfill
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    cat = await storage.upsert_group(
+        source_id=sid,
+        platform_groupid="Forum-Databases",
+        kind=GroupKind.FORUM_CATEGORY,
+        title="Databases",
+        seen_at=now,
+    )
+    with pytest.raises(ConflictError):
+        await groups_backfill(
+            group_id=cat, current_user=_user(), storage=storage, audit=_audit(storage)
+        )
+
+
+@pytest.mark.unit
+async def test_groups_backfill_rejects_non_forum_kind(storage: BaseRepository) -> None:
+    from eyenet.api.v1.groups.api_backfill_group import groups_backfill
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
+    gid = await storage.upsert_group(
+        source_id=sid, platform_groupid="@c", kind=GroupKind.CHANNEL, title="c", seen_at=now
+    )
+    with pytest.raises(ConflictError):
+        await groups_backfill(
+            group_id=gid, current_user=_user(), storage=storage, audit=_audit(storage)
+        )

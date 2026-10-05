@@ -18,6 +18,7 @@
   let monitorGroups = $state('');
   // forum
   let forumBaseUrl = $state('');
+  let forumEngine = $state('mybb');
   let forumThreadUrls = $state('');
   let forumUserAgent = $state('');
   let forumEvasion = $state('');
@@ -101,6 +102,7 @@
         : files[0];
       fd.append('session', blob);
       fd.append('forum_base_url', forumBaseUrl.trim());
+      if (forumEngine) fd.append('forum_engine', forumEngine);
       if (forumThreadUrls.trim()) fd.append('forum_thread_urls', forumThreadUrls.trim());
       if (forumUserAgent.trim()) fd.append('forum_user_agent', forumUserAgent.trim());
       if (forumEvasion) fd.append('forum_evasion_level', forumEvasion);
@@ -120,6 +122,7 @@
       forumBaseUrl = '';
       forumThreadUrls = '';
       forumUserAgent = '';
+      forumEngine = 'mybb';
       forumEvasion = '';
       forumTls = '';
       curlBlob = '';
@@ -201,6 +204,13 @@
 
       <label class="fld"><span class="flabel">Forum base URL</span>
         <input class="fin" type="text" bind:value={forumBaseUrl} placeholder="https://forum.example — or http://xxx.onion for a Tor mirror" /></label>
+
+      <label class="fld"><span class="flabel">Board engine</span>
+        <select class="fin" bind:value={forumEngine}>
+          <option value="mybb">MyBB (default)</option>
+          <option value="xenforo">XenForo</option>
+        </select>
+        <span class="hint">Selects the parser (DOM selectors + listing sort/pagination). MyBB sorts categories by thread start date via ?sortby=started; XenForo via /page-N + order=start_date.</span></label>
 
       <label class="fld"><span class="flabel">Thread URLs (optional, comma-separated)</span>
         <input class="fin" type="text" bind:value={forumThreadUrls} placeholder="Thread-slug--123, Thread-other--456" /></label>

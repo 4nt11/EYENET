@@ -99,6 +99,36 @@ def test_get_parser_dispatch_is_case_insensitive_and_fails_loud() -> None:
 
 
 @pytest.mark.unit
+def test_category_url_per_engine_creation_sort_and_pagination() -> None:
+    # MyBB: ?page=N query + sortby=started; page 1 omits the page param.
+    assert _mybb.category_url("Forum-Databases", 1, by_created=True) == (
+        "Forum-Databases?sortby=started&order=desc"
+    )
+    assert _mybb.category_url("Forum-Databases", 2, by_created=True) == (
+        "Forum-Databases?sortby=started&order=desc&page=2"
+    )
+    assert _mybb.category_url("Forum-Databases", 3) == "Forum-Databases?page=3"
+    assert _mybb.category_url("Forum-Databases", 1) == "Forum-Databases"
+    # XenForo: /page-N PATH segment + order=start_date; page 1 omits the segment.
+    assert _xenforo.category_url("/foros/db.5", 1, by_created=True) == (
+        "/foros/db.5?order=start_date&direction=desc"
+    )
+    assert _xenforo.category_url("/foros/db.5/", 2, by_created=True) == (
+        "/foros/db.5/page-2?order=start_date&direction=desc"
+    )
+    assert _xenforo.category_url("/foros/db.5", 2) == "/foros/db.5/page-2"
+
+
+@pytest.mark.unit
+def test_thread_page_url_per_engine() -> None:
+    assert _mybb.thread_page_url("Thread-x", 1) == "Thread-x"
+    assert _mybb.thread_page_url("Thread-x", 3) == "Thread-x?page=3"
+    assert _mybb.thread_page_url("showthread.php?tid=9", 2) == "showthread.php?tid=9&page=2"
+    assert _xenforo.thread_page_url("/threads/x.9/", 1) == "/threads/x.9/"
+    assert _xenforo.thread_page_url("/threads/x.9/", 3) == "/threads/x.9/page-3"
+
+
+@pytest.mark.unit
 def test_posted_at_to_utc_converts_aware_and_attaches_naive() -> None:
     # aware +01:00 02:07 -> 01:07 UTC (converted, NOT clobbered)
     aware = datetime(2022, 12, 28, 2, 7, 7, tzinfo=timezone(timedelta(hours=1)))

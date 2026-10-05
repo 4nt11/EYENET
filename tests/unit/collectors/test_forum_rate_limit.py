@@ -90,6 +90,52 @@ def test_build_source_config_expands_level_to_knobs() -> None:
 
 
 @pytest.mark.unit
+def test_build_source_config_carries_engine_and_rejects_unknown() -> None:
+    cfg = _build_source_config(
+        SourceKind.FORUM,
+        telegram_api_id=None,
+        telegram_api_hash=None,
+        monitor_groups=None,
+        forum_base_url="https://board.test",
+        forum_engine="XenForo",
+    )
+    assert cfg["forum_engine"] == "xenforo"  # normalized lower
+
+    from fastapi.exceptions import RequestValidationError
+
+    with pytest.raises(RequestValidationError):
+        _build_source_config(
+            SourceKind.FORUM,
+            telegram_api_id=None,
+            telegram_api_hash=None,
+            monitor_groups=None,
+            forum_base_url="https://board.test",
+            forum_engine="phpbb",
+        )
+
+
+@pytest.mark.unit
+def test_identity_entry_round_trips_engine_and_steady_pages(tmp_path: Path) -> None:
+    entry = IdentityFileEntry(
+        name="df",
+        source=SourceKind.FORUM,
+        forum_base_url="https://board.test",
+        forum_engine="xenforo",
+        forum_steady_pages=5,
+    )
+    out = tmp_path / "identities.toml"
+    dump(IdentityFile(identities=[entry]), out)
+    text = out.read_text(encoding="utf-8")
+    assert 'forum_engine = "xenforo"' in text
+    assert "forum_steady_pages = 5" in text
+    from eyenet.identity_pool.loader import load
+
+    reloaded = load(out, check_session_files=False).identities[0]
+    assert reloaded.forum_engine == "xenforo"
+    assert reloaded.forum_steady_pages == 5
+
+
+@pytest.mark.unit
 def test_build_source_config_rejects_unknown_level() -> None:
     from fastapi.exceptions import RequestValidationError
 

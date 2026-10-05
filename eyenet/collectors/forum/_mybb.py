@@ -380,4 +380,38 @@ def thread_page_count(html: str) -> int:
     return max_page
 
 
-__all__ = ["ParsedPost", "parse_thread", "thread_page_count"]
+def category_url(slug: str, page: int, *, by_created: bool = False) -> str:
+    """Build a MyBB category-listing URL for ``page``.
+
+    ``by_created`` sorts by thread CREATION date descending (``sortby=started``)
+    instead of MyBB's default last-post order. Page 1 is spam-clogged on busy
+    boards (exploit-ad copypasta self-bumps to the top under last-post sort), so
+    a creation-date sort gives a deterministic chronological feed where fresh
+    leaks stay on page 1..N instead of sinking. ``page<=1`` omits the page param.
+    """
+    params: list[str] = []
+    if by_created:
+        params += ["sortby=started", "order=desc"]
+    if page > 1:
+        params.append(f"page={page}")
+    if not params:
+        return slug
+    sep = "&" if "?" in slug else "?"
+    return f"{slug}{sep}{'&'.join(params)}"
+
+
+def thread_page_url(url: str, page: int) -> str:
+    """Page ``N`` of a MyBB thread given its page-1 URL (``?page=N`` query)."""
+    if page <= 1:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}page={page}"
+
+
+__all__ = [
+    "ParsedPost",
+    "category_url",
+    "parse_thread",
+    "thread_page_count",
+    "thread_page_url",
+]

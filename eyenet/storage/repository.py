@@ -1406,8 +1406,14 @@ class BaseRepository(ABC):
         group_id: UUID,
         requested_by: str,
         requested_at: datetime,
+        from_page: int | None = None,
+        to_page: int | None = None,
     ) -> UUID:
-        """Enqueue a deep-backfill of one forum thread (state=pending)."""
+        """Enqueue a forum backfill (state=pending).
+
+        Thread backfill: leave ``from_page``/``to_page`` None (walks all pages).
+        Category backfill: pass the page range to re-sweep.
+        """
 
     @abstractmethod
     async def list_pending_forum_backfill_requests(self, source_id: UUID) -> list[object]:

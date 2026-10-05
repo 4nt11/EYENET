@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from eyenet.collectors.forum import _mybb, _xenforo
 from eyenet.collectors.forum._mybb import (
     ReplyForm,
+    category_url,
     parse_canonical_tid,
     parse_forum_links,
     parse_reply_form,
@@ -28,6 +29,7 @@ from eyenet.collectors.forum._mybb import (
     parse_thread_links,
     parse_thread_title,
     thread_page_count,
+    thread_page_url,
 )
 from eyenet.collectors.forum._post import ParsedPost
 
@@ -50,6 +52,11 @@ class ForumParser(Protocol):
     def parse_canonical_tid(self, html: str) -> str | None: ...
     def parse_thread_title(self, html: str) -> str | None: ...
     def thread_page_count(self, html: str) -> int: ...
+    # URL builders: pagination + sort differ per engine (MyBB ?page=N query +
+    # sortby=started; XenForo /page-N path + order=start_date), so the collector
+    # asks the parser to build them instead of hard-coding MyBB query syntax.
+    def category_url(self, slug: str, page: int, *, by_created: bool = False) -> str: ...
+    def thread_page_url(self, url: str, page: int) -> str: ...
 
 
 # The modules structurally satisfy ForumParser; mypy can't verify a module
@@ -93,6 +100,7 @@ __all__ = [
     "ForumParser",
     "ParsedPost",
     "ReplyForm",
+    "category_url",
     "get_parser",
     "parse_canonical_tid",
     "parse_forum_links",
@@ -103,4 +111,5 @@ __all__ = [
     "parse_thread_title",
     "posted_at_to_utc",
     "thread_page_count",
+    "thread_page_url",
 ]

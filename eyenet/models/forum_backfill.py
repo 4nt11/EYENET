@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""ForumBackfillRequestTable — operator-queued deep backfill of one forum thread.
+"""ForumBackfillRequestTable — operator-queued deep backfill of a forum thread or
+category page range.
 
-Sweeps stay shallow (page 1: the leak + the OP) for breadth. When a specific
-thread is worth its deep pages, the operator queues a backfill here; the running
-collector fetches ALL pages of that thread under its throttle and ingests them.
-Read-only against the board (no write), state walks pending -> done | failed.
+Sweeps stay shallow for breadth. When a specific thread is worth its deep pages,
+the operator queues a THREAD backfill (``from_page``/``to_page`` null); the
+collector fetches all pages of that thread. When a fresh leak sank past the
+steady window, the operator queues a CATEGORY backfill for an explicit page
+RANGE (``from_page``..``to_page``). Read-only against the board (no write),
+state walks pending -> done | failed.
 """
 
 from __future__ import annotations
@@ -22,7 +25,10 @@ class ForumBackfillRequestTable(SQLModel, table=True):
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
     source_id: UUID = Field(index=True)
-    group_id: UUID = Field(index=True)  # the FORUM_THREAD group to deep-fetch
+    group_id: UUID = Field(index=True)  # FORUM_THREAD (deep-fetch) or FORUM_CATEGORY (page range)
+    # Category page range (null for a thread backfill, which walks all pages).
+    from_page: int | None = None
+    to_page: int | None = None
     state: str = Field(default="pending", index=True)  # pending | done | failed
     requested_by: str
     requested_at: datetime

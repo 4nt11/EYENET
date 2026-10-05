@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""`MyBBForumCollector` - live MyBB forum collector over an imported cookie jar.
+"""`ForumCollector` - live forum collector over an imported cookie jar.
+
+Engine-agnostic (MyBB, XenForo, ...): the per-engine parser is resolved from the
+identity's ``forum_engine`` via ``get_parser`` in ``on_subscribe``. Exported also
+as ``MyBBForumCollector`` for back-compat.
 
 Poll-based, not event-based: each ``tick`` re-fetches the configured threads,
 parses posts, and ingests the new ones. Login is NOT automated - the operator
@@ -32,16 +36,11 @@ from sqlalchemy.exc import OperationalError
 from eyenet.collectors.base._credentials import materialize_forum_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.collectors.forum import (
+    ForumParser,
     ParsedPost,
-    parse_canonical_tid,
-    parse_forum_links,
+    get_parser,
     parse_reply_form,
-    parse_subforum_links,
-    parse_thread,
-    parse_thread_links,
-    parse_thread_title,
     posted_at_to_utc,
-    thread_page_count,
 )
 from eyenet.collectors.forum._timing_presets import (
     DEFAULT_DELAY_MAX,
@@ -82,14 +81,20 @@ _LOGGED_IN_MARKERS = ("action=logout", "usercp")
 # One paced discovery sweep, then rest. Re-enumerating 500-page categories every
 # minute would be its own DoS; a category rarely gains threads that fast.
 _DEFAULT_DISCOVERY_INTERVAL = 21_600  # 6h
-# 0 = walk every page of a category (full backfill). MyBB sorts threads by last
-# post desc, so a positive cap gets the most recently active threads first.
+# 0 = walk every page of a category (full backfill). Listings are fetched sorted
+# by thread CREATION date desc (see ForumParser.category_url by_created), so a
+# positive cap gets the most recently CREATED threads first.
 _DEFAULT_MAX_CATEGORY_PAGES = 0
 # Per-thread depth on a sweep. Page 1 is the leak + the OP (the signal + the
 # actor worth scraping); deeper pages are leecher "thanks" that bloat the corpus.
 # So default shallow for breadth; the operator backfills a specific thread deeper
 # on demand (POST .../backfill). 0 = all pages.
 _DEFAULT_MAX_THREAD_PAGES = 1
+# Steady-state breadth: once a category's archive is backfilled, re-sweep the top
+# N creation-sorted pages each pass (not just page 1). Page 1 alone misses a fresh
+# leak that spam already pushed to page 2-3 between sweeps; the creation-date sort
+# makes the top N a deterministic newest-first window. 0 = page 1 only.
+_DEFAULT_STEADY_PAGES = 3
 # Subforum-discovery depth default (DEFAULT_DISCOVERY_DEPTH) lives in
 # _timing_presets alongside the per-level overrides.
 
@@ -197,8 +202,13 @@ def _normalize_thread_slug(key: str) -> str:
     return key
 
 
-class MyBBForumCollector(CollectorSkeleton):
-    """Cookie-session MyBB collector: fetch -> parse -> store -> publish."""
+class ForumCollector(CollectorSkeleton):
+    """Cookie-session forum collector: fetch -> parse -> store -> publish.
+
+    Engine-agnostic: the parser (MyBB, XenForo, ...) is resolved from the
+    identity's ``forum_engine`` via :func:`get_parser` in :meth:`on_subscribe`,
+    so URL/sort syntax and DOM selectors stay in the parser module. The write
+    path (reply-to-unlock, single-thread deep backfill) is still MyBB-only."""
 
     def __init__(
         self,
@@ -237,7 +247,11 @@ class MyBBForumCollector(CollectorSkeleton):
         self._discovery_interval = float(_DEFAULT_DISCOVERY_INTERVAL)
         self._max_category_pages = _DEFAULT_MAX_CATEGORY_PAGES
         self._max_thread_pages = _DEFAULT_MAX_THREAD_PAGES
+        self._steady_pages = _DEFAULT_STEADY_PAGES
         self._discovery_depth = DEFAULT_DISCOVERY_DEPTH
+        # Parser resolved from forum_engine in on_subscribe; default MyBB so
+        # methods are usable before subscribe (tests, standalone probes).
+        self._parser: ForumParser = get_parser("mybb")
         # Monotonic deadline: while now < this, every request is refused BEFORE it
         # hits the wire (poking during a 429 cooldown re-arms the server's timer).
         self._cooldown_until = 0.0
@@ -267,9 +281,14 @@ class MyBBForumCollector(CollectorSkeleton):
         self._max_thread_pages = int(
             getattr(entry, "forum_max_thread_pages", _DEFAULT_MAX_THREAD_PAGES)
         )
+        self._steady_pages = int(getattr(entry, "forum_steady_pages", _DEFAULT_STEADY_PAGES))
         self._discovery_depth = int(
             getattr(entry, "forum_discovery_depth", DEFAULT_DISCOVERY_DEPTH)
         )
+        # Pick the engine parser (MyBB default). An unknown engine raises here —
+        # fail loud at boot, same posture as forum_tls_impersonate; the API
+        # validates against the registry so a live value is always known.
+        self._parser = get_parser(getattr(entry, "forum_engine", "mybb"))
 
         if self._client is None:
             self._client = await self._build_forum_client(entry)
@@ -503,7 +522,7 @@ class MyBBForumCollector(CollectorSkeleton):
         seen: set[str] = set()
         frontier: list[tuple[str, int]] = []
         # Top-level categories from the single index request — yield them ALL now.
-        for url in parse_forum_links(index.text):
+        for url in self._parser.parse_forum_links(index.text):
             slug = _last_segment(url)
             if slug not in seen:
                 seen.add(slug)
@@ -532,7 +551,7 @@ class MyBBForumCollector(CollectorSkeleton):
                 )
                 continue
             new = 0
-            for child_url in parse_subforum_links(page.text):
+            for child_url in self._parser.parse_subforum_links(page.text):
                 child = _last_segment(child_url)
                 if child not in seen:
                     seen.add(child)
@@ -675,8 +694,8 @@ class MyBBForumCollector(CollectorSkeleton):
         for url in self._thread_urls:
             await self._poll_thread(url)
         # Then each monitored category, INTERLEAVED: scrape each page's threads
-        # as we discover them (newest-first on MyBB) so posts flow from the first
-        # minute instead of after a full multi-hour enumeration.
+        # as we discover them (creation-sorted newest-first) so posts flow from
+        # the first minute instead of after a full multi-hour enumeration.
         for slug in sorted(monitored):
             try:
                 await self._crawl_category(slug)
@@ -716,7 +735,7 @@ class MyBBForumCollector(CollectorSkeleton):
         """
         threads = 0
         category_ref = self._abs(slug)  # Referer for each thread: its category page
-        for thread_url in parse_thread_links(html):
+        for thread_url in self._parser.parse_thread_links(html):
             try:
                 # Poll first: it resolves the thread's STABLE key (canonical tid
                 # via the alias) from the page, so the category->thread link is
@@ -740,15 +759,16 @@ class MyBBForumCollector(CollectorSkeleton):
         return threads
 
     async def _crawl_category(self, slug: str) -> None:
-        """Sweep one MONITORED category: page 1 always, deep pages by resume cursor.
+        """Sweep one MONITORED category, CREATION-sorted: top N pages steady, deep by cursor.
 
-        Page 1 (newest, MyBB last-post-desc) is swept every time so freshly
-        active threads are never missed. Historical pages are backfilled FORWARD
-        from a persisted cursor: a restart or scheduled re-sweep resumes where it
-        left off instead of re-paying the throttle to re-scrape already-stored top
-        pages. Once the last page is reached the category latches complete and
-        later sweeps stay page-1-only (the archive is compiled; from then on we
-        only track the newest). To re-backfill, reset the cursor row by hand.
+        Listings are fetched sorted by thread CREATION date descending (the
+        parser's ``by_created``), not MyBB's spam-bumpable last-post order, so
+        the newest threads stay on the first pages even on a page-1-clogged
+        board. In steady state (archive already backfilled) we re-sweep the top
+        ``forum_steady_pages`` pages so a fresh leak that spam pushed to page 2-3
+        between sweeps is still caught. Before the archive is complete, pages are
+        backfilled FORWARD from a persisted cursor and the category latches
+        complete at the last page. To re-backfill, reset the cursor row by hand.
         """
         _log.info("forum.category_sweep_start", identity=self._identity_name, category=slug)
         cursor_page, complete = 1, False
@@ -758,7 +778,10 @@ class MyBBForumCollector(CollectorSkeleton):
             )
         # Page 1 first: newest threads, and it tells us the total page count.
         try:
-            first = await self._get(slug, referer=self._base_url or None)
+            first = await self._get(
+                self._parser.category_url(slug, 1, by_created=True),
+                referer=self._base_url or None,
+            )
         except httpx.HTTPError as exc:
             await self.syslog(
                 level=SystemLogLevel.WARN,
@@ -766,20 +789,36 @@ class MyBBForumCollector(CollectorSkeleton):
                 message=f"{self._identity_name}: {slug} p1 failed ({exc!r})",
             )
             return
-        last = thread_page_count(first.text)
+        last = self._parser.thread_page_count(first.text)
         if self._max_category_pages > 0:
             last = min(last, self._max_category_pages)
         threads = await self._process_category_page(slug, first.text)
 
         if complete:
-            # Steady state: archive already backfilled, page 1 is all we track.
+            # Steady state: archive backfilled. Re-sweep the top N creation-sorted
+            # pages (page 1 handled above) so a spam-sunk fresh leak is still seen.
+            steady_last = min(last, self._steady_pages) if self._steady_pages > 0 else last
+            for page in range(2, steady_last + 1):
+                try:
+                    resp = await self._get(
+                        self._parser.category_url(slug, page, by_created=True),
+                        referer=self._abs(slug),
+                    )
+                except httpx.HTTPError as exc:
+                    await self.syslog(
+                        level=SystemLogLevel.WARN,
+                        event="forum.category_fetch_failed",
+                        message=f"{self._identity_name}: {slug} p{page} failed ({exc!r})",
+                    )
+                    break
+                threads += await self._process_category_page(slug, resp.text)
             _log.info(
                 "forum.category_sweep_done",
                 identity=self._identity_name,
                 category=slug,
                 threads=threads,
-                pages=last,
-                mode="page1",
+                pages=steady_last,
+                mode="steady",
             )
             return
 
@@ -787,7 +826,10 @@ class MyBBForumCollector(CollectorSkeleton):
         page = max(2, cursor_page)
         while page <= last:
             try:
-                resp = await self._get(slug, params={"page": page}, referer=self._abs(slug))
+                resp = await self._get(
+                    self._parser.category_url(slug, page, by_created=True),
+                    referer=self._abs(slug),
+                )
             except httpx.HTTPError as exc:
                 # Persist progress so the next sweep resumes here, not at page 1.
                 await self._save_cursor(slug, next_page=page, complete=False)
@@ -841,7 +883,7 @@ class MyBBForumCollector(CollectorSkeleton):
                 message=f"{self._identity_name}: {url} fetch failed ({exc!r})",
             )
             return None
-        canonical_tid = parse_canonical_tid(first.text)
+        canonical_tid = self._parser.parse_canonical_tid(first.text)
         if canonical_tid is not None and self._source_uuid is not None:
             key = await self._storage.resolve_or_bind_forum_thread(
                 source_id=self._source_uuid,
@@ -851,13 +893,13 @@ class MyBBForumCollector(CollectorSkeleton):
         else:
             key = _normalize_thread_slug(url_key)
         try:
-            pages = thread_page_count(first.text)
+            pages = self._parser.thread_page_count(first.text)
             # Cap per-thread depth: the leak announcement + download live on page 1;
             # deep pages are "thanks for the share" noise. Capping gets breadth
             # (many threads' signal) instead of deep-mining a few. 0 = all pages.
             if self._max_thread_pages > 0:
                 pages = min(pages, self._max_thread_pages)
-            title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
+            title = self._parser.parse_thread_title(first.text)  # page 1 subject, reused
             if not title:
                 await self.syslog(
                     level=SystemLogLevel.WARN,
@@ -867,7 +909,9 @@ class MyBBForumCollector(CollectorSkeleton):
                 )
             await self._ingest_page(key, title, first.text, is_first_page=True)
             for page in range(2, pages + 1):
-                resp = await self._get(url, params={"page": page}, referer=self._abs(url))
+                resp = await self._get(
+                    self._parser.thread_page_url(url, page), referer=self._abs(url)
+                )
                 await self._ingest_page(key, title, resp.text)
         except httpx.HTTPError as exc:
             await self.syslog(
@@ -967,15 +1011,41 @@ class MyBBForumCollector(CollectorSkeleton):
             )
             return
         try:
-            pages = await self._backfill_thread(grp.platform_groupid)
+            if grp.kind is GroupKind.FORUM_CATEGORY:
+                # One-shot operator override: re-sweep an explicit page RANGE of a
+                # category (creation-sorted), e.g. grab page 2-3 where a fresh leak
+                # sank. Defaults to page 1 if the range columns are unset.
+                frm = int(getattr(req, "from_page", None) or 1)
+                to = int(getattr(req, "to_page", None) or frm)
+                pages = await self._backfill_category(grp.platform_groupid, frm, to)
+                result = f"backfilled category pages {frm}-{to} ({pages} fetched)"
+            else:
+                n = await self._backfill_thread(grp.platform_groupid)
+                result = f"backfilled {n} page(s)"
         except httpx.HTTPError as exc:
             await self._storage.complete_forum_backfill_request(
                 req.id, state="failed", result=f"http_error:{exc!r}", completed_at=now
             )
             return
         await self._storage.complete_forum_backfill_request(
-            req.id, state="done", result=f"backfilled {pages} page(s)", completed_at=now
+            req.id, state="done", result=result, completed_at=now
         )
+
+    async def _backfill_category(self, slug: str, from_page: int, to_page: int) -> int:
+        """Fetch a creation-sorted page RANGE of a category and ingest its threads.
+
+        The one-shot operator override. Paced + idempotent like a normal sweep;
+        put_message skips already-stored posts. Returns the page count fetched.
+        """
+        fetched = 0
+        for page in range(max(1, from_page), max(from_page, to_page) + 1):
+            resp = await self._get(
+                self._parser.category_url(slug, page, by_created=True),
+                referer=self._abs(slug),
+            )
+            await self._process_category_page(slug, resp.text)
+            fetched += 1
+        return fetched
 
     async def _backfill_thread(self, tid: str) -> int:
         """Fetch ALL pages of a thread (showthread.php?tid) and ingest them.
@@ -984,8 +1054,8 @@ class MyBBForumCollector(CollectorSkeleton):
         already-stored page-1 posts are skipped and the deep pages are added.
         """
         first = await self._get("showthread.php", params={"tid": tid})
-        pages = thread_page_count(first.text)
-        title = parse_thread_title(first.text)
+        pages = self._parser.thread_page_count(first.text)
+        title = self._parser.parse_thread_title(first.text)
         if not title:
             await self.syslog(
                 level=SystemLogLevel.WARN,
@@ -1007,14 +1077,14 @@ class MyBBForumCollector(CollectorSkeleton):
         """
         try:
             first = await self._get("showthread.php", params={"tid": tid})
-            pages = thread_page_count(first.text)
+            pages = self._parser.thread_page_count(first.text)
             for page in range(1, pages + 1):
                 html = (
                     first.text
                     if page == 1
                     else (await self._get("showthread.php", params={"tid": tid, "page": page})).text
                 )
-                for post in parse_thread(html):
+                for post in self._parser.parse_thread(html):
                     body = post.body_text
                     await self._storage.update_message_content(
                         f"forum:{self._board}:{tid}:{post.pid}",
@@ -1039,7 +1109,7 @@ class MyBBForumCollector(CollectorSkeleton):
     async def _ingest_page(
         self, tid: str, title: str | None, html: str, *, is_first_page: bool = False
     ) -> None:
-        posts = parse_thread(html)
+        posts = self._parser.parse_thread(html)
         if not posts:
             _log.warning(
                 "forum.empty_page",
@@ -1210,4 +1280,8 @@ class MyBBForumCollector(CollectorSkeleton):
         )
 
 
-__all__ = ["MyBBForumCollector"]
+# Back-compat alias: the collector is engine-agnostic now (ForumCollector), but
+# cli/main.py and the test suite still import the historical name.
+MyBBForumCollector = ForumCollector
+
+__all__ = ["ForumCollector", "MyBBForumCollector"]

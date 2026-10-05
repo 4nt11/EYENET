@@ -444,14 +444,18 @@ class ForumMixin:
         group_id: UUID,
         requested_by: str,
         requested_at: datetime,
+        from_page: int | None = None,
+        to_page: int | None = None,
     ) -> UUID:
-        """Enqueue a deep-backfill of one thread. Returns the request id."""
+        """Enqueue a backfill (thread, or a category page range). Returns the id."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             row = ForumBackfillRequestTable(
                 source_id=source_id,
                 group_id=group_id,
                 requested_by=requested_by,
                 requested_at=requested_at,
+                from_page=from_page,
+                to_page=to_page,
             )
             session.add(row)
             await session.commit()

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Forum backfill page cursor: resume, latch-complete, then page-1-only."""
+"""Forum backfill page cursor: resume, latch-complete, then steady top-N sweep."""
 
 from __future__ import annotations
 
@@ -110,9 +110,10 @@ async def test_resume_skips_already_backfilled_pages(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_complete_category_is_page1_only(tmp_path: Path) -> None:
+async def test_complete_category_steady_sweeps_top_pages(tmp_path: Path) -> None:
     seen: list[str | None] = []
     storage, coll, sid = await _wire(tmp_path, seen)
+    coll._steady_pages = 3  # re-sweep top 3 creation-sorted pages in steady state
     await storage.set_forum_crawl_cursor(
         source_id=sid,
         category_platform_groupid=_SLUG,
@@ -123,8 +124,45 @@ async def test_complete_category_is_page1_only(tmp_path: Path) -> None:
 
     await coll._crawl_category(_SLUG)
 
-    # Only page 1 touched; deep pages left alone once backfill is done.
+    # Steady state re-sweeps the top N pages (a fresh leak spam pushed to p2-3 is
+    # still caught) but does NOT advance/clear the cursor (archive stays complete).
+    assert seen == [None, "2", "3"]
+    assert await storage.get_forum_crawl_cursor(source_id=sid, category_platform_groupid=_SLUG) == (
+        4,
+        True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_complete_category_steady_pages_one_is_page1_only(tmp_path: Path) -> None:
+    seen: list[str | None] = []
+    storage, coll, sid = await _wire(tmp_path, seen)
+    coll._steady_pages = 1  # page 1 only
+    await storage.set_forum_crawl_cursor(
+        source_id=sid,
+        category_platform_groupid=_SLUG,
+        next_page=4,
+        backfill_complete=True,
+        updated_at=datetime.now(tz=UTC),
+    )
+
+    await coll._crawl_category(_SLUG)
+
     assert seen == [None]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_backfill_category_fetches_explicit_page_range(tmp_path: Path) -> None:
+    # The one-shot override: fetch only pages 2-3 (creation-sorted), nothing else.
+    seen: list[str | None] = []
+    _storage, coll, _sid = await _wire(tmp_path, seen)
+
+    fetched = await coll._backfill_category(_SLUG, 2, 3)
+
+    assert fetched == 2
+    assert seen == ["2", "3"]  # page 1 NOT touched
 
 
 @pytest.mark.unit

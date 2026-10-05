@@ -324,4 +324,32 @@ def parse_reply_form(html: str) -> ReplyForm | None:
     return ReplyForm(xf_token=xf_token, tid=tid)
 
 
-__all__ = ["ParsedPost", "parse_thread", "thread_page_count"]
+def category_url(slug: str, page: int, *, by_created: bool = False) -> str:
+    """Build a XenForo forum-listing URL for ``page``.
+
+    XenForo paginates by a ``/page-N`` PATH segment (not a query param). The
+    creation-date sort is ``order=start_date&direction=desc`` — XF's thread-list
+    "Start date" ordering — vs the default last-post order that lets self-bumping
+    spam clog the first page. ``page<=1`` omits the segment.
+    ponytail: ``start_date`` is XF2's documented start-date order; if a board's
+    addon renames it, adjust here (one parser-local string).
+    """
+    base = slug.rstrip("/")
+    path = base if page <= 1 else f"{base}/page-{page}"
+    return f"{path}?order=start_date&direction=desc" if by_created else path
+
+
+def thread_page_url(url: str, page: int) -> str:
+    """Page ``N`` of a XenForo thread given its page-1 URL (``/page-N`` path)."""
+    if page <= 1:
+        return url
+    return f"{url.rstrip('/')}/page-{page}"
+
+
+__all__ = [
+    "ParsedPost",
+    "category_url",
+    "parse_thread",
+    "thread_page_count",
+    "thread_page_url",
+]
