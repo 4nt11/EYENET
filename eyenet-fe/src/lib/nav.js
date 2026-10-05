@@ -7,6 +7,7 @@ export const NAV = [
   {
     group: 'Investigate',
     items: [
+      { slug: 'search', label: 'Search', href: '/search', built: true, desc: 'Global cross-entity full-text search · actors, personas, cases, groups, messages, documents' },
       { slug: 'cases', label: 'Cases', href: '/cases', built: true, desc: 'Investigation workspace: evidence, documents, attachments, logs',
         children: [
           { slug: 'cases-overview', label: 'Overview', href: '/cases', built: true, desc: 'Case workspace and caseload' },
