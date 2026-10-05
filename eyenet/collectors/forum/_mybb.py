@@ -45,7 +45,11 @@ _HIDE_GATE = re.compile(r"reply to (?:this )?thread to view", re.IGNORECASE)
 # ago") under some settings — raidforums does for fresh posts. _parse_date handles
 # these too; a real parsed value means the collector's date-fallback-to-now() ERROR
 # guard (recency is load-bearing) does NOT fire on the newest, highest-value posts.
-_DATE_FMT = "%d-%m-%y, %I:%M %p"
+# darkforums renders day-first, 2-digit year ("06-09-26"); raidforums renders
+# US month-first, 4-digit year ("11-29-2023"). Both are MyBB — the format is a
+# per-board locale setting, not an engine difference. Tried in order; the 2-digit
+# vs 4-digit year keeps them unambiguous (one fails ValueError, the other parses).
+_DATE_FMTS = ("%d-%m-%y, %I:%M %p", "%m-%d-%Y, %I:%M %p")
 _TIME_FMT = "%I:%M %p"  # the time tail shared by "Today,"/"Yesterday," forms
 _REL_UNITS = {
     "second": 1,
@@ -104,18 +108,19 @@ def _username_slug(href: str) -> str:
 def _parse_date(raw: str, *, now: datetime | None = None) -> datetime | None:
     """Parse a MyBB post timestamp to a NAIVE board-local datetime, or None.
 
-    Absolute (`_DATE_FMT`) first, then the relative renderings ("Today, HH:MM AM/PM",
-    "Yesterday, ...", "N minutes/hours/days ago", "an hour ago"). A relative parse
-    yields a REAL timestamp (not a now()-substitution), so the collector's recency
-    guard stays quiet. `now` is injectable for tests; defaults to the board-local
-    naive clock to match `_DATE_FMT`.
+    Absolute (`_DATE_FMTS`, darkforums DD-MM-YY + raidforums MM-DD-YYYY) first, then
+    the relative renderings ("Today, HH:MM AM/PM", "Yesterday, ...", "N minutes/hours/
+    days ago", "an hour ago"). A relative parse yields a REAL timestamp (not a
+    now()-substitution), so the collector's recency guard stays quiet. `now` is
+    injectable for tests; defaults to the board-local naive clock to match `_DATE_FMTS`.
     """
     raw = raw.strip()
-    try:
-        return datetime.strptime(raw, _DATE_FMT)  # noqa: DTZ007 - board-local naive, see module note
-    except ValueError:
-        pass
-    ref = now or datetime.now()  # noqa: DTZ005 - board-local naive, matches _DATE_FMT
+    for fmt in _DATE_FMTS:
+        try:
+            return datetime.strptime(raw, fmt)  # noqa: DTZ007 - board-local naive, see module note
+        except ValueError:
+            continue
+    ref = now or datetime.now()  # noqa: DTZ005 - board-local naive, matches _DATE_FMTS
     low = raw.lower()
     for word, days_back in (("today", 0), ("yesterday", 1)):
         if low.startswith(word):
@@ -171,8 +176,18 @@ def parse_thread(html: str) -> list[ParsedPost]:
         author_username = _username_slug(href) if href else ""
         author_display = author_link.get_text(strip=True) if author_link else ""
 
+        # Date rendering varies by post age on darkforums: older posts carry the
+        # absolute timestamp as direct text ("06-09-26, 10:56 PM"); recent ones
+        # render a relative label with the EXACT timestamp in a nested
+        # <span title="29-09-26, 01:24 AM">4 hours ago</span>. Prefer that title
+        # (precise absolute) over the relative text; fall back to the direct text
+        # for the older layout. post_edit is also nested but carries no title.
         date_span = container.select_one("span.post_date")
-        posted_raw = _direct_text(date_span) if date_span else ""
+        posted_raw = ""
+        if date_span is not None:
+            titled = date_span.select_one("span[title]")
+            title_ts = str(titled.get("title", "")).strip() if titled else ""
+            posted_raw = title_ts or _direct_text(date_span)
         posted_at = _parse_date(posted_raw) if posted_raw else None
 
         edit_span = container.select_one("span.post_edit")

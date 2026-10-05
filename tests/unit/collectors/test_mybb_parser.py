@@ -73,6 +73,9 @@ def test_parse_date_absolute_and_relative() -> None:
     # the collector's recency guard quiet. Fixed clock so the assertions are stable.
     ref = datetime(2026, 10, 5, 15, 0)  # noqa: DTZ001 - naive board-local, matches _DATE_FMT
     assert _parse_date("16-07-26, 08:00 PM") == datetime(2026, 7, 16, 20, 0)  # noqa: DTZ001
+    # raidforums renders absolute dates US-style MM-DD-YYYY (4-digit year); the
+    # 2-digit vs 4-digit year keeps it unambiguous vs darkforums' DD-MM-YY.
+    assert _parse_date("11-29-2023, 10:58 AM") == datetime(2023, 11, 29, 10, 58)  # noqa: DTZ001
     assert _parse_date("Today, 03:20 PM", now=ref) == datetime(2026, 10, 5, 15, 20)  # noqa: DTZ001
     assert _parse_date("Yesterday, 11:30 AM", now=ref) == datetime(2026, 10, 4, 11, 30)  # noqa: DTZ001
     assert _parse_date("1 hour ago", now=ref) == datetime(2026, 10, 5, 14, 0)  # noqa: DTZ001
@@ -234,6 +237,22 @@ def test_unparseable_date_yields_none_not_crash() -> None:
     (post,) = parse_thread(html)
     assert post.posted_at is None
     assert post.posted_raw == "whenever o_O"
+
+
+def test_recent_post_date_uses_nested_title_not_relative_label() -> None:
+    # darkforums renders recent posts as a relative label with the EXACT absolute
+    # timestamp in a nested <span title="...">. Prefer the title (precise) over the
+    # "4 hours ago" text so recency is reliable, not now()-substituted.
+    html = (
+        '<div class="post classic" id="post_7">'
+        '<div class="post_user-profile"><a href="User-bob">bob</a></div>'
+        '<span class="post_date"><span title="29-09-26, 01:24 AM">4 hours ago</span>'
+        ' <span class="post_edit" id="edited_by_7"></span></span>'
+        '<div class="post_body">leak</div></div>'
+    )
+    (post,) = parse_thread(html)
+    assert post.posted_raw == "29-09-26, 01:24 AM"
+    assert post.posted_at == datetime(2026, 9, 29, 1, 24)  # noqa: DTZ001
 
 
 def _cf_encode(email: str, key: int = 0x2B) -> str:
