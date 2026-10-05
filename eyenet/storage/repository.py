@@ -1844,6 +1844,54 @@ class BaseRepository(ABC):
     @abstractmethod
     async def count_search_actors(self, q: str) -> int: ...
 
+    # -- Global cross-entity search (GLOBAL_SEARCH.md) ----------------------
+    @abstractmethod
+    async def put_search_documents_bulk(self, rows: Sequence[dict[str, Any]]) -> None:
+        """Upsert many `search_document` rows (keyed on entity_type+entity_id)."""
+
+    @abstractmethod
+    async def put_search_document(self, **fields: Any) -> None:
+        """Upsert one `search_document` row from column kwargs."""
+
+    @abstractmethod
+    async def delete_search_document(self, entity_type: str, entity_id: UUID) -> None:
+        """Remove one `search_document` row (entity deleted/redacted)."""
+
+    @abstractmethod
+    async def search_global(
+        self,
+        q: str,
+        *,
+        types: Sequence[str] | None = None,
+        status: Sequence[str] | None = None,
+        source_id: UUID | None = None,
+        limit: int,
+        offset: int = 0,
+    ) -> list[object]:
+        """Ranked cross-entity hits for ``q``; SearchDocumentTable rows type-erased."""
+
+    @abstractmethod
+    async def count_search_global(
+        self,
+        q: str,
+        *,
+        types: Sequence[str] | None = None,
+        status: Sequence[str] | None = None,
+        source_id: UUID | None = None,
+    ) -> int:
+        """Total `search_document` rows matching ``q`` + filters."""
+
+    @abstractmethod
+    async def search_global_facets(
+        self,
+        q: str,
+        *,
+        types: Sequence[str] | None = None,
+        status: Sequence[str] | None = None,
+        source_id: UUID | None = None,
+    ) -> dict[str, dict[str, int]]:
+        """Facet counts for ``q``: ``{"by_type": {...}, "by_source": {...}}``."""
+
     @abstractmethod
     async def list_actors(
         self,

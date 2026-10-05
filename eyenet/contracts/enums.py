@@ -124,6 +124,29 @@ class CaseSubjectKind(StrEnum):
     LINKAGE = "linkage"
 
 
+class EntityType(StrEnum):
+    """Kind of entity indexed in `search_document` / returned by global search.
+
+    One haystack row per entity (GLOBAL_SEARCH.md §1.1). `crew` is the
+    operator-curated `manual_crew` only (derived /actor-groups crews are not
+    indexable). `group` carries a lifecycle `status` facet
+    (candidate/joined/monitored/known) rather than being split into types.
+    """
+
+    ACTOR = "actor"
+    GROUP = "group"
+    THREAD = "thread"
+    MESSAGE = "message"
+    MENTION = "mention"
+    ARTIFACT = "artifact"
+    PERSONA = "persona"
+    CREW = "crew"
+    CASE = "case"
+    DOCUMENT = "document"
+    ATTACHMENT = "attachment"
+    INCIDENT = "incident"
+
+
 class CaseRoleOnCase(StrEnum):
     """A collaborator's role on a specific case (API_PLAN §4.10.1).
 
@@ -520,6 +543,7 @@ __all__ = [
     "ConfidenceTier",
     "EngagementScope",
     "EngagementSubjectKind",
+    "EntityType",
     "FileServedVia",
     "GroupAccessKind",
     "GroupKind",

@@ -68,6 +68,7 @@ from .persona import PersonaMembershipTable, PersonaTable
 from .profile import ProfileTable
 from .reaction import ReactionTable
 from .relation import ActorRelationTable
+from .search import SearchDocumentTable
 from .social_graph import MembershipTable
 from .source import SourceTable
 from .source_domain import SourceDomainTable
@@ -138,6 +139,7 @@ __all__ = [
     "ReactionTable",
     "RefreshTokenTable",
     "SQLModel",
+    "SearchDocumentTable",
     "SigningKeyChallengeTable",
     "SourceDomainTable",
     "SourceTable",
