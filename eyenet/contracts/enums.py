@@ -320,6 +320,10 @@ class CollectorState(StrEnum):
     RATE_LIMITED = "rate_limited"
     DEGRADED = "degraded"
     STOPPED = "stopped"
+    # Fail-closed halt: the collector hit data it refuses to ingest (e.g. an
+    # unparseable post date, which would manufacture false recency) and stopped
+    # itself rather than write garbage. Stays idle until an operator restart.
+    FAULTED = "faulted"
 
 
 class CollectorDesiredState(StrEnum):

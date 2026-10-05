@@ -53,7 +53,8 @@ from eyenet.collectors.forum._timing_presets import (
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.actor import actor_key
 from eyenet.contracts.bus import Bus
-from eyenet.contracts.enums import GroupKind, SourceKind, SystemLogLevel
+from eyenet.contracts.collector import CollectorHealth
+from eyenet.contracts.enums import CollectorState, GroupKind, SourceKind, SystemLogLevel
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import ScanVisibleGroupsCommand, command_subject_for
@@ -140,6 +141,25 @@ def _validate_impersonate(target: str) -> None:
 class RateLimited(Exception):  # noqa: N818 - a control signal, not an error condition
     """A board 429'd us (or we're still inside its cooldown). Caught at the tick
     boundary to abort the sweep SILENTLY — never retried, never polled."""
+
+
+class UnparseableDateError(Exception):
+    """A post date could not be parsed to a real timestamp.
+
+    FAIL-CLOSED: we refuse to ingest the post rather than substitute now() (which
+    silently manufactures false recency on an old leak — the single most damaging
+    field to get wrong, see CLAUDE.md 4a). Caught at the tick boundary, where it
+    FAULTS the whole collector: the parser is missing a board's date format and a
+    human must add it, not let the collector backfill garbage. Carries the raw
+    string so the operator can extend the parser from the log line.
+    """
+
+    def __init__(self, *, tid: str, pid: str, raw: str) -> None:
+        self.tid = tid
+        self.pid = pid
+        self.raw = raw
+        detail = f"unparseable date {raw!r}" if raw.strip() else "date span missing"
+        super().__init__(f"tid={tid} pid={pid}: {detail}")
 
 
 def _zero_traceparent() -> str:
@@ -255,6 +275,12 @@ class ForumCollector(CollectorSkeleton):
         # Monotonic deadline: while now < this, every request is refused BEFORE it
         # hits the wire (poking during a 429 cooldown re-arms the server's timer).
         self._cooldown_until = 0.0
+        # Fail-closed halt reason. Set when the collector hits data it refuses to
+        # ingest (an unparseable post date). While set, tick() is a no-op: the
+        # collector stays alive but makes ZERO board requests and writes NOTHING,
+        # until an operator restarts it (clears this in-process flag). health()
+        # reports CollectorState.FAULTED so the fault is visible on the API.
+        self._faulted: str | None = None
         # When we last swept (monotonic) + the monitored set that sweep was for
         # (so a newly-monitored category triggers a re-sweep next tick instead of
         # waiting out the interval).
@@ -421,6 +447,15 @@ class ForumCollector(CollectorSkeleton):
             closer = getattr(self._client, "aclose", None) or self._client.close
             await closer()
         await super().stop()
+
+    async def health(self) -> CollectorHealth:
+        """Report FAULTED while halted on unparseable data; else delegate."""
+        base = await super().health()
+        if self._faulted is not None:
+            return base.model_copy(
+                update={"state": CollectorState.FAULTED, "last_error": self._faulted}
+            )
+        return base
 
     def _abs(self, path: str) -> str:
         """Absolute origin URL for a board-relative ``path`` (for Referer)."""
@@ -650,6 +685,12 @@ class ForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
+        # FAULTED: a fail-closed halt (unparseable date). Stay fully idle — no board
+        # requests, no writes — until an operator restarts the collector. We do NOT
+        # keep retrying: retrying would re-hit the same bad data and either loop or
+        # resume poisoning the corpus, which is exactly what the halt prevents.
+        if self._faulted is not None:
+            return
         # In a 429 cooldown: stay fully silent — don't even enter the sweep. Without
         # this, every tick re-entered _tick_body (the throttle handler below resets
         # _last_discovery=0), logged a sweep_start, then aborted at the _get cooldown
@@ -670,6 +711,21 @@ class ForumCollector(CollectorSkeleton):
                 level=SystemLogLevel.WARN,
                 event="forum.rate_limited",
                 message=f"{self._identity_name}: {exc}",
+            )
+        except UnparseableDateError as exc:
+            # Fail-closed: a post date we can't parse would be now()-substituted
+            # (false recency). We did NOT write it. HALT the collector rather than
+            # keep backfilling garbage — the parser is missing this board's date
+            # format and a human must add it (the raw string is in the message).
+            self._faulted = str(exc)
+            await self.syslog(
+                level=SystemLogLevel.ERROR,
+                event="forum.faulted_unparseable_date",
+                message=(
+                    f"{self._identity_name}: FAULTED - refusing to ingest a post with an "
+                    f"unparseable date ({exc}); collector HALTED (no now() backfill). "
+                    "Add the board's date format to _mybb._parse_date and restart."
+                ),
             )
 
     async def _tick_body(self) -> None:
@@ -1148,14 +1204,17 @@ class ForumCollector(CollectorSkeleton):
                 "author - selector miss, row refused (WHO is unknown)",
             )
             return
+        # FAIL-CLOSED on the timestamp, BEFORE any write. An unparseable date must
+        # never become now() (false recency on an old leak — CLAUDE.md 4a). Raise
+        # so tick() FAULTS the collector: stop, don't backfill garbage. Nothing for
+        # THIS post is written; the raw string rides the exception to the operator.
+        sent_at = posted_at_to_utc(post.posted_at)
+        if sent_at is None:
+            raise UnparseableDateError(tid=tid, pid=post.pid, raw=post.posted_raw)
         now = datetime.now(tz=UTC)
         # Board-scope the userid: MyBB slugs collide across boards.
         platform_userid = f"{self._board}|{post.author_username}"
         key = actor_key(SourceKind.FORUM, platform_userid)
-        # Normalize to UTC engine-agnostically (naive MyBB -> attach UTC; aware ->
-        # convert, never clobber the offset); fall back to now() for a
-        # relative/unparsed date. The per-source tz offset remains a calibration knob.
-        sent_at = posted_at_to_utc(post.posted_at) or now
 
         group_id = await self._storage.upsert_group(
             source_id=source_uuid,
@@ -1226,26 +1285,8 @@ class ForumCollector(CollectorSkeleton):
                 f"{'OP' if is_op else 'post'} parsed an empty body - possible selector miss",
             )
 
-        # No parsed date => sent_at fell back to now(). That silently rewrites an old
-        # leak as "posted today" and can start an incident on a 3-year-old dump — the
-        # single most damaging field to get wrong. WARN loud so the operator never
-        # trusts this row's recency. (A present-but-unparsed raw = format drift; an
-        # empty raw = the date span itself was missed.)
-        if post.posted_at is None:
-            detail = (
-                f"unparsed date {post.posted_raw!r}"
-                if post.posted_raw.strip()
-                else "date span missing"
-            )
-            # ERROR, not WARN: the enum's top severity. A now()-substituted date is the
-            # one field that manufactures false recency and can start an incident on an
-            # old leak — it outranks the empty-body / missing-title parse gripes.
-            await self.syslog(
-                level=SystemLogLevel.ERROR,
-                event="forum.post_date_fallback_now",
-                message=f"{self._identity_name}: tid={tid} pid={post.pid} {detail} - "
-                "timestamp fell back to now(); this row's recency is UNRELIABLE",
-            )
+        # (An unparseable date never reaches here — it raised UnparseableDateError
+        # above, before any write, and faults the collector. No now() backfill.)
 
         # Pure-quote posts strip to an empty body: no authored words to classify
         # (the quoted content belongs to someone else). Store as evidence but do
