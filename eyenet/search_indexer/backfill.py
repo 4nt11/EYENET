@@ -5,7 +5,14 @@ Read-only over the source tables (via the ``session()`` escape hatch, dialect-
 free ORM selects), writing only through ``put_search_documents_bulk`` (the
 upsert, so re-running is idempotent). Covers the entity types with clean reads:
 actor (+aliases), group (+candidates), message, persona, case, document,
-artifact, crew. Messages are batched; everything else is entity-scale.
+artifact, crew.
+
+Operates against the LIVE operating DB while collectors + the SearchIndexer are
+also writing, so it is built for contention:
+  * every bulk write is retried with backoff on a transient SQLite lock;
+  * messages are indexed **resumably** — each batch selects the next messages
+    NOT yet in ``search_document`` (index-backed ``NOT EXISTS``), so a re-run
+    only fills the gap left by an interrupted run instead of re-indexing all.
 
 Payloads come from the shared builders in ``haystack.py`` (the same ones the live
 SearchIndexer uses), so backfill and live indexing never drift.
@@ -13,10 +20,13 @@ SearchIndexer uses), so backfill and live indexing never drift.
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy import exists
+from sqlalchemy.exc import OperationalError
 from sqlmodel import col, select
 
 from eyenet.models import (
@@ -32,11 +42,29 @@ from eyenet.models import (
     ManualCrewTable,
     MessageTable,
     PersonaTable,
+    SearchDocumentTable,
 )
 from eyenet.search_indexer import haystack
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from eyenet.storage.repository import BaseRepository
+
+_RETRY_ATTEMPTS = 6
+
+
+async def _bulk(storage: BaseRepository, rows: Sequence[dict[str, Any]]) -> None:
+    """Upsert a batch, retrying on a transient SQLite lock (live-DB contention)."""
+    for attempt in range(_RETRY_ATTEMPTS):
+        try:
+            await storage.put_search_documents_bulk(rows)
+            return
+        except OperationalError as exc:
+            msg = str(exc).lower()
+            if attempt == _RETRY_ATTEMPTS - 1 or ("locked" not in msg and "busy" not in msg):
+                raise
+            await asyncio.sleep(0.5 * (attempt + 1))
 
 
 async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[str, int]:
@@ -73,9 +101,7 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
     for cm in crew_members:
         members_by_crew[cm.crew_id].append(cm.actor_id)
 
-    await storage.put_search_documents_bulk(
-        [haystack.actor_doc(a, aliases_by_actor.get(a.id, [])) for a in actors]
-    )
+    await _bulk(storage, [haystack.actor_doc(a, aliases_by_actor.get(a.id, [])) for a in actors])
     counts["actor"] = len(actors)
 
     group_rows: list[dict[str, Any]] = [
@@ -83,31 +109,33 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
         for g in groups
     ]
     group_rows += [haystack.candidate_group_doc(c) for c in candidates]
-    await storage.put_search_documents_bulk(group_rows)
+    await _bulk(storage, group_rows)
     counts["group"] = len(group_rows)
 
-    await storage.put_search_documents_bulk(
+    await _bulk(
+        storage,
         [
             haystack.persona_doc(p, [actor_handle.get(UUID(m), "") for m in p.member_actor_ids])
             for p in personas
-        ]
+        ],
     )
     counts["persona"] = len(personas)
 
-    await storage.put_search_documents_bulk([haystack.case_doc(c) for c in cases])
+    await _bulk(storage, [haystack.case_doc(c) for c in cases])
     counts["case"] = len(cases)
 
-    await storage.put_search_documents_bulk([haystack.document_doc(d) for d in documents])
+    await _bulk(storage, [haystack.document_doc(d) for d in documents])
     counts["document"] = len(documents)
 
-    await storage.put_search_documents_bulk([haystack.artifact_doc(a) for a in artifacts])
+    await _bulk(storage, [haystack.artifact_doc(a) for a in artifacts])
     counts["artifact"] = len(artifacts)
 
-    await storage.put_search_documents_bulk(
+    await _bulk(
+        storage,
         [
             haystack.crew_doc(cr, [actor_handle.get(m, "") for m in members_by_crew.get(cr.id, [])])
             for cr in crews
-        ]
+        ],
     )
     counts["crew"] = len(crews)
 
@@ -121,19 +149,31 @@ async def _backfill_messages(
     actor_handle: dict[UUID, str],
     batch: int,
 ) -> int:
-    """Index messages in batches via the shared message builder."""
+    """Index messages resumably: each batch takes the next messages NOT already in
+    search_document, so an interrupted run resumes from the gap on re-run."""
     total = 0
-    offset = 0
+    already_indexed = (
+        select(SearchDocumentTable.id)
+        .where(
+            SearchDocumentTable.entity_type == "message",
+            SearchDocumentTable.entity_id == MessageTable.id,
+        )
+        .correlate(MessageTable)
+    )
     while True:
         async with storage.session() as s:
             msgs = list(
                 await s.exec(
-                    select(MessageTable).order_by(col(MessageTable.id)).limit(batch).offset(offset)
+                    select(MessageTable)
+                    .where(~exists(already_indexed))
+                    .order_by(col(MessageTable.id))
+                    .limit(batch)
                 )
             )
         if not msgs:
             break
-        await storage.put_search_documents_bulk(
+        await _bulk(
+            storage,
             [
                 haystack.message_doc(
                     m,
@@ -141,12 +181,9 @@ async def _backfill_messages(
                     author_handle=actor_handle.get(m.actor_id),
                 )
                 for m in msgs
-            ]
+            ],
         )
         total += len(msgs)
-        offset += batch
-        if len(msgs) < batch:
-            break
     return total
 
 
