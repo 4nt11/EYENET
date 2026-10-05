@@ -349,7 +349,7 @@ class MyBBForumCollector(CollectorSkeleton):
                 event="forum.discovery_failed_at_startup",
                 message=(
                     f"{self._identity_name}: startup discovery failed "
-                    f"({type(exc).__name__}: {exc}) — collector starting anyway"
+                    f"({type(exc).__name__}: {exc}) - collector starting anyway"
                 ),
             )
 
@@ -398,7 +398,7 @@ class MyBBForumCollector(CollectorSkeleton):
         base = float(ra) if ra.isdigit() else DEFAULT_RETRY_AFTER
         pad = random.uniform(*RETRY_AFTER_PAD)  # noqa: S311 - jitter, not crypto
         self._cooldown_until = time.monotonic() + base + pad
-        raise RateLimited(f"429 → silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})")
+        raise RateLimited(f"429 -> silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})")
 
     async def _get(self, url: str, *, referer: str | None = None, **kw: Any) -> httpx.Response:
         """Every board request funnels through here: sequential + jittered delay.
@@ -801,7 +801,14 @@ class MyBBForumCollector(CollectorSkeleton):
             if self._max_thread_pages > 0:
                 pages = min(pages, self._max_thread_pages)
             title = parse_thread_title(first.text)  # subject from page 1, reused for all pages
-            await self._ingest_page(key, title, first.text)
+            if not title:
+                await self.syslog(
+                    level=SystemLogLevel.WARN,
+                    event="forum.thread_title_unparsed",
+                    message=f"{self._identity_name}: tid={key} - blank thread OP title "
+                    "(subject selector miss), falling back to tid",
+                )
+            await self._ingest_page(key, title, first.text, is_first_page=True)
             for page in range(2, pages + 1):
                 resp = await self._get(url, params={"page": page}, referer=self._abs(url))
                 await self._ingest_page(key, title, resp.text)
@@ -922,7 +929,14 @@ class MyBBForumCollector(CollectorSkeleton):
         first = await self._get("showthread.php", params={"tid": tid})
         pages = thread_page_count(first.text)
         title = parse_thread_title(first.text)
-        await self._ingest_page(tid, title, first.text)
+        if not title:
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.thread_title_unparsed",
+                message=f"{self._identity_name}: tid={tid} - blank thread OP title "
+                "(subject selector miss), falling back to tid",
+            )
+        await self._ingest_page(tid, title, first.text, is_first_page=True)
         for page in range(2, pages + 1):
             resp = await self._get("showthread.php", params={"tid": tid, "page": page})
             await self._ingest_page(tid, title, resp.text)
@@ -965,7 +979,9 @@ class MyBBForumCollector(CollectorSkeleton):
                 message=f"{self._identity_name}: re-fetch of {tid} after reply failed ({exc!r})",
             )
 
-    async def _ingest_page(self, tid: str, title: str | None, html: str) -> None:
+    async def _ingest_page(
+        self, tid: str, title: str | None, html: str, *, is_first_page: bool = False
+    ) -> None:
         posts = parse_thread(html)
         if not posts:
             _log.warning(
@@ -974,10 +990,14 @@ class MyBBForumCollector(CollectorSkeleton):
                 thread=tid,
             )
             return
-        for post in posts:
-            await self._ingest_post(tid, title, post)
+        # The OP is the first post on page 1; an OP-specific anomaly (e.g. no body)
+        # is a stronger signal than the same anomaly on a reply.
+        for index, post in enumerate(posts):
+            await self._ingest_post(tid, title, post, is_op=is_first_page and index == 0)
 
-    async def _ingest_post(self, tid: str, title: str | None, post: ParsedPost) -> None:
+    async def _ingest_post(
+        self, tid: str, title: str | None, post: ParsedPost, *, is_op: bool = False
+    ) -> None:
         source_uuid = self._source_uuid
         if source_uuid is None:
             return
@@ -990,11 +1010,15 @@ class MyBBForumCollector(CollectorSkeleton):
         # post is recovered by a re-crawl once the selector is fixed (put_message
         # is insert-only, so nothing here to purge).
         if not post.author_username.strip():
+            # ERROR, not WARN: attribution is non-negotiable in this field. A post with
+            # no author is the data that links aliases to personas — losing it means "we
+            # don't know WHO", which is unacceptable. Refuse the row AND log at top
+            # severity so a theme that drops authors is impossible to miss.
             await self.syslog(
-                level=SystemLogLevel.WARN,
+                level=SystemLogLevel.ERROR,
                 event="forum.post_skipped_no_author",
                 message=f"{self._identity_name}: tid={tid} pid={post.pid} parsed a blank "
-                "author — selector miss, row refused",
+                "author - selector miss, row refused (WHO is unknown)",
             )
             return
         now = datetime.now(tz=UTC)
@@ -1060,6 +1084,41 @@ class MyBBForumCollector(CollectorSkeleton):
         # unchanged thread writes nothing and must not re-spam the sensor.
         if not written:
             return
+
+        # Empty body_html = the post_body container was missing/empty. This is NOT a
+        # quote-only post (those keep their quote HTML, only body_text strips empty),
+        # so it is genuinely content-less: strange for any post, and on a thread OP it
+        # means the leak announcement itself did not parse. Log loud + distinct; keep
+        # the row (author/metadata are valid, a re-crawl recovers the body once a
+        # selector is fixed). Fires once per NEW post — the re-poll returned above.
+        if not post.body_html.strip():
+            await self.syslog(
+                level=SystemLogLevel.WARN,
+                event="forum.op_empty_body" if is_op else "forum.post_empty_body",
+                message=f"{self._identity_name}: tid={tid} pid={post.pid} "
+                f"{'OP' if is_op else 'post'} parsed an empty body - possible selector miss",
+            )
+
+        # No parsed date => sent_at fell back to now(). That silently rewrites an old
+        # leak as "posted today" and can start an incident on a 3-year-old dump — the
+        # single most damaging field to get wrong. WARN loud so the operator never
+        # trusts this row's recency. (A present-but-unparsed raw = format drift; an
+        # empty raw = the date span itself was missed.)
+        if post.posted_at is None:
+            detail = (
+                f"unparsed date {post.posted_raw!r}"
+                if post.posted_raw.strip()
+                else "date span missing"
+            )
+            # ERROR, not WARN: the enum's top severity. A now()-substituted date is the
+            # one field that manufactures false recency and can start an incident on an
+            # old leak — it outranks the empty-body / missing-title parse gripes.
+            await self.syslog(
+                level=SystemLogLevel.ERROR,
+                event="forum.post_date_fallback_now",
+                message=f"{self._identity_name}: tid={tid} pid={post.pid} {detail} - "
+                "timestamp fell back to now(); this row's recency is UNRELIABLE",
+            )
 
         # Pure-quote posts strip to an empty body: no authored words to classify
         # (the quoted content belongs to someone else). Store as evidence but do
