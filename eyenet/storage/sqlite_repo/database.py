@@ -127,6 +127,9 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "linkage_event_log",
         "persona_event_log",
         "identity_event_log",
+        # GLOBAL_SEARCH.md — derived cross-entity search index (post-baseline,
+        # created by migration 0006; FTS virtual tables are raw DDL below).
+        "search_document",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset(
@@ -196,6 +199,43 @@ _MESSAGE_FTS_DDL: tuple[str, ...] = (
 # small-operator scale; the fleet-scale prod path is the Postgres tsvector override, not
 # this. Gate it (e.g. a sentinel row) only if SQLite boot time ever bites.
 _MESSAGE_FTS_REBUILD = "INSERT INTO message_fts(message_fts) VALUES('rebuild')"
+
+# Global search index (GLOBAL_SEARCH.md). Two FTS5 external-content tables over
+# ``search_document`` because the FTS5 tokenizer is TABLE-level, not per-column:
+#   * search_fts_prose   — ``haystack`` with unicode61 (diacritics folded) for
+#     ranked token/phrase prose search over the Spanish-first corpus.
+#   * search_fts_handles — ``handles`` with the trigram tokenizer for TRUE
+#     substring match on identifiers (so ``zfo`` matches ``zfoleaks``).
+# Three triggers keep both in sync (search_document rows are upserted/edited by
+# the SearchIndexer). FTS5 is a SQLite extension → backend layer (Rule 1); the
+# Postgres backend uses tsvector/GIN + pg_trgm instead.
+_SEARCH_FTS_DDL: tuple[str, ...] = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts_prose "
+    "USING fts5(haystack, content='search_document', content_rowid='rowid', "
+    "tokenize='unicode61 remove_diacritics 2')",
+    "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts_handles "
+    "USING fts5(handles, content='search_document', content_rowid='rowid', "
+    "tokenize='trigram')",
+    "CREATE TRIGGER IF NOT EXISTS search_doc_fts_ai AFTER INSERT ON search_document BEGIN "
+    "INSERT INTO search_fts_prose(rowid, haystack) VALUES (new.rowid, new.haystack); "
+    "INSERT INTO search_fts_handles(rowid, handles) VALUES (new.rowid, new.handles); END",
+    "CREATE TRIGGER IF NOT EXISTS search_doc_fts_ad AFTER DELETE ON search_document BEGIN "
+    "INSERT INTO search_fts_prose(search_fts_prose, rowid, haystack) "
+    "VALUES('delete', old.rowid, old.haystack); "
+    "INSERT INTO search_fts_handles(search_fts_handles, rowid, handles) "
+    "VALUES('delete', old.rowid, old.handles); END",
+    "CREATE TRIGGER IF NOT EXISTS search_doc_fts_au AFTER UPDATE ON search_document BEGIN "
+    "INSERT INTO search_fts_prose(search_fts_prose, rowid, haystack) "
+    "VALUES('delete', old.rowid, old.haystack); "
+    "INSERT INTO search_fts_handles(search_fts_handles, rowid, handles) "
+    "VALUES('delete', old.rowid, old.handles); "
+    "INSERT INTO search_fts_prose(rowid, haystack) VALUES (new.rowid, new.haystack); "
+    "INSERT INTO search_fts_handles(rowid, handles) VALUES (new.rowid, new.handles); END",
+)
+_SEARCH_FTS_REBUILD: tuple[str, ...] = (
+    "INSERT INTO search_fts_prose(search_fts_prose) VALUES('rebuild')",
+    "INSERT INTO search_fts_handles(search_fts_handles) VALUES('rebuild')",
+)
 
 
 def _hamming64(a: int | None, b: int | None) -> int:
@@ -424,6 +464,44 @@ def _drop_audit_schema(conn: Any, table_names: frozenset[str]) -> None:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
 
+def _apply_search_document_schema(conn: Any) -> None:
+    """Create ``search_document`` + its two FTS5 indexes (migration 0006).
+
+    Post-baseline, so NOT part of ``_apply_main_schema`` (the baseline's frozen
+    set). Creating the ORM table via ``create_all`` guarantees index/constraint
+    parity with the model (the no-drift test); the FTS virtual tables + triggers
+    are raw DDL.
+    """
+
+    from sqlalchemy import text  # noqa: PLC0415
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(frozenset({"search_document"}))
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+    for stmt in _SEARCH_FTS_DDL:
+        conn.execute(text(stmt))
+    for stmt in _SEARCH_FTS_REBUILD:
+        conn.execute(text(stmt))
+
+
+def _drop_search_document_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_search_document_schema` (migration 0006 downgrade)."""
+
+    from sqlalchemy import text  # noqa: PLC0415
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    for trig in ("search_doc_fts_au", "search_doc_fts_ad", "search_doc_fts_ai"):
+        conn.execute(text(f"DROP TRIGGER IF EXISTS {trig}"))
+    conn.execute(text("DROP TABLE IF EXISTS search_fts_prose"))
+    conn.execute(text("DROP TABLE IF EXISTS search_fts_handles"))
+    tables = _filtered_tables(frozenset({"search_document"}))
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
 # Objects that live OUTSIDE SQLModel.metadata (raw DDL). ``env.py`` excludes
 # these from autogenerate so a future ``--autogenerate`` never emits a DROP for
 # what it cannot see in the models (the FTS index, its shadow tables, the
@@ -438,6 +516,17 @@ _RAW_DDL_OBJECTS: frozenset[str] = frozenset(
         "message_fts_docsize",
         "message_fts_config",
         "uq_signing_pubkey_active",
+        # GLOBAL_SEARCH.md — the two search FTS5 virtual tables + their shadows.
+        "search_fts_prose",
+        "search_fts_prose_data",
+        "search_fts_prose_idx",
+        "search_fts_prose_docsize",
+        "search_fts_prose_config",
+        "search_fts_handles",
+        "search_fts_handles_data",
+        "search_fts_handles_idx",
+        "search_fts_handles_docsize",
+        "search_fts_handles_config",
     }
 )
 
