@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -441,20 +441,23 @@ def parse_thread_title(html: str) -> str | None:
 
 
 def thread_page_count(html: str) -> int:
-    """Highest ``?page=N`` in a MyBB thread's pagination block (>= 1).
+    """Highest ``page=N`` in a MyBB pagination block (>= 1).
 
-    The collector walks pages 1..N. Reads the pagination anchors via the DOM and
-    the ``page`` query param via urllib (URL parsing, not markup regex). A thread
-    with no pagination block is a single page.
+    The collector walks pages 1..N. The page number is pulled from each pagination
+    anchor's href with a regex rather than ``parse_qs`` + ``isdigit``, because
+    raidforums.im's SEO rewrite emits a MALFORMED double-query when a sort is
+    applied (``Forum-Databases?page=205?sortby=started``): parse_qs then yields the
+    value ``"205?sortby=started"``, which ``isdigit()`` rejects, collapsing a
+    205-page forum to one page. The regex reads the digits after ``page=`` in any
+    of ``?page=N`` / ``&page=N`` / the malformed ``?page=N?...`` forms. A block with
+    no pagination anchors is a single page.
     """
     soup = BeautifulSoup(html, "html5lib")
     max_page = 1
     for anchor in soup.select("a.pagination_page, a.pagination_next, a.pagination_last"):
-        href = str(anchor.get("href", ""))
-        pages = parse_qs(urlparse(href).query).get("page", [])
-        for value in pages:
-            if value.isdigit():
-                max_page = max(max_page, int(value))
+        m = re.search(r"[?&]page=(\d+)", str(anchor.get("href", "")))
+        if m:
+            max_page = max(max_page, int(m.group(1)))
     return max_page
 
 

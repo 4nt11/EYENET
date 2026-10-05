@@ -281,6 +281,37 @@ def test_bare_date_only_falls_back_to_midnight_not_fault() -> None:
     assert _parse_date_only("10-05-2026") == datetime(2026, 10, 5, 0, 0)  # noqa: DTZ001
 
 
+def test_page_count_survives_raidforums_malformed_double_query() -> None:
+    # raidforums.im's SEO rewrite emits a MALFORMED double-query when sorted:
+    # "Forum-Databases?page=205?sortby=started". parse_qs + isdigit rejected the
+    # "205?sortby=started" value and collapsed a 205-page forum to one page.
+    from eyenet.collectors.forum._mybb import thread_page_count
+
+    html = (
+        "<html><body>"
+        '<a href="Forum-Databases?page=2?sortby=started" class="pagination_page">2</a>'
+        '<a href="Forum-Databases?page=205?sortby=started" class="pagination_last">205</a>'
+        "</body></html>"
+    )
+    assert thread_page_count(html) == 205
+
+    def one(href: str) -> int:
+        return thread_page_count(f'<a href="{href}" class="pagination_last">x</a>')
+
+    # well-formed forms still parse
+    assert one("Forum-X?page=7") == 7  # single query
+    assert one("Forum-X?sortby=started&page=9") == 9  # &-joined
+    assert one("Forum-X?page=12&order=desc") == 12  # page first, &-joined
+    # mangled forms the raidforums SEO rewrite can emit — all must still read N
+    assert one("Forum-X?page=42?sortby=started") == 42  # double '?' (the live bug)
+    assert one("Forum-X?sortby=started?page=43") == 43  # sort first, then a second '?'
+    assert one("Forum-X?page=44?sortby=started?order=desc") == 44  # triple '?'
+    assert one("Forum-X?order=desc&page=45?foo=bar") == 45  # '&' then a stray '?'
+    # genuine junk must NOT be mistaken for a page number (stays single-page)
+    assert one("Forum-X?page=abc?sortby=started") == 1
+    assert one("Forum-X?sortby=page=start") == 1  # 'page=' with no digits
+
+
 def _cf_encode(email: str, key: int = 0x2B) -> str:
     return bytes([key, *[ord(c) ^ key for c in email]]).hex()
 
