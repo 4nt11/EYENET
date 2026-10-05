@@ -257,7 +257,10 @@ class CollectorJoinHandler:
         Reused by :meth:`finalize_joined` (``from_state=JOINING``) and
         :meth:`confirm_requested_membership` (``from_state=REQUESTED``)."""
         at = now or datetime.now(tz=UTC)
-        group_id = await self._storage.upsert_group(
+        # The group becomes searchable via the message-ingest path (which emits
+        # entity.group.changed); the joined-status facet refresh on join is a
+        # documented Phase-3 refinement, so no emit here.
+        group_id, _ = await self._storage.upsert_group(
             source_id=source_uuid,
             platform_groupid=platform_groupid,
             kind=kind,

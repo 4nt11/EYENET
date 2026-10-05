@@ -25,14 +25,14 @@ def storage() -> BaseRepository:
 
 
 async def _actor(storage: BaseRepository, src: UUID, key: str, handle: str, uid: str) -> UUID:
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=src,
         actor_key=key,
         platform_userid=uid,
         handle=handle,
         display_name=handle.lstrip("@").title(),
         seen_at=_NOW,
-    )
+    ))[0]
 
 
 async def _msg(
@@ -67,7 +67,7 @@ async def _msg(
 
 async def _setup(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    grp = await storage.upsert_group(
+    grp, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g", kind=GroupKind.CHAT, title="g", seen_at=_NOW
     )
     alice = await _actor(storage, src, "tg:alice", "@alice", "111")

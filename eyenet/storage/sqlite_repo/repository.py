@@ -27,7 +27,8 @@ from eyenet.contracts.audit import (
     AuditLogRow,
     compute_self_hash,
 )
-from eyenet.models import CorpusCursorTable, FileAccessJournalTable
+from eyenet.models import CorpusCursorTable, FileAccessJournalTable, SearchDocumentTable
+from eyenet.models._base import new_uuid7
 from eyenet.models.file_access import FileAccessAcknowledgmentTable
 from eyenet.storage.sqlite_repo.database import (
     get_async_engine,
@@ -82,6 +83,9 @@ _FILE_ACCESS_INSERT_SQL = (
     "prev_journal_hash, self_hash, seq"
     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
+
+# FTS5 trigram tokenizer needs >= 3 chars; shorter queries skip the handles index.
+_TRIGRAM_MIN_CHARS = 3
 
 
 class SQLiteRepository(SQLModelRepository):
@@ -416,6 +420,59 @@ class SQLiteRepository(SQLModelRepository):
         return text(
             "message.rowid IN (SELECT rowid FROM message_fts WHERE message_fts MATCH :fts_q)"
         ).bindparams(fts_q=self._fts_query(q))
+
+    def _search_predicate(self, q: str) -> Any:
+        """SQLite override: FTS5 MATCH over the two ``search_document`` indexes.
+
+        Prose (unicode61) always; identifiers (trigram) only when the query is
+        >=3 chars, since the trigram tokenizer cannot match shorter terms and
+        would raise. Replaces the generic LIKE full-scan from ``SearchMixin``.
+        """
+        from sqlalchemy import text  # noqa: PLC0415
+
+        fts = self._fts_query(q)
+        clause = (
+            "search_document.rowid IN "
+            "(SELECT rowid FROM search_fts_prose WHERE search_fts_prose MATCH :sfts_q)"
+        )
+        if len(q.strip()) >= _TRIGRAM_MIN_CHARS:
+            clause += (
+                " OR search_document.rowid IN "
+                "(SELECT rowid FROM search_fts_handles WHERE search_fts_handles MATCH :sfts_hq)"
+            )
+            return text(clause).bindparams(sfts_q=fts, sfts_hq=fts)
+        return text(clause).bindparams(sfts_q=fts)
+
+    async def put_search_documents_bulk(self, rows: Sequence[dict[str, Any]]) -> None:
+        """SQLite override: atomic upsert on (entity_type, entity_id).
+
+        The generic SELECT-then-add races; SQLite expresses the upsert via
+        ``ON CONFLICT ... DO UPDATE``. Fresh rows need an explicit ``id`` (the
+        model's Python-side ``default_factory`` does not fire on a core insert).
+        """
+        if not rows:
+            return
+        values: list[dict[str, Any]] = []
+        for raw in rows:
+            r = self._coerce(dict(raw))
+            r["id"] = new_uuid7()
+            values.append(r)
+        stmt = sqlite_insert(SearchDocumentTable).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["entity_type", "entity_id"],
+            set_={
+                "source_id": stmt.excluded.source_id,
+                "status": stmt.excluded.status,
+                "title": stmt.excluded.title,
+                "subtitle": stmt.excluded.subtitle,
+                "haystack": stmt.excluded.haystack,
+                "handles": stmt.excluded.handles,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        async with safe_session(self._session_factory) as session:
+            await session.exec(stmt)
+            await session.commit()
 
     async def close(self) -> None:
         await self.engine.dispose()

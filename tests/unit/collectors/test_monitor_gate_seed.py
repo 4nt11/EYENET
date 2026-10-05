@@ -30,7 +30,7 @@ async def _joined_group(storage: BaseRepository, sid, coll_id, platform_groupid:
     cand = await storage.ensure_candidate(
         source_id=sid, platform_groupid=platform_groupid, seen_at=now
     )
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid,
         platform_groupid=platform_groupid,
         kind=GroupKind.CHANNEL,

@@ -34,14 +34,14 @@ async def _seed_message(storage: BaseRepository, *, body: str, title: str) -> ob
     source_id = await storage.upsert_source(
         kind=SourceKind.FORUM, display_name="darkforums", created_at=now
     )
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid=f"t-{new_uuid7().hex[:6]}",
         kind=GroupKind.FORUM_THREAD,
         title=title,
         seen_at=now,
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=f"a-{new_uuid7().hex[:6]}",
         platform_userid="u1",
@@ -150,7 +150,7 @@ async def _seed_thread(
     source_id = await storage.upsert_source(
         kind=SourceKind.FORUM, display_name="darkforums", created_at=now
     )
-    g = await storage.upsert_group(
+    g, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid=pgid,
         kind=GroupKind.FORUM_THREAD,
@@ -163,7 +163,7 @@ async def _seed_thread(
         thread_platform_groupid=pgid,
         seen_at=now,
     )
-    actor = await storage.upsert_actor(
+    actor, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key="a" + pgid,
         platform_userid="u",

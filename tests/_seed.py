@@ -36,7 +36,7 @@ async def seed_telegram_fixture(
         display_name=source_display_name,
         created_at=now,
     )
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid=platform_groupid,
         kind=GroupKind.CHAT,
@@ -47,7 +47,7 @@ async def seed_telegram_fixture(
     for rec in records:
         ak = rec["actor_key"]
         if ak not in actor_ids:
-            actor_ids[ak] = await storage.upsert_actor(
+            actor_ids[ak], _ = await storage.upsert_actor(
                 source_id=source_id,
                 actor_key=ak,
                 platform_userid=ak[-8:],

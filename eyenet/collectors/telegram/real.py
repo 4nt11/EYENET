@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from cryptography.fernet import Fernet
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.services.discovery.scout_graduation import ScoutGraduationService
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
@@ -833,14 +834,18 @@ class TelegramCollector(CollectorSkeleton):
         if self._source_uuid is None:
             raise RuntimeError("source_uuid not set — on_subscribe incomplete")
 
-        group_id = await self._storage.upsert_group(
+        group_id, group_changed = await self._storage.upsert_group(
             source_id=self._source_uuid,
             platform_groupid=platform_groupid,
             kind=group_kind,
             title=group_title,
             seen_at=collected_at,
         )
-        actor_id = await self._storage.upsert_actor(
+        if group_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="group", entity_id=group_id, source_id=self._source_uuid
+            )
+        actor_id, actor_changed = await self._storage.upsert_actor(
             source_id=self._source_uuid,
             actor_key=actor_key,
             platform_userid=author.platform_userid,
@@ -849,6 +854,10 @@ class TelegramCollector(CollectorSkeleton):
             seen_at=sent_at,
             is_bot=author.is_bot,
         )
+        if actor_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="actor", entity_id=actor_id, source_id=self._source_uuid
+            )
 
         platform_msgid = str(msg.id)
         evidence_ref = f"telegram:{platform_groupid}:{platform_msgid}"

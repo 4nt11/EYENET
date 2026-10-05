@@ -11,9 +11,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_storage
+from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_publisher, get_storage
 from eyenet.api.v1.cases._detail import audit_ctx
 from eyenet.api.v1.schemas.actor_groups import OpenCrewCaseRequest, OpenCrewCaseResult
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.linker.crew_cases import crew_key_for, open_case_for_crew
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -32,6 +33,7 @@ async def actor_groups_open_case(
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:cases"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher | None, Depends(get_publisher)] = None,
 ) -> OpenCrewCaseResult:
     ctx = audit_ctx(audit)
     case = await open_case_for_crew(
@@ -42,5 +44,6 @@ async def actor_groups_open_case(
         title=body.title,
         service=ctx["service"],
         instance_id=ctx["instance_id"],
+        publisher=publisher,
     )
     return OpenCrewCaseResult(case_id=case.id, crew_key=crew_key_for(body.top_infra, body.members))

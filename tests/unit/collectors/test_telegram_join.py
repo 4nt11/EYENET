@@ -570,7 +570,7 @@ async def test_confirm_requested_resolved_groupid_overrides_joinchat(
     # placeholder. upsert_group is idempotent on (source, platform_groupid), so a
     # repeat upsert of the resolved id returns the SAME group id, while a repeat
     # of the joinchat: placeholder would return a DIFFERENT (new) id.
-    resolved_again = await storage.upsert_group(
+    resolved_again, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid="4964840750",
         kind=GroupKind.CHANNEL,
@@ -578,7 +578,7 @@ async def test_confirm_requested_resolved_groupid_overrides_joinchat(
         seen_at=_NOW,
     )
     assert resolved_again == row.resulting_group_id
-    joinchat_again = await storage.upsert_group(
+    joinchat_again, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid="joinchat:AAAAAEHbEkabc",
         kind=GroupKind.CHANNEL,

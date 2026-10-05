@@ -25,14 +25,14 @@ def _page() -> CursorParams:
 
 async def _actor(storage: BaseRepository, now: datetime, key: str, handle: str):
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=src,
         actor_key=key,
         platform_userid=key[-2:],
         handle=handle,
         display_name=handle.title(),
         seen_at=now,
-    )
+    ))[0]
 
 
 async def test_graph_stats_counts(

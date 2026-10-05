@@ -45,6 +45,7 @@ from .observations import ObservationsMixin
 from .personas import PersonasMixin
 from .profiles import ProfilesMixin
 from .relations import RelationsMixin
+from .search import SearchMixin
 from .sources import SourcesMixin
 from .syslog import SyslogMixin
 from .users import UsersMixin
@@ -87,6 +88,7 @@ class SQLModelRepository(
     PersonasMixin,
     ProfilesMixin,
     RelationsMixin,
+    SearchMixin,
     SourcesMixin,
     SyslogMixin,
     UsersMixin,

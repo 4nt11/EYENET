@@ -43,7 +43,7 @@ async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
         created_at=_NOW,
         created_by_user_id=UUID(int=1),
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=src,
         actor_key="actor:1",
         platform_userid="1",
@@ -51,7 +51,7 @@ async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
         display_name=None,
         seen_at=_NOW,
     )
-    group = await storage.upsert_group(
+    group, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid="rootgroup",
         kind=GroupKind.CHANNEL,

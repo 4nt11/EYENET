@@ -404,10 +404,10 @@ async def test_add_actor_with_posts(
     sid = await storage.upsert_source(
         kind=SourceKind.FORUM, display_name="darkforums", created_at=now
     )
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="t1", kind=GroupKind.FORUM_THREAD, title="leak", seen_at=now
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=sid,
         actor_key="holl0w33n",
         platform_userid="1",

@@ -40,16 +40,15 @@ async def _actors(storage: BaseRepository, src: UUID, n: int) -> list[UUID]:
     now = datetime.now(tz=UTC)
     out = []
     for i in range(n):
-        out.append(
-            await storage.upsert_actor(
-                source_id=src,
-                actor_key=f"actor:{i}",
-                platform_userid=str(i),
-                handle=None,
-                display_name=f"bot{i}",
-                seen_at=now,
-            )
+        actor_id, _ = await storage.upsert_actor(
+            source_id=src,
+            actor_key=f"actor:{i}",
+            platform_userid=str(i),
+            handle=None,
+            display_name=f"bot{i}",
+            seen_at=now,
         )
+        out.append(actor_id)
     return out
 
 

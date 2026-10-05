@@ -38,14 +38,14 @@ async def _seed_actor(
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=source_id,
         actor_key=f"actor:u:{uid}",
         platform_userid=uid,
         handle=handle,
         display_name=display,
         seen_at=now,
-    )
+    ))[0]
 
 
 async def test_actors_get_detail(

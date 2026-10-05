@@ -26,14 +26,14 @@ async def fk_ids(storage: BaseRepository) -> tuple[UUID, UUID, UUID]:
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg:test", created_at=_NOW
     )
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid="-100",
         kind=GroupKind.CHAT,
         title="Test",
         seen_at=_NOW,
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key="actor:" + "a" * 64,
         platform_userid="1",

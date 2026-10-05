@@ -18,8 +18,10 @@ from uuid import UUID
 
 from eyenet.contracts.enums import CaseRoleOnCase, CaseSubjectKind, LinkageState
 from eyenet.linker.crews import Crew, build_crews
+from eyenet.search_indexer.events import publish_entity_changed
 
 if TYPE_CHECKING:
+    from eyenet.bus.publisher import BusEnvelopePublisher
     from eyenet.contracts.attribution import LinkageRow
     from eyenet.contracts.case import CaseRow
     from eyenet.storage.repository import BaseRepository
@@ -70,6 +72,7 @@ async def open_case_for_crew(
     service: str,
     instance_id: str,
     title: str | None = None,
+    publisher: BusEnvelopePublisher | None = None,
 ) -> CaseRow:
     """Open (or return the existing) Case for a crew and attach its actors.
 
@@ -112,6 +115,10 @@ async def open_case_for_crew(
             service=service,
             instance_id=instance_id,
         )
+    # Live reindex for the operator-triggered path; the bulk auto-sweep passes no
+    # publisher and relies on the backfill (GLOBAL_SEARCH.md as-built).
+    if publisher is not None:
+        await publish_entity_changed(publisher, entity_type="case", entity_id=case.id)
     return case
 
 

@@ -30,14 +30,14 @@ async def _actor(storage: BaseRepository, now: datetime, key: str, handle: str) 
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=source_id,
         actor_key=key,
         platform_userid=key[-3:],
         handle=handle,
         display_name=handle.title(),
         seen_at=now,
-    )
+    ))[0]
 
 
 async def test_graph_stats_counts_source_tables(

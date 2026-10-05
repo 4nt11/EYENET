@@ -43,24 +43,24 @@ async def _make_source(storage: BaseRepository, name: str = "SRC") -> UUID:
 
 
 async def _make_group(storage: BaseRepository, source_id: UUID, name: str) -> UUID:
-    return await storage.upsert_group(
+    return (await storage.upsert_group(
         source_id=source_id,
         platform_groupid=name,
         kind=GroupKind.CHANNEL,
         title=name,
         seen_at=_NOW,
-    )
+    ))[0]
 
 
 async def _make_actor(storage: BaseRepository, source_id: UUID, key_suffix: str) -> UUID:
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=source_id,
         actor_key=f"actor:{'a' * 60}{key_suffix[:4]}",
         platform_userid=key_suffix,
         handle=None,
         display_name=None,
         seen_at=_NOW,
-    )
+    ))[0]
 
 
 async def _record(

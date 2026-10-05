@@ -31,14 +31,14 @@ def _user() -> CurrentUser:
 
 
 async def _actor(storage: BaseRepository, src, uid: str, *, handle=None, display=None):
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=src,
         actor_key=f"actor:tg:{uid}",
         platform_userid=uid,
         handle=handle,
         display_name=display,
         seen_at=datetime.now(tz=UTC),
-    )
+    ))[0]
 
 
 @pytest.mark.unit

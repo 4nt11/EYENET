@@ -310,7 +310,7 @@ async def test_put_artifact_idempotent_on_value_hash(storage: BaseRepository) ->
 @pytest.mark.unit
 async def test_add_group_access_artifact_for_group(storage: BaseRepository) -> None:
     src = await _make_source(storage, "alpha")
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid="grp_a",
         kind=GroupKind.CHANNEL,
@@ -343,14 +343,14 @@ _FAKE_COLLECTOR_E55 = UUID("00000000-0000-0000-0000-0000000000e5")
 async def _candidate_for_artifacts(storage: BaseRepository, name: str) -> UUID:
     """Create a GroupCandidate (via a mention) to hang access artifacts off of."""
     src = await _make_source(storage, name)
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid=f"observed_{name}",
         kind=GroupKind.CHANNEL,
         title=f"observed_{name}",
         seen_at=_NOW,
     )
-    actor = await storage.upsert_actor(
+    actor, _ = await storage.upsert_actor(
         source_id=src,
         actor_key=f"actor:{'a' * 60}{name[:4]}",
         platform_userid=f"u_{name}",

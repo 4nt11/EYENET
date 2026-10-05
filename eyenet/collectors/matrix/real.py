@@ -89,6 +89,7 @@ from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.identity_pool.loader import IdentityFileEntry
 from eyenet.models import AttachmentTable, GroupTable, MessageTable, ReactionTable
 from eyenet.models._base import new_uuid7
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage import store_attachment
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
@@ -709,14 +710,15 @@ class MatrixCollector(CollectorSkeleton):
         display_name = room.user_name(event.sender) or None
         reply_to_platform_msgid = self._extract_reply_to(event)
 
-        group_id = await self._storage.upsert_group(
+        group_id, group_changed = await self._storage.upsert_group(
             source_id=self._source_uuid,
             platform_groupid=platform_groupid,
             kind=group_kind,
             title=group_title,
             seen_at=collected_at,
         )
-        actor_id = await self._storage.upsert_actor(
+        await self._emit_changed("group", group_id, group_changed)
+        actor_id, actor_changed = await self._storage.upsert_actor(
             source_id=self._source_uuid,
             actor_key=actor_key,
             platform_userid=event.sender,
@@ -724,6 +726,7 @@ class MatrixCollector(CollectorSkeleton):
             display_name=display_name,
             seen_at=sent_at,
         )
+        await self._emit_changed("actor", actor_id, actor_changed)
         reply_to_msg_id: UUID | None = None
         source_specific: dict[str, Any] = {}
         if reply_to_platform_msgid is not None:
@@ -924,6 +927,16 @@ class MatrixCollector(CollectorSkeleton):
         ):
             await self._ingest_media_event_inner(room, event)
 
+    async def _emit_changed(self, entity_type: str, entity_id: UUID, changed: bool) -> None:
+        """Emit entity.<type>.changed only when the write changed searchable content."""
+        if changed and self._source_uuid is not None:
+            await publish_entity_changed(
+                self.publisher,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                source_id=self._source_uuid,
+            )
+
     async def _ingest_media_event_inner(self, room: MatrixRoom, event: Any) -> None:
         if not self._should_ingest(room, getattr(event, "sender", None)):
             return
@@ -944,14 +957,15 @@ class MatrixCollector(CollectorSkeleton):
         display_name = room.user_name(event.sender) or None
         reply_to_platform_msgid = self._extract_reply_to(event)
 
-        group_id = await self._storage.upsert_group(
+        group_id, group_changed = await self._storage.upsert_group(
             source_id=self._source_uuid,
             platform_groupid=platform_groupid,
             kind=GroupKind.MATRIX_ROOM,
             title=group_title,
             seen_at=collected_at,
         )
-        actor_id = await self._storage.upsert_actor(
+        await self._emit_changed("group", group_id, group_changed)
+        actor_id, actor_changed = await self._storage.upsert_actor(
             source_id=self._source_uuid,
             actor_key=actor_key,
             platform_userid=event.sender,
@@ -959,6 +973,7 @@ class MatrixCollector(CollectorSkeleton):
             display_name=display_name,
             seen_at=sent_at,
         )
+        await self._emit_changed("actor", actor_id, actor_changed)
         reply_to_msg_id: UUID | None = None
         source_specific: dict[str, Any] = {}
         if reply_to_platform_msgid is not None:
@@ -1119,7 +1134,7 @@ class MatrixCollector(CollectorSkeleton):
                 target=target_event_id,
             )
             return
-        actor_id = await self._storage.upsert_actor(
+        actor_id, actor_changed = await self._storage.upsert_actor(
             source_id=self._source_uuid,
             actor_key=actor_key,
             platform_userid=event.sender,
@@ -1127,6 +1142,7 @@ class MatrixCollector(CollectorSkeleton):
             display_name=room.user_name(event.sender) or None,
             seen_at=reacted_at,
         )
+        await self._emit_changed("actor", actor_id, actor_changed)
         row = ReactionTable(
             id=new_uuid7(),
             message_id=target_uuid,

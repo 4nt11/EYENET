@@ -23,10 +23,10 @@ _NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
 async def _seed_message(storage: BaseRepository) -> UUID:
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    grp = await storage.upsert_group(
+    grp, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g", kind=GroupKind.CHAT, title="g", seen_at=_NOW
     )
-    actor = await storage.upsert_actor(
+    actor, _ = await storage.upsert_actor(
         source_id=src,
         actor_key="tg:a",
         platform_userid="1",

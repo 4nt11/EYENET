@@ -20,6 +20,7 @@ from eyenet.api.deps import (
     ResourceNotFound,
     ScopeForbidden,
     get_audit,
+    get_publisher,
     get_storage,
 )
 from eyenet.api.v1.cases._detail import (
@@ -29,7 +30,9 @@ from eyenet.api.v1.cases._detail import (
     require_owner_or_admin_case,
 )
 from eyenet.api.v1.schemas.cases import CaseDetail, CaseReopenRequest
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import CaseRoleOnCase, CaseStatus
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage.errors import CaseError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -49,6 +52,7 @@ async def cases_reopen(
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:cases"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher | None, Depends(get_publisher)] = None,
 ) -> CaseDetail:
     existing = await storage.get_case(case_id)
     if existing is None:
@@ -86,6 +90,8 @@ async def cases_reopen(
     else:
         raise ConflictError(f"cannot reopen a case in status {existing.status.value}")
 
+    if publisher is not None:
+        await publish_entity_changed(publisher, entity_type="case", entity_id=result_id)
     detail = await build_case_detail(storage, result_id)
     if detail is None:  # pragma: no cover — just-written row must exist
         raise ResourceNotFound("case")

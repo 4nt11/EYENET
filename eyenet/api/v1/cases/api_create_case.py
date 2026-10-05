@@ -11,10 +11,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_storage
+from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_publisher, get_storage
 from eyenet.api.v1.cases._detail import audit_ctx, build_case_detail
 from eyenet.api.v1.schemas.cases import CaseCreateRequest, CaseDetail
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import CaseRoleOnCase
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -32,6 +34,7 @@ async def cases_create(
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:cases"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher | None, Depends(get_publisher)] = None,
 ) -> CaseDetail:
     ctx = audit_ctx(audit)
     row = await storage.create_case(
@@ -40,6 +43,8 @@ async def cases_create(
         opened_by_user_id=current_user.user_id,
         **ctx,
     )
+    if publisher is not None:
+        await publish_entity_changed(publisher, entity_type="case", entity_id=row.id)
     await storage.add_case_collaborator(
         case_id=row.id,
         user_id=current_user.user_id,

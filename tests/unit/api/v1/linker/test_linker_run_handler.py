@@ -39,7 +39,7 @@ def _user() -> CurrentUser:
 
 
 async def _post(storage, src, gid, uid, body, n):
-    a = await storage.upsert_actor(
+    a, _ = await storage.upsert_actor(
         source_id=src,
         actor_key=f"a{uid}",
         platform_userid=uid,
@@ -70,7 +70,7 @@ async def _post(storage, src, gid, uid, body, n):
 async def test_run_infra_and_detect_copypasta(storage: BaseRepository) -> None:
     now = datetime.now(tz=UTC)
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g", kind=GroupKind.CHANNEL, title="g", seen_at=now
     )
     # 3 accounts posting the same ad (shared @handle in-body + copypasta template).

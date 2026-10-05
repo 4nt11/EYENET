@@ -37,6 +37,7 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "classify.document.uploaded",
     "classify.attachment.stored",
     "incident.detected",
+    "entity.",
     "eyenet.audit.",
     "eyenet.control.",
     "eyenet.identity.",

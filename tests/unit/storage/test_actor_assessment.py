@@ -26,10 +26,10 @@ async def _seed(storage: BaseRepository):
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW
     )
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=source_id, actor_key="a:1", platform_userid="1",
         handle="h", display_name=None, seen_at=_NOW,
-    )
+    ))[0]
 
 
 async def test_set_assessment_roundtrip(storage: BaseRepository) -> None:

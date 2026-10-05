@@ -25,13 +25,13 @@ def storage() -> BaseRepository:
 
 async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID, UUID]:
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    g1 = await storage.upsert_group(
+    g1, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g1", kind=GroupKind.CHAT, title="g1", seen_at=_NOW
     )
-    g2 = await storage.upsert_group(
+    g2, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g2", kind=GroupKind.CHAT, title="g2", seen_at=_NOW
     )
-    alice = await storage.upsert_actor(
+    alice, _ = await storage.upsert_actor(
         source_id=src,
         actor_key="k:a",
         platform_userid="1",
@@ -40,7 +40,7 @@ async def _seed(storage: BaseRepository) -> tuple[UUID, UUID, UUID, UUID]:
         seen_at=_NOW,
         is_bot=False,
     )
-    bot = await storage.upsert_actor(
+    bot, _ = await storage.upsert_actor(
         source_id=src,
         actor_key="k:b",
         platform_userid="2",

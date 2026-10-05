@@ -24,6 +24,7 @@ _BUS_MODULES: frozenset[str] = frozenset(
         "eyenet.contracts.attribution",
         "eyenet.contracts.audit",
         "eyenet.contracts.classify_events",
+        "eyenet.contracts.search_events",
         "eyenet.contracts.control",
         "eyenet.contracts.anchor_events",
         "eyenet.contracts.incident",
