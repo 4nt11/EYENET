@@ -5,6 +5,7 @@
   import NavRail from '$lib/components/NavRail.svelte';
   import Login from '$lib/components/Login.svelte';
   import { auth, loadMe } from '$lib/auth.svelte.js';
+  import { ui } from '$lib/ui.svelte.js';
   let { children } = $props();
 
   // Validate any stored token on boot; marks auth.ready when settled.
@@ -19,7 +20,7 @@
   <div class="app">
     <TopBar />
     <div class="shell">
-      <NavRail />
+      {#if !ui.navCollapsed}<NavRail />{/if}
       <div class="content">{@render children()}</div>
     </div>
   </div>

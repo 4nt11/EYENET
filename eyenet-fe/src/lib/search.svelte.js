@@ -27,6 +27,9 @@ export const searchCtx = $state({
   items: [],
   byType: {},
   bySource: {},
+  // source_id -> human display name (e.g. "forum:darkforums-1"). The API resolves
+  // these server-side; we fall back to the short hex id for anything unmapped.
+  sourceLabels: {},
   nextCursor: null,
   total: null,
   loaded: false,
@@ -35,6 +38,13 @@ export const searchCtx = $state({
   typeFilter: null,
   sourceFilter: null
 });
+
+// Human-readable name for a source id: the API-provided display name, else the
+// first 8 hex chars, else '' for a null source.
+export function sourceName(id) {
+  if (!id) return '';
+  return searchCtx.sourceLabels[id] ?? short(id);
+}
 
 function searchQuery(cursor) {
   const p = new URLSearchParams({ q: searchCtx.q, limit: '50' });
@@ -56,6 +66,7 @@ export async function runSearch(q) {
     searchCtx.items = [];
     searchCtx.byType = {};
     searchCtx.bySource = {};
+    searchCtx.sourceLabels = {};
     searchCtx.nextCursor = null;
     searchCtx.total = null;
     searchCtx.error = null;
@@ -70,6 +81,7 @@ export async function runSearch(q) {
     searchCtx.items = page.items.map(mapHit);
     searchCtx.byType = page.by_type ?? {};
     searchCtx.bySource = page.by_source ?? {};
+    searchCtx.sourceLabels = page.source_labels ?? {};
     searchCtx.nextCursor = page.next_cursor ?? null;
     searchCtx.total = page.estimated_total ?? null;
     searchCtx.error = null;
@@ -79,6 +91,7 @@ export async function runSearch(q) {
     searchCtx.items = [];
     searchCtx.byType = {};
     searchCtx.bySource = {};
+    searchCtx.sourceLabels = {};
     searchCtx.nextCursor = null;
   } finally {
     if (mine === seq) searchCtx.loaded = true;
@@ -91,6 +104,7 @@ export async function loadMoreSearch() {
   try {
     const page = await apiGet(`/v1/search?${searchQuery(searchCtx.nextCursor)}`, { auth: true });
     searchCtx.items = [...searchCtx.items, ...page.items.map(mapHit)];
+    searchCtx.sourceLabels = { ...searchCtx.sourceLabels, ...(page.source_labels ?? {}) };
     searchCtx.nextCursor = page.next_cursor ?? null;
   } catch (e) {
     searchCtx.error = e.message ?? String(e);

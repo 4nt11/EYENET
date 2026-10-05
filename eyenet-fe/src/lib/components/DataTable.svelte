@@ -1,15 +1,36 @@
 <script>
   import Badge from './Badge.svelte';
   // Dense evidence table. columns: [{ key, header, width?, align?, mono?, badge? }]
-  let { columns = [], rows = [], onRowClick, selectedId = null, rowKey = 'id' } = $props();
+  //
+  // Opt-in layout flags (all default off, so existing callers are untouched):
+  //   stickyHead  — the <thead> row sticks while an ANCESTOR scroll container
+  //                 scrolls. Requires the table's own wrapper to NOT be a scroll
+  //                 container, so it also drops the wrap's clipping overflow.
+  //   stickyTop   — offset for the sticky header (e.g. under a sticky section bar).
+  //   flat        — drop the wrap border/radius (when the table sits inside an
+  //                 already-framed section).
+  //   fixed       — table-layout:fixed + per-cell ellipsis, so long text truncates
+  //                 instead of forcing horizontal overflow (needed when stickyHead
+  //                 removes the wrap's horizontal clip).
+  let {
+    columns = [],
+    rows = [],
+    onRowClick,
+    selectedId = null,
+    rowKey = 'id',
+    stickyHead = false,
+    stickyTop = '0',
+    flat = false,
+    fixed = false
+  } = $props();
 </script>
 
-<div class="wrap">
+<div class="wrap" class:sticky={stickyHead} class:flat class:fixed>
   <table>
     <thead>
       <tr>
         {#each columns as c}
-          <th style="text-align:{c.align ?? 'left'}; width:{c.width ?? 'auto'};">{c.header}</th>
+          <th style="text-align:{c.align ?? 'left'}; width:{c.width ?? 'auto'}; top:{stickyTop};">{c.header}</th>
         {/each}
       </tr>
     </thead>
@@ -47,7 +68,14 @@
     overflow: hidden;
     background: var(--surface);
   }
+  /* Sticky-head mode: the wrapper must not clip or create a scroll context, so
+     the <thead> can stick to the nearest *ancestor* scroll container (the page). */
+  .wrap.sticky { overflow: visible; }
+  .wrap.flat { border: none; border-radius: 0; background: transparent; }
   table { width: 100%; border-collapse: collapse; font-family: var(--font-sans); }
+  .wrap.fixed table { table-layout: fixed; }
+  .wrap.sticky th { position: sticky; z-index: 1; }
+  .wrap.fixed td, .wrap.fixed th { overflow: hidden; text-overflow: ellipsis; }
   th {
     padding: 8px 12px;
     font-size: var(--fs-11);
