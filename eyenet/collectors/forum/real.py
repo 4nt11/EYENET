@@ -631,13 +631,21 @@ class MyBBForumCollector(CollectorSkeleton):
     async def tick(self) -> None:
         if self._client is None or self._source_uuid is None:
             return
+        # In a 429 cooldown: stay fully silent — don't even enter the sweep. Without
+        # this, every tick re-entered _tick_body (the throttle handler below resets
+        # _last_discovery=0), logged a sweep_start, then aborted at the _get cooldown
+        # guard — a per-second busy-spin that spammed the DB with forum.rate_limited
+        # rows for the whole ~10min window. Returning here makes a throttled collector
+        # truly idle; _last_discovery==0 still re-sweeps on the first tick AFTER the
+        # cooldown lapses.
+        if time.monotonic() < self._cooldown_until:
+            return
         try:
             await self._tick_body()
         except RateLimited as exc:
-            # The board 429'd us (or we're still mid-cooldown). Abort this sweep
-            # SILENTLY — no retry, no poll. Force a re-sweep next tick so we resume
-            # the moment the cooldown lapses; until then _guard_cooldown makes each
-            # tick a no-op (it raises before any request touches the wire).
+            # The board 429'd us. Abort this sweep SILENTLY — no retry, no poll.
+            # Reset _last_discovery so the first tick after the cooldown lapses
+            # re-sweeps promptly; the guard above keeps us idle until then.
             self._last_discovery = 0.0
             await self.syslog(
                 level=SystemLogLevel.WARN,

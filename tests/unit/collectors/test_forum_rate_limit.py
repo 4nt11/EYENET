@@ -181,6 +181,30 @@ async def test_429_without_retry_after_uses_default(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_tick_is_silent_during_cooldown(tmp_path: Path) -> None:
+    # During a 429 cooldown tick() must return BEFORE entering the sweep: no wire
+    # hit, no sweep_start, no per-second busy-spin (which spammed the DB).
+    import time
+    from uuid import uuid4
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, text="ok")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://host.onion"
+    ) as client:
+        coll = _collector(tmp_path, client)
+        coll._source_uuid = uuid4()  # past the tick() None-guard
+        coll._cooldown_until = time.monotonic() + 600  # mid-cooldown
+        await coll.tick()
+        assert calls["n"] == 0  # returned before any sweep/request
+
+
+@pytest.mark.unit
 def test_identity_detail_surfaces_running_profile() -> None:
     # The read surface must show which pacing profile a collector is running.
     from uuid import uuid4
