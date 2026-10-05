@@ -8,6 +8,7 @@ trigram/prose indexes the backfill populates. Seeds a small corpus, runs
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -81,4 +82,26 @@ async def test_backfill_is_idempotent(storage: BaseRepository) -> None:
     await backfill_search(storage)
     second = await storage.count_search_global("zfo")
     assert first == second
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_bulk_upsert_chunks_large_batch(storage: BaseRepository) -> None:
+    """A single bulk call larger than the SQLite variable-cap chunk size lands
+    every row (regression: 'too many SQL variables' on 90+ rows per INSERT)."""
+    rows = [
+        {
+            "entity_type": "actor",
+            "entity_id": uuid.uuid4(),
+            "source_id": None,
+            "status": None,
+            "title": f"bulkactor{i}",
+            "subtitle": None,
+            "haystack": f"bulkactor{i} payload",
+            "handles": f"bulkactor{i}",
+        }
+        for i in range(250)
+    ]
+    await storage.put_search_documents_bulk(rows)
+    assert await storage.count_search_global("bulkactor", types=["actor"]) == 250
     await storage.close()

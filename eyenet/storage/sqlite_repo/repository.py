@@ -87,6 +87,10 @@ _FILE_ACCESS_INSERT_SQL = (
 # FTS5 trigram tokenizer needs >= 3 chars; shorter queries skip the handles index.
 _TRIGRAM_MIN_CHARS = 3
 
+# Rows per multi-row INSERT for search_document (10 cols): 90 * 10 = 900 < SQLite's
+# 999-variable cap. Chunk the bulk upsert so large backfill batches never overflow it.
+_SEARCH_BULK_CHUNK = 90
+
 
 class SQLiteRepository(SQLModelRepository):
     """SQLite-backed repository: 2 physical DBs (main + audit), async engines."""
@@ -457,21 +461,25 @@ class SQLiteRepository(SQLModelRepository):
             r = self._coerce(dict(raw))
             r["id"] = new_uuid7()
             values.append(r)
-        stmt = sqlite_insert(SearchDocumentTable).values(values)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["entity_type", "entity_id"],
-            set_={
-                "source_id": stmt.excluded.source_id,
-                "status": stmt.excluded.status,
-                "title": stmt.excluded.title,
-                "subtitle": stmt.excluded.subtitle,
-                "haystack": stmt.excluded.haystack,
-                "handles": stmt.excluded.handles,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
+        # search_document is 10 columns; SQLite caps bind variables at 999
+        # (SQLITE_MAX_VARIABLE_NUMBER), so one multi-row INSERT is chunked to stay
+        # under it (90 * 10 = 900). All chunks commit in one transaction.
         async with safe_session(self._session_factory) as session:
-            await session.exec(stmt)
+            for i in range(0, len(values), _SEARCH_BULK_CHUNK):
+                stmt = sqlite_insert(SearchDocumentTable).values(values[i : i + _SEARCH_BULK_CHUNK])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["entity_type", "entity_id"],
+                    set_={
+                        "source_id": stmt.excluded.source_id,
+                        "status": stmt.excluded.status,
+                        "title": stmt.excluded.title,
+                        "subtitle": stmt.excluded.subtitle,
+                        "haystack": stmt.excluded.haystack,
+                        "handles": stmt.excluded.handles,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                await session.exec(stmt)
             await session.commit()
 
     async def close(self) -> None:
