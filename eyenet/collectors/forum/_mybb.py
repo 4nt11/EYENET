@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
+from bs4.element import Tag
 
 from eyenet.collectors.forum._post import ParsedPost
 
@@ -50,7 +50,15 @@ _HIDE_GATE = re.compile(r"reply to (?:this )?thread to view", re.IGNORECASE)
 # per-board locale setting, not an engine difference. Tried in order; the 2-digit
 # vs 4-digit year keeps them unambiguous (one fails ValueError, the other parses).
 _DATE_FMTS = ("%d-%m-%y, %I:%M %p", "%m-%d-%Y, %I:%M %p")
+# The DATE half alone (no time). A "Yesterday" / "Today" post renders the absolute
+# DATE in the tooltip title and the TIME as trailing text; this parses the title
+# date so it can be recombined with that time. Also the last-resort for a genuinely
+# date-only stamp (-> midnight), still a real date, never a now() substitution.
+_DATE_ONLY_FMTS = ("%d-%m-%y", "%m-%d-%Y")
 _TIME_FMT = "%I:%M %p"  # the time tail shared by "Today,"/"Yesterday," forms
+# The "01:40 PM" time tail, pulled out of a "Yesterday, 01:40 PM" rendering to
+# recombine with the tooltip's absolute date.
+_TIME_RE = re.compile(r"(\d{1,2}:\d{2}\s*[AP]M)", re.IGNORECASE)
 _REL_UNITS = {
     "second": 1,
     "sec": 1,
@@ -137,18 +145,80 @@ def _parse_date(raw: str, *, now: datetime | None = None) -> datetime | None:
     return None
 
 
-def _direct_text(node: Tag) -> str:
-    """First direct (non-descendant) text of a node, stripped.
+def _parse_date_only(raw: str) -> datetime | None:
+    """Parse a bare DATE (no time) to midnight, or None. Last resort before fault."""
+    raw = raw.strip()
+    for fmt in _DATE_ONLY_FMTS:
+        try:
+            return datetime.strptime(raw, fmt)  # noqa: DTZ007 - board-local naive
+        except ValueError:
+            continue
+    return None
 
-    ``post_date`` holds the date as a direct string then nests the (usually
-    empty) ``post_edit`` span; we want only the direct string.
+
+def _post_date_text(date_span: Tag) -> str:
+    """Visible text of ``span.post_date`` MINUS the trailing ``post_edit`` note.
+
+    The edit note ("(This post was last modified: ...)") lives in a nested
+    ``span.post_edit`` and would otherwise pollute the date string.
     """
-    for child in node.children:
-        if isinstance(child, NavigableString):
-            text = child.strip()
-            if text:
-                return text
-    return ""
+    parts: list[str] = []
+    for child in date_span.children:
+        if isinstance(child, Tag):
+            cls = child.get("class")
+            classes = cls.split() if isinstance(cls, str) else list(cls or [])
+            if "post_edit" in classes:
+                continue
+            text = child.get_text()
+        else:
+            text = str(child)
+        if text.strip():
+            parts.append(text.strip())
+    return " ".join(parts).replace(" ,", ",").strip()
+
+
+def _extract_post_datetime(date_span: Tag) -> tuple[str, datetime | None]:
+    """Resolve ``span.post_date`` to (raw, datetime) across darkforums' layouts.
+
+    Three renderings, all handled, preferring an EXACT absolute timestamp:
+    - direct text ``06-09-26, 10:56 PM`` (older posts)
+    - nested tooltip holding the full timestamp: ``<span title="29-09-26,
+      01:24 AM">4 hours ago</span>`` (recent posts) -> use the title
+    - split "Yesterday"/"Today": ``<span title="05-10-26">Yesterday</span>,
+      01:40 PM`` -> the tooltip has the DATE, the trailing text the TIME; recombine
+      them into ``05-10-26, 01:40 PM`` rather than losing the time to a fault.
+
+    Returns (raw, None) only when nothing yields a real date — the caller then
+    fails closed (no now() substitution).
+    """
+    titled = date_span.select_one("span[title]")
+    title = str(titled.get("title", "")).strip() if titled else ""
+    full = _post_date_text(date_span)  # e.g. "Yesterday, 01:40 PM" / "06-09-26, 10:56 PM"
+
+    # 1. Tooltip is itself a full absolute timestamp (recent-post layout).
+    if title:
+        dt = _parse_date(title)
+        if dt is not None:
+            return title, dt
+    # 2. Tooltip is a bare DATE and the visible text carries the TIME: recombine.
+    tm = _TIME_RE.search(full)
+    if title and tm and _parse_date_only(title) is not None:
+        combined = f"{title}, {tm.group(1)}"
+        dt = _parse_date(combined)
+        if dt is not None:
+            return combined, dt
+    # 3. The visible text parses on its own (direct absolute, or relative "N ago").
+    if full:
+        dt = _parse_date(full)
+        if dt is not None:
+            return full, dt
+    # 4. Date-only last resort (-> midnight): a real date beats a now() lie.
+    for cand in (title, full):
+        if cand:
+            dt = _parse_date_only(cand)
+            if dt is not None:
+                return cand, dt
+    return (title or full), None
 
 
 def parse_thread(html: str) -> list[ParsedPost]:
@@ -177,18 +247,11 @@ def parse_thread(html: str) -> list[ParsedPost]:
         author_display = author_link.get_text(strip=True) if author_link else ""
 
         # Date rendering varies by post age on darkforums: older posts carry the
-        # absolute timestamp as direct text ("06-09-26, 10:56 PM"); recent ones
-        # render a relative label with the EXACT timestamp in a nested
-        # <span title="29-09-26, 01:24 AM">4 hours ago</span>. Prefer that title
-        # (precise absolute) over the relative text; fall back to the direct text
-        # for the older layout. post_edit is also nested but carries no title.
+        # Date rendering varies by post age (direct text / nested-tooltip /
+        # split "Yesterday, HH:MM"); _extract_post_datetime handles all three and
+        # returns (raw, None) only when nothing is a real date (caller fails closed).
         date_span = container.select_one("span.post_date")
-        posted_raw = ""
-        if date_span is not None:
-            titled = date_span.select_one("span[title]")
-            title_ts = str(titled.get("title", "")).strip() if titled else ""
-            posted_raw = title_ts or _direct_text(date_span)
-        posted_at = _parse_date(posted_raw) if posted_raw else None
+        posted_raw, posted_at = _extract_post_datetime(date_span) if date_span else ("", None)
 
         edit_span = container.select_one("span.post_edit")
         edited = bool(edit_span and edit_span.get_text(strip=True))

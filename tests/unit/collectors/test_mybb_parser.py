@@ -255,6 +255,32 @@ def test_recent_post_date_uses_nested_title_not_relative_label() -> None:
     assert post.posted_at == datetime(2026, 9, 29, 1, 24)  # noqa: DTZ001
 
 
+def test_split_yesterday_date_recombines_tooltip_date_with_trailing_time() -> None:
+    # darkforums "Yesterday"/"Today" posts split the stamp: the tooltip holds the
+    # absolute DATE (no time), the trailing text the TIME. Recombine to the exact
+    # timestamp instead of faulting on the date-only tooltip.
+    html = (
+        '<div class="post classic" id="post_8">'
+        '<div class="post_user-profile"><a href="User-zfo">zfo</a></div>'
+        '<span class="post_date"><span title="05-10-26">Yesterday</span>, 01:40 PM'
+        ' <span class="post_edit" id="edited_by_8"></span></span>'
+        '<div class="post_body">dump</div></div>'
+    )
+    (post,) = parse_thread(html)
+    assert post.posted_raw == "05-10-26, 01:40 PM"
+    assert post.posted_at == datetime(2026, 10, 5, 13, 40)  # noqa: DTZ001
+
+
+def test_bare_date_only_falls_back_to_midnight_not_fault() -> None:
+    # A genuinely date-only stamp (no time anywhere) -> midnight: a real date still
+    # beats a now() lie, and keeps the collector from faulting on it.
+    from eyenet.collectors.forum._mybb import _parse_date, _parse_date_only
+
+    assert _parse_date("05-10-26") is None  # strict: no time -> not a full parse
+    assert _parse_date_only("05-10-26") == datetime(2026, 10, 5, 0, 0)  # noqa: DTZ001
+    assert _parse_date_only("10-05-2026") == datetime(2026, 10, 5, 0, 0)  # noqa: DTZ001
+
+
 def _cf_encode(email: str, key: int = 0x2B) -> str:
     return bytes([key, *[ord(c) ^ key for c in email]]).hex()
 
