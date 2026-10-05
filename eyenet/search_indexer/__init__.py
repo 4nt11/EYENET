@@ -1,18 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Global-search indexing (GLOBAL_SEARCH.md).
 
-Phase 1 ships the ONE-SHOT BACKFILL (`backfill.py`) that populates
-``search_document`` from the existing corpus — the operator-run bootstrap that
-makes ``GET /v1/search`` return results. It is read-only over the source tables
-and writes only ``search_document`` via the bulk upsert, so it is safe to run
-against the live operating DB.
+- ``backfill.backfill_search`` — the one-shot corpus bootstrap (``eyenet
+  search-backfill``), read-only over the source tables.
+- ``service.SearchIndexerService`` — the live, event-driven indexer: subscribes
+  to ``entity.>`` (change-gated actor/group/case events), ``raw.message.>``,
+  ``attribution.persona.updated`` and the classify events, and reindexes the one
+  entity named in each.
+- ``events.publish_entity_changed`` — the emit helper write paths call.
+- ``haystack`` — the shared per-entity payload builders (backfill + service).
 
-The live, event-driven ``SearchIndexer`` service (subscribing to ``raw.message.>``
-et al.) and the new actor/group/case domain events are the remaining Phase 1
-freshness layer — deferred to land with live-NATS validation, since they touch
-the ingest/producer paths. Until then, re-run the backfill to refresh the index.
+Submodules are imported directly (no eager re-export) so importing ``events`` on
+the collector hot path does not pull in the backfill/service machinery.
 """
-
-from eyenet.search_indexer.backfill import backfill_search
-
-__all__ = ["backfill_search"]

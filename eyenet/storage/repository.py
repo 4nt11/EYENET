@@ -1794,7 +1794,9 @@ class BaseRepository(ABC):
         kind: GroupKind,
         title: str | None,
         seen_at: datetime,
-    ) -> UUID: ...
+    ) -> tuple[UUID, bool]:
+        """Upsert a group; returns ``(group_id, search_changed)`` where
+        ``search_changed`` gates the ``entity.group.changed`` event."""
 
     @abstractmethod
     async def upsert_actor(
@@ -1807,7 +1809,9 @@ class BaseRepository(ABC):
         display_name: str | None,
         seen_at: datetime,
         is_bot: bool = False,
-    ) -> UUID: ...
+    ) -> tuple[UUID, bool]:
+        """Upsert an actor; returns ``(actor_id, search_changed)`` where
+        ``search_changed`` gates the ``entity.actor.changed`` event."""
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...

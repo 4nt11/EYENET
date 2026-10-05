@@ -71,7 +71,7 @@ async def _monitor_category(storage: BaseRepository, sid, coll_id, slug: str):
     cand = await storage.ensure_candidate(
         source_id=sid, platform_groupid=slug, seen_at=now, kind=GroupKind.FORUM_CATEGORY
     )
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid=slug, kind=GroupKind.FORUM_CATEGORY, title=slug, seen_at=now
     )
     await storage.open_membership(

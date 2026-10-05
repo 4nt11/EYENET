@@ -14,11 +14,14 @@ from eyenet.api.deps import (
     RequireScope,
     ResourceNotFound,
     get_audit,
+    get_publisher,
     get_storage,
 )
 from eyenet.api.v1.cases._detail import audit_ctx, build_case_detail
 from eyenet.api.v1.schemas.cases import CaseDetail, CaseUpdateRequest
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import CaseStatus
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage.errors import CaseError
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
@@ -38,6 +41,7 @@ async def cases_update(
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:cases"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher | None, Depends(get_publisher)] = None,
 ) -> CaseDetail:
     existing = await storage.get_case(case_id)
     if existing is None:
@@ -54,6 +58,8 @@ async def cases_update(
         )
     except CaseError as exc:
         raise ConflictError(str(exc)) from exc
+    if publisher is not None:
+        await publish_entity_changed(publisher, entity_type="case", entity_id=case_id)
     detail = await build_case_detail(storage, case_id)
     if detail is None:  # pragma: no cover — existence checked above
         raise ResourceNotFound("case")

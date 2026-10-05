@@ -45,14 +45,14 @@ async def _seed_one_actor_with_bodies(
         display_name="telegram:isolation_test",
         created_at=_NOW,
     )
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid="-100",
         kind=GroupKind.CHAT,
         title="iso",
         seen_at=_NOW,
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=_ACTOR_KEY,
         platform_userid="iso",

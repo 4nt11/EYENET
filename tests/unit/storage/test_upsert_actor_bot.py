@@ -23,7 +23,7 @@ def storage() -> BaseRepository:
 
 async def _upsert(storage: BaseRepository, key: str, *, is_bot: bool):
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    aid = await storage.upsert_actor(
+    aid, _ = await storage.upsert_actor(
         source_id=src, actor_key=key, platform_userid=key[-6:], handle="@x",
         display_name="X", seen_at=_NOW, is_bot=is_bot,
     )
@@ -43,7 +43,7 @@ async def test_default_is_not_bot(storage: BaseRepository) -> None:
 async def test_bot_flag_is_sticky(storage: BaseRepository) -> None:
     # First sight: bot. A later plain-post upsert must NOT clear the flag.
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    aid = await storage.upsert_actor(
+    aid, _ = await storage.upsert_actor(
         source_id=src, actor_key="tg:sticky", platform_userid="1", handle="@b",
         display_name="B", seen_at=_NOW, is_bot=True,
     )

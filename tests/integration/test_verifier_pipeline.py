@@ -52,14 +52,14 @@ async def _seed_corpus_async(
         display_name=f"telegram:{msg_prefix}",
         created_at=_NOW,
     )
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid=f"-100-{msg_prefix}",
         kind=GroupKind.CHAT,
         title="test",
         seen_at=_NOW,
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=f"actor:test:{msg_prefix}",
         platform_userid=msg_prefix,

@@ -334,7 +334,11 @@ class ActorsMixin:
         kind: GroupKind,
         title: str | None,
         seen_at: datetime,
-    ) -> UUID:
+    ) -> tuple[UUID, bool]:
+        """Returns ``(group_id, search_changed)``. ``search_changed`` is True when
+        the group is newly created or its searchable field (title) actually
+        changed — the gate for emitting ``entity.group.changed`` (GLOBAL_SEARCH.md).
+        """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(
                 select(GroupTable).where(
@@ -354,8 +358,11 @@ class ActorsMixin:
                 )
                 session.add(row)
                 await session.flush()
+                search_changed = True
             else:
-                row.current_title = title or row.current_title
+                new_title = title or row.current_title
+                search_changed = new_title != row.current_title
+                row.current_title = new_title
                 stored = row.last_observed_at_ingest
                 if stored.tzinfo is None:
                     stored = stored.replace(tzinfo=UTC)
@@ -364,7 +371,7 @@ class ActorsMixin:
                 await session.flush()
             row_id = row.id
             await session.commit()
-            return row_id
+            return row_id, search_changed
 
     async def get_group(self, group_id: UUID) -> GroupRow | None:
         """Return one GroupRow by id, or ``None`` (used by the leave path)."""
@@ -389,7 +396,13 @@ class ActorsMixin:
         display_name: str | None,
         seen_at: datetime,
         is_bot: bool = False,
-    ) -> UUID:
+    ) -> tuple[UUID, bool]:
+        """Returns ``(actor_id, search_changed)``. ``search_changed`` is True when
+        the actor is newly created or a searchable field (handle / display name)
+        actually changed — the gate for emitting ``entity.actor.changed``
+        (GLOBAL_SEARCH.md). Note: ``notes``/``operator_assessment``/aliases are
+        set on other paths, which emit their own event.
+        """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             result = await session.exec(select(ActorTable).where(ActorTable.actor_key == actor_key))
             row = result.first()
@@ -408,9 +421,15 @@ class ActorsMixin:
                 )
                 session.add(row)
                 await session.flush()
+                search_changed = True
             else:
-                row.current_handle = handle or row.current_handle
-                row.current_display_name = display_name or row.current_display_name
+                new_handle = handle or row.current_handle
+                new_display = display_name or row.current_display_name
+                search_changed = (
+                    new_handle != row.current_handle or new_display != row.current_display_name
+                )
+                row.current_handle = new_handle
+                row.current_display_name = new_display
                 # Sticky: once Telegram tells us it's a bot, keep it flagged.
                 row.is_bot_self_declared = is_bot or row.is_bot_self_declared
                 li = row.last_seen_at_ingest
@@ -427,7 +446,7 @@ class ActorsMixin:
                 await session.flush()
             row_id = row.id
             await session.commit()
-            return row_id
+            return row_id, search_changed
 
 
 __all__ = ["ActorsMixin"]

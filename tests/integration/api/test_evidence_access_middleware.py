@@ -37,14 +37,14 @@ async def _actor(storage: BaseRepository, now: datetime) -> Any:
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=source_id,
         actor_key="actor:mw",
         platform_userid="1",
         handle="h",
         display_name="d",
         seen_at=now,
-    )
+    ))[0]
 
 
 async def test_successful_read_emits_attributed_evidence_row(

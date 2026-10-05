@@ -38,7 +38,7 @@ async def _seed_actor(
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
-    actor_id = await storage.upsert_actor(
+    actor_id, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=actor_key,
         platform_userid="42",
@@ -202,7 +202,7 @@ async def test_actors_neighbors_typed_union(
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
-    a = await storage.upsert_actor(
+    a, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key="actor:n1",
         platform_userid="1",
@@ -210,7 +210,7 @@ async def test_actors_neighbors_typed_union(
         display_name="a",
         seen_at=now,
     )
-    b = await storage.upsert_actor(
+    b, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key="actor:n2",
         platform_userid="2",
@@ -244,7 +244,7 @@ async def test_personas_get_and_members(
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="tg", created_at=now
     )
-    a = await storage.upsert_actor(
+    a, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key="actor:p1",
         platform_userid="1",
@@ -252,7 +252,7 @@ async def test_personas_get_and_members(
         display_name="a",
         seen_at=now,
     )
-    b = await storage.upsert_actor(
+    b, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key="actor:p2",
         platform_userid="2",

@@ -124,7 +124,7 @@ async def _monitor_forum_category(
     the board.
     """
     now = datetime.now(tz=UTC)
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=row.source_id,
         platform_groupid=row.platform_groupid,
         kind=GroupKind.FORUM_CATEGORY,

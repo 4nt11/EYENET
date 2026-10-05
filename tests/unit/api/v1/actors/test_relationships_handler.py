@@ -23,10 +23,10 @@ _NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
 async def _seed(storage: BaseRepository) -> tuple[UUID, UUID]:
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    grp = await storage.upsert_group(
+    grp, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g", kind=GroupKind.CHAT, title="g", seen_at=_NOW
     )
-    alice = await storage.upsert_actor(
+    alice, _ = await storage.upsert_actor(
         source_id=src,
         actor_key="tg:alice",
         platform_userid="111",
@@ -34,7 +34,7 @@ async def _seed(storage: BaseRepository) -> tuple[UUID, UUID]:
         display_name="Alice",
         seen_at=_NOW,
     )
-    bob = await storage.upsert_actor(
+    bob, _ = await storage.upsert_actor(
         source_id=src,
         actor_key="tg:bob",
         platform_userid="222",

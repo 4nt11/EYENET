@@ -29,10 +29,10 @@ _NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
 async def _actor(storage: BaseRepository, key: str, handle: str) -> UUID:
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=_NOW)
-    return await storage.upsert_actor(
+    return (await storage.upsert_actor(
         source_id=src, actor_key=key, platform_userid=key[-4:], handle=handle,
         display_name=handle.lstrip("@").title(), seen_at=_NOW,
-    )
+    ))[0]
 
 
 async def test_crew_lifecycle(

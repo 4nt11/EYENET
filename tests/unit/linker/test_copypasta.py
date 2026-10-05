@@ -50,7 +50,7 @@ async def test_detect_flags_template_and_gates() -> None:
     storage: BaseRepository = get_repository(in_memory=True)
     now = datetime.now(tz=UTC)
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g", kind=GroupKind.CHANNEL, title="g", seen_at=now
     )
     n = 0
@@ -58,7 +58,7 @@ async def test_detect_flags_template_and_gates() -> None:
     async def _post(uid: str, body: str) -> None:
         nonlocal n
         n += 1
-        a = await storage.upsert_actor(
+        a, _ = await storage.upsert_actor(
             source_id=src,
             actor_key=f"actor:tg:{uid}",
             platform_userid=uid,

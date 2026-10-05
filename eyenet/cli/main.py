@@ -129,7 +129,7 @@ async def _seed_fixture(  # pragma: no cover
     source_id = await storage.upsert_source(
         kind=SourceKind.TELEGRAM, display_name="telegram:tg_alpha", created_at=now
     )
-    group_id = await storage.upsert_group(
+    group_id, _ = await storage.upsert_group(
         source_id=source_id,
         platform_groupid="-100",
         kind=GroupKind.CHAT,
@@ -140,7 +140,7 @@ async def _seed_fixture(  # pragma: no cover
     for rec in records:
         ak = rec["actor_key"]
         if ak not in actor_ids:
-            actor_ids[ak] = await storage.upsert_actor(
+            actor_ids[ak], _ = await storage.upsert_actor(
                 source_id=source_id,
                 actor_key=ak,
                 platform_userid=ak[-8:],
@@ -541,6 +541,24 @@ def geo_run(  # pragma: no cover
     )
 
 
+@app.command("search-indexer")
+def search_indexer_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Run the global-search indexer: reindex search_document off the bus.
+
+    Event-driven (no tick): consumes entity.> / raw.message.> /
+    attribution.persona.updated / classify.document.uploaded. Run
+    `eyenet search-backfill` once first to bootstrap the index (GLOBAL_SEARCH.md).
+    """
+    from eyenet.search_indexer.service import SearchIndexerService  # noqa: PLC0415
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(lambda bus, storage: SearchIndexerService(bus=bus, storage=storage), cfg)
+
+
 @app.command("engine")
 def engine_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
@@ -655,7 +673,7 @@ def search_backfill(  # pragma: no cover
     Read-only over the source tables; upserts search_document (idempotent, re-run
     to refresh). Bootstraps GET /v1/search. See GLOBAL_SEARCH.md.
     """
-    from eyenet.search_indexer import backfill_search  # noqa: PLC0415
+    from eyenet.search_indexer.backfill import backfill_search  # noqa: PLC0415
 
     async def _main() -> None:
         cfg = RuntimeConfig.from_env(data_dir=data_dir)

@@ -387,7 +387,7 @@ async def test_list_candidates_filters_by_state_and_source(
     storage: BaseRepository,
 ) -> None:
     src = await _make_source(storage, "cand")
-    grp = await storage.upsert_group(
+    grp, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid="root",
         kind=GroupKind.CHANNEL,

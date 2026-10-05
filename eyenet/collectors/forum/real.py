@@ -66,6 +66,7 @@ from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import ScanVisibleGroupsCommand, command_subject_for
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.logging import get_logger
 from eyenet.telemetry.propagation import current_traceparent
@@ -1233,14 +1234,18 @@ class ForumCollector(CollectorSkeleton):
         platform_userid = f"{self._board}|{post.author_username}"
         key = actor_key(SourceKind.FORUM, platform_userid)
 
-        group_id = await self._storage.upsert_group(
+        group_id, group_changed = await self._storage.upsert_group(
             source_id=source_uuid,
             platform_groupid=tid,
             kind=GroupKind.FORUM_THREAD,
             title=title,
             seen_at=now,
         )
-        actor_id = await self._storage.upsert_actor(
+        if group_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="group", entity_id=group_id, source_id=source_uuid
+            )
+        actor_id, actor_changed = await self._storage.upsert_actor(
             source_id=source_uuid,
             actor_key=key,
             platform_userid=platform_userid,
@@ -1249,6 +1254,10 @@ class ForumCollector(CollectorSkeleton):
             seen_at=sent_at,
             is_bot=False,
         )
+        if actor_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="actor", entity_id=actor_id, source_id=source_uuid
+            )
 
         evidence_ref = f"forum:{self._board}:{tid}:{post.pid}"
         body = post.body_text

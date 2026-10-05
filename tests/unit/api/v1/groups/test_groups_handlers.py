@@ -220,7 +220,7 @@ async def test_leave_parks_and_closes_membership(storage: BaseRepository) -> Non
     cand = await storage.ensure_candidate(
         source_id=sid, platform_groupid="@g", seen_at=datetime.now(tz=UTC)
     )
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid,
         platform_groupid="@g",
         kind=GroupKind.CHANNEL,
@@ -359,10 +359,10 @@ async def test_groups_messages_returns_thread_posts_oldest_first(storage: BaseRe
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
-    aid = await storage.upsert_actor(
+    aid, _ = await storage.upsert_actor(
         source_id=sid,
         actor_key="actor:x",
         platform_userid="p",
@@ -436,7 +436,7 @@ async def test_groups_reply_enqueues_pending(storage: BaseRepository) -> None:
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
     res = await groups_reply(
@@ -459,7 +459,7 @@ async def test_groups_reply_rejects_non_forum_thread(storage: BaseRepository) ->
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="@c", kind=GroupKind.CHANNEL, title="c", seen_at=now
     )
     with pytest.raises(ConflictError):
@@ -479,7 +479,7 @@ async def test_groups_category_threads_lists_linked_threads(storage: BaseReposit
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    cat = await storage.upsert_group(
+    cat, _ = await storage.upsert_group(
         source_id=sid,
         platform_groupid="Forum-Databases",
         kind=GroupKind.FORUM_CATEGORY,
@@ -514,7 +514,7 @@ async def test_groups_category_threads_rejects_non_category(storage: BaseReposit
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    thread = await storage.upsert_group(
+    thread, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
     with pytest.raises(ConflictError):
@@ -537,20 +537,20 @@ async def test_groups_category_search_across_threads(storage: BaseRepository) ->
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    cat = await storage.upsert_group(
+    cat, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="Cat", kind=GroupKind.FORUM_CATEGORY, title="C", seen_at=now
     )
-    t1 = await storage.upsert_group(
+    t1, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="t1", kind=GroupKind.FORUM_THREAD, title="One", seen_at=now
     )
-    t2 = await storage.upsert_group(
+    t2, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="t2", kind=GroupKind.FORUM_THREAD, title="Two", seen_at=now
     )
     for tp in ("t1", "t2"):
         await storage.record_forum_thread_link(
             source_id=sid, category_platform_groupid="Cat", thread_platform_groupid=tp, seen_at=now
         )
-    aid = await storage.upsert_actor(
+    aid, _ = await storage.upsert_actor(
         source_id=sid, actor_key="a", platform_userid="p", handle="h", display_name="d", seen_at=now
     )
     posts = [
@@ -599,7 +599,7 @@ async def test_groups_category_search_rejects_non_category(storage: BaseReposito
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    thread = await storage.upsert_group(
+    thread, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
     with pytest.raises(ConflictError):
@@ -618,7 +618,7 @@ async def test_groups_backfill_enqueues_pending(storage: BaseRepository) -> None
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
     res = await groups_backfill(
@@ -634,7 +634,7 @@ async def test_groups_backfill_category_page_range(storage: BaseRepository) -> N
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    cat = await storage.upsert_group(
+    cat, _ = await storage.upsert_group(
         source_id=sid,
         platform_groupid="Forum-Databases",
         kind=GroupKind.FORUM_CATEGORY,
@@ -660,7 +660,7 @@ async def test_groups_backfill_category_requires_from_page(storage: BaseReposito
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    cat = await storage.upsert_group(
+    cat, _ = await storage.upsert_group(
         source_id=sid,
         platform_groupid="Forum-Databases",
         kind=GroupKind.FORUM_CATEGORY,
@@ -679,7 +679,7 @@ async def test_groups_backfill_rejects_non_forum_kind(storage: BaseRepository) -
 
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="@c", kind=GroupKind.CHANNEL, title="c", seen_at=now
     )
     with pytest.raises(ConflictError):

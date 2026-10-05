@@ -81,7 +81,7 @@ async def test_run_infra_linker_persists_shared_infra_linkages() -> None:
     now = datetime.now(tz=UTC)
     src = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
 
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=src, platform_groupid="@g", kind=GroupKind.CHANNEL, title="g", seen_at=now
     )
     counter = 0
@@ -90,7 +90,7 @@ async def test_run_infra_linker_persists_shared_infra_linkages() -> None:
         nonlocal counter
         counter += 1
         uid = str(10**7 + counter)
-        a = await storage.upsert_actor(
+        a, _ = await storage.upsert_actor(
             source_id=src,
             actor_key=f"actor:tg:{uid}",
             platform_userid=uid,

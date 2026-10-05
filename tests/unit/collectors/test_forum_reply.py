@@ -69,7 +69,7 @@ def _client(seen: list[tuple[str, str]]) -> httpx.AsyncClient:
 
 async def _seed_gated(storage: BaseRepository, sid: UUID, gid: UUID) -> None:
     now = datetime.now(tz=UTC)
-    aid = await storage.upsert_actor(
+    aid, _ = await storage.upsert_actor(
         source_id=sid,
         actor_key="actor:a",
         platform_userid="forum.test|alice",
@@ -103,7 +103,7 @@ async def test_reply_posts_and_unlocks(tmp_path: Path) -> None:
     storage = get_repository(in_memory=True)
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
     await _seed_gated(storage, sid, gid)
@@ -150,7 +150,7 @@ async def test_flood_control_marks_failed_not_double_post(tmp_path: Path) -> Non
     storage = get_repository(in_memory=True)
     now = datetime.now(tz=UTC)
     sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
-    gid = await storage.upsert_group(
+    gid, _ = await storage.upsert_group(
         source_id=sid, platform_groupid="42", kind=GroupKind.FORUM_THREAD, title="t", seen_at=now
     )
     await _seed_gated(storage, sid, gid)

@@ -40,7 +40,7 @@ async def test_resolve_unknown_returns_none(storage: BaseRepository) -> None:
 @pytest.mark.asyncio
 async def test_upsert_and_resolve(storage: BaseRepository, source_id: UUID) -> None:
     actor_key = "actor:" + "b" * 64
-    uid = await storage.upsert_actor(
+    uid, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=actor_key,
         platform_userid="12345",
@@ -56,7 +56,7 @@ async def test_upsert_and_resolve(storage: BaseRepository, source_id: UUID) -> N
 @pytest.mark.asyncio
 async def test_upsert_idempotent(storage: BaseRepository, source_id: UUID) -> None:
     actor_key = "actor:" + "c" * 64
-    uid1 = await storage.upsert_actor(
+    uid1, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=actor_key,
         platform_userid="99",
@@ -64,7 +64,7 @@ async def test_upsert_idempotent(storage: BaseRepository, source_id: UUID) -> No
         display_name=None,
         seen_at=_NOW,
     )
-    uid2 = await storage.upsert_actor(
+    uid2, _ = await storage.upsert_actor(
         source_id=source_id,
         actor_key=actor_key,
         platform_userid="99",

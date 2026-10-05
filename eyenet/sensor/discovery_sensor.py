@@ -26,6 +26,7 @@ import asyncio
 
 from eyenet.contracts.enums import GroupKind, SourceKind
 from eyenet.contracts.raw_message import RawMessageEnvelope
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.sensor.discovery import DISCOVERY_EXTRACTORS, MessageContext
 from eyenet.service import ServiceBase
 from eyenet.telemetry.logging import get_logger
@@ -91,13 +92,20 @@ class DiscoverySensor(ServiceBase):
             _log.warning("discovery_sensor.missing_body", evidence_ref=env.evidence_ref)
             return None
 
-        group_id = await self._storage.upsert_group(
+        group_id, group_changed = await self._storage.upsert_group(
             source_id=collector.source_id,
             platform_groupid=env.platform_groupid,
             kind=_DEFAULT_GROUP_KIND.get(env.source, GroupKind.CHAT),
             title=None,
             seen_at=env.collected_at,
         )
+        if group_changed:
+            await publish_entity_changed(
+                self.publisher,
+                entity_type="group",
+                entity_id=group_id,
+                source_id=collector.source_id,
+            )
         seed_root_id, depth = await self._storage.group_lineage(group_id)
 
         return MessageContext(

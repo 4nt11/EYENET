@@ -42,13 +42,13 @@ async def _make_source(storage: BaseRepository) -> UUID:
 
 
 async def _make_group(storage: BaseRepository, source_id: UUID, name: str) -> UUID:
-    return await storage.upsert_group(
+    return (await storage.upsert_group(
         source_id=source_id,
         platform_groupid=name,
         kind=GroupKind.CHANNEL,
         title=name,
         seen_at=_NOW,
-    )
+    ))[0]
 
 
 async def _make_message(storage: BaseRepository, source_id: UUID, group_id: UUID) -> UUID:

@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from eyenet.search_indexer import backfill_search
+from eyenet.search_indexer.backfill import backfill_search
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 from tests._seed import seed_telegram_fixture
