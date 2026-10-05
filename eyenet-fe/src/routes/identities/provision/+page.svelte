@@ -21,6 +21,10 @@
   let forumThreadUrls = $state('');
   let forumUserAgent = $state('');
   let forumEvasion = $state('');
+  // curl-cffi Firefox TLS-impersonation target for a CLEARNET https board behind a
+  // JA3/JA4 WAF (DDoS-Guard/Cloudflare). Blank = httpx (onion/Tor + default).
+  let forumTls = $state('');
+  const TLS_TARGETS = ['firefox133', 'firefox135', 'firefox144', 'firefox147'];
   let cookiesText = $state('');
   let curlBlob = $state('');
   let curlMsg = $state('');
@@ -100,6 +104,7 @@
       if (forumThreadUrls.trim()) fd.append('forum_thread_urls', forumThreadUrls.trim());
       if (forumUserAgent.trim()) fd.append('forum_user_agent', forumUserAgent.trim());
       if (forumEvasion) fd.append('forum_evasion_level', forumEvasion);
+      if (forumTls) fd.append('forum_tls_impersonate', forumTls);
     }
 
     if (cooldown.trim()) fd.append('cooldown_seconds', cooldown.trim());
@@ -116,6 +121,7 @@
       forumThreadUrls = '';
       forumUserAgent = '';
       forumEvasion = '';
+      forumTls = '';
       curlBlob = '';
       curlMsg = '';
       cookiesText = '';
@@ -213,6 +219,13 @@
           <option value="smash">smash (E4) · sub-second, tolerant boards only</option>
         </select>
         <span class="hint">nmap-style pacing preset. Sets the inter-request delay; on a 429 the collector always goes silent for the padded Retry-After regardless of level.</span></label>
+
+      <label class="fld"><span class="flabel">TLS impersonation (optional)</span>
+        <select class="fin" bind:value={forumTls}>
+          <option value="">none — httpx (onion/Tor boards)</option>
+          {#each TLS_TARGETS as t}<option value={t}>{t}</option>{/each}
+        </select>
+        <span class="hint">Clearnet https board behind a JA3/JA4 WAF (DDoS-Guard/Cloudflare)? Speak TLS as a real Firefox via curl-cffi instead of httpx (whose OpenSSL fingerprint is a bot tell). Pick the target that matches the browser that minted these cookies (FF152 → firefox147). Leave as none for .onion/Tor — Tor wraps the TLS, and setting a proxy ignores this anyway.</span></label>
     {:else if sourceId}
       <p class="hint">This source kind can't be provisioned from this form.</p>
     {/if}
