@@ -54,6 +54,11 @@ class CursorPageSearchHit(CursorPage[SearchHit]):
         default_factory=dict,
         description="Count of matches per source_id ('' = no single source).",
     )
+    source_labels: dict[str, str] = Field(
+        default_factory=dict,
+        description="Human display name per source_id (e.g. 'forum:darkforums-1'); "
+        "for rendering rows/facets instead of the raw UUID.",
+    )
 
 
 __all__ = ["CursorPageSearchHit", "SearchHit"]

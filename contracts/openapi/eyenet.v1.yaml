@@ -3844,6 +3844,10 @@ components:
               type: object
               additionalProperties: { type: integer }
               description: Count of matches per source_id ('' = no single source).
+            source_labels:
+              type: object
+              additionalProperties: { type: string }
+              description: Human display name per source_id, for rendering rows/facets.
 
     # ── Enums (mirrors of eyenet/contracts/enums.py) ──────────────────────
     LinkageState:

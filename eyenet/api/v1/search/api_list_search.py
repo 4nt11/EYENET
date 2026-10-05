@@ -62,10 +62,19 @@ async def search_global(
         q, types=types_list, status=status_list, source_id=source
     )
     items = [SearchHit.from_domain(row) for row in rows[: page.limit]]
+    # Resolve source UUIDs -> human display names for row + facet rendering.
+    source_ids = {sid for sid in facets["by_source"] if sid}
+    source_ids.update(str(h.source_id) for h in items if h.source_id is not None)
+    source_labels: dict[str, str] = {}
+    for sid in source_ids:
+        row = await storage.get_source(UUID(sid))
+        if row is not None:
+            source_labels[sid] = getattr(row, "display_name", sid)
     return CursorPageSearchHit(
         items=items,
         next_cursor=page.next_cursor(fetched=len(rows)),
         estimated_total=estimated_total,
         by_type=facets["by_type"],
         by_source=facets["by_source"],
+        source_labels=source_labels,
     )
