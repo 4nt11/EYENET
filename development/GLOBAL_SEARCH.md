@@ -501,3 +501,119 @@ Rules:
   set on SQLite and Postgres (the whole reason we own the grammar).
 - Operator-typo resilience: malformed boolean / dangling operator degrades to a
   best-effort text search, not a 500.
+
+---
+
+## 10. Phase 2 — Discover UI + search-as-graph (induced subgraph + operator edge mapping)
+
+The payoff: a search is not a list, it is an **induced subgraph** you can read AND
+edit. The hits are nodes; EYENET already stores the edges between them; the analyst
+maps new relationships and they become durable, audited truth. Decisions locked
+with the operator: full Kibana/Discover layout, configurable columns, structured
+hit fields, a Cytoscape graph view, and operator-mapped edges that persist.
+
+### 10.1 Discover layout + configurable columns
+
+- ONE unified results table across all entity types (not per-type panels). `type`
+  is a column + a facet. Expandable row = the full document (the current detail
+  flyout folds into this).
+- Left **field sidebar** doubles as filter-insert (the §9 fields) AND column
+  toggle. A **column picker** persisted in `localStorage` (per-viewer
+  convenience, guarded try/catch) — user A sees {author, message}, user B sees
+  full detail. Default to a sane set (type, title, source, date).
+- A **view toggle: Table | Graph**, same query + facets driving both.
+
+### 10.2 Structured hit fields (prereq for real columns)
+
+Configurable columns need structured data, not a `subtitle` blob. Add a
+`fields` JSON column to `search_document` (the Kibana `_source` analog) holding
+`{author, timestamp, aliases, ...}` per entity, plus surface it on `SearchHit`.
+One migration (0007), extensible without future migrations. Needs a backfill
+re-run to populate (additive; the resumable backfill makes repeat runs cheap, but
+a new column means re-indexing every row once).
+
+### 10.3 The induced subgraph
+
+- **Nodes** = the search hits, capped (~300; never dump 580k — cap + "expand").
+  `GraphNodeType` today is actor/persona/group; extend to cover artifact /
+  message / case (or map message→its actor).
+- **Edges (DERIVED, recomputed)** assembled from existing relations, scoped to
+  the node set: `actor_relation` (weight = occurrence_count), `linkage`,
+  `actor_artifact` (two actors on one artifact = shared-infra edge),
+  `persona_membership`, group membership, message `reply_to`/`forward_of`,
+  `group_candidate_mention`.
+- **1-hop expansion** (toggle, default on): pull in the connectors (the shared
+  artifact, the persona) even when they did not match the text, so the graph
+  shows STRUCTURE instead of disconnected dots.
+- Storage already has `graph_neighbor_edges` / `graph_edges_by_type`; add an
+  induced-subgraph read (edges where both endpoints are in the node set).
+
+### 10.4 Operator edge mapping — persistence (the headline)
+
+Two edge classes on one canvas:
+
+- **DERIVED** edges: recomputed from the data, ephemeral, rendered dashed.
+- **ASSERTED** edges: operator-mapped, **durable**, rendered solid. These are
+  the new requirement — "map an edge, it becomes a real EYENET edge."
+
+Design rules:
+
+- New `GraphEdgeType` for operator assertions (e.g. `ASSOCIATE` /
+  `COMMUNICATES_WITH` / `SAME_CREW`). A mapped edge persists as a `graph_edge`
+  row of that type.
+- **Provenance + audit (operator-grade evidence).** A mapped edge carries who /
+  when / reason. `graph_edge` has no provenance columns today (only `attrs`
+  JSON); add `created_by_user_id` + `reason` columns (migration) rather than bury
+  provenance in JSON, and **emit an audit event on every map/unmap** (same bar as
+  a linkage decision).
+- **Persist per-edit, not on close.** The canvas autosaves through the write
+  endpoint on each map/unmap (crash-safe + a real audit trail); closing the graph
+  just closes it.
+- **Never clobber asserted edges.** The GraphService only `upsert_graph_edge`s
+  its own DERIVED types (linked_to / belongs_to_persona / member_of) and never
+  bulk-deletes, so a distinct asserted type is structurally safe today — but add a
+  guard + a test so a future recompute can never delete operator truth.
+- **Do NOT duplicate `linkage`.** "Same person" has its own lifecycle
+  (propose→confirm→persona aggregation). A same-person mapping in the graph routes
+  to the linkage API; the asserted graph edge is for associative relationships
+  linkage does not model. Draw this line in the UI (two actions) and the backend.
+
+### 10.5 API
+
+- `GET /v1/search/graph?q=...&expand=0|1` → `{nodes, edges}` (derived + asserted
+  among the node set); `read:search` + `read:graph`.
+- `POST /v1/graph/edges` → create an ASSERTED edge `{src_id, dst_id, kind,
+  reason}`; upserts the two `graph_node`s; audited; `write:graph` (new scope).
+- `DELETE /v1/graph/edges/{id}` → remove an asserted edge; audited.
+- Same-person assertions use the existing linkage endpoints, not these.
+
+### 10.6 Frontend
+
+- **Cytoscape.js** (the one justified new runtime dep; Sigma/WebGL only if node
+  counts ever blow past thousands).
+- Discover page gains the Graph view: typed/colored nodes, derived edges dashed,
+  asserted edges solid. Drag node→node to map an edge → modal (kind + reason) →
+  POST → shows asserted. Right-click an asserted edge → delete. Click a node →
+  the same detail flyout as a table row. Autosave per edit.
+
+### 10.7 Build order (worktree `phase2-search-graph`)
+
+1. `search_document.fields` JSON + `SearchHit` structured fields + haystack
+   builders + migration 0007 + re-backfill.
+2. Extend `GraphNodeType`/`GraphEdgeType`; `graph_edge` provenance columns
+   (migration); storage: induced-subgraph read + `assert_graph_edge` /
+   `unassert_graph_edge` (audited); don't-clobber guard + test.
+3. `GET /v1/search/graph` + `POST`/`DELETE /v1/graph/edges` + `write:graph` scope
+   + OpenAPI.
+4. FE: Cytoscape dep, Discover Table+Graph, column config, field sidebar, edge
+   write-back.
+5. Full gate + `--no-ff` merge.
+
+### 10.8 Risks
+
+- Render perf: cap nodes (~300) + "expand", never dump the full match set.
+- Re-backfill for the `fields` column (reindex all rows once; additive).
+- `graph_edge` provenance migration on the live DB (additive, snapshot first).
+- The derived-vs-asserted clobber boundary — test that a GraphService recompute
+  leaves asserted edges untouched.
+- Cytoscape is a new FE dependency (acceptable; it is the feature).
