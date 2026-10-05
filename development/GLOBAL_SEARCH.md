@@ -20,19 +20,30 @@ below are deliberate and were decided with the operator):
   `by_source` facets, `read:search` scope. Documented in the OpenAPI contract.
 - **FE:** global box in `TopBar` (+`/` focus) + `/search` grouped results.
 - **Population:** a read-only one-shot **backfill** (`eyenet search-backfill`)
-  covers actor/group/message/persona/case/document/artifact/crew. This is what
-  makes search return results today; re-run to refresh.
+  covers actor/group/message/persona/case/document/artifact/crew. Bootstraps the
+  index; re-run any time to rebuild.
+- **Live freshness:** the **`SearchIndexer` bus service** (`eyenet
+  search-indexer`, a `ServiceBase`) subscribes to `entity.>`, `raw.message.>`,
+  `attribution.persona.updated`, `classify.document.uploaded` and reindexes the
+  one named entity via the shared `haystack.py` builders.
+- **Events:** new `entity.<type>.changed` subjects. `upsert_actor`/`upsert_group`
+  return `(id, search_changed)`; collectors + discovery sensor emit **only on real
+  change** (new row or handle/title differs), so a busy group/actor does NOT
+  re-emit per message (the change-gated design — avoids 3x ingest-bus write
+  amplification). Case create/update/close/archive/reopen + the operator crew-case
+  path emit `entity.case.changed`.
 
-**Deferred (to finish WITH the operator — need live NATS / Postgres to validate,
-or touch the hot ingest path):**
+**Still deferred:**
 
-- The live **`SearchIndexer` bus service** and the new **actor/group/case domain
-  events** (§2.4). Instrumenting the ~8 ingest-path `upsert_actor`/`upsert_group`
-  call sites with publishes was judged too risky to land unattended. Until it
-  lands, re-run the backfill for freshness.
-- **Postgres FTS** (`tsvector`/GIN/`pg_trgm`, §2.2): the PG backend currently
-  serves search via the generic ANSI `LIKE` fallback (the table is created by the
-  PG baseline since it is in `_MAIN_TABLES`). The FTS optimization is unwritten.
+- **Postgres FTS** (`tsvector`/GIN/`pg_trgm`, §2.2): the PG backend serves search
+  via the generic ANSI `LIKE` fallback (the table is created by the PG baseline
+  since it is in `_MAIN_TABLES`). The FTS optimization is unwritten; the live
+  stack is SQLite so it is not on the critical path.
+- **Group joined/monitored status on join/leave:** the status facet is set at
+  index time from membership; a group becomes searchable via its message stream,
+  but a pure join/leave with no message does not yet re-emit (the crew auto-sweep
+  case-create likewise relies on the backfill). Minor facet staleness, Phase 3.
+- **Attachment indexing** as its own entity (documents are covered).
 - **Phase 1.5 query DSL** (§9) and **Phase 2** (graph pivot, create-case-from-
   query) remain as designed below.
 
