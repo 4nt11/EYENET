@@ -54,9 +54,7 @@ async def search_global(
         ),
     )
     estimated_total = (
-        await storage.count_search_global(
-            q, types=types_list, status=status_list, source_id=source
-        )
+        await storage.count_search_global(q, types=types_list, status=status_list, source_id=source)
         if page.include_total
         else None
     )

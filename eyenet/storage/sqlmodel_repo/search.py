@@ -123,7 +123,11 @@ class SearchMixin:
         source_id: UUID | None = None,
     ) -> int:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(func.count()).select_from(SearchDocumentTable).where(self._search_predicate(q))
+            stmt = (
+                select(func.count())
+                .select_from(SearchDocumentTable)
+                .where(self._search_predicate(q))
+            )
             stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
             result = await session.exec(stmt)
             return int(result.one())

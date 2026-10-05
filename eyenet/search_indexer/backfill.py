@@ -225,7 +225,9 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
             "title": cr.name,
             "subtitle": f"{len(members_by_crew.get(cr.id, []))} members",
             "haystack": _clean(
-                cr.name, cr.notes, *[actor_handle.get(m, "") for m in members_by_crew.get(cr.id, [])]
+                cr.name,
+                cr.notes,
+                *[actor_handle.get(m, "") for m in members_by_crew.get(cr.id, [])],
             ),
             "handles": _clean(*[actor_handle.get(m, "") for m in members_by_crew.get(cr.id, [])]),
         }
@@ -234,8 +236,18 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
     await storage.put_search_documents_bulk(rows)
     counts["crew"] = len(rows)
 
-    # --- messages (batched; haystack = body + group title + author handle) -
-    total_msgs = 0
+    counts["message"] = await _backfill_messages(storage, group_title, actor_handle, batch)
+    return counts
+
+
+async def _backfill_messages(
+    storage: BaseRepository,
+    group_title: dict[UUID, str],
+    actor_handle: dict[UUID, str],
+    batch: int,
+) -> int:
+    """Index messages in batches: haystack = body + group title + author handle."""
+    total = 0
     offset = 0
     while True:
         async with storage.session() as s:
@@ -246,7 +258,7 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
             )
         if not msgs:
             break
-        mrows = [
+        rows = [
             {
                 "entity_type": "message",
                 "entity_id": m.id,
@@ -261,14 +273,12 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
             }
             for m in msgs
         ]
-        await storage.put_search_documents_bulk(mrows)
-        total_msgs += len(mrows)
+        await storage.put_search_documents_bulk(rows)
+        total += len(rows)
         offset += batch
         if len(msgs) < batch:
             break
-    counts["message"] = total_msgs
-
-    return counts
+    return total
 
 
 __all__ = ["backfill_search"]

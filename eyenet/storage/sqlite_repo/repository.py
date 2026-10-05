@@ -84,6 +84,9 @@ _FILE_ACCESS_INSERT_SQL = (
     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
+# FTS5 trigram tokenizer needs >= 3 chars; shorter queries skip the handles index.
+_TRIGRAM_MIN_CHARS = 3
+
 
 class SQLiteRepository(SQLModelRepository):
     """SQLite-backed repository: 2 physical DBs (main + audit), async engines."""
@@ -432,7 +435,7 @@ class SQLiteRepository(SQLModelRepository):
             "search_document.rowid IN "
             "(SELECT rowid FROM search_fts_prose WHERE search_fts_prose MATCH :sfts_q)"
         )
-        if len(q.strip()) >= 3:
+        if len(q.strip()) >= _TRIGRAM_MIN_CHARS:
             clause += (
                 " OR search_document.rowid IN "
                 "(SELECT rowid FROM search_fts_handles WHERE search_fts_handles MATCH :sfts_hq)"

@@ -131,7 +131,6 @@ from eyenet.api.v1.documents.api_upload_document import router as documents_uplo
 # === graph ===
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
-from eyenet.api.v1.search.api_list_search import router as search_global_router
 from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
 
 # === groups (monitored-groups: see + join at will) ===
@@ -205,6 +204,7 @@ from eyenet.api.v1.reclassify.api_reclassify_observation import (
 )
 from eyenet.api.v1.relations.api_rebuild import router as relations_rebuild_router
 from eyenet.api.v1.schemas.errors import ProblemDetail
+from eyenet.api.v1.search.api_list_search import router as search_global_router
 
 # === sources (M9.D1 discovery) ===
 from eyenet.api.v1.sources.api_add_source_domain import router as sources_add_domain_router
