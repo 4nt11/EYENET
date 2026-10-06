@@ -25,6 +25,7 @@ from sqlmodel import col, select
 from eyenet.models import (
     ActorArtifactTable,
     ActorRelationTable,
+    ActorTable,
     LinkageTable,
     MessageTable,
     PersonaMembershipTable,
@@ -237,21 +238,18 @@ class SearchMixin:
         actor_ids: Collection[UUID],
         persona_ids: Collection[UUID],
         artifact_ids: Collection[UUID],
-        thread_ids: Collection[UUID] = (),
     ) -> list[dict[str, Any]]:
         """Derived edges among the search-result nodes (GLOBAL_SEARCH.md §10.3).
 
         Scoped to the given node ids: linkage + actor_relation (actor-actor),
-        shared-infra (two node-actors on one artifact) + actor-artifact, persona
-        membership, and ``same_author`` among threads whose OP is the same actor
-        (free: the OP is provably one entity, so the operator needn't hand-link
-        them). Each edge is a dict the API maps to the wire shape; ``provenance``
-        is stamped "derived" by the caller.
+        shared-infra (two node-actors on one artifact) + actor-artifact, and
+        persona membership. Each edge is a dict the API maps to the wire shape;
+        ``provenance`` is stamped "derived" by the caller. (Thread→author edges
+        are built by the graph endpoint, which also injects the author node.)
         """
         a_ids = list(actor_ids)
         edges: list[dict[str, Any]] = []
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            await self._same_author_thread_edges(session, list(thread_ids), edges)
             if a_ids:
                 links = await session.exec(
                     select(LinkageTable).where(
@@ -338,63 +336,45 @@ class SearchMixin:
                         )
         return edges
 
-    # Small clusters get a full mesh (every pair of a prolific author's threads is
-    # related); big clusters star on one hub thread so the graph stays readable.
-    _SAME_AUTHOR_MESH_MAX = 5
-
-    async def _same_author_thread_edges(
-        self, session: Any, thread_ids: list[UUID], edges: list[dict[str, Any]]
-    ) -> None:
-        """Append ``same_author`` edges among threads whose OP (earliest message)
-        is the same actor. The node set is capped (<=500) upstream, so a single IN
-        is safe — no chunking.
+    async def thread_op_authors(
+        self, thread_ids: Collection[UUID]
+    ) -> dict[UUID, tuple[UUID, str, UUID | None]]:
+        """Map each thread → its OP (earliest-post) author as
+        ``{thread_id: (actor_id, handle, source_id)}``. The graph endpoint uses
+        this to inject the author as a node and spoke the threads into it. Node
+        set is capped (<=500) upstream, so a single IN is safe — no chunking.
         """
-        if not thread_ids:
-            return
+        ids = list(thread_ids)
+        out: dict[UUID, tuple[UUID, str, UUID | None]] = {}
+        if not ids:
+            return out
         earliest = (
             select(
                 MessageTable.group_id,
                 func.min(MessageTable.sent_at_source).label("mn"),
             )
-            .where(col(MessageTable.group_id).in_(thread_ids))
+            .where(col(MessageTable.group_id).in_(ids))
             .group_by(col(MessageTable.group_id))
             .subquery()
         )
-        ops = await session.exec(
-            select(MessageTable.group_id, MessageTable.actor_id).join(
-                earliest,
-                and_(
-                    col(MessageTable.group_id) == earliest.c.group_id,
-                    col(MessageTable.sent_at_source) == earliest.c.mn,
-                ),
-            )
-        )
-        threads_by_author: dict[UUID, list[UUID]] = defaultdict(list)
-        seen: set[UUID] = set()
-        for gid, aid in ops:
-            if gid in seen:  # a timestamp tie yields >1 OP row; keep the first
-                continue
-            seen.add(gid)
-            threads_by_author[aid].append(gid)
-        for aid, ths in threads_by_author.items():
-            uniq = sorted(set(ths))
-            if len(uniq) <= 1:
-                continue
-            if len(uniq) <= self._SAME_AUTHOR_MESH_MAX:
-                pairs: Any = combinations(uniq, 2)
-            else:
-                hub = uniq[0]
-                pairs = ((hub, t) for t in uniq[1:])
-            for x, y in pairs:
-                edges.append(
-                    {
-                        "src_id": x,
-                        "dst_id": y,
-                        "kind": "same_author",
-                        "weight": None,
-                        "meta": {"actor_id": str(aid)},
-                    }
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            rows = await session.exec(
+                select(MessageTable.group_id, ActorTable)
+                .join(
+                    earliest,
+                    and_(
+                        col(MessageTable.group_id) == earliest.c.group_id,
+                        col(MessageTable.sent_at_source) == earliest.c.mn,
+                    ),
                 )
+                .join(ActorTable, col(MessageTable.actor_id) == col(ActorTable.id))
+            )
+            for gid, actor in rows:
+                if gid in out:  # a timestamp tie yields >1 OP row; keep the first
+                    continue
+                handle = actor.current_handle or actor.current_display_name or str(actor.id)[:8]
+                out[gid] = (actor.id, handle, actor.source_id)
+        return out
 
 
 def _enum(v: Any) -> str:

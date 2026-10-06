@@ -1905,10 +1905,14 @@ class BaseRepository(ABC):
         actor_ids: Collection[UUID],
         persona_ids: Collection[UUID],
         artifact_ids: Collection[UUID],
-        thread_ids: Collection[UUID] = (),
     ) -> list[dict[str, Any]]:
-        """Derived edges among search-result nodes (linkage/relation/infra/persona,
-        plus same_author among threads sharing an OP actor)."""
+        """Derived edges among search-result nodes (linkage/relation/infra/persona)."""
+
+    @abstractmethod
+    async def thread_op_authors(
+        self, thread_ids: Collection[UUID]
+    ) -> dict[UUID, tuple[UUID, str, UUID | None]]:
+        """Each thread -> its OP author as {thread_id: (actor_id, handle, source_id)}."""
 
     # -- Operator-asserted graph edges (GLOBAL_SEARCH.md §10.4) --------------
     @abstractmethod

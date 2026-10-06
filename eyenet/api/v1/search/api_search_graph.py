@@ -67,11 +67,34 @@ async def search_graph(
         all_ids.add(r.entity_id)
 
     edges: list[SearchGraphEdge] = []
+
+    # Thread -> OP author: inject the author as a NODE (if not already a hit) and
+    # spoke every thread into it, so same-author threads cluster on the real actor
+    # instead of linking to each other. The author also joins the actor set so
+    # linkage/relation edges among authors show too.
+    actor_ids = list(by_type.get("actor", []))
+    op_authors = await storage.thread_op_authors(by_type.get("thread", []))
+    authored: list[tuple[UUID, UUID]] = []  # (thread_id, actor_id)
+    for thread_id, (actor_id, handle, src_id) in op_authors.items():
+        if actor_id not in all_ids:
+            nodes.append(
+                SearchGraphNode(
+                    entity_type="actor",  # type: ignore[arg-type]
+                    entity_id=actor_id,
+                    title=handle,
+                    status=None,
+                    source_id=src_id,
+                    fields={},
+                )
+            )
+            all_ids.add(actor_id)
+            actor_ids.append(actor_id)
+        authored.append((thread_id, actor_id))
+
     derived = await storage.induced_edges(
-        actor_ids=by_type.get("actor", []),
+        actor_ids=actor_ids,
         persona_ids=by_type.get("persona", []),
         artifact_ids=by_type.get("artifact", []),
-        thread_ids=by_type.get("thread", []),
     )
     for e in derived:
         edges.append(
@@ -81,6 +104,12 @@ async def search_graph(
                 kind=e["kind"],
                 weight=e.get("weight"),
                 provenance="derived",
+            )
+        )
+    for thread_id, actor_id in authored:
+        edges.append(
+            SearchGraphEdge(
+                src_id=thread_id, dst_id=actor_id, kind="authored_by", provenance="derived"
             )
         )
     for ae in cast("list[AssertedEdgeTable]", await storage.list_asserted_edges_for(all_ids)):
@@ -96,7 +125,7 @@ async def search_graph(
         )
 
     source_labels: dict[str, str] = {}
-    for sid in {str(r.source_id) for r in rows if r.source_id is not None}:
+    for sid in {str(n.source_id) for n in nodes if n.source_id is not None}:
         srow = await storage.get_source(UUID(sid))
         if srow is not None:
             source_labels[sid] = getattr(srow, "display_name", sid)

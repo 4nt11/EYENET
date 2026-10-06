@@ -74,9 +74,9 @@ async def test_induced_edges_scopes_to_node_set(storage: BaseRepository) -> None
 
 
 @pytest.mark.asyncio
-async def test_same_author_thread_edges(storage: BaseRepository) -> None:
-    """Threads whose OP (earliest post) is the same actor get a derived same_author
-    edge; a thread by a different author does not join them."""
+async def test_thread_op_authors_resolves_earliest_poster(storage: BaseRepository) -> None:
+    """thread_op_authors maps each thread to its OP (earliest-post) author + handle,
+    so the graph endpoint can hub threads on the real actor node."""
     src, _g, _a = await seed_telegram_fixture(
         storage, [{"actor_key": "k", "platform_msgid": "1", "body": "x"}], _NOW
     )
@@ -125,14 +125,13 @@ async def test_same_author_thread_edges(storage: BaseRepository) -> None:
         )
 
     await _op(threads["t1"], author, "p1", datetime(2026, 1, 1, tzinfo=UTC))
+    await _op(threads["t1"], other, "p1b", datetime(2026, 1, 5, tzinfo=UTC))  # later reply
     await _op(threads["t2"], author, "p2", datetime(2026, 1, 2, tzinfo=UTC))
     await _op(threads["t3"], other, "p3", datetime(2026, 1, 3, tzinfo=UTC))
 
-    edges = await storage.induced_edges(
-        actor_ids=[], persona_ids=[], artifact_ids=[], thread_ids=list(threads.values())
-    )
-    sa = [e for e in edges if e["kind"] == "same_author"]
-    assert len(sa) == 1  # t1<->t2 only; t3 (different author) is not joined
-    assert {sa[0]["src_id"], sa[0]["dst_id"]} == {threads["t1"], threads["t2"]}
-    assert sa[0]["meta"]["actor_id"] == str(author)
+    authors = await storage.thread_op_authors(list(threads.values()))
+    assert authors[threads["t1"]][0] == author  # earliest poster, not the later replier
+    assert authors[threads["t2"]][0] == author
+    assert authors[threads["t3"]][0] == other
+    assert authors[threads["t1"]][1] == "auth"  # handle
     await storage.close()
