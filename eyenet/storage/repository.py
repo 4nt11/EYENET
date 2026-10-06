@@ -26,7 +26,7 @@ from uuid import UUID
 from eyenet.contracts.enums import IdentityRole as _IdentityRole, IdentityState as _IdentityState
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
     from eyenet.contracts.access_artifact import GroupAccessArtifactRow
     from eyenet.contracts.anchor import AnchorRow
@@ -1895,6 +1895,45 @@ class BaseRepository(ABC):
         source_id: UUID | None = None,
     ) -> dict[str, dict[str, int]]:
         """Facet counts for ``q``: ``{"by_type": {...}, "by_source": {...}}``."""
+
+    # -- Operator-asserted graph edges (GLOBAL_SEARCH.md §10.4) --------------
+    @abstractmethod
+    async def assert_edge(
+        self,
+        *,
+        src_type: str,
+        src_id: UUID,
+        dst_type: str,
+        dst_id: UUID,
+        kind: str,
+        reason: str,
+        created_by_user_id: UUID,
+        service: str,
+        instance_id: str,
+        now: datetime | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> object:
+        """Create (or return the existing active) operator-asserted edge; audited."""
+
+    @abstractmethod
+    async def retract_edge(
+        self,
+        *,
+        edge_id: UUID,
+        removed_by_user_id: UUID,
+        reason: str,
+        service: str,
+        instance_id: str,
+        now: datetime | None = None,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+    ) -> bool:
+        """Soft-delete an asserted edge; audited. False if absent/already removed."""
+
+    @abstractmethod
+    async def list_asserted_edges_for(self, entity_ids: Collection[UUID]) -> list[object]:
+        """Active asserted edges with both endpoints in ``entity_ids``."""
 
     @abstractmethod
     async def list_actors(

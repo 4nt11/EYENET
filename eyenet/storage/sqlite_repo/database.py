@@ -130,6 +130,9 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         # GLOBAL_SEARCH.md — derived cross-entity search index (post-baseline,
         # created by migration 0006; FTS virtual tables are raw DDL below).
         "search_document",
+        # GLOBAL_SEARCH.md §10.4 — operator-asserted graph edges (post-baseline,
+        # created by migration 0008).
+        "asserted_edge",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset(
@@ -498,6 +501,26 @@ def _drop_search_document_schema(conn: Any) -> None:
     conn.execute(text("DROP TABLE IF EXISTS search_fts_prose"))
     conn.execute(text("DROP TABLE IF EXISTS search_fts_handles"))
     tables = _filtered_tables(frozenset({"search_document"}))
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+def _apply_asserted_edge_schema(conn: Any) -> None:
+    """Create ``asserted_edge`` (migration 0008). Plain table, no raw DDL."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(frozenset({"asserted_edge"}))
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_asserted_edge_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_asserted_edge_schema` (migration 0008 downgrade)."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(frozenset({"asserted_edge"}))
     if tables:
         SQLModel.metadata.drop_all(conn, tables=tables)
 

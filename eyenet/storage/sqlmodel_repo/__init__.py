@@ -18,6 +18,7 @@ from ._helpers import safe_session
 from .actors import ActorsMixin
 from .anchors import AnchorsMixin
 from .artifacts import ArtifactsMixin
+from .asserted_edges import AssertedEdgesMixin
 from .attachments import AttachmentsMixin
 from .audit import AuditMixin
 from .auth import AuthMixin
@@ -61,6 +62,7 @@ class SQLModelRepository(
     ActorsMixin,
     AnchorsMixin,
     ArtifactsMixin,
+    AssertedEdgesMixin,
     AttachmentsMixin,
     AuditMixin,
     AuthMixin,

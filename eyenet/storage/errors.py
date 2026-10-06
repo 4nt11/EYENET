@@ -25,6 +25,10 @@ class CaseError(Exception):
     """Domain-shaped rejection from the case-store helper layer."""
 
 
+class AssertedEdgeError(Exception):
+    """Domain-shaped rejection from the asserted-edge (operator graph) layer."""
+
+
 class ReclassifyDemotionError(Exception):
     """Raised when a reclassify call attempts to lower a row's tier.
 
