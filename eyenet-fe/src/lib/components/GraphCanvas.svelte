@@ -3,11 +3,9 @@
   import cytoscape from 'cytoscape';
   import fcose from 'cytoscape-fcose';
   import edgehandles from 'cytoscape-edgehandles';
-  import cola from 'cytoscape-cola';
 
   cytoscape.use(fcose);
   cytoscape.use(edgehandles);
-  cytoscape.use(cola);
 
   // Cytoscape render surface for the search-as-graph view. Nodes are colored by
   // entity_type (token palette), edges dashed=derived / solid=asserted with the
@@ -154,7 +152,6 @@
 
   function runLayout() {
     if (!cy) return;
-    colaRun?.stop(); // don't let the live sim fight the fcose re-seed
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
@@ -178,29 +175,37 @@
     cy.fit(undefined, 32);
   }
 
-  // Force sim run ONLY while a node is held (grab→free), so dragging a node makes its
-  // neighbors spring and trail with real motion (edges are springs), then freezes on
-  // release. A node grab starts it warm — the drag that follows keeps resuming it, so
-  // neighbors move; stopping on release is what prevents the spring-back.
-  // ponytail: cola during drag is fine for typical graphs; gate it to the dragged
-  // node's neighborhood if a huge (500+ node) graph ever chugs mid-drag.
-  let colaRun = null;
-  function startPhysics() {
-    if (!cy) return;
-    colaRun?.stop();
-    colaRun = cy.layout({
-      name: 'cola',
-      infinite: true,
-      fit: false,
-      animate: true,
-      randomize: false, // continue from current positions, don't reshuffle
-      handleDisconnected: false, // don't re-pack components (that froze the spokes)
-      avoidOverlap: true,
-      centerGraph: false, // never recenter under a drag
-      nodeSpacing: 12,
-      edgeLength: 120 // spring rest length
-    });
-    colaRun.run();
+  // Spring-follow drag (own rAF loop — cytoscape-cola refused to track a live drag).
+  // On grab we snapshot the dragged node's LEAF (degree-1) neighbors and their offset
+  // from it; each frame we EASE them toward (hub + offset). The easing (not a rigid
+  // set) is what gives the trailing, springy motion — the spokes lag then catch up.
+  // On release we just stop the loop: nodes stay where they landed, nothing springs
+  // back. Dragging a leaf moves only it (its one neighbor, the hub, is high-degree).
+  let dragState = null;
+  const FOLLOW_EASE = 0.2;
+  function followTick() {
+    if (!dragState) return;
+    const hub = dragState.node.position();
+    for (const f of dragState.followers) {
+      const p = f.ele.position();
+      const tx = hub.x + f.offx;
+      const ty = hub.y + f.offy;
+      f.ele.position({ x: p.x + (tx - p.x) * FOLLOW_EASE, y: p.y + (ty - p.y) * FOLLOW_EASE });
+    }
+    dragState.raf = requestAnimationFrame(followTick);
+  }
+  function startFollow(node) {
+    const hub = node.position();
+    const followers = node
+      .neighborhood('node')
+      .filter((x) => x.degree(false) === 1)
+      .map((x) => ({ ele: x, offx: x.position('x') - hub.x, offy: x.position('y') - hub.y }));
+    dragState = { node, followers, raf: 0 };
+    followTick();
+  }
+  function stopFollow() {
+    if (dragState?.raf) cancelAnimationFrame(dragState.raf);
+    dragState = null;
   }
 
   onMount(() => {
@@ -237,26 +242,15 @@
       if (evt.originalEvent?.shiftKey) {
         cy.autoungrabify(true); // suppress node-drag for THIS draw only
         eh.start(evt.target);
-      } else {
-        // Start the sim on mousedown — BEFORE 'grab' fires — so cola's grab listener
-        // is bound in time to hook this drag (starting it on 'grab' missed the event
-        // and the neighbors stayed frozen). Physics lives only for the drag.
-        startPhysics();
       }
     });
     cy.on('ehstop', releaseGrab);
     window.addEventListener('mouseup', releaseGrab);
     window.addEventListener('blur', releaseGrab);
 
-    // Stop on release so the graph FREEZES where you dropped it — a sim left running
-    // springs the node back to equilibrium (the "snaps back" bug). Deferred so cola's
-    // own free-relax tick is cancelled before it can pull anything back.
-    cy.on('free', 'node', () => {
-      setTimeout(() => {
-        colaRun?.stop();
-        colaRun = null;
-      }, 0);
-    });
+    // Spring-follow: the held node's leaf neighbors trail after it, then stay put.
+    cy.on('grab', 'node', (evt) => startFollow(evt.target));
+    cy.on('free', 'node', stopFollow);
 
     cy.on('ehcomplete', (_evt, src, tgt, added) => {
       added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
@@ -286,7 +280,7 @@
       window.removeEventListener('mouseup', releaseGrab);
       window.removeEventListener('blur', releaseGrab);
       container.removeEventListener('contextmenu', noCtx);
-      colaRun?.stop();
+      stopFollow();
       ro.disconnect();
       cy?.destroy();
       cy = null;
