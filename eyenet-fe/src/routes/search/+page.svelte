@@ -59,7 +59,7 @@
     if (view === 'graph' && q) runGraph(q);
   });
 
-  function onView() { saveView(view); clearSel(); }
+  function onView() { saveView(view); clearSel(); ctxMenu = null; }
   function submitInPage(e) {
     if (e.key !== 'Enter') return;
     goto(`/search?q=${encodeURIComponent(query.trim())}`);
@@ -151,8 +151,13 @@
   let selNode = $state(null); // a graph node
   function clearSel() { selRow = null; selNode = null; }
 
-  // ── Edge edit modal (graph). connectMode arms node-pair picking on the canvas.
-  let connectMode = $state(false);
+  // ── Right-click facet menu (graph view): opened at the pointer over empty canvas.
+  let ctxMenu = $state(null); // { x, y } container-relative px | null
+  function openCtxMenu(pos) { ctxMenu = { x: pos.x, y: pos.y }; }
+  function pickType(arg) { setTypeFilter(arg); ctxMenu = null; }
+  function pickSource(arg) { setSourceFilter(arg); ctxMenu = null; }
+
+  // ── Edge edit modal (graph). Shift+drag on the canvas maps the node pair.
   let modal = $state(null); // { mode:'connect', src, dst } | { mode:'retract', edge }
 
   function openConnect(src, dst) { graphCtx.mutateError = null; modal = { mode: 'connect', src, dst }; }
@@ -199,21 +204,25 @@
     {:else if searchCtx.error}
       <p class="pnote">Search failed: {searchCtx.error}</p>
     {:else}
-      {#if typeChips.length}
-        <div class="facets">
-          <button class="chip" class:active={!searchCtx.typeFilter} onclick={() => setTypeFilter(searchCtx.typeFilter)}>All types</button>
-          {#each typeChips as [t, n]}
-            <button class="chip" class:active={searchCtx.typeFilter === t} onclick={() => setTypeFilter(t)}>{cap(t)} <span class="n">{n}</span></button>
-          {/each}
-        </div>
-      {/if}
-      {#if sourceChips.length}
-        <div class="facets">
-          <button class="chip" class:active={!searchCtx.sourceFilter} onclick={() => setSourceFilter(searchCtx.sourceFilter)}>All sources</button>
-          {#each sourceChips as [id, n]}
-            <button class="chip mono" class:active={searchCtx.sourceFilter === id} title={id} onclick={() => setSourceFilter(id)}>{sourceName(id)} <span class="n">{n}</span></button>
-          {/each}
-        </div>
+      <!-- Facet chips live inline in Table view; in Graph view they move to the
+           canvas right-click menu (less chrome, more graph). -->
+      {#if view === 'table'}
+        {#if typeChips.length}
+          <div class="facets">
+            <button class="chip" class:active={!searchCtx.typeFilter} onclick={() => setTypeFilter(searchCtx.typeFilter)}>All types</button>
+            {#each typeChips as [t, n]}
+              <button class="chip" class:active={searchCtx.typeFilter === t} onclick={() => setTypeFilter(t)}>{cap(t)} <span class="n">{n}</span></button>
+            {/each}
+          </div>
+        {/if}
+        {#if sourceChips.length}
+          <div class="facets">
+            <button class="chip" class:active={!searchCtx.sourceFilter} onclick={() => setSourceFilter(searchCtx.sourceFilter)}>All sources</button>
+            {#each sourceChips as [id, n]}
+              <button class="chip mono" class:active={searchCtx.sourceFilter === id} title={id} onclick={() => setSourceFilter(id)}>{sourceName(id)} <span class="n">{n}</span></button>
+            {/each}
+          </div>
+        {/if}
       {/if}
 
       <div class="toolbar">
@@ -222,9 +231,7 @@
           {#if view === 'table'}
             <ColumnPicker options={colOptions} bind:selected={selectedCols} onchange={saveCols} label="Columns" />
           {:else}
-            <button class="tbtn" class:on={connectMode} onclick={() => (connectMode = !connectMode)} title="Pick a source node then a target node to map an edge">
-              {connectMode ? 'Connecting… (pick 2 nodes)' : 'Connect edge'}
-            </button>
+            <span class="ghint"><kbd>Shift</kbd>+drag a node → another to map an edge · right-click for filters</span>
           {/if}
         </div>
       </div>
@@ -306,11 +313,36 @@
             <GraphCanvas
               nodes={graphCtx.nodes}
               edges={graphCtx.edges}
-              {connectMode}
               onNodeClick={(n) => (selNode = n)}
               onConnectReady={openConnect}
               onEdgeRetract={openRetract}
+              onBackgroundContext={openCtxMenu}
+              onCanvasTap={() => (ctxMenu = null)}
             />
+
+            <!-- right-click facet menu (replaces the inline chip rows in graph view) -->
+            {#if ctxMenu}
+              <div class="ctxmenu" style="left:{ctxMenu.x}px; top:{ctxMenu.y}px">
+                {#if typeChips.length}
+                  <div class="ctxsec">
+                    <div class="ctxlabel">Type</div>
+                    <button class="ctxitem" class:active={!searchCtx.typeFilter} onclick={() => pickType(searchCtx.typeFilter)}>All types</button>
+                    {#each typeChips as [t, n]}
+                      <button class="ctxitem" class:active={searchCtx.typeFilter === t} onclick={() => pickType(t)}>{cap(t)} <span class="n">{n}</span></button>
+                    {/each}
+                  </div>
+                {/if}
+                {#if sourceChips.length}
+                  <div class="ctxsec">
+                    <div class="ctxlabel">Source</div>
+                    <button class="ctxitem" class:active={!searchCtx.sourceFilter} onclick={() => pickSource(searchCtx.sourceFilter)}>All sources</button>
+                    {#each sourceChips as [id, n]}
+                      <button class="ctxitem mono" class:active={searchCtx.sourceFilter === id} title={id} onclick={() => pickSource(id)}>{sourceName(id)} <span class="n">{n}</span></button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
 
             <!-- legend overlay (bottom-left): entity palette + edge styles + counts -->
             <div class="overlay legend">
@@ -411,6 +443,19 @@
   /* Inspector floats over the graph; EntityDetail brings its own panel chrome so
      the wrapper is just position + scroll (a long message body scrolls here). */
   .inspector { top: 10px; right: 10px; width: 360px; max-width: calc(100% - 20px); max-height: calc(100% - 20px); overflow-y: auto; background: transparent; border: none; backdrop-filter: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+
+  .ghint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
+
+  /* Right-click facet menu, positioned at the pointer inside the canvas. */
+  .ctxmenu { position: absolute; z-index: 5; min-width: 170px; max-height: calc(100% - 20px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: rgba(12, 13, 16, 0.97); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); backdrop-filter: blur(3px); }
+  .ctxsec { display: flex; flex-direction: column; gap: 3px; }
+  .ctxlabel { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); padding: 2px 4px; }
+  .ctxitem { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-12); padding: 4px 8px; cursor: pointer; }
+  .ctxitem.mono { font-family: var(--font-mono); }
+  .ctxitem:hover { background: var(--surface); border-color: var(--accent); }
+  .ctxitem.active { background: var(--accent-fill); border-color: var(--accent); color: var(--accent-text); }
+  .ctxitem .n { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
+  .ctxitem.active .n { color: var(--accent-text); }
 
   .rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .collapse { appearance: none; background: transparent; border: none; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-16); line-height: 1; cursor: pointer; padding: 0 4px; }

@@ -2,29 +2,35 @@
   import { onMount } from 'svelte';
   import cytoscape from 'cytoscape';
   import fcose from 'cytoscape-fcose';
+  import edgehandles from 'cytoscape-edgehandles';
 
   cytoscape.use(fcose);
+  cytoscape.use(edgehandles);
 
   // Cytoscape render surface for the search-as-graph view. Nodes are colored by
   // entity_type (token palette), edges dashed=derived / solid=asserted with the
   // `kind` as label and `weight` → thickness. Node tap drives the detail flyout
-  // (onNodeClick). In connectMode a first node tap picks the source, a second
-  // picks the target and fires onConnectReady(src, dst). Tapping (or right-
-  // clicking) an ASSERTED edge fires onEdgeRetract(edge); derived edges are
-  // read-only. The parent persists the mutation and feeds the new edge list back.
+  // (onNodeClick).
+  //
+  // Connect an operator edge by SHIFT+dragging from a source node to a target
+  // node (cytoscape-edgehandles draws the ghost arrow) → onConnectReady(src,dst).
+  // Tapping (or right-clicking) an ASSERTED edge fires onEdgeRetract(edge);
+  // derived edges are read-only. Right-clicking empty canvas fires
+  // onBackgroundContext(pos) so the parent can pop the facet menu; a plain tap on
+  // empty canvas fires onCanvasTap (parent closes the menu).
   let {
     nodes = [],
     edges = [],
-    connectMode = false,
     onNodeClick = () => {},
     onConnectReady = () => {},
-    onEdgeRetract = () => {}
+    onEdgeRetract = () => {},
+    onBackgroundContext = () => {},
+    onCanvasTap = () => {}
   } = $props();
 
   let container;
   let cy = null;
-  let currentConnectMode = false;
-  let pendingSrcId = null;
+  let eh = null;
 
   // Resolve the entity-type palette from CSS tokens once (dark-theme values).
   const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'];
@@ -100,7 +106,6 @@
         'border-color': '#000000'
       }
     },
-    { selector: 'node.pick-src', style: { 'border-width': 3, 'border-color': getComputedStyle(document.documentElement).getPropertyValue('--accent-text').trim() || '#a259c4' } },
     {
       selector: 'edge',
       style: {
@@ -131,7 +136,18 @@
         'line-color': getComputedStyle(document.documentElement).getPropertyValue('--edge-asserted').trim() || '#a259c4',
         'target-arrow-color': getComputedStyle(document.documentElement).getPropertyValue('--edge-asserted').trim() || '#a259c4'
       }
-    }
+    },
+    // edgehandles' in-flight ghost edge + preview node, themed to the asserted color.
+    {
+      selector: '.eh-ghost-edge, .eh-preview',
+      style: {
+        'line-color': getComputedStyle(document.documentElement).getPropertyValue('--edge-asserted').trim() || '#a259c4',
+        'target-arrow-color': getComputedStyle(document.documentElement).getPropertyValue('--edge-asserted').trim() || '#a259c4',
+        'line-style': 'solid',
+        width: 2.5
+      }
+    },
+    { selector: '.eh-source, .eh-target', style: { 'border-width': 3, 'border-color': getComputedStyle(document.documentElement).getPropertyValue('--edge-asserted').trim() || '#a259c4' } }
   ];
 
   function runLayout() {
@@ -139,7 +155,7 @@
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
-    const hasEdges = cy.edges().length > 0;
+    const hasEdges = cy.edges(':not(.eh-ghost-edge)').length > 0;
     cy.layout({
       name: 'fcose',
       animate: false,
@@ -159,11 +175,6 @@
     cy.fit(undefined, 32);
   }
 
-  function clearPick() {
-    pendingSrcId = null;
-    cy?.nodes().removeClass('pick-src');
-  }
-
   onMount(() => {
     colorMap = buildColorMap();
     cy = cytoscape({
@@ -172,51 +183,67 @@
       style: cyStyle(),
       minZoom: 0.15,
       maxZoom: 3,
-      wheelSensitivity: 0.2
+      wheelSensitivity: 0.6, // 0.2 felt sluggish; 0.6 is a brisk but controllable zoom
+      boxSelectionEnabled: false
     });
     lastNodeSig = nodeSig();
     runLayout();
 
-    cy.on('tap', 'node', (evt) => {
-      const n = evt.target.data('raw');
-      onNodeClick(n);
-      if (!currentConnectMode) return;
-      const id = evt.target.id();
-      if (pendingSrcId == null) {
-        pendingSrcId = id;
-        evt.target.addClass('pick-src');
-      } else if (pendingSrcId === id) {
-        clearPick(); // tapped the source again → cancel
-      } else {
-        const src = cy.getElementById(pendingSrcId).data('raw');
-        onConnectReady(src, n);
-        clearPick();
-      }
+    // ── Shift+drag to connect (cytoscape-edgehandles, triggered manually so there
+    // is no always-on hover handle). While Shift is held nodes are un-grabbable so
+    // the drag draws an edge instead of moving the node.
+    eh = cy.edgehandles({
+      canConnect: (s, t) => !s.same(t),
+      edgeParams: () => ({ data: { _ghost: true } }),
+      snap: true,
+      snapThreshold: 24,
+      snapFrequency: 15,
+      noEdgeEventsInDraw: true,
+      disableBrowserGestures: true
     });
+
+    const onKey = (down) => (e) => { if (e.key === 'Shift') cy.autoungrabify(down); };
+    const keyDown = onKey(true);
+    const keyUp = onKey(false);
+    window.addEventListener('keydown', keyDown);
+    window.addEventListener('keyup', keyUp);
+
+    cy.on('mousedown', 'node', (evt) => {
+      if (evt.originalEvent?.shiftKey) eh.start(evt.target);
+    });
+
+    cy.on('ehcomplete', (_evt, src, tgt, added) => {
+      added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
+      onConnectReady(src.data('raw'), tgt.data('raw'));
+    });
+
+    cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
 
     const onEdgeTap = (evt) => {
       const e = evt.target.data('raw');
-      if (e.provenance === 'asserted') onEdgeRetract(e);
+      if (e?.provenance === 'asserted') onEdgeRetract(e);
     };
     cy.on('tap', 'edge', onEdgeTap);
     cy.on('cxttap', 'edge', onEdgeTap);
-    cy.on('tap', (evt) => { if (evt.target === cy) clearPick(); });
+
+    // Background: plain tap closes the facet menu; right-click opens it at the
+    // pointer (container-relative renderedPosition).
+    cy.on('tap', (evt) => { if (evt.target === cy) onCanvasTap(); });
+    cy.on('cxttap', (evt) => { if (evt.target === cy) onBackgroundContext(evt.renderedPosition); });
+    const noCtx = (e) => e.preventDefault(); // suppress the browser menu over the canvas
+    container.addEventListener('contextmenu', noCtx);
 
     const ro = new ResizeObserver(() => cy && cy.resize());
     ro.observe(container);
 
     return () => {
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('keyup', keyUp);
+      container.removeEventListener('contextmenu', noCtx);
       ro.disconnect();
       cy?.destroy();
       cy = null;
     };
-  });
-
-  // Mirror connectMode into the closure the handlers read; clear any half-done
-  // pick when the mode turns off.
-  $effect(() => {
-    currentConnectMode = connectMode;
-    if (!connectMode) clearPick();
   });
 
   // Full rebuild + relayout only when the NODE set changes (a new query/facet).
@@ -229,7 +256,6 @@
     colorMap = buildColorMap();
     cy.elements().remove();
     cy.add([...nodes.map(nodeEl), ...presentEdges().map(edgeEl)]);
-    clearPick();
     runLayout();
   });
 
@@ -237,10 +263,9 @@
   // never reshuffles the canvas.
   $effect(() => {
     if (!cy) return;
-    // touch `edges` so this effect tracks it
     const want = presentEdges();
     const wantIds = new Set(want.map(edgeKey));
-    cy.edges().forEach((el) => { if (!wantIds.has(el.id())) el.remove(); });
+    cy.edges('[!_ghost]').forEach((el) => { if (!wantIds.has(el.id())) el.remove(); });
     for (const e of want) {
       if (cy.getElementById(edgeKey(e)).empty()) cy.add(edgeEl(e));
     }
