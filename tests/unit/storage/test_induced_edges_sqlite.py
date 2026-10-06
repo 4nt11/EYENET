@@ -31,16 +31,19 @@ def storage(monkeypatch: pytest.MonkeyPatch) -> BaseRepository:
 @pytest.mark.asyncio
 async def test_induced_edges_scopes_to_node_set(storage: BaseRepository) -> None:
     a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    # the linkage table enforces a canonical ordered pair (actor_a_id < actor_b_id).
+    ab_lo, ab_hi = sorted((a, b))
+    ac_lo, ac_hi = sorted((a, c))
     async with storage.session() as s:
         s.add(
             LinkageTable(
-                actor_a_id=a, actor_b_id=b, state=LinkageState.CONFIRMED,
+                actor_a_id=ab_lo, actor_b_id=ab_hi, state=LinkageState.CONFIRMED,
                 method="shared_infra", score=0.9, proposed_at=_NOW,
             )
         )
         s.add(
             LinkageTable(
-                actor_a_id=a, actor_b_id=c, state=LinkageState.PROPOSED,
+                actor_a_id=ac_lo, actor_b_id=ac_hi, state=LinkageState.PROPOSED,
                 method="shared_infra", score=0.5, proposed_at=_NOW,
             )
         )
