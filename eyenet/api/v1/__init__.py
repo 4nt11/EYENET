@@ -204,7 +204,10 @@ from eyenet.api.v1.reclassify.api_reclassify_observation import (
 )
 from eyenet.api.v1.relations.api_rebuild import router as relations_rebuild_router
 from eyenet.api.v1.schemas.errors import ProblemDetail
+from eyenet.api.v1.graph.api_assert_edge import router as graph_assert_edge_router
+from eyenet.api.v1.graph.api_retract_edge import router as graph_retract_edge_router
 from eyenet.api.v1.search.api_list_search import router as search_global_router
+from eyenet.api.v1.search.api_search_graph import router as search_graph_router
 
 # === sources (M9.D1 discovery) ===
 from eyenet.api.v1.sources.api_add_source_domain import router as sources_add_domain_router
@@ -309,6 +312,9 @@ v1_router.include_router(incident_rule_delete_router)
 v1_router.include_router(graph_stats_router)
 v1_router.include_router(graph_search_router)
 v1_router.include_router(search_global_router)
+v1_router.include_router(search_graph_router)
+v1_router.include_router(graph_assert_edge_router)
+v1_router.include_router(graph_retract_edge_router)
 
 # audit
 v1_router.include_router(audit_list_router)

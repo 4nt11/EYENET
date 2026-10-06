@@ -1896,6 +1896,16 @@ class BaseRepository(ABC):
     ) -> dict[str, dict[str, int]]:
         """Facet counts for ``q``: ``{"by_type": {...}, "by_source": {...}}``."""
 
+    @abstractmethod
+    async def induced_edges(
+        self,
+        *,
+        actor_ids: Collection[UUID],
+        persona_ids: Collection[UUID],
+        artifact_ids: Collection[UUID],
+    ) -> list[dict[str, Any]]:
+        """Derived edges among search-result nodes (linkage/relation/infra/persona)."""
+
     # -- Operator-asserted graph edges (GLOBAL_SEARCH.md §10.4) --------------
     @abstractmethod
     async def assert_edge(
