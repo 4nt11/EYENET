@@ -154,6 +154,7 @@
 
   function runLayout() {
     if (!cy) return;
+    colaRun?.stop(); // don't let the live sim fight the fcose re-seed
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
@@ -175,6 +176,33 @@
       padding: 32
     }).run();
     cy.fit(undefined, 32);
+    startPhysics();
+  }
+
+  // Continuous cola force sim: kept RUNNING (infinite) so it is already live when a
+  // node is grabbed — then dragging a node makes its neighbors spring and trail with
+  // real motion (edges are springs). Started on a node grab did NOT work: cola hooks
+  // the drag on run() and converges instantly, so the ongoing drag never engaged.
+  // It settles to equilibrium and sits ~still until you perturb it by dragging.
+  // ponytail: a live sim costs idle CPU; gate it to the dragged node's neighborhood
+  // if a huge (500+ node) graph ever chugs.
+  let colaRun = null;
+  function startPhysics() {
+    if (!cy) return;
+    colaRun?.stop();
+    colaRun = cy.layout({
+      name: 'cola',
+      infinite: true,
+      fit: false,
+      animate: true,
+      randomize: false, // continue from the fcose seed, don't reshuffle
+      handleDisconnected: false, // don't re-pack components (that froze the spokes)
+      avoidOverlap: true,
+      centerGraph: false, // never recenter under a drag
+      nodeSpacing: 12,
+      edgeLength: 120 // spring rest length
+    });
+    colaRun.run();
   }
 
   onMount(() => {
@@ -220,30 +248,6 @@
     cy.on('ehcomplete', (_evt, src, tgt, added) => {
       added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
       onConnectReady(src.data('raw'), tgt.data('raw'));
-    });
-
-    // ── Physics drag: while a node is held, run a continuous cola force sim so its
-    // neighbors spring and trail after it (edges act as springs) instead of jumping
-    // rigidly. The grabbed node is pinned to the cursor; cola relaxes the rest. The
-    // sim lives only for the drag (started on grab, stopped on free) to bound CPU.
-    let colaRun = null;
-    cy.on('grab', 'node', () => {
-      colaRun?.stop();
-      colaRun = cy.layout({
-        name: 'cola',
-        infinite: true, // keep simulating for as long as the node is held
-        fit: false,
-        animate: true,
-        randomize: false, // continue from the current positions, don't reshuffle
-        nodeSpacing: 18,
-        edgeLength: 110, // spring rest length
-        convergenceThreshold: 0.01
-      });
-      colaRun.run();
-    });
-    cy.on('free', 'node', () => {
-      colaRun?.stop();
-      colaRun = null;
     });
 
     cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
