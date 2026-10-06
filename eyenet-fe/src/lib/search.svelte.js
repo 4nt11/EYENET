@@ -9,8 +9,12 @@ import { apiGet } from './api.js';
 const short = (id) => (id ? id.slice(0, 8) : '');
 
 // SearchHit → the row shape the DataTable consumes. entity_id is the rowKey; we
-// keep the raw type so the page can group + route per entity_type.
+// keep the raw type so the page can group + route per entity_type. `fields` is a
+// per-entity bag (message.author, actor.handle, group.member_count…) that drives
+// the configurable-columns picker; `date` is the one derived convenience column
+// (sent_at for messages, last_seen for actors — whichever the hit carries).
 function mapHit(h) {
+  const fields = h.fields ?? {};
   return {
     entityType: h.entity_type,
     id: h.entity_id,
@@ -18,8 +22,31 @@ function mapHit(h) {
     subtitle: h.subtitle ?? '',
     status: h.status ?? '',
     sourceId: h.source_id ?? null,
-    sourceShort: h.source_id ? short(h.source_id) : ''
+    sourceShort: h.source_id ? short(h.source_id) : '',
+    fields,
+    date: fields.sent_at ?? fields.last_seen ?? ''
   };
+}
+
+// Union of every key seen across the loaded hits' `fields` bags, sorted — the
+// candidate set for the configurable-columns picker. Recomputed by the caller
+// from searchCtx.items whenever the page changes.
+export function fieldKeyUnion(items) {
+  const keys = new Set();
+  for (const it of items) {
+    for (const k of Object.keys(it.fields ?? {})) keys.add(k);
+  }
+  return [...keys].sort();
+}
+
+// Flatten one field value to a display string: arrays (aliases) join with ", ",
+// objects JSON-stringify, null/undefined → ''. Keeps the table cells plain text.
+export function fieldValue(it, key) {
+  const v = it.fields?.[key];
+  if (v == null) return '';
+  if (Array.isArray(v)) return v.join(', ');
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
 }
 
 export const searchCtx = $state({
