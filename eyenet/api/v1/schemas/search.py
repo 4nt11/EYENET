@@ -76,6 +76,11 @@ class SearchGraphNode(ApiSchema):
     title: str
     status: str | None = None
     source_id: UUID | None = None
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured per-entity fields (same bag as the table hit) so the "
+        "graph inspector shows full detail — author, timestamp, full message body, ...",
+    )
 
 
 class SearchGraphEdge(ApiSchema):

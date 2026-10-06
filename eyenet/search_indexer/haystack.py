@@ -113,15 +113,24 @@ def candidate_group_doc(c: GroupCandidateTable) -> dict[str, Any]:
     }
 
 
+#: Full message body carried in the inspector `fields` so an operator reads the
+#: WHOLE message (greetz, @mentions, context) — truncating it loses linkage
+#: signal. Capped only against a pathological mega-dump paste; a normal forum/
+#: chat post is far under this. ponytail: 16k ceiling; stream from a message
+#: detail endpoint if full dumps ever need reading in the inspector.
+_BODY_MAX = 16000
+
+
 def message_doc(
     m: MessageTable, *, group_title: str | None, author_handle: str | None
 ) -> dict[str, Any]:
+    body = m.body or ""
     return {
         "entity_type": "message",
         "entity_id": m.id,
         "source_id": m.source_id,
         "status": None,
-        "title": (m.body or "")[:80] or f"message {str(m.id)[:8]}",
+        "title": body[:80] or f"message {str(m.id)[:8]}",
         "subtitle": clean(group_title, author_handle),
         "haystack": clean(m.body, group_title, author_handle),
         "handles": clean(author_handle, extract_handles(m.body)),
@@ -130,6 +139,7 @@ def message_doc(
             "group": group_title,
             "sent_at": _iso(m.sent_at_source),
             "platform_msgid": m.platform_msgid,
+            "body": body[:_BODY_MAX] + ("…" if len(body) > _BODY_MAX else ""),
         },
     }
 

@@ -56,6 +56,7 @@ async def search_graph(
             title=r.title,
             status=r.status,
             source_id=r.source_id,
+            fields=r.fields or {},
         )
         for r in rows
     ]

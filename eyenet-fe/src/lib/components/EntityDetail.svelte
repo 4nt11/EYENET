@@ -70,7 +70,7 @@
   .dtitle { font-family: var(--font-sans); font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); line-height: var(--lh-tight); word-break: break-word; }
   .dfield { display: flex; flex-direction: column; gap: 2px; }
   .dk { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
-  .dv { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); word-break: break-word; }
+  .dv { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); word-break: break-word; white-space: pre-wrap; }
   .dv.mono { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); }
   .fgrid { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
   .dopen { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); text-decoration: none; margin-top: 2px; }

@@ -27,7 +27,8 @@ function mapNode(n) {
     id: n.entity_id,
     title: n.title ?? '',
     status: n.status ?? null,
-    sourceId: n.source_id ?? null
+    sourceId: n.source_id ?? null,
+    fields: n.fields ?? {}
   };
 }
 

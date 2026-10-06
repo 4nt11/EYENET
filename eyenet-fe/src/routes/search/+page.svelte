@@ -19,6 +19,7 @@
   } from '$lib/searchGraph.svelte.js';
 
   const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+  const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'];
 
   // ── View toggle (Table | Graph), persisted per-viewer (localStorage guarded).
   const VIEW_KEY = 'eyenet_search_view';
@@ -292,52 +293,45 @@
           </aside>
         </div>
 
-      <!-- ═══ GRAPH VIEW ═══ -->
+      <!-- ═══ GRAPH VIEW — full-bleed canvas, legend + inspector float inside ═══ -->
       {:else}
-        <div class="layout">
-          <div class="results">
-            {#if graphCtx.loading && !graphCtx.nodes.length}
-              <p class="pnote">Building graph…</p>
-            {:else if graphCtx.error}
-              <p class="pnote">Graph failed: {graphCtx.error}</p>
-            {:else if !graphCtx.nodes.length}
-              <p class="pnote">No graph for “{searchCtx.q}”.</p>
-            {:else}
-              <div class="gwrap">
-                <GraphCanvas
-                  nodes={graphCtx.nodes}
-                  edges={graphCtx.edges}
-                  {connectMode}
-                  onNodeClick={(n) => (selNode = n)}
-                  onConnectReady={openConnect}
-                  onEdgeRetract={openRetract}
-                />
-                <div class="legend">
-                  <div class="lrow"><span class="lline solid"></span> asserted (operator)</div>
-                  <div class="lrow"><span class="lline dashed"></span> derived (read-only)</div>
-                  <div class="lrow lcount">{graphCtx.nodes.length} nodes · {graphCtx.edges.length} edges</div>
-                </div>
+        {#if graphCtx.loading && !graphCtx.nodes.length}
+          <p class="pnote">Building graph…</p>
+        {:else if graphCtx.error}
+          <p class="pnote">Graph failed: {graphCtx.error}</p>
+        {:else if !graphCtx.nodes.length}
+          <p class="pnote">No graph for “{searchCtx.q}”.</p>
+        {:else}
+          <div class="gwrap">
+            <GraphCanvas
+              nodes={graphCtx.nodes}
+              edges={graphCtx.edges}
+              {connectMode}
+              onNodeClick={(n) => (selNode = n)}
+              onConnectReady={openConnect}
+              onEdgeRetract={openRetract}
+            />
+
+            <!-- legend overlay (bottom-left): entity palette + edge styles + counts -->
+            <div class="overlay legend">
+              <div class="swatches">
+                {#each ETYPES as t}
+                  <span class="sw"><span class="dot" style="background:var(--etype-{t})"></span>{t}</span>
+                {/each}
+              </div>
+              <div class="lrow"><span class="lline solid"></span> asserted (operator)</div>
+              <div class="lrow"><span class="lline dashed"></span> derived (read-only)</div>
+              <div class="lrow lcount">{graphCtx.nodes.length} nodes · {graphCtx.edges.length} edges</div>
+            </div>
+
+            <!-- inspector overlay (top-right): full entity detail, scrolls internally -->
+            {#if selNode}
+              <div class="overlay inspector">
+                <EntityDetail entity={selNode} fields={selNode.fields} sourceName={graphSourceName} onClose={() => (selNode = null)} />
               </div>
             {/if}
           </div>
-
-          <aside class="rail">
-            <Panel title="Graph legend">
-              <div class="palette">
-                <p class="fhint">Nodes colored by entity type. Tap a node to inspect it. Arm <b>Connect edge</b>, then tap a source node and a target node to map an operator edge. Tap an <b>asserted</b> edge to remove it.</p>
-                <div class="swatches">
-                  {#each ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'] as t}
-                    <span class="sw"><span class="dot" style="background:var(--etype-{t})"></span>{t}</span>
-                  {/each}
-                </div>
-              </div>
-            </Panel>
-
-            {#if selNode}
-              <EntityDetail entity={selNode} sourceName={graphSourceName} onClose={() => (selNode = null)} />
-            {/if}
-          </aside>
-        </div>
+        {/if}
       {/if}
     {/if}
   </div>
@@ -403,20 +397,26 @@
   .rframe { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: visible; }
   .more { display: flex; justify-content: center; padding: 2px 0; }
 
-  /* Graph canvas gets a fixed box inside the scrolling body so Cytoscape has a
-     height to fill and resizes cleanly. */
-  .gwrap { position: relative; height: 72vh; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
-  .legend { position: absolute; left: 10px; bottom: 10px; z-index: 2; display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; background: rgba(12, 13, 16, 0.85); border: 1px solid var(--border-strong); border-radius: var(--radius); backdrop-filter: blur(2px); }
+  /* Full-bleed graph: the canvas fills (almost) the whole viewport and the legend
+     + inspector float on top (VirusTotal-style), so the graph owns the screen. */
+  .gwrap { position: relative; height: calc(100dvh - 200px); min-height: 520px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+
+  .overlay { position: absolute; z-index: 2; border: 1px solid var(--border-strong); border-radius: var(--radius); background: rgba(12, 13, 16, 0.9); backdrop-filter: blur(3px); }
+  .legend { left: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 6px; padding: 9px 11px; max-width: 340px; }
   .lrow { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-muted); }
   .lrow.lcount { color: var(--text-faint); margin-top: 2px; }
   .lline { width: 22px; height: 0; border-top: 2px solid var(--edge-asserted); }
   .lline.dashed { border-top-style: dashed; border-top-color: var(--edge-derived); }
 
+  /* Inspector floats over the graph; EntityDetail brings its own panel chrome so
+     the wrapper is just position + scroll (a long message body scrolls here). */
+  .inspector { top: 10px; right: 10px; width: 360px; max-width: calc(100% - 20px); max-height: calc(100% - 20px); overflow-y: auto; background: transparent; border: none; backdrop-filter: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+
   .rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .collapse { appearance: none; background: transparent; border: none; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-16); line-height: 1; cursor: pointer; padding: 0 4px; }
   .collapse:hover { color: var(--accent-text); }
 
-  .fields, .palette { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
+  .fields { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
   .fhint { margin: 0; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); line-height: var(--lh-normal); }
   .fhint code { font-family: var(--font-mono); color: var(--accent-text); }
   .fgroup { display: flex; flex-direction: column; gap: 5px; }
