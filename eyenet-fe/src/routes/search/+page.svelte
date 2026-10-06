@@ -273,7 +273,7 @@
               {/snippet}
               {#if fieldsOpen}
                 <div class="fields">
-                  <p class="fhint">Click a field to insert <code>field:</code> (scoped text). Operators: <code>==</code> exact, <code>!=</code> not, <code>=~</code> like, plus <code>AND</code> <code>OR</code> <code>NOT</code> and <code>( )</code>. Where a field maps to a loaded column, use <span class="pluschip">+col</span> to add it as a table column.</p>
+                  <p class="fhint">Click a field to insert <code>field:</code> (scoped text). Operators: <code>==</code> exact, <code>!=</code> not, <code>=~</code> like, plus <code>AND</code>/<code>&&</code>, <code>OR</code>/<code>||</code>, <code>NOT</code> and <code>( )</code>. Where a field maps to a loaded column, use <span class="pluschip">+col</span> to add it as a table column.</p>
                   {#each QUERY_FIELDS as fg}
                     <div class="fgroup">
                       <div class="fgroup-label">{fg.group}</div>

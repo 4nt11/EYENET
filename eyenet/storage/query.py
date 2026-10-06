@@ -16,7 +16,8 @@ Grammar (§9.2)::
     predicate := FIELD ( '==' | '!=' | '=~' | ':' ) value
     term      := WORD | '"' PHRASE '"' | WORD '*'
 
-``=~`` is the LIKE (case-insensitive substring) operator. Field names are
+``=~`` is the LIKE (case-insensitive substring) operator. ``&&`` / ``||`` are
+accepted as C-style aliases for ``AND`` / ``OR``. Field names are
 whitelisted via :data:`FIELD_REGISTRY`; an unknown field raises
 :class:`UnknownFieldError` (the API turns it into a clean 422). Values are NEVER
 interpolated — the compiler always binds them.
@@ -109,16 +110,19 @@ class QueryParseError(ValueError):
 
 # ── Tokenizer ─────────────────────────────────────────────────────────────────
 # A word is a run of non-delimiter chars; ``:`` splits as an operator UNLESS it is
-# part of a scheme ("://"), so URLs stay whole. ``=``/``!`` never appear in words,
-# so ``==``/``!=``/``=~`` always split out even when glued (``field==value``).
+# part of a scheme ("://"), so URLs stay whole. ``=``/``!``/``&``/``|`` never appear
+# in words, so ``==``/``!=``/``=~`` and the ``&&``/``||`` C-style boolean aliases
+# always split out even when glued (``field==value``, ``a&&b``).
 _TOKEN_RE = re.compile(
     r"""
       \s+
     | (?P<lp>\()
     | (?P<rp>\))
     | (?P<phrase>"[^"]*")
+    | (?P<booland>&&)
+    | (?P<boolor>\|\|)
     | (?P<op>==|!=|=~|:(?!/))
-    | (?P<word>(?:[^\s()"=!:]|:(?=/))+)
+    | (?P<word>(?:[^\s()"=!:&|]|:(?=/))+)
     """,
     re.VERBOSE,
 )
@@ -147,6 +151,10 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
             toks.append(("rp", val))
         elif kind == "op":
             toks.append(("op", val))
+        elif kind == "booland":  # && is an alias for AND
+            toks.append(("AND", val))
+        elif kind == "boolor":  # || is an alias for OR
+            toks.append(("OR", val))
     return toks
 
 

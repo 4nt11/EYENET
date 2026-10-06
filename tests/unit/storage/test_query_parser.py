@@ -55,6 +55,15 @@ def test_lowercase_keywords() -> None:
     assert parse_query("a or b") == Or((Term("a"), Term("b")))
 
 
+def test_c_style_boolean_aliases() -> None:
+    assert parse_query("a && b") == And((Term("a"), Term("b")))
+    assert parse_query("a || b") == Or((Term("a"), Term("b")))
+    assert parse_query("a&&b") == And((Term("a"), Term("b")))  # glued
+    assert parse_query("message.author == zfo || message.author == pampa") == Or(
+        (Field("message.author", "==", "zfo"), Field("message.author", "==", "pampa"))
+    )
+
+
 @pytest.mark.parametrize(
     ("q", "op"),
     [
