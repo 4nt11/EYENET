@@ -181,24 +181,43 @@
   // set) is what gives the trailing, springy motion — the spokes lag then catch up.
   // On release we just stop the loop: nodes stay where they landed, nothing springs
   // back. Dragging a leaf moves only it (its one neighbor, the hub, is high-degree).
+  // Spring-damper physics (velocity + overshoot) so the cluster FLINGS: spokes whip
+  // and bounce after the hub, and a fast release throws the hub with momentum. STIFF =
+  // pull toward the ideal offset; DAMP < 1 leaves bounce; HUB_DECAY coasts the thrown
+  // hub. (A critically-damped ease just "follows" — no fling.)
   let dragState = null;
-  const FOLLOW_EASE = 0.3; // per-frame catch-up: high enough to keep up, low enough to trail
+  const STIFF = 0.18;
+  const DAMP = 0.72;
+  const HUB_DECAY = 0.85;
   function followTick() {
     if (!dragState) return;
-    const hub = dragState.node.position();
-    let maxd = 0;
+    const node = dragState.node;
+    if (dragState.releasing) {
+      // Thrown: coast the hub along its last drag velocity, decaying.
+      dragState.hubVx *= HUB_DECAY;
+      dragState.hubVy *= HUB_DECAY;
+      const hp = node.position();
+      node.position({ x: hp.x + dragState.hubVx, y: hp.y + dragState.hubVy });
+    } else {
+      // Held: measure the hub's per-frame velocity (the throw, captured for release).
+      const hp = node.position();
+      dragState.hubVx = hp.x - dragState.lastHub.x;
+      dragState.hubVy = hp.y - dragState.lastHub.y;
+      dragState.lastHub = { x: hp.x, y: hp.y };
+    }
+    const hub = node.position();
+    let energy = dragState.releasing ? Math.abs(dragState.hubVx) + Math.abs(dragState.hubVy) : 1;
     for (const f of dragState.followers) {
       const p = f.ele.position();
       const tx = hub.x + f.offx;
       const ty = hub.y + f.offy;
-      const nx = p.x + (tx - p.x) * FOLLOW_EASE;
-      const ny = p.y + (ty - p.y) * FOLLOW_EASE;
-      f.ele.position({ x: nx, y: ny });
-      maxd = Math.max(maxd, Math.abs(tx - nx), Math.abs(ty - ny));
+      f.vx = (f.vx + (tx - p.x) * STIFF) * DAMP;
+      f.vy = (f.vy + (ty - p.y) * STIFF) * DAMP;
+      f.ele.position({ x: p.x + f.vx, y: p.y + f.vy });
+      energy = Math.max(energy, Math.abs(f.vx) + Math.abs(f.vy), Math.abs(tx - p.x) + Math.abs(ty - p.y));
     }
-    // After release, keep easing until the spokes CATCH UP to their offset (otherwise
-    // they freeze mid-trail, barely moved). While still held, keep running regardless.
-    if (dragState.releasing && maxd < 0.5) {
+    // After release, run until the whole system settles (hub coasted + springs rest).
+    if (dragState.releasing && energy < 0.4) {
       dragState = null;
       return;
     }
@@ -218,8 +237,14 @@
         const xn = x.neighborhood().nodes();
         return xn.length === 1 && xn[0].id() === id;
       })
-      .map((x) => ({ ele: x, offx: x.position('x') - hub.x, offy: x.position('y') - hub.y }));
-    dragState = { node, followers, raf: 0 };
+      .map((x) => ({
+        ele: x,
+        offx: x.position('x') - hub.x,
+        offy: x.position('y') - hub.y,
+        vx: 0,
+        vy: 0
+      }));
+    dragState = { node, followers, raf: 0, releasing: false, lastHub: { ...hub }, hubVx: 0, hubVy: 0 };
     followTick();
   }
   function stopFollow() {
