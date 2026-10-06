@@ -71,6 +71,7 @@ async def search_graph(
         actor_ids=by_type.get("actor", []),
         persona_ids=by_type.get("persona", []),
         artifact_ids=by_type.get("artifact", []),
+        thread_ids=by_type.get("thread", []),
     )
     for e in derived:
         edges.append(

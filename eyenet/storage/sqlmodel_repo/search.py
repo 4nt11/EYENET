@@ -19,13 +19,14 @@ from itertools import combinations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlmodel import col, select
 
 from eyenet.models import (
     ActorArtifactTable,
     ActorRelationTable,
     LinkageTable,
+    MessageTable,
     PersonaMembershipTable,
     SearchDocumentTable,
 )
@@ -230,24 +231,27 @@ class SearchMixin:
                 await session.delete(existing)
                 await session.commit()
 
-
     async def induced_edges(
         self,
         *,
         actor_ids: Collection[UUID],
         persona_ids: Collection[UUID],
         artifact_ids: Collection[UUID],
+        thread_ids: Collection[UUID] = (),
     ) -> list[dict[str, Any]]:
         """Derived edges among the search-result nodes (GLOBAL_SEARCH.md §10.3).
 
         Scoped to the given node ids: linkage + actor_relation (actor-actor),
-        shared-infra (two node-actors on one artifact) + actor-artifact, and
-        persona membership. Each edge is a dict the API maps to the wire shape;
-        ``provenance`` is stamped "derived" by the caller.
+        shared-infra (two node-actors on one artifact) + actor-artifact, persona
+        membership, and ``same_author`` among threads whose OP is the same actor
+        (free: the OP is provably one entity, so the operator needn't hand-link
+        them). Each edge is a dict the API maps to the wire shape; ``provenance``
+        is stamped "derived" by the caller.
         """
         a_ids = list(actor_ids)
         edges: list[dict[str, Any]] = []
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            await self._same_author_thread_edges(session, list(thread_ids), edges)
             if a_ids:
                 links = await session.exec(
                     select(LinkageTable).where(
@@ -285,7 +289,9 @@ class SearchMixin:
                 # actor<->actor shared-infra edge (two node-actors on one artifact).
                 aa = list(
                     await session.exec(
-                        select(ActorArtifactTable).where(col(ActorArtifactTable.actor_id).in_(a_ids))
+                        select(ActorArtifactTable).where(
+                            col(ActorArtifactTable.actor_id).in_(a_ids)
+                        )
                     )
                 )
                 art_set = set(artifact_ids)
@@ -331,6 +337,64 @@ class SearchMixin:
                             }
                         )
         return edges
+
+    # Small clusters get a full mesh (every pair of a prolific author's threads is
+    # related); big clusters star on one hub thread so the graph stays readable.
+    _SAME_AUTHOR_MESH_MAX = 5
+
+    async def _same_author_thread_edges(
+        self, session: Any, thread_ids: list[UUID], edges: list[dict[str, Any]]
+    ) -> None:
+        """Append ``same_author`` edges among threads whose OP (earliest message)
+        is the same actor. The node set is capped (<=500) upstream, so a single IN
+        is safe — no chunking.
+        """
+        if not thread_ids:
+            return
+        earliest = (
+            select(
+                MessageTable.group_id,
+                func.min(MessageTable.sent_at_source).label("mn"),
+            )
+            .where(col(MessageTable.group_id).in_(thread_ids))
+            .group_by(col(MessageTable.group_id))
+            .subquery()
+        )
+        ops = await session.exec(
+            select(MessageTable.group_id, MessageTable.actor_id).join(
+                earliest,
+                and_(
+                    col(MessageTable.group_id) == earliest.c.group_id,
+                    col(MessageTable.sent_at_source) == earliest.c.mn,
+                ),
+            )
+        )
+        threads_by_author: dict[UUID, list[UUID]] = defaultdict(list)
+        seen: set[UUID] = set()
+        for gid, aid in ops:
+            if gid in seen:  # a timestamp tie yields >1 OP row; keep the first
+                continue
+            seen.add(gid)
+            threads_by_author[aid].append(gid)
+        for aid, ths in threads_by_author.items():
+            uniq = sorted(set(ths))
+            if len(uniq) <= 1:
+                continue
+            if len(uniq) <= self._SAME_AUTHOR_MESH_MAX:
+                pairs: Any = combinations(uniq, 2)
+            else:
+                hub = uniq[0]
+                pairs = ((hub, t) for t in uniq[1:])
+            for x, y in pairs:
+                edges.append(
+                    {
+                        "src_id": x,
+                        "dst_id": y,
+                        "kind": "same_author",
+                        "weight": None,
+                        "meta": {"actor_id": str(aid)},
+                    }
+                )
 
 
 def _enum(v: Any) -> str:
