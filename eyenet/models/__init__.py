@@ -80,9 +80,9 @@ from .thread_summary import ThreadSummaryTable
 __all__ = [
     "ActorAliasHistoryTable",
     "ActorArtifactTable",
-    "AssertedEdgeTable",
     "ActorRelationTable",
     "ActorTable",
+    "AssertedEdgeTable",
     "AttachmentTable",
     "AuditAnchorTable",
     "AuditLogTable",
