@@ -87,16 +87,16 @@
         label: 'data(label)',
         color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#dfe5e5',
         'font-family': getComputedStyle(document.documentElement).getPropertyValue('--font-sans').trim() || 'sans-serif',
-        'font-size': 9,
-        'text-max-width': 120,
+        'font-size': 10,
+        'text-max-width': 100,
         'text-wrap': 'ellipsis',
         'text-valign': 'bottom',
-        'text-margin-y': 4,
-        'text-outline-width': 2,
+        'text-margin-y': 5,
+        'text-outline-width': 3,
         'text-outline-color': '#000000',
-        width: 18,
-        height: 18,
-        'border-width': 1,
+        width: 22,
+        height: 22,
+        'border-width': 1.5,
         'border-color': '#000000'
       }
     },
@@ -136,8 +136,27 @@
 
   function runLayout() {
     if (!cy) return;
-    cy.layout({ name: 'fcose', animate: false, quality: 'default', randomize: true, nodeSeparation: 80, idealEdgeLength: 90, padding: 24 }).run();
-    cy.fit(undefined, 28);
+    // With few/no edges every node is its own component; fcose tiles them. Sizing
+    // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
+    // label pile-up, and wider separation keeps the tiling from looking cramped.
+    const hasEdges = cy.edges().length > 0;
+    cy.layout({
+      name: 'fcose',
+      animate: false,
+      quality: 'proof',
+      randomize: true,
+      nodeDimensionsIncludeLabels: true,
+      packComponents: true,
+      nodeSeparation: hasEdges ? 90 : 150,
+      idealEdgeLength: 120,
+      nodeRepulsion: 9000,
+      gravity: 0.25,
+      gravityRange: 3.0,
+      tilingPaddingVertical: 24,
+      tilingPaddingHorizontal: 24,
+      padding: 32
+    }).run();
+    cy.fit(undefined, 32);
   }
 
   function clearPick() {
