@@ -204,3 +204,14 @@ vs return a new object the driver must reassign?), and that the FE `$effect` in
 change (poll cadence is 2s, so a changed url should re-render within 2s). Likely a
 driver-side reassignment bug or the poll not observing the new url. Add a visible
 "code refreshed" tick + a manual "regenerate" button as a fallback.
+
+## Telegram messages should connect to their attributed author (search graph)
+
+In the search-as-graph induced subgraph, forum threads now spoke into their OP
+author (`authored_by`, `thread_op_authors`). Telegram **messages** have the same
+latent edge — `MessageTable.actor_id` is the attributed author — but message nodes
+currently float unconnected in the graph. Add a message→author derived edge
+(mirror the thread→author path in `api_search_graph.py`): resolve each message
+hit's `actor_id`, inject the actor node if absent, draw a derived `authored_by`
+edge. Same model as threads, just keyed on `message.actor_id` instead of the
+thread OP. Makes a message-heavy query cluster on its senders instead of a dot field.
