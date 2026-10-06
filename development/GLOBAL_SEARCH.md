@@ -502,6 +502,26 @@ Rules:
 - Operator-typo resilience: malformed boolean / dangling operator degrades to a
   best-effort text search, not a 500.
 
+### 9.5 As-built (shipped)
+
+- **Added operator: `=~` (LIKE)** — case-insensitive substring, alongside `==`
+  (exact), `!=` (not-exact), `:` (scoped text/FTS). Full operator set: `AND` `OR`
+  `NOT`, `( )`, `"phrases"`, `prefix*`, and the four field operators.
+- **Parser + registry** are one pure module: `eyenet/storage/query.py` (AST,
+  tokenizer, recursive-descent parser, `FIELD_REGISTRY`, `UnknownFieldError`). No
+  SQL; the tokenizer keeps `://` whole so URLs aren't split on the `:` operator.
+- **Compiler** lives in `SearchMixin._compile_query` / `_compile_node` /
+  `_field_predicate`, with two dialect seams: `_search_predicate` (text → FTS) and
+  `_target_expr` (the `fields.<key>` JSON path, overridden on SQLite via
+  `json_extract`). Values are always bound; field names only ever come from the
+  registry. Unknown field → 422 (`/v1/search` and `/v1/search/graph`).
+- **Backend scope:** SQLite compiler shipped (the live stack). The neutral AST is
+  ready for the Postgres compiler + the §9.4 parity battery, deferred to the
+  Postgres milestone (PG isn't live yet).
+- Tests: `tests/unit/storage/test_query_parser.py` (grammar + 4k-input fuzz) and
+  `tests/unit/storage/test_search_dsl_sqlite.py` (compile/scoping/injection-binding/
+  typo-fallback).
+
 ---
 
 ## 10. Phase 2 — Discover UI + search-as-graph (induced subgraph + operator edge mapping)
