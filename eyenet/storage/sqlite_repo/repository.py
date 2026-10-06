@@ -435,17 +435,20 @@ class SQLiteRepository(SQLModelRepository):
         from sqlalchemy import text  # noqa: PLC0415
 
         fts = self._fts_query(q)
-        clause = (
+        prose = (
             "search_document.rowid IN "
             "(SELECT rowid FROM search_fts_prose WHERE search_fts_prose MATCH :sfts_q)"
         )
         if len(q.strip()) >= _TRIGRAM_MIN_CHARS:
-            clause += (
-                " OR search_document.rowid IN "
+            handles = (
+                "search_document.rowid IN "
                 "(SELECT rowid FROM search_fts_handles WHERE search_fts_handles MATCH :sfts_hq)"
             )
-            return text(clause).bindparams(sfts_q=fts, sfts_hq=fts)
-        return text(clause).bindparams(sfts_q=fts)
+            # MUST parenthesize: without it, the AND that `.where(types=...)` appends
+            # binds tighter than this OR (SQL precedence), so the prose branch would
+            # escape the type/source/status filter and leak other entity types.
+            return text(f"({prose} OR {handles})").bindparams(sfts_q=fts, sfts_hq=fts)
+        return text(prose).bindparams(sfts_q=fts)
 
     async def put_search_documents_bulk(self, rows: Sequence[dict[str, Any]]) -> None:
         """SQLite override: atomic upsert on (entity_type, entity_id).

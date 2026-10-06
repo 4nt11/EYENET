@@ -25,10 +25,11 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import exists
+from sqlalchemy import and_, delete, exists, func
 from sqlalchemy.exc import OperationalError
 from sqlmodel import col, select
 
+from eyenet.contracts.enums import GroupKind
 from eyenet.models import (
     ActorAliasHistoryTable,
     ActorTable,
@@ -111,13 +112,20 @@ async def backfill_search(
     await _bulk(storage, [haystack.actor_doc(a, aliases_by_actor.get(a.id, [])) for a in actors])
     counts["actor"] = len(actors)
 
+    # Forum threads are group-kinded rows but indexed as their OWN entity_type with
+    # OP-derived fields (author/created/OP content) — split them from plain groups.
+    threads = [g for g in groups if g.kind == GroupKind.FORUM_THREAD]
+    plain_groups = [g for g in groups if g.kind != GroupKind.FORUM_THREAD]
+
     group_rows: list[dict[str, Any]] = [
         haystack.group_doc(g, status="joined" if g.id in open_group_ids else "known")
-        for g in groups
+        for g in plain_groups
     ]
     group_rows += [haystack.candidate_group_doc(c) for c in candidates]
     await _bulk(storage, group_rows)
     counts["group"] = len(group_rows)
+
+    counts["thread"] = await _backfill_threads(storage, threads)
 
     await _bulk(
         storage,
@@ -148,6 +156,79 @@ async def backfill_search(
 
     counts["message"] = await _backfill_messages(storage, group_title, actor_handle, batch, full)
     return counts
+
+
+def _chunked(seq: list[Any], n: int) -> list[list[Any]]:
+    return [seq[i : i + n] for i in range(0, len(seq), n)]
+
+
+async def _backfill_threads(storage: BaseRepository, threads: Sequence[Any]) -> int:
+    """Index forum threads as entity_type='thread' with OP author/date/content.
+
+    The OP is each thread's EARLIEST message. IN-clauses are chunked under the 999
+    SQLite variable cap. Also deletes any stale entity_type='group' doc for these
+    threads (the entity_type changed, so the old group doc would orphan).
+    """
+    if not threads:
+        return 0
+    thread_ids = [t.id for t in threads]
+    ops: dict[UUID, Any] = {}
+    post_counts: dict[UUID, int] = {}
+    async with storage.session() as s:
+        for chunk in _chunked(thread_ids, 900):
+            for gid, cnt in await s.exec(
+                select(MessageTable.group_id, func.count())
+                .where(col(MessageTable.group_id).in_(chunk))
+                .group_by(col(MessageTable.group_id))
+            ):
+                post_counts[gid] = cnt
+            earliest = (
+                select(
+                    MessageTable.group_id,
+                    func.min(MessageTable.sent_at_source).label("mn"),
+                )
+                .where(col(MessageTable.group_id).in_(chunk))
+                .group_by(col(MessageTable.group_id))
+                .subquery()
+            )
+            for m in await s.exec(
+                select(MessageTable).join(
+                    earliest,
+                    and_(
+                        col(MessageTable.group_id) == earliest.c.group_id,
+                        col(MessageTable.sent_at_source) == earliest.c.mn,
+                    ),
+                )
+            ):
+                ops.setdefault(m.group_id, m)  # first wins on a timestamp tie
+        authors: dict[UUID, Any] = {}
+        author_ids = list({m.actor_id for m in ops.values()})
+        for chunk in _chunked(author_ids, 900):
+            for a in await s.exec(select(ActorTable).where(col(ActorTable.id).in_(chunk))):
+                authors[a.id] = a
+
+    rows: list[dict[str, Any]] = []
+    for t in threads:
+        op = ops.get(t.id)
+        author = authors.get(op.actor_id) if op is not None else None
+        handle = (author.current_handle or author.current_display_name) if author else None
+        rows.append(
+            haystack.thread_doc(
+                t, op=op, op_author_handle=handle, post_count=post_counts.get(t.id, 0)
+            )
+        )
+    await _bulk(storage, rows)
+
+    async with storage.session() as s:
+        for chunk in _chunked(thread_ids, 900):
+            await s.exec(
+                delete(SearchDocumentTable).where(
+                    col(SearchDocumentTable.entity_type) == "group",
+                    col(SearchDocumentTable.entity_id).in_(chunk),
+                )
+            )
+        await s.commit()
+    return len(rows)
 
 
 async def _backfill_messages(

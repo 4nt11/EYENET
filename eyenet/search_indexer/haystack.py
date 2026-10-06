@@ -144,6 +144,40 @@ def message_doc(
     }
 
 
+def thread_doc(
+    g: GroupTable,
+    *,
+    op: MessageTable | None,
+    op_author_handle: str | None,
+    post_count: int,
+) -> dict[str, Any]:
+    """A forum thread — a group-kinded row, but indexed as its OWN entity_type so
+    search keeps thread author / creation date / OP content instead of flattening
+    it into a generic group. The OP is the thread's earliest message.
+    """
+    op_body = (op.body or "") if op is not None else ""
+    return {
+        "entity_type": "thread",
+        "entity_id": g.id,
+        "source_id": g.source_id,
+        "status": None,  # a thread has no joined/known lifecycle; that's a group facet
+        "title": g.current_title or g.platform_groupid,
+        "subtitle": clean(op_author_handle, f"{post_count} posts" if post_count else None),
+        # OP body IN the haystack so searching the leak announcement finds the thread.
+        "haystack": clean(
+            g.current_title, g.current_description, g.platform_groupid, op_body, op_author_handle
+        ),
+        "handles": clean(op_author_handle, extract_handles(op_body), g.platform_groupid),
+        "fields": {
+            "thread_author": op_author_handle,
+            "created": _iso(op.sent_at_source) if op is not None else None,
+            "posts": post_count,
+            "op": op_body[:_BODY_MAX] + ("…" if len(op_body) > _BODY_MAX else ""),
+            "platform_groupid": g.platform_groupid,
+        },
+    }
+
+
 def persona_doc(p: PersonaTable, member_handles: list[str]) -> dict[str, Any]:
     return {
         "entity_type": "persona",
@@ -227,4 +261,5 @@ __all__ = [
     "group_doc",
     "message_doc",
     "persona_doc",
+    "thread_doc",
 ]
