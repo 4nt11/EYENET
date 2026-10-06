@@ -196,9 +196,18 @@
   }
   function startFollow(node) {
     const hub = node.position();
+    const id = node.id();
+    // A neighbor follows only if it is PENDANT on this node — every node it connects
+    // to IS this node (handles spokes with >1 edge to the hub). So dragging the hub
+    // carries all its spokes; dragging a lone spoke doesn't yank the hub (the hub
+    // connects to many others, so it isn't pendant on the spoke).
     const followers = node
-      .neighborhood('node')
-      .filter((x) => x.degree(false) === 1)
+      .neighborhood()
+      .nodes()
+      .filter((x) => {
+        const xn = x.neighborhood().nodes();
+        return xn.length === 1 && xn[0].id() === id;
+      })
       .map((x) => ({ ele: x, offx: x.position('x') - hub.x, offy: x.position('y') - hub.y }));
     dragState = { node, followers, raf: 0 };
     followTick();
