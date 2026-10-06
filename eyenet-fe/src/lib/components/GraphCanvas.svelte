@@ -186,9 +186,9 @@
   // pull toward the ideal offset; DAMP < 1 leaves bounce; HUB_DECAY coasts the thrown
   // hub. (A critically-damped ease just "follows" — no fling.)
   let dragState = null;
-  const STIFF = 0.18;
-  const DAMP = 0.72;
-  const HUB_DECAY = 0.85;
+  const STIFF = 0.08; // softer pull → more lag/overshoot (lively, not snappy)
+  const DAMP = 0.92; // retain most velocity → springs actually swing instead of dying
+  const HUB_DECAY = 0.92; // a thrown hub coasts noticeably
   function followTick() {
     if (!dragState) return;
     const node = dragState.node;
