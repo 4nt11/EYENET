@@ -213,7 +213,7 @@
       style: cyStyle(),
       minZoom: 0.15,
       maxZoom: 3,
-      wheelSensitivity: 0.6, // 0.2 felt sluggish; 0.6 is a brisk but controllable zoom
+      wheelSensitivity: 1.5, // snappy zoom (0.2 was sluggish, 0.6 still slow)
       boxSelectionEnabled: false
     });
     lastNodeSig = nodeSig();
