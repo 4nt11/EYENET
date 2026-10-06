@@ -183,8 +183,8 @@
   // the cursor while held and stays where dropped after release (no snap-back); the mesh
   // deforms/settles around it. O(edges) per frame — cheap even on big graphs.
   let sim = null;
-  const SPRING_K = 0.09; // spring stiffness along each edge
-  const SPRING_DAMP = 0.86; // velocity retention (<1 so it settles; high enough to swing)
+  const SPRING_K = 0.045; // softer → edges visibly STRETCH during a pull then retract (rubber-band)
+  const SPRING_DAMP = 0.9; // retain more velocity so the stretch/retract actually swings
   function simTick() {
     if (!sim) return;
     const S = sim.state;
