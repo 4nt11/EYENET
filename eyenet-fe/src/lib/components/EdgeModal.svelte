@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import Button from './Button.svelte';
   import Dropdown from './Dropdown.svelte';
 
@@ -18,9 +19,42 @@
     { v: 'other', l: 'other (freetext)…' }
   ];
 
+  // Preset reasons so the operator doesn't re-type the same justification every
+  // time; "Custom…" reveals the free-text box. Mode-specific wording.
+  const PRESET_REASONS = {
+    connect: [
+      'Same operator across accounts',
+      'Co-posted the same leak',
+      'Direct communication observed',
+      'Members of the same crew',
+      'Shared infrastructure / artifact'
+    ],
+    retract: [
+      'Misattributed — not the same entity',
+      'Coincidental overlap',
+      'Duplicate of another edge',
+      'Mapped in error'
+    ]
+  };
+
   let kindSel = $state('associate');
   let kindOther = $state('');
   let reason = $state('');
+  let customReason = $state(false);
+  let reasonEl;
+
+  let presets = $derived(PRESET_REASONS[mode === 'retract' ? 'retract' : 'connect']);
+
+  function pickReason(r) {
+    customReason = false;
+    reason = r;
+  }
+  async function enableCustomReason() {
+    customReason = true;
+    reason = '';
+    await tick();
+    reasonEl?.focus();
+  }
 
   const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
   const nodeLabel = (n) => (n ? `${cap(n.entityType)} · ${n.title || n.id}` : '—');
@@ -73,10 +107,18 @@
         <p class="warn">This permanently retracts an operator-mapped edge. Derived edges can't be removed.</p>
       {/if}
 
-      <label class="fld">
+      <div class="fld">
         <span class="flk">Reason <span class="req">required</span></span>
-        <textarea class="txt area" bind:value={reason} rows="2" placeholder={mode === 'retract' ? 'Why is this edge wrong?' : 'Why are these linked? (audited)'}></textarea>
-      </label>
+        <div class="reasons">
+          {#each presets as r}
+            <button type="button" class="rchip" class:active={!customReason && reason === r} onclick={() => pickReason(r)}>{r}</button>
+          {/each}
+          <button type="button" class="rchip custom" class:active={customReason} onclick={enableCustomReason}>Custom…</button>
+        </div>
+        {#if customReason}
+          <textarea class="txt area" bind:this={reasonEl} bind:value={reason} rows="2" placeholder={mode === 'retract' ? 'Why is this edge wrong? (audited)' : 'Why are these linked? (audited)'}></textarea>
+        {/if}
+      </div>
 
       {#if error}<p class="err">{error}</p>{/if}
     </div>
@@ -112,6 +154,12 @@
   .txt { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-13); padding: 7px 9px; }
   .txt:focus { outline: none; border-color: var(--accent); }
   .area { resize: vertical; min-height: 44px; }
+
+  .reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rchip { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-12); padding: 4px 9px; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+  .rchip:hover { border-color: var(--accent); }
+  .rchip.active { border-color: var(--accent); background: var(--accent-fill); color: var(--accent-text); }
+  .rchip.custom { font-family: var(--font-mono); }
 
   .warn { margin: 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--warn-text); line-height: var(--lh-normal); }
   .err { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--red-text); }
