@@ -176,16 +176,14 @@
       padding: 32
     }).run();
     cy.fit(undefined, 32);
-    startPhysics();
   }
 
-  // Continuous cola force sim: kept RUNNING (infinite) so it is already live when a
-  // node is grabbed — then dragging a node makes its neighbors spring and trail with
-  // real motion (edges are springs). Started on a node grab did NOT work: cola hooks
-  // the drag on run() and converges instantly, so the ongoing drag never engaged.
-  // It settles to equilibrium and sits ~still until you perturb it by dragging.
-  // ponytail: a live sim costs idle CPU; gate it to the dragged node's neighborhood
-  // if a huge (500+ node) graph ever chugs.
+  // Force sim run ONLY while a node is held (grab→free), so dragging a node makes its
+  // neighbors spring and trail with real motion (edges are springs), then freezes on
+  // release. A node grab starts it warm — the drag that follows keeps resuming it, so
+  // neighbors move; stopping on release is what prevents the spring-back.
+  // ponytail: cola during drag is fine for typical graphs; gate it to the dragged
+  // node's neighborhood if a huge (500+ node) graph ever chugs mid-drag.
   let colaRun = null;
   function startPhysics() {
     if (!cy) return;
@@ -195,7 +193,7 @@
       infinite: true,
       fit: false,
       animate: true,
-      randomize: false, // continue from the fcose seed, don't reshuffle
+      randomize: false, // continue from current positions, don't reshuffle
       handleDisconnected: false, // don't re-pack components (that froze the spokes)
       avoidOverlap: true,
       centerGraph: false, // never recenter under a drag
@@ -239,11 +237,26 @@
       if (evt.originalEvent?.shiftKey) {
         cy.autoungrabify(true); // suppress node-drag for THIS draw only
         eh.start(evt.target);
+      } else {
+        // Start the sim on mousedown — BEFORE 'grab' fires — so cola's grab listener
+        // is bound in time to hook this drag (starting it on 'grab' missed the event
+        // and the neighbors stayed frozen). Physics lives only for the drag.
+        startPhysics();
       }
     });
     cy.on('ehstop', releaseGrab);
     window.addEventListener('mouseup', releaseGrab);
     window.addEventListener('blur', releaseGrab);
+
+    // Stop on release so the graph FREEZES where you dropped it — a sim left running
+    // springs the node back to equilibrium (the "snaps back" bug). Deferred so cola's
+    // own free-relax tick is cancelled before it can pull anything back.
+    cy.on('free', 'node', () => {
+      setTimeout(() => {
+        colaRun?.stop();
+        colaRun = null;
+      }, 0);
+    });
 
     cy.on('ehcomplete', (_evt, src, tgt, added) => {
       added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
