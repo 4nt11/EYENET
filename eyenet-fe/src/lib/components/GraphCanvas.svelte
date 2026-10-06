@@ -175,86 +175,85 @@
     cy.fit(undefined, 32);
   }
 
-  // Spring-follow drag (own rAF loop — cytoscape-cola refused to track a live drag).
-  // On grab we snapshot the dragged node's LEAF (degree-1) neighbors and their offset
-  // from it; each frame we EASE them toward (hub + offset). The easing (not a rigid
-  // set) is what gives the trailing, springy motion — the spokes lag then catch up.
-  // On release we just stop the loop: nodes stay where they landed, nothing springs
-  // back. Dragging a leaf moves only it (its one neighbor, the hub, is high-degree).
-  // Spring-damper physics (velocity + overshoot) so the cluster FLINGS: spokes whip
-  // and bounce after the hub, and a fast release throws the hub with momentum. STIFF =
-  // pull toward the ideal offset; DAMP < 1 leaves bounce; HUB_DECAY coasts the thrown
-  // hub. (A critically-damped ease just "follows" — no fling.)
-  let dragState = null;
-  const STIFF = 0.08; // softer pull → more lag/overshoot (lively, not snappy)
-  const DAMP = 0.92; // retain most velocity → springs actually swing instead of dying
-  const HUB_DECAY = 0.92; // a thrown hub coasts noticeably
-  function followTick() {
-    if (!dragState) return;
-    const node = dragState.node;
-    if (dragState.releasing) {
-      // Thrown: coast the hub along its last drag velocity, decaying.
-      dragState.hubVx *= HUB_DECAY;
-      dragState.hubVy *= HUB_DECAY;
-      const hp = node.position();
-      node.position({ x: hp.x + dragState.hubVx, y: hp.y + dragState.hubVy });
-    } else {
-      // Held: measure the hub's per-frame velocity (the throw, captured for release).
-      const hp = node.position();
-      dragState.hubVx = hp.x - dragState.lastHub.x;
-      dragState.hubVy = hp.y - dragState.lastHub.y;
-      dragState.lastHub = { x: hp.x, y: hp.y };
+  // Spring-mesh drag (own rAF loop — cola/d3-force wouldn't track a live drag). At grab
+  // EVERY edge records its CURRENT length as its rest length, so the whole graph starts
+  // balanced (no reshuffle). As you drag the held node, its edges stretch and the spring
+  // force propagates edge-to-edge through the connected web: neighbors move, then THEIR
+  // neighbors, with velocity → the pull travels and swings. The held node is pinned to
+  // the cursor while held and stays where dropped after release (no snap-back); the mesh
+  // deforms/settles around it. O(edges) per frame — cheap even on big graphs.
+  let sim = null;
+  const SPRING_K = 0.09; // spring stiffness along each edge
+  const SPRING_DAMP = 0.86; // velocity retention (<1 so it settles; high enough to swing)
+  function simTick() {
+    if (!sim) return;
+    const S = sim.state;
+    const pin = sim.pinned;
+    // While held, the pinned node tracks cytoscape (the cursor); after release it stays
+    // put (we never integrate it), so the mesh settles around the drop point.
+    if (pin != null && !sim.releasing) {
+      const p = S[pin].ele.position();
+      S[pin].x = p.x;
+      S[pin].y = p.y;
     }
-    const hub = node.position();
-    let energy = dragState.releasing ? Math.abs(dragState.hubVx) + Math.abs(dragState.hubVy) : 1;
-    for (const f of dragState.followers) {
-      const p = f.ele.position();
-      const tx = hub.x + f.offx;
-      const ty = hub.y + f.offy;
-      f.vx = (f.vx + (tx - p.x) * STIFF) * DAMP;
-      f.vy = (f.vy + (ty - p.y) * STIFF) * DAMP;
-      f.ele.position({ x: p.x + f.vx, y: p.y + f.vy });
-      energy = Math.max(energy, Math.abs(f.vx) + Math.abs(f.vy), Math.abs(tx - p.x) + Math.abs(ty - p.y));
+    const fx = new Float64Array(S.length);
+    const fy = new Float64Array(S.length);
+    for (const e of sim.edges) {
+      const dx = S[e.b].x - S[e.a].x;
+      const dy = S[e.b].y - S[e.a].y;
+      const d = Math.hypot(dx, dy) || 0.01;
+      const f = (d - e.rest) * SPRING_K;
+      const ux = (dx / d) * f;
+      const uy = (dy / d) * f;
+      fx[e.a] += ux;
+      fy[e.a] += uy;
+      fx[e.b] -= ux;
+      fy[e.b] -= uy;
     }
-    // After release, run until the whole system settles (hub coasted + springs rest).
-    if (dragState.releasing && energy < 0.4) {
-      dragState = null;
+    let energy = 0;
+    for (let i = 0; i < S.length; i++) {
+      if (i === pin) continue; // held/dropped node is fixed
+      S[i].vx = (S[i].vx + fx[i]) * SPRING_DAMP;
+      S[i].vy = (S[i].vy + fy[i]) * SPRING_DAMP;
+      S[i].x += S[i].vx;
+      S[i].y += S[i].vy;
+      S[i].ele.position({ x: S[i].x, y: S[i].y });
+      energy = Math.max(energy, Math.abs(S[i].vx) + Math.abs(S[i].vy));
+    }
+    if (sim.releasing && energy < 0.3) {
+      sim = null;
       return;
     }
-    dragState.raf = requestAnimationFrame(followTick);
+    sim.raf = requestAnimationFrame(simTick);
   }
-  function startFollow(node) {
-    const hub = node.position();
-    const id = node.id();
-    // A neighbor follows only if it is PENDANT on this node — every node it connects
-    // to IS this node (handles spokes with >1 edge to the hub). So dragging the hub
-    // carries all its spokes; dragging a lone spoke doesn't yank the hub (the hub
-    // connects to many others, so it isn't pendant on the spoke).
-    const followers = node
-      .neighborhood()
-      .nodes()
-      .filter((x) => {
-        const xn = x.neighborhood().nodes();
-        return xn.length === 1 && xn[0].id() === id;
+  function startSim(node) {
+    const nodes = cy.nodes();
+    const idx = new Map();
+    nodes.forEach((n, i) => idx.set(n.id(), i));
+    const state = nodes.map((n) => {
+      const p = n.position();
+      return { ele: n, x: p.x, y: p.y, vx: 0, vy: 0 };
+    });
+    const edges = cy
+      .edges()
+      .map((e) => {
+        const a = idx.get(e.source().id());
+        const b = idx.get(e.target().id());
+        if (a == null || b == null) return null;
+        const dx = state[b].x - state[a].x;
+        const dy = state[b].y - state[a].y;
+        return { a, b, rest: Math.hypot(dx, dy) || 1 }; // rest = current length → starts balanced
       })
-      .map((x) => ({
-        ele: x,
-        offx: x.position('x') - hub.x,
-        offy: x.position('y') - hub.y,
-        vx: 0,
-        vy: 0
-      }));
-    dragState = { node, followers, raf: 0, releasing: false, lastHub: { ...hub }, hubVx: 0, hubVy: 0 };
-    followTick();
+      .filter(Boolean);
+    sim = { state, edges, pinned: idx.get(node.id()), raf: 0, releasing: false };
+    simTick();
   }
-  function stopFollow() {
-    // Don't freeze mid-trail: flag release so the loop keeps easing the spokes until
-    // they catch up to the hub, then it stops itself.
-    if (dragState) dragState.releasing = true;
+  function releaseSim() {
+    if (sim) sim.releasing = true; // keep simulating so the mesh settles, then it stops itself
   }
-  function killFollow() {
-    if (dragState?.raf) cancelAnimationFrame(dragState.raf);
-    dragState = null;
+  function killSim() {
+    if (sim?.raf) cancelAnimationFrame(sim.raf);
+    sim = null;
   }
 
   onMount(() => {
@@ -297,9 +296,9 @@
     window.addEventListener('mouseup', releaseGrab);
     window.addEventListener('blur', releaseGrab);
 
-    // Spring-follow: the held node's leaf neighbors trail after it, then stay put.
-    cy.on('grab', 'node', (evt) => startFollow(evt.target));
-    cy.on('free', 'node', stopFollow);
+    // Spring mesh: dragging a node propagates force through the whole connected web.
+    cy.on('grab', 'node', (evt) => startSim(evt.target));
+    cy.on('free', 'node', releaseSim);
 
     cy.on('ehcomplete', (_evt, src, tgt, added) => {
       added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
@@ -329,7 +328,7 @@
       window.removeEventListener('mouseup', releaseGrab);
       window.removeEventListener('blur', releaseGrab);
       container.removeEventListener('contextmenu', noCtx);
-      killFollow();
+      killSim();
       ro.disconnect();
       cy?.destroy();
       cy = null;
@@ -343,7 +342,7 @@
     const sig = nodeSig();
     if (!cy || sig === lastNodeSig) return;
     lastNodeSig = sig;
-    killFollow(); // a running follow would reference now-removed nodes
+    killSim(); // a running follow would reference now-removed nodes
     colorMap = buildColorMap();
     cy.elements().remove();
     cy.add([...nodes.map(nodeEl), ...presentEdges().map(edgeEl)]);
