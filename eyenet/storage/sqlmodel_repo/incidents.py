@@ -94,6 +94,7 @@ class IncidentsMixin:
         source_ids: list[UUID] | None,
         victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
+        message_id: UUID | None = None,
     ) -> Any:
         """Apply the triage-feed filters to a SELECT over IncidentTable.
 
@@ -111,6 +112,9 @@ class IncidentsMixin:
         # would count as non-blank here where Python str.strip() drops it. Rare
         # enough to accept; tighten with a char-class trim if it ever matters.
         """
+        if message_id is not None:
+            # Single-message lookup (the search inspector's incident block).
+            stmt = stmt.where(col(IncidentTable.message_id) == message_id)
         if labels:
             # labels is a JSON array of clean identifiers; match the quoted token in its
             # text form. cast + LIKE are ANSI; each pattern is a bound param (no
@@ -162,6 +166,7 @@ class IncidentsMixin:
         source_ids: list[UUID] | None = None,
         victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
+        message_id: UUID | None = None,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters IN
         the query (OR: an incident matches if it carries ANY of the given leaves) so rare
@@ -180,6 +185,7 @@ class IncidentsMixin:
                 source_ids=source_ids,
                 victim_countries=victim_countries,
                 exclude_bodyless=exclude_bodyless,
+                message_id=message_id,
             )
             stmt = (
                 stmt.order_by(col(IncidentTable.classified_at).desc()).offset(offset).limit(limit)
@@ -196,6 +202,7 @@ class IncidentsMixin:
         source_ids: list[UUID] | None = None,
         victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
+        message_id: UUID | None = None,
     ) -> int:
         """Total incidents matching the same filters as :meth:`recent_incidents`
         (no offset/limit) — powers the triage feed's ``estimated_total`` so the
@@ -209,6 +216,7 @@ class IncidentsMixin:
                 source_ids=source_ids,
                 victim_countries=victim_countries,
                 exclude_bodyless=exclude_bodyless,
+                message_id=message_id,
             )
             result = await session.exec(stmt)
             return int(result.one())

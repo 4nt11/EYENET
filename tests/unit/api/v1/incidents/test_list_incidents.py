@@ -47,6 +47,7 @@ class _FakeStorage:
         source_ids=None,
         victim_countries=None,
         exclude_bodyless: bool = False,
+        message_id=None,
     ) -> list:
         # q/FTS + exclude_bodyless + victim_countries semantics are covered at the
         # storage layer (test_incident_search_sqlite / test_backfill); this fake
@@ -62,6 +63,7 @@ class _FakeStorage:
         source_ids=None,
         victim_countries=None,
         exclude_bodyless: bool = False,
+        message_id=None,
     ) -> int:
         return len(self._filter(labels, group_ids))
 

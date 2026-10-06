@@ -1,5 +1,7 @@
 <script>
   import Badge from './Badge.svelte';
+  import RelabelEditor from './RelabelEditor.svelte';
+  import { loadMessageIncident } from '$lib/incident.svelte.js';
 
   // Shared detail flyout for a selected search hit — used by BOTH the table rows
   // and the graph nodes so the two lenses inspect an entity identically. `entity`
@@ -26,6 +28,15 @@
   let fieldRows = $derived(
     fields ? Object.entries(fields).filter(([, v]) => v != null && v !== '') : []
   );
+
+  // For a message hit, pull its incident classification so the inspector shows the
+  // same model-labels + correct-labels block as the reader. Refetch per selection.
+  let incidentMsg = $state(null);
+  $effect(() => {
+    const id = entity?.entityType === 'message' ? entity.id : null;
+    incidentMsg = null;
+    if (id) loadMessageIncident(id).then((m) => { incidentMsg = m; });
+  });
 </script>
 
 <div class="detail">
@@ -55,6 +66,13 @@
     </div>
   {/if}
 
+  {#if incidentMsg}
+    <div class="incident">
+      <span class="dk">Incident</span>
+      <RelabelEditor message={incidentMsg} />
+    </div>
+  {/if}
+
   {#if ROUTE[entity.entityType]}
     <a class="dopen" href={ROUTE[entity.entityType](entity)}>Open in {ROUTE_LABEL[entity.entityType]} →</a>
   {:else}
@@ -73,6 +91,7 @@
   .dv { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); word-break: break-word; white-space: pre-wrap; }
   .dv.mono { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); }
   .fgrid { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .incident { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 10px; }
   .dopen { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); text-decoration: none; margin-top: 2px; }
   .dopen:hover { color: var(--link-hover); text-decoration: underline; }
   .dnote { margin: 2px 0 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }

@@ -43,6 +43,7 @@ async def list_incidents(
     # items, not each string (a single ?victim_country=RU is a 1-item list → would 422).
     # Per-item alpha-2 is documented in the OpenAPI; an unknown code just matches no rows.
     victim_country: Annotated[list[str] | None, Query()] = None,
+    message_id: Annotated[UUID | None, Query(description="Single message's incident row")] = None,
 ) -> CursorPageIncidentOut:
     # ?label= repeats (OR); ?group_id= / ?source_id= repeat to show only those groups/sources.
     # ?victim_country= repeats (ISO alpha-2) to show only incidents with that geo verdict —
@@ -62,6 +63,7 @@ async def list_incidents(
             source_ids=source_id,
             victim_countries=victim_country,
             exclude_bodyless=True,
+            message_id=message_id,
         ),
     )
     next_cursor = page.next_cursor(fetched=len(rows))
@@ -82,6 +84,7 @@ async def list_incidents(
             source_ids=source_id,
             victim_countries=victim_country,
             exclude_bodyless=True,
+            message_id=message_id,
         )
         if page.include_total
         else None

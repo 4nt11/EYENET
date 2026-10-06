@@ -1759,6 +1759,7 @@ paths:
         - { name: group_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: source_id, in: query, required: false, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: victim_country, in: query, required: false, description: "ISO 3166-1 alpha-2; repeat to OR. Keeps only incidents with that geo verdict.", schema: { type: array, items: { type: string, minLength: 2, maxLength: 2 } } }
+        - { name: message_id, in: query, required: false, description: "Return only the incident row for this one message (the search inspector's incident block).", schema: { type: string, format: uuid, nullable: true } }
       responses:
         "200":
           description: A page of recent incidents (bodyless rows excluded).

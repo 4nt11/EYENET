@@ -161,6 +161,26 @@ export async function loadMoreIncidents() {
   }
 }
 
+// One message's incident row (model labels + operator correction), shaped for
+// RelabelEditor. Used by the search inspector so a message hit shows the same
+// incident block as the reader. Returns null when the message isn't classified.
+export async function loadMessageIncident(messageId) {
+  try {
+    const page = await apiGet(`/v1/incidents?message_id=${messageId}&limit=1`, { auth: true });
+    const r = (page.items ?? [])[0];
+    if (!r) return null;
+    return {
+      id: r.message_id,
+      incident_labels: r.labels ?? [],
+      corrected_labels: r.corrected_labels ?? null,
+      corrected_by: r.corrected_by ?? null,
+      corrected_at: shortTs(r.corrected_at)
+    };
+  } catch {
+    return null; // unclassified / not permitted / offline — just show no incident block
+  }
+}
+
 // Relabel state for the detail pane's editor (per-selection submit feedback).
 export const incidentEdit = $state({ submitting: false, msg: null });
 

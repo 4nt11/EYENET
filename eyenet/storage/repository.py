@@ -704,6 +704,7 @@ class BaseRepository(ABC):
         source_ids: list[UUID] | None = None,
         victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
+        message_id: UUID | None = None,
     ) -> list[object]:
         """Most recently classified incidents (operator triage feed). ``labels`` filters in
         the query (OR across the given leaves; rare leaves found regardless of recency);
@@ -722,6 +723,7 @@ class BaseRepository(ABC):
         source_ids: list[UUID] | None = None,
         victim_countries: list[str] | None = None,
         exclude_bodyless: bool = False,
+        message_id: UUID | None = None,
     ) -> int:
         """Total incidents matching the same filters as :meth:`recent_incidents`
         (no offset/limit) — the triage feed's ``estimated_total``."""
@@ -1903,8 +1905,10 @@ class BaseRepository(ABC):
         actor_ids: Collection[UUID],
         persona_ids: Collection[UUID],
         artifact_ids: Collection[UUID],
+        thread_ids: Collection[UUID] = (),
     ) -> list[dict[str, Any]]:
-        """Derived edges among search-result nodes (linkage/relation/infra/persona)."""
+        """Derived edges among search-result nodes (linkage/relation/infra/persona,
+        plus same_author among threads sharing an OP actor)."""
 
     # -- Operator-asserted graph edges (GLOBAL_SEARCH.md §10.4) --------------
     @abstractmethod
