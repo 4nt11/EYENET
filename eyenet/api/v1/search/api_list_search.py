@@ -8,10 +8,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from eyenet.api.deps import CurrentUser, RequireScope, get_storage
+from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params
 from eyenet.api.v1.schemas.search import CursorPageSearchHit, SearchHit
 from eyenet.models.search import SearchDocumentTable
+from eyenet.storage.query import UnknownFieldError
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["search"])
@@ -42,25 +43,30 @@ async def search_global(
 ) -> CursorPageSearchHit:
     types_list = _csv(types)
     status_list = _csv(status)
-    rows = cast(
-        "list[SearchDocumentTable]",
-        await storage.search_global(
-            q,
-            types=types_list,
-            status=status_list,
-            source_id=source,
-            limit=page.fetch_limit,
-            offset=page.offset,
-        ),
-    )
-    estimated_total = (
-        await storage.count_search_global(q, types=types_list, status=status_list, source_id=source)
-        if page.include_total
-        else None
-    )
-    facets = await storage.search_global_facets(
-        q, types=types_list, status=status_list, source_id=source
-    )
+    try:
+        rows = cast(
+            "list[SearchDocumentTable]",
+            await storage.search_global(
+                q,
+                types=types_list,
+                status=status_list,
+                source_id=source,
+                limit=page.fetch_limit,
+                offset=page.offset,
+            ),
+        )
+        estimated_total = (
+            await storage.count_search_global(
+                q, types=types_list, status=status_list, source_id=source
+            )
+            if page.include_total
+            else None
+        )
+        facets = await storage.search_global_facets(
+            q, types=types_list, status=status_list, source_id=source
+        )
+    except UnknownFieldError as exc:
+        raise UnprocessableError(str(exc)) from exc
     items = [SearchHit.from_domain(row) for row in rows[: page.limit]]
     # Resolve source UUIDs -> human display names for row + facet rendering.
     source_ids = {sid for sid in facets["by_source"] if sid}

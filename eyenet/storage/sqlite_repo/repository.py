@@ -406,6 +406,17 @@ class SQLiteRepository(SQLModelRepository):
             await session.exec(stmt)
             await session.commit()
 
+    def _target_expr(self, target: str) -> Any:
+        """SQLite query-DSL seam: a ``fields.<key>`` path resolves via ``json_extract``;
+        real columns fall through to the generic mixin. Key comes from the registry."""
+        if target.startswith("fields."):
+            from sqlalchemy import func  # noqa: PLC0415
+            from sqlmodel import col  # noqa: PLC0415
+
+            key = target.split(".", 1)[1]
+            return func.json_extract(col(SearchDocumentTable.fields), f"$.{key}")
+        return super()._target_expr(target)
+
     @staticmethod
     def _fts_query(q: str) -> str:
         """Wrap operator input as ONE FTS5 phrase so it can never be a MATCH syntax error

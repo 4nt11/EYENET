@@ -19,7 +19,7 @@ from itertools import combinations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import and_, case, func, not_, or_
 from sqlmodel import col, select
 
 from eyenet.models import (
@@ -32,6 +32,16 @@ from eyenet.models import (
     SearchDocumentTable,
 )
 from eyenet.models._base import now_utc
+from eyenet.storage.query import (
+    FIELD_REGISTRY,
+    And,
+    Field,
+    Not,
+    Or,
+    UnknownFieldError,
+    collect_fields,
+    parse_query,
+)
 
 from ._helpers import safe_session
 
@@ -82,6 +92,64 @@ class SearchMixin:
             func.lower(func.coalesce(col(SearchDocumentTable.handles), "")).like(pattern),
         )
 
+    # ---- query DSL compiler (GLOBAL_SEARCH.md §9) -------------------------
+    def _target_expr(self, target: str) -> Any:
+        """Column element for a field's value source. Real columns are ANSI (here);
+        the JSON ``fields.<key>`` path is a dialect seam — overridden per backend."""
+        if target == "haystack":
+            return col(SearchDocumentTable.haystack)
+        if target in ("title", "status", "handles", "subtitle"):
+            return col(getattr(SearchDocumentTable, target))
+        raise NotImplementedError(f"field target {target!r} needs a backend override")
+
+    @staticmethod
+    def _like_pattern(value: str) -> str:
+        esc = value.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{esc}%"
+
+    def _field_predicate(self, field: str, op: str, value: str) -> Any:
+        """Compile one ``field OP value`` to a type-scoped, PARAMETER-BOUND clause.
+
+        Field names come only from the registry (validated upstream); values are bound
+        by SQLAlchemy, never interpolated. ``==``/``!=`` are exact (case-folded); ``=~``
+        and ``:`` on an exact field are substring LIKE; ``:`` on a text field is FTS.
+        """
+        spec = FIELD_REGISTRY[field]
+        scope = col(SearchDocumentTable.entity_type) == spec.entity_type
+        if op == ":" and spec.kind == "text":
+            return and_(scope, self._search_predicate(value))
+        target = self._target_expr(spec.target)
+        if op in ("=~", ":"):
+            return and_(scope, func.lower(target).like(self._like_pattern(value), escape="\\"))
+        if op == "==":
+            return and_(scope, func.lower(target) == value.lower())
+        return and_(scope, func.lower(target) != value.lower())  # op == "!="
+
+    def _compile_node(self, node: Any) -> Any:
+        if isinstance(node, Or):
+            return or_(*(self._compile_node(c) for c in node.children))
+        if isinstance(node, And):
+            return and_(*(self._compile_node(c) for c in node.children))
+        if isinstance(node, Not):
+            return not_(self._compile_node(node.child))
+        if isinstance(node, Field):
+            return self._field_predicate(node.field, node.op, node.value)
+        return self._search_predicate(node.text)  # Term (phrase/prefix fold to text match)
+
+    def _compile_query(self, q: str) -> Any:
+        """Parse the DSL and compile to a WHERE clause. Unknown field → UnknownFieldError
+        (API 422). An unparseable query degrades to a plain text search (§9.4)."""
+        try:
+            node = parse_query(q)
+        except Exception:
+            node = None
+        if node is None:
+            return self._search_predicate(q)
+        unknown = [f for f in collect_fields(node) if f not in FIELD_REGISTRY]
+        if unknown:
+            raise UnknownFieldError(unknown[0])
+        return self._compile_node(node)
+
     @staticmethod
     def _type_rank() -> Any:
         return case(_TYPE_RANK, value=col(SearchDocumentTable.entity_type), else_=_DEFAULT_RANK)
@@ -114,7 +182,7 @@ class SearchMixin:
         offset: int = 0,
     ) -> list[object]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(SearchDocumentTable).where(self._search_predicate(q))
+            stmt = select(SearchDocumentTable).where(self._compile_query(q))
             stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
             stmt = (
                 stmt.order_by(self._type_rank())
@@ -135,9 +203,7 @@ class SearchMixin:
     ) -> int:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
-                select(func.count())
-                .select_from(SearchDocumentTable)
-                .where(self._search_predicate(q))
+                select(func.count()).select_from(SearchDocumentTable).where(self._compile_query(q))
             )
             stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
             result = await session.exec(stmt)
@@ -160,7 +226,7 @@ class SearchMixin:
             # by_type: apply status + source, NOT types.
             t_stmt = (
                 select(col(SearchDocumentTable.entity_type), func.count())
-                .where(self._search_predicate(q))
+                .where(self._compile_query(q))
                 .group_by(col(SearchDocumentTable.entity_type))
             )
             t_stmt = self._apply_filters(t_stmt, types=None, status=status, source_id=source_id)
@@ -169,7 +235,7 @@ class SearchMixin:
             # by_source: apply types + status, NOT source.
             s_stmt = (
                 select(col(SearchDocumentTable.source_id), func.count())
-                .where(self._search_predicate(q))
+                .where(self._compile_query(q))
                 .group_by(col(SearchDocumentTable.source_id))
             )
             s_stmt = self._apply_filters(s_stmt, types=types, status=status, source_id=None)

@@ -12,10 +12,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from eyenet.api.deps import CurrentUser, RequireScope, get_storage
+from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
 from eyenet.api.v1.schemas.search import SearchGraph, SearchGraphEdge, SearchGraphNode
 from eyenet.models.asserted_edge import AssertedEdgeTable
 from eyenet.models.search import SearchDocumentTable
+from eyenet.storage.query import UnknownFieldError
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["search"])
@@ -43,12 +44,15 @@ async def search_graph(
     source: Annotated[UUID | None, Query(description="Restrict to one source_id")] = None,
     limit: Annotated[int, Query(ge=1, le=500, description="node cap")] = 300,
 ) -> SearchGraph:
-    rows = cast(
-        "list[SearchDocumentTable]",
-        await storage.search_global(
-            q, types=_csv(types), status=_csv(status), source_id=source, limit=limit, offset=0
-        ),
-    )
+    try:
+        rows = cast(
+            "list[SearchDocumentTable]",
+            await storage.search_global(
+                q, types=_csv(types), status=_csv(status), source_id=source, limit=limit, offset=0
+            ),
+        )
+    except UnknownFieldError as exc:
+        raise UnprocessableError(str(exc)) from exc
     nodes = [
         SearchGraphNode(
             entity_type=r.entity_type,  # type: ignore[arg-type]
