@@ -183,7 +183,7 @@
   // the cursor while held and stays where dropped after release (no snap-back); the mesh
   // deforms/settles around it. O(edges) per frame — cheap even on big graphs.
   let sim = null;
-  const SPRING_K = 0.045; // softer → edges visibly STRETCH during a pull then retract (rubber-band)
+  const SPRING_K = 0.035; // softer → edges visibly STRETCH during a pull then retract (rubber-band)
   const SPRING_DAMP = 0.9; // retain more velocity so the stretch/retract actually swings
   function simTick() {
     if (!sim) return;
@@ -202,6 +202,9 @@
       const dx = S[e.b].x - S[e.a].x;
       const dy = S[e.b].y - S[e.a].y;
       const d = Math.hypot(dx, dy) || 0.01;
+      // Pull-only, like a real rubber band: force only when STRETCHED past rest; slack
+      // (no push) when compressed, so you can drag nodes closer and they stay put.
+      if (d <= e.rest) continue;
       const f = (d - e.rest) * SPRING_K;
       const ux = (dx / d) * f;
       const uy = (dy / d) * f;
