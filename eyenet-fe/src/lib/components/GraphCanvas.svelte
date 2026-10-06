@@ -3,9 +3,11 @@
   import cytoscape from 'cytoscape';
   import fcose from 'cytoscape-fcose';
   import edgehandles from 'cytoscape-edgehandles';
+  import cola from 'cytoscape-cola';
 
   cytoscape.use(fcose);
   cytoscape.use(edgehandles);
+  cytoscape.use(cola);
 
   // Cytoscape render surface for the search-as-graph view. Nodes are colored by
   // entity_type (token palette), edges dashed=derived / solid=asserted with the
@@ -220,26 +222,29 @@
       onConnectReady(src.data('raw'), tgt.data('raw'));
     });
 
-    // ── Cluster drag: dragging a node pulls its LEAF (degree-1) neighbors along, so
-    // moving a hub actor carries its thread spokes; dragging a leaf moves just it.
-    let pullSet = null;
-    let lastPos = null;
-    cy.on('grab', 'node', (evt) => {
-      pullSet = evt.target.neighborhood('node').filter((x) => x.degree(false) === 1);
-      lastPos = { ...evt.target.position() };
-    });
-    cy.on('drag', 'node', (evt) => {
-      if (!pullSet || !lastPos) return;
-      const p = evt.target.position();
-      const dx = p.x - lastPos.x;
-      const dy = p.y - lastPos.y;
-      lastPos = { x: p.x, y: p.y };
-      pullSet.forEach((x) => {
-        const xp = x.position();
-        x.position({ x: xp.x + dx, y: xp.y + dy });
+    // ── Physics drag: while a node is held, run a continuous cola force sim so its
+    // neighbors spring and trail after it (edges act as springs) instead of jumping
+    // rigidly. The grabbed node is pinned to the cursor; cola relaxes the rest. The
+    // sim lives only for the drag (started on grab, stopped on free) to bound CPU.
+    let colaRun = null;
+    cy.on('grab', 'node', () => {
+      colaRun?.stop();
+      colaRun = cy.layout({
+        name: 'cola',
+        infinite: true, // keep simulating for as long as the node is held
+        fit: false,
+        animate: true,
+        randomize: false, // continue from the current positions, don't reshuffle
+        nodeSpacing: 18,
+        edgeLength: 110, // spring rest length
+        convergenceThreshold: 0.01
       });
+      colaRun.run();
     });
-    cy.on('free', 'node', () => { pullSet = null; lastPos = null; });
+    cy.on('free', 'node', () => {
+      colaRun?.stop();
+      colaRun = null;
+    });
 
     cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
 
@@ -264,6 +269,7 @@
       window.removeEventListener('mouseup', releaseGrab);
       window.removeEventListener('blur', releaseGrab);
       container.removeEventListener('contextmenu', noCtx);
+      colaRun?.stop();
       ro.disconnect();
       cy?.destroy();
       cy = null;
