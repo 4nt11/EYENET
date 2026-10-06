@@ -189,9 +189,10 @@
     lastNodeSig = nodeSig();
     runLayout();
 
-    // ── Shift+drag to connect (cytoscape-edgehandles, triggered manually so there
-    // is no always-on hover handle). While Shift is held nodes are un-grabbable so
-    // the drag draws an edge instead of moving the node.
+    // ── Shift+drag from a node draws an edge (cytoscape-edgehandles, manual start —
+    // no always-on handle). Nodes are un-grabbed ONLY for the duration of a draw and
+    // re-grabbed on ehstop/mouseup/blur, so a plain left-drag is NEVER left stuck off
+    // (the old keydown/keyup toggle stuck whenever a Shift keyup was missed).
     eh = cy.edgehandles({
       canConnect: (s, t) => !s.same(t),
       edgeParams: () => ({ data: { _ghost: true } }),
@@ -201,21 +202,44 @@
       noEdgeEventsInDraw: true,
       disableBrowserGestures: true
     });
+    eh.disableDrawMode?.(); // only our shift+mousedown eh.start() draws; plain clicks drag
 
-    const onKey = (down) => (e) => { if (e.key === 'Shift') cy.autoungrabify(down); };
-    const keyDown = onKey(true);
-    const keyUp = onKey(false);
-    window.addEventListener('keydown', keyDown);
-    window.addEventListener('keyup', keyUp);
-
+    const releaseGrab = () => cy?.autoungrabify(false);
     cy.on('mousedown', 'node', (evt) => {
-      if (evt.originalEvent?.shiftKey) eh.start(evt.target);
+      if (evt.originalEvent?.shiftKey) {
+        cy.autoungrabify(true); // suppress node-drag for THIS draw only
+        eh.start(evt.target);
+      }
     });
+    cy.on('ehstop', releaseGrab);
+    window.addEventListener('mouseup', releaseGrab);
+    window.addEventListener('blur', releaseGrab);
 
     cy.on('ehcomplete', (_evt, src, tgt, added) => {
       added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
       onConnectReady(src.data('raw'), tgt.data('raw'));
     });
+
+    // ── Cluster drag: dragging a node pulls its LEAF (degree-1) neighbors along, so
+    // moving a hub actor carries its thread spokes; dragging a leaf moves just it.
+    let pullSet = null;
+    let lastPos = null;
+    cy.on('grab', 'node', (evt) => {
+      pullSet = evt.target.neighborhood('node').filter((x) => x.degree(false) === 1);
+      lastPos = { ...evt.target.position() };
+    });
+    cy.on('drag', 'node', (evt) => {
+      if (!pullSet || !lastPos) return;
+      const p = evt.target.position();
+      const dx = p.x - lastPos.x;
+      const dy = p.y - lastPos.y;
+      lastPos = { x: p.x, y: p.y };
+      pullSet.forEach((x) => {
+        const xp = x.position();
+        x.position({ x: xp.x + dx, y: xp.y + dy });
+      });
+    });
+    cy.on('free', 'node', () => { pullSet = null; lastPos = null; });
 
     cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
 
@@ -237,8 +261,8 @@
     ro.observe(container);
 
     return () => {
-      window.removeEventListener('keydown', keyDown);
-      window.removeEventListener('keyup', keyUp);
+      window.removeEventListener('mouseup', releaseGrab);
+      window.removeEventListener('blur', releaseGrab);
       container.removeEventListener('contextmenu', noCtx);
       ro.disconnect();
       cy?.destroy();
