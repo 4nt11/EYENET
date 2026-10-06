@@ -54,6 +54,7 @@ _COLUMNS = (
     "subtitle",
     "haystack",
     "handles",
+    "fields",
     "updated_at",
 )
 
@@ -178,6 +179,8 @@ class SearchMixin:
             row["title"] = ""
         if row.get("haystack") is None:
             row["haystack"] = ""
+        if row.get("fields") is None:
+            row["fields"] = {}
         return row
 
     async def put_search_documents_bulk(self, rows: Sequence[dict[str, Any]]) -> None:

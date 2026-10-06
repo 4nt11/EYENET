@@ -7,6 +7,7 @@ real detail surface by `entity_type` + `entity_id`.
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import Field
@@ -30,6 +31,11 @@ class SearchHit(ApiSchema):
     )
     title: str
     subtitle: str | None = None
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured per-entity fields (author, timestamp, aliases, kind, ...) "
+        "for configurable result columns.",
+    )
 
     @classmethod
     def from_domain(cls, doc: SearchDocumentTable) -> SearchHit:
@@ -40,6 +46,7 @@ class SearchHit(ApiSchema):
             status=doc.status,
             title=doc.title,
             subtitle=doc.subtitle,
+            fields=doc.fields or {},
         )
 
 

@@ -49,6 +49,11 @@ def _enum_value(v: Any) -> str:
     return v.value if hasattr(v, "value") else str(v)
 
 
+def _iso(dt: Any) -> str | None:
+    """ISO-string a datetime for the JSON `fields` bag (datetimes aren't JSON-native)."""
+    return dt.isoformat() if dt is not None else None
+
+
 def actor_doc(a: ActorTable, aliases: list[str]) -> dict[str, Any]:
     return {
         "entity_type": "actor",
@@ -66,6 +71,13 @@ def actor_doc(a: ActorTable, aliases: list[str]) -> dict[str, Any]:
             *aliases,
         ),
         "handles": clean(a.current_handle, a.platform_userid, *aliases),
+        "fields": {
+            "handle": a.current_handle,
+            "display_name": a.current_display_name,
+            "platform_userid": a.platform_userid,
+            "aliases": aliases,
+            "last_seen": _iso(a.last_seen_at_source),
+        },
     }
 
 
@@ -79,6 +91,11 @@ def group_doc(g: GroupTable, *, status: str) -> dict[str, Any]:
         "subtitle": _enum_value(g.kind),
         "haystack": clean(g.current_title, g.current_description, g.platform_groupid),
         "handles": g.platform_groupid,
+        "fields": {
+            "kind": _enum_value(g.kind),
+            "platform_groupid": g.platform_groupid,
+            "member_count": g.member_count,
+        },
     }
 
 
@@ -92,6 +109,7 @@ def candidate_group_doc(c: GroupCandidateTable) -> dict[str, Any]:
         "subtitle": "candidate",
         "haystack": clean(c.display_name_hint, c.platform_groupid),
         "handles": c.platform_groupid,
+        "fields": {"kind": "candidate", "platform_groupid": c.platform_groupid},
     }
 
 
@@ -107,6 +125,12 @@ def message_doc(
         "subtitle": clean(group_title, author_handle),
         "haystack": clean(m.body, group_title, author_handle),
         "handles": clean(author_handle, extract_handles(m.body)),
+        "fields": {
+            "author": author_handle,
+            "group": group_title,
+            "sent_at": _iso(m.sent_at_source),
+            "platform_msgid": m.platform_msgid,
+        },
     }
 
 
@@ -120,6 +144,7 @@ def persona_doc(p: PersonaTable, member_handles: list[str]) -> dict[str, Any]:
         "subtitle": f"{len(p.member_actor_ids)} members",
         "haystack": clean(p.label, *member_handles),
         "handles": clean(*member_handles),
+        "fields": {"members": len(p.member_actor_ids), "member_handles": member_handles},
     }
 
 
@@ -133,6 +158,7 @@ def case_doc(c: CaseTable) -> dict[str, Any]:
         "subtitle": None,
         "haystack": clean(c.title, c.description),
         "handles": None,
+        "fields": {"status": _enum_value(c.status)},
     }
 
 
@@ -146,6 +172,7 @@ def document_doc(d: DocumentTable) -> dict[str, Any]:
         "subtitle": d.mime,
         "haystack": clean(d.filename, d.extracted_text),
         "handles": None,
+        "fields": {"filename": d.filename, "mime": d.mime},
     }
 
 
@@ -160,6 +187,7 @@ def artifact_doc(a: InfrastructureArtifactTable) -> dict[str, Any]:
         "subtitle": kind,
         "haystack": clean(a.value, kind),
         "handles": a.value,
+        "fields": {"kind": kind, "value": a.value},
     }
 
 
@@ -173,6 +201,7 @@ def crew_doc(cr: ManualCrewTable, member_handles: list[str]) -> dict[str, Any]:
         "subtitle": f"{len(member_handles)} members",
         "haystack": clean(cr.name, cr.notes, *member_handles),
         "handles": clean(*member_handles),
+        "fields": {"members": len(member_handles), "member_handles": member_handles},
     }
 
 

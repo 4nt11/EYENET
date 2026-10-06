@@ -3828,6 +3828,10 @@ components:
         status: { type: string, nullable: true }
         title: { type: string }
         subtitle: { type: string, nullable: true }
+        fields:
+          type: object
+          additionalProperties: true
+          description: Structured per-entity fields for configurable result columns.
     CursorPageSearchHit:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }

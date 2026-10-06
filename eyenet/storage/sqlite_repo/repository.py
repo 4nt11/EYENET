@@ -87,9 +87,9 @@ _FILE_ACCESS_INSERT_SQL = (
 # FTS5 trigram tokenizer needs >= 3 chars; shorter queries skip the handles index.
 _TRIGRAM_MIN_CHARS = 3
 
-# Rows per multi-row INSERT for search_document (10 cols): 90 * 10 = 900 < SQLite's
+# Rows per multi-row INSERT for search_document (11 cols): 80 * 11 = 880 < SQLite's
 # 999-variable cap. Chunk the bulk upsert so large backfill batches never overflow it.
-_SEARCH_BULK_CHUNK = 90
+_SEARCH_BULK_CHUNK = 80
 
 
 class SQLiteRepository(SQLModelRepository):
@@ -476,6 +476,7 @@ class SQLiteRepository(SQLModelRepository):
                         "subtitle": stmt.excluded.subtitle,
                         "haystack": stmt.excluded.haystack,
                         "handles": stmt.excluded.handles,
+                        "fields": stmt.excluded.fields,
                         "updated_at": stmt.excluded.updated_at,
                     },
                 )
