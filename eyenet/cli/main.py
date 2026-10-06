@@ -667,18 +667,22 @@ def incidents_backfill(  # pragma: no cover
 def search_backfill(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
     batch_size: int = typer.Option(500, "--batch-size", help="messages per upsert batch"),
+    full: bool = typer.Option(
+        False, "--full", help="re-index ALL messages (rewrite after a payload schema change)"
+    ),
 ) -> None:
     """Populate the global-search index (search_document) from the existing corpus.
 
     Read-only over the source tables; upserts search_document (idempotent, re-run
-    to refresh). Bootstraps GET /v1/search. See GLOBAL_SEARCH.md.
+    to refresh). Default re-fills only the gap; --full re-indexes every message
+    (needed to populate new columns like `fields`). Bootstraps GET /v1/search.
     """
     from eyenet.search_indexer.backfill import backfill_search  # noqa: PLC0415
 
     async def _main() -> None:
         cfg = RuntimeConfig.from_env(data_dir=data_dir)
         storage = get_repository(data_dir=cfg.data_dir)
-        counts = await backfill_search(storage, batch=batch_size)
+        counts = await backfill_search(storage, batch=batch_size, full=full)
         await storage.close()
         typer.echo("indexed " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 

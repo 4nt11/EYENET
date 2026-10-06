@@ -67,8 +67,15 @@ async def _bulk(storage: BaseRepository, rows: Sequence[dict[str, Any]]) -> None
             await asyncio.sleep(0.5 * (attempt + 1))
 
 
-async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[str, int]:
-    """Populate ``search_document`` for every covered entity. Returns per-type counts."""
+async def backfill_search(
+    storage: BaseRepository, *, batch: int = 500, full: bool = False
+) -> dict[str, int]:
+    """Populate ``search_document`` for every covered entity. Returns per-type counts.
+
+    ``full=True`` re-indexes every message (not just un-indexed ones) — needed after
+    a schema change to the message payload (e.g. the new ``fields`` column), where
+    existing rows must be rewritten. Default re-fills only the gap (resume).
+    """
     counts: dict[str, int] = {}
 
     async with storage.session() as s:
@@ -139,7 +146,7 @@ async def backfill_search(storage: BaseRepository, *, batch: int = 500) -> dict[
     )
     counts["crew"] = len(crews)
 
-    counts["message"] = await _backfill_messages(storage, group_title, actor_handle, batch)
+    counts["message"] = await _backfill_messages(storage, group_title, actor_handle, batch, full)
     return counts
 
 
@@ -148,10 +155,16 @@ async def _backfill_messages(
     group_title: dict[UUID, str],
     actor_handle: dict[UUID, str],
     batch: int,
+    full: bool,
 ) -> int:
-    """Index messages resumably: each batch takes the next messages NOT already in
-    search_document, so an interrupted run resumes from the gap on re-run."""
+    """Index messages via keyset pagination (id ascending), O(n) single pass.
+
+    ``full=False`` skips messages already in search_document (resume a gap);
+    ``full=True`` re-upserts every message (rewrite after a payload schema change).
+    Keyset (``id > last_id``) avoids OFFSET/NOT-EXISTS-from-start quadratics.
+    """
     total = 0
+    last_id = UUID(int=0)
     already_indexed = (
         select(SearchDocumentTable.id)
         .where(
@@ -162,16 +175,13 @@ async def _backfill_messages(
     )
     while True:
         async with storage.session() as s:
-            msgs = list(
-                await s.exec(
-                    select(MessageTable)
-                    .where(~exists(already_indexed))
-                    .order_by(col(MessageTable.id))
-                    .limit(batch)
-                )
-            )
+            stmt = select(MessageTable).where(col(MessageTable.id) > last_id)
+            if not full:
+                stmt = stmt.where(~exists(already_indexed))
+            msgs = list(await s.exec(stmt.order_by(col(MessageTable.id)).limit(batch)))
         if not msgs:
             break
+        last_id = msgs[-1].id
         await _bulk(
             storage,
             [
