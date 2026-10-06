@@ -182,15 +182,25 @@
   // On release we just stop the loop: nodes stay where they landed, nothing springs
   // back. Dragging a leaf moves only it (its one neighbor, the hub, is high-degree).
   let dragState = null;
-  const FOLLOW_EASE = 0.2;
+  const FOLLOW_EASE = 0.3; // per-frame catch-up: high enough to keep up, low enough to trail
   function followTick() {
     if (!dragState) return;
     const hub = dragState.node.position();
+    let maxd = 0;
     for (const f of dragState.followers) {
       const p = f.ele.position();
       const tx = hub.x + f.offx;
       const ty = hub.y + f.offy;
-      f.ele.position({ x: p.x + (tx - p.x) * FOLLOW_EASE, y: p.y + (ty - p.y) * FOLLOW_EASE });
+      const nx = p.x + (tx - p.x) * FOLLOW_EASE;
+      const ny = p.y + (ty - p.y) * FOLLOW_EASE;
+      f.ele.position({ x: nx, y: ny });
+      maxd = Math.max(maxd, Math.abs(tx - nx), Math.abs(ty - ny));
+    }
+    // After release, keep easing until the spokes CATCH UP to their offset (otherwise
+    // they freeze mid-trail, barely moved). While still held, keep running regardless.
+    if (dragState.releasing && maxd < 0.5) {
+      dragState = null;
+      return;
     }
     dragState.raf = requestAnimationFrame(followTick);
   }
@@ -213,6 +223,11 @@
     followTick();
   }
   function stopFollow() {
+    // Don't freeze mid-trail: flag release so the loop keeps easing the spokes until
+    // they catch up to the hub, then it stops itself.
+    if (dragState) dragState.releasing = true;
+  }
+  function killFollow() {
     if (dragState?.raf) cancelAnimationFrame(dragState.raf);
     dragState = null;
   }
@@ -289,7 +304,7 @@
       window.removeEventListener('mouseup', releaseGrab);
       window.removeEventListener('blur', releaseGrab);
       container.removeEventListener('contextmenu', noCtx);
-      stopFollow();
+      killFollow();
       ro.disconnect();
       cy?.destroy();
       cy = null;
@@ -303,6 +318,7 @@
     const sig = nodeSig();
     if (!cy || sig === lastNodeSig) return;
     lastNodeSig = sig;
+    killFollow(); // a running follow would reference now-removed nodes
     colorMap = buildColorMap();
     cy.elements().remove();
     cy.add([...nodes.map(nodeEl), ...presentEdges().map(edgeEl)]);
