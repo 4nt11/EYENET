@@ -13,14 +13,22 @@ lives in `main.db` / `main`, like `message_fts`.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Collection, Sequence
+from itertools import combinations
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import case, func, or_
 from sqlmodel import col, select
 
-from eyenet.models import SearchDocumentTable
+from eyenet.models import (
+    ActorArtifactTable,
+    ActorRelationTable,
+    LinkageTable,
+    PersonaMembershipTable,
+    SearchDocumentTable,
+)
 from eyenet.models._base import now_utc
 
 from ._helpers import safe_session
@@ -54,6 +62,7 @@ _COLUMNS = (
     "subtitle",
     "haystack",
     "handles",
+    "fields",
     "updated_at",
 )
 
@@ -178,6 +187,8 @@ class SearchMixin:
             row["title"] = ""
         if row.get("haystack") is None:
             row["haystack"] = ""
+        if row.get("fields") is None:
+            row["fields"] = {}
         return row
 
     async def put_search_documents_bulk(self, rows: Sequence[dict[str, Any]]) -> None:
@@ -218,6 +229,112 @@ class SearchMixin:
             if existing is not None:
                 await session.delete(existing)
                 await session.commit()
+
+
+    async def induced_edges(
+        self,
+        *,
+        actor_ids: Collection[UUID],
+        persona_ids: Collection[UUID],
+        artifact_ids: Collection[UUID],
+    ) -> list[dict[str, Any]]:
+        """Derived edges among the search-result nodes (GLOBAL_SEARCH.md §10.3).
+
+        Scoped to the given node ids: linkage + actor_relation (actor-actor),
+        shared-infra (two node-actors on one artifact) + actor-artifact, and
+        persona membership. Each edge is a dict the API maps to the wire shape;
+        ``provenance`` is stamped "derived" by the caller.
+        """
+        a_ids = list(actor_ids)
+        edges: list[dict[str, Any]] = []
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            if a_ids:
+                links = await session.exec(
+                    select(LinkageTable).where(
+                        col(LinkageTable.actor_a_id).in_(a_ids),
+                        col(LinkageTable.actor_b_id).in_(a_ids),
+                    )
+                )
+                for lk in links:
+                    edges.append(
+                        {
+                            "src_id": lk.actor_a_id,
+                            "dst_id": lk.actor_b_id,
+                            "kind": "linked",
+                            "weight": lk.score,
+                            "meta": {"state": _enum(lk.state), "method": lk.method},
+                        }
+                    )
+                rels = await session.exec(
+                    select(ActorRelationTable).where(
+                        col(ActorRelationTable.from_actor_id).in_(a_ids),
+                        col(ActorRelationTable.to_actor_id).in_(a_ids),
+                    )
+                )
+                for rel in rels:
+                    edges.append(
+                        {
+                            "src_id": rel.from_actor_id,
+                            "dst_id": rel.to_actor_id,
+                            "kind": _enum(rel.kind),
+                            "weight": float(rel.occurrence_count),
+                            "meta": {},
+                        }
+                    )
+                # actor -> artifact (when the artifact is also a node) + the
+                # actor<->actor shared-infra edge (two node-actors on one artifact).
+                aa = list(
+                    await session.exec(
+                        select(ActorArtifactTable).where(col(ActorArtifactTable.actor_id).in_(a_ids))
+                    )
+                )
+                art_set = set(artifact_ids)
+                actors_by_artifact: dict[UUID, list[UUID]] = defaultdict(list)
+                for row in aa:
+                    actors_by_artifact[row.artifact_id].append(row.actor_id)
+                    if row.artifact_id in art_set:
+                        edges.append(
+                            {
+                                "src_id": row.actor_id,
+                                "dst_id": row.artifact_id,
+                                "kind": "uses_infra",
+                                "weight": row.confidence,
+                                "meta": {},
+                            }
+                        )
+                for art_id, actors in actors_by_artifact.items():
+                    for x, y in combinations(sorted(set(actors)), 2):
+                        edges.append(
+                            {
+                                "src_id": x,
+                                "dst_id": y,
+                                "kind": "shares_infra",
+                                "weight": None,
+                                "meta": {"artifact_id": str(art_id)},
+                            }
+                        )
+                if persona_ids:
+                    pm = await session.exec(
+                        select(PersonaMembershipTable).where(
+                            col(PersonaMembershipTable.actor_id).in_(a_ids),
+                            col(PersonaMembershipTable.persona_id).in_(list(persona_ids)),
+                        )
+                    )
+                    for m in pm:
+                        edges.append(
+                            {
+                                "src_id": m.actor_id,
+                                "dst_id": m.persona_id,
+                                "kind": "member_of_persona",
+                                "weight": None,
+                                "meta": {},
+                            }
+                        )
+        return edges
+
+
+def _enum(v: Any) -> str:
+    return v.value if hasattr(v, "value") else str(v)
 
 
 __all__ = ["SearchMixin"]

@@ -57,4 +57,26 @@
   --tier-high-fill:var(--accent-fill);
   --tier-medium:var(--text-muted);
   --tier-low:var(--text-faint);
+
+  /* Entity-type palette · muted hues tuned to sit calmly on black. Used by the
+     search graph (node fill) and anything that colors by entity_type. Purple
+     stays the brand accent; the rest are desaturated so the canvas never turns
+     garish. Any type without a token falls back to --etype-default. */
+  --etype-actor:#a259c4;       /* purple · the brand-adjacent primary subject */
+  --etype-persona:#7e8cd6;     /* indigo */
+  --etype-crew:#c27f8f;        /* dusty rose */
+  --etype-case:#d9b45c;        /* amber */
+  --etype-group:#5fa5b0;       /* teal */
+  --etype-thread:#6fb08a;      /* green */
+  --etype-message:#8a9bb0;     /* slate blue */
+  --etype-mention:#b0957f;     /* tan */
+  --etype-incident:#e07b76;    /* signal red (incidents only) */
+  --etype-document:#9b8fc2;    /* lavender */
+  --etype-attachment:#8f9aa6;  /* cool grey */
+  --etype-artifact:#b0a55f;    /* olive */
+  --etype-default:#7a7d8c;     /* fallback · faint */
+
+  /* Graph edge tints */
+  --edge-derived:#4a4d57;      /* muted · read-only, machine-derived */
+  --edge-asserted:#a259c4;     /* accent · operator-mapped, durable */
 }

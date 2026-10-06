@@ -48,6 +48,11 @@ class AuditSubject(StrEnum):
     # eligibility (the reachable-root dimension of the §4.12.3 predicate).
     CASE_SEED_ROOTS_CHANGED = "eyenet.audit.case.seed_roots_changed"
 
+    # Operator-asserted graph edges (GLOBAL_SEARCH.md §10.4) — a mapped edge is
+    # operator-grade evidence, so map/retract are audited like a case decision.
+    GRAPH_EDGE_ASSERTED = "eyenet.audit.graph.edge_asserted"
+    GRAPH_EDGE_RETRACTED = "eyenet.audit.graph.edge_retracted"
+
     # --- §4.12.4 CollectorSupervisor runtime (M9.E3) -----------------------
     # Supervisor reconciled a collector's observed_state toward desired_state.
     COLLECTOR_RECONCILED = "eyenet.audit.collector.reconciled"

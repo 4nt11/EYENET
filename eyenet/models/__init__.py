@@ -13,6 +13,7 @@ from sqlmodel import SQLModel
 from .access_artifact import GroupAccessArtifactTable
 from .actor import ActorAliasHistoryTable, ActorTable
 from .anchor import AuditAnchorTable
+from .asserted_edge import AssertedEdgeTable
 from .audit import AuditLogTable
 from .auth import (
     JwtDenylistTable,
@@ -81,6 +82,7 @@ __all__ = [
     "ActorArtifactTable",
     "ActorRelationTable",
     "ActorTable",
+    "AssertedEdgeTable",
     "AttachmentTable",
     "AuditAnchorTable",
     "AuditLogTable",

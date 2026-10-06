@@ -4,53 +4,42 @@
   import SectionHeader from '$lib/components/SectionHeader.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
   import Panel from '$lib/components/Panel.svelte';
-  import Badge from '$lib/components/Badge.svelte';
   import Button from '$lib/components/Button.svelte';
+  import Segmented from '$lib/components/Segmented.svelte';
+  import ColumnPicker from '$lib/components/ColumnPicker.svelte';
+  import EntityDetail from '$lib/components/EntityDetail.svelte';
+  import GraphCanvas from '$lib/components/GraphCanvas.svelte';
+  import EdgeModal from '$lib/components/EdgeModal.svelte';
   import {
-    searchCtx, runSearch, loadMoreSearch, setTypeFilter, setSourceFilter, sourceName
+    searchCtx, runSearch, loadMoreSearch, setTypeFilter, setSourceFilter,
+    sourceName, fieldKeyUnion, fieldValue
   } from '$lib/search.svelte.js';
+  import {
+    graphCtx, runGraph, assertEdge, retractEdge, graphSourceName
+  } from '$lib/searchGraph.svelte.js';
 
-  // Columns are the SearchHit fields. One Panel+DataTable per entity-type group
-  // (DataTable has no grouping of its own). `sourceName` resolves the raw hex
-  // source_id to its human label (API-provided), falling back to the short id.
-  const COLUMNS = [
-    { key: 'title', header: 'Title' },
-    { key: 'subtitle', header: 'Subtitle' },
-    { key: 'status', header: 'Status', mono: true, width: '110px' },
-    { key: 'sourceName', header: 'Source', mono: true, width: '150px' }
-  ];
-
-  // Ordered type labels so groups render in a stable, sensible order (any type
-  // not listed falls to the end). entity_type ∈ actor|group|thread|message|
-  // mention|artifact|persona|crew|case|document|attachment|incident.
-  const TYPE_ORDER = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'];
   const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
-  // Best-effort deep-link map: not every entity_type has a detail screen. A type
-  // absent here renders without an "Open" link in the detail panel.
-  const ROUTE = {
-    actor: (r) => `/actors?id=${r.id}`,
-    persona: (r) => `/personas?id=${r.id}`,
-    case: (r) => `/cases?id=${r.id}`,
-    group: (r) => `/monitored-groups?id=${r.id}`,
-    thread: (r) => `/monitored-groups?id=${r.id}`
-  };
-  const ROUTE_LABEL = { actor: 'Actors', persona: 'Personas', case: 'Cases', group: 'Monitored groups', thread: 'Monitored groups' };
+  // ── View toggle (Table | Graph), persisted per-viewer (localStorage guarded).
+  const VIEW_KEY = 'eyenet_search_view';
+  const COLS_KEY = 'eyenet_search_columns';
+  function loadView() { try { return localStorage.getItem(VIEW_KEY) === 'graph' ? 'graph' : 'table'; } catch { return 'table'; } }
+  function saveView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* best-effort */ } }
 
-  // Queryable-fields palette for the upcoming query language (Phase 1.5). Clicking
-  // a field appends `field:` to the in-page box so the operator can compose a query.
-  const QUERY_FIELDS = [
-    { group: 'Message', fields: ['message.content', 'message.author'] },
-    { group: 'Group', fields: ['group.title', 'group.status'] },
-    { group: 'Forum', fields: ['forum.thread.author'] },
-    { group: 'Actor', fields: ['actor.handle'] },
-    { group: 'Artifact', fields: ['artifact.value'] },
-    { group: 'Case', fields: ['case.title'] },
-    { group: 'Document', fields: ['document.text'] }
-  ];
+  const DEFAULT_COLS = ['type', 'title', 'sourceName', 'date', 'status'];
+  function loadCols() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(COLS_KEY) ?? 'null');
+      if (Array.isArray(raw) && raw.length) return raw.includes('title') ? raw : ['title', ...raw];
+    } catch { /* fall through to default */ }
+    return [...DEFAULT_COLS];
+  }
+  function saveCols() { try { localStorage.setItem(COLS_KEY, JSON.stringify(selectedCols)); } catch { /* best-effort */ } }
 
-  // In-page query box. Kept in sync with the URL ?q= so top-bar and in-page
-  // searches stay coherent; Enter in either navigates (the $effect runs the fetch).
+  let view = $state(loadView());
+  let selectedCols = $state(loadCols());
+
+  // ── In-page query box, kept in sync with ?q= (top-bar + in-page stay coherent).
   let query = $state('');
   let inputEl;
 
@@ -60,49 +49,124 @@
     runSearch(q);
   });
 
+  // Graph is a second lens on the SAME query + facets — fetch it lazily (only when
+  // the Graph tab is active) and re-fetch whenever the query or a facet changes.
+  $effect(() => {
+    const q = searchCtx.q;
+    // track facets so a chip toggle refetches the graph too
+    void searchCtx.typeFilter; void searchCtx.sourceFilter;
+    if (view === 'graph' && q) runGraph(q);
+  });
+
+  function onView() { saveView(view); clearSel(); }
   function submitInPage(e) {
     if (e.key !== 'Enter') return;
     goto(`/search?q=${encodeURIComponent(query.trim())}`);
   }
-
   function insertField(f) {
     const cur = query.trimEnd();
     query = (cur ? cur + ' ' : '') + f + ':';
     inputEl?.focus();
   }
 
-  // Group the loaded page by entity_type, honouring the active type facet, and
-  // attach the human source name per row for the table's Source column.
-  let groups = $derived.by(() => {
-    const by = {};
-    for (const r of searchCtx.items) {
-      if (searchCtx.typeFilter && r.entityType !== searchCtx.typeFilter) continue;
-      (by[r.entityType] ??= []).push({ ...r, sourceName: sourceName(r.sourceId) });
-    }
-    const present = Object.keys(by);
-    present.sort((a, b) => {
-      const ia = TYPE_ORDER.indexOf(a);
-      const ib = TYPE_ORDER.indexOf(b);
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    });
-    return present.map((t) => ({ type: t, rows: by[t] }));
-  });
+  // ── Facet chips (shared by both views).
+  let typeChips = $derived(Object.entries(searchCtx.byType).sort((a, b) => b[1] - a[1]));
+  let sourceChips = $derived(Object.entries(searchCtx.bySource).filter(([id]) => id).sort((a, b) => b[1] - a[1]));
 
-  let typeChips = $derived(
-    Object.entries(searchCtx.byType).sort((a, b) => b[1] - a[1])
-  );
-  let sourceChips = $derived(
-    Object.entries(searchCtx.bySource).filter(([id]) => id).sort((a, b) => b[1] - a[1])
-  );
-
-  // Row selection drives the detail side-panel (click a row to inspect it).
-  let selectedId = $state(null);
-  let sel = $derived(selectedId ? (searchCtx.items.find((x) => x.id === selectedId) ?? null) : null);
-  // A selected row can carry an author/handle in its subtitle — surface it clearly.
-  const HAS_HANDLE = new Set(['message', 'actor', 'thread', 'mention']);
-
-  // Collapsible fields palette (per-viewer convenience only, no persistence needed).
+  // ── Query-fields palette → insert `field:` and (where it maps to a loaded
+  // column) offer a one-click "add as column".
+  const QUERY_FIELDS = [
+    { group: 'Message', fields: ['message.content', 'message.author'] },
+    { group: 'Group', fields: ['group.title', 'group.status'] },
+    { group: 'Forum', fields: ['forum.thread.author'] },
+    { group: 'Actor', fields: ['actor.handle'] },
+    { group: 'Artifact', fields: ['artifact.value'] },
+    { group: 'Case', fields: ['case.title'] },
+    { group: 'Document', fields: ['document.text'] }
+  ];
   let fieldsOpen = $state(true);
+
+  // ── Configurable columns. Union of keys across the loaded hits' `fields` bags
+  // feeds the picker; base columns are always offered.
+  let fieldUnion = $derived(fieldKeyUnion(searchCtx.items));
+  const BASE_OPTS = [
+    { v: 'type', l: 'Type' },
+    { v: 'title', l: 'Title', fixed: true },
+    { v: 'sourceName', l: 'Source' },
+    { v: 'date', l: 'Date' },
+    { v: 'status', l: 'Status' }
+  ];
+  let colOptions = $derived([...BASE_OPTS, ...fieldUnion.map((k) => ({ v: 'f:' + k, l: k }))]);
+
+  const TYPE_TONE = { actor: 'high', persona: 'high', crew: 'high', case: 'warn', incident: 'critical', group: 'medium', thread: 'medium', message: 'neutral', mention: 'neutral', document: 'medium', attachment: 'neutral', artifact: 'warn' };
+  const BASE_DEF = {
+    type: { key: 'type', header: 'Type', badge: true, tone: (_v, r) => TYPE_TONE[r.entityType] ?? 'neutral', width: '120px' },
+    title: { key: 'title', header: 'Title' },
+    sourceName: { key: 'sourceName', header: 'Source', mono: true, width: '160px' },
+    date: { key: 'date', header: 'Date', mono: true, width: '170px' },
+    status: { key: 'status', header: 'Status', mono: true, width: '110px' }
+  };
+  let columns = $derived(
+    selectedCols.map((k) => BASE_DEF[k] ?? { key: k, header: k.startsWith('f:') ? k.slice(2) : k, mono: true })
+  );
+
+  // Trim an ISO-ish timestamp to "YYYY-MM-DD HH:MM"; pass anything else through.
+  function fmtDate(s) {
+    if (!s) return '';
+    return typeof s === 'string' && s.includes('T') ? s.slice(0, 16).replace('T', ' ') : String(s);
+  }
+
+  // Unified ranked rows (server already applied the type/source facets). Every
+  // field-union value is spread under `f:<key>` so toggling a column needs no
+  // row rebuild.
+  let rows = $derived(
+    searchCtx.items.map((it) => {
+      const row = {
+        id: it.id,
+        entityType: it.entityType,
+        type: cap(it.entityType),
+        title: it.title || '—',
+        sourceName: sourceName(it.sourceId),
+        date: fmtDate(it.date),
+        status: it.status,
+        _hit: it
+      };
+      for (const k of fieldUnion) row['f:' + k] = fieldValue(it, k);
+      return row;
+    })
+  );
+
+  function fieldColKey(f) {
+    const seg = f.split('.').pop();
+    return fieldUnion.includes(seg) ? 'f:' + seg : null;
+  }
+  function addCol(colKey) {
+    if (!selectedCols.includes(colKey)) { selectedCols = [...selectedCols, colKey]; saveCols(); }
+  }
+
+  // ── Selection → shared detail flyout. Table rows carry `fields`; graph nodes
+  // don't. Keep the two selections separate so switching tabs doesn't cross-wire.
+  let selRow = $state(null);  // a search hit (with .fields)
+  let selNode = $state(null); // a graph node
+  function clearSel() { selRow = null; selNode = null; }
+
+  // ── Edge edit modal (graph). connectMode arms node-pair picking on the canvas.
+  let connectMode = $state(false);
+  let modal = $state(null); // { mode:'connect', src, dst } | { mode:'retract', edge }
+
+  function openConnect(src, dst) { graphCtx.mutateError = null; modal = { mode: 'connect', src, dst }; }
+  function openRetract(edge) { graphCtx.mutateError = null; modal = { mode: 'retract', edge }; }
+  function closeModal() { modal = null; }
+
+  async function confirmModal(a, b) {
+    try {
+      if (modal.mode === 'retract') await retractEdge(modal.edge.edgeId, a);
+      else await assertEdge(modal.src, modal.dst, a, b);
+      closeModal();
+    } catch {
+      // error surfaces via graphCtx.mutateError inside the modal; keep it open
+    }
+  }
 </script>
 
 <main>
@@ -151,108 +215,153 @@
         </div>
       {/if}
 
-      <div class="layout">
-        <div class="results">
-          {#if groups.length}
-            {#each groups as g (g.type)}
-              <section class="rgroup">
-                <div class="rhead">
-                  <span class="rlabel">{cap(g.type)}</span>
-                  <span class="rcount">{g.rows.length}</span>
-                </div>
+      <div class="toolbar">
+        <Segmented options={[{ v: 'table', l: 'Table' }, { v: 'graph', l: 'Graph' }]} bind:value={view} onchange={onView} />
+        <div class="toolbar-right">
+          {#if view === 'table'}
+            <ColumnPicker options={colOptions} bind:selected={selectedCols} onchange={saveCols} label="Columns" />
+          {:else}
+            <button class="tbtn" class:on={connectMode} onclick={() => (connectMode = !connectMode)} title="Pick a source node then a target node to map an edge">
+              {connectMode ? 'Connecting… (pick 2 nodes)' : 'Connect edge'}
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <!-- ═══ TABLE VIEW ═══ -->
+      {#if view === 'table'}
+        <div class="layout">
+          <div class="results">
+            {#if rows.length}
+              <div class="rframe">
                 <DataTable
                   rowKey="id"
-                  columns={COLUMNS}
-                  rows={g.rows}
-                  selectedId={sel?.id}
-                  onRowClick={(r) => (selectedId = r.id)}
+                  {columns}
+                  {rows}
+                  selectedId={selRow?.id}
+                  onRowClick={(r) => (selRow = r._hit)}
                   stickyHead
-                  stickyTop="33px"
+                  stickyTop="0"
                   flat
                   fixed
                 />
-              </section>
-            {/each}
-            {#if searchCtx.nextCursor}
-              <div class="more">
-                <Button variant="ghost" size="sm" disabled={searchCtx.loadingMore} onclick={loadMoreSearch}>
-                  {searchCtx.loadingMore ? 'Loading…' : 'Load more'}
-                </Button>
               </div>
-            {/if}
-          {:else}
-            <p class="pnote">No results for “{searchCtx.q}”.</p>
-          {/if}
-        </div>
-
-        <aside class="rail">
-          <Panel title="Query fields">
-            {#snippet action()}
-              <button class="collapse" onclick={() => (fieldsOpen = !fieldsOpen)} aria-expanded={fieldsOpen} aria-label="Toggle query fields">
-                {fieldsOpen ? '−' : '+'}
-              </button>
-            {/snippet}
-            {#if fieldsOpen}
-              <div class="fields">
-                <p class="fhint">Click to insert <code>field:</code>. The query language (<code>field:value</code>, <code>==</code>, <code>!=</code>, AND/OR) arrives in Phase 1.5.</p>
-                {#each QUERY_FIELDS as fg}
-                  <div class="fgroup">
-                    <div class="fgroup-label">{fg.group}</div>
-                    <div class="fchips">
-                      {#each fg.fields as f}
-                        <button class="fchip" onclick={() => insertField(f)} title={`Insert ${f}:`}>{f}</button>
-                      {/each}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </Panel>
-
-          {#if sel}
-            <div class="detail">
-              <div class="detail-head">
-                <Badge tone="high">{cap(sel.entityType)}</Badge>
-                <button class="detail-close" onclick={() => (selectedId = null)} aria-label="Close detail">×</button>
-              </div>
-              <div class="dtitle">{sel.title || '—'}</div>
-              {#if sel.subtitle}
-                <div class="dfield">
-                  <span class="dk">{HAS_HANDLE.has(sel.entityType) ? 'Author / handle' : 'Subtitle'}</span>
-                  <span class="dv">{sel.subtitle}</span>
+              {#if searchCtx.nextCursor}
+                <div class="more">
+                  <Button variant="ghost" size="sm" disabled={searchCtx.loadingMore} onclick={loadMoreSearch}>
+                    {searchCtx.loadingMore ? 'Loading…' : 'Load more'}
+                  </Button>
                 </div>
               {/if}
-              {#if sel.status}
-                <div class="dfield"><span class="dk">Status</span><span class="dv mono">{sel.status}</span></div>
-              {/if}
-              <div class="dfield"><span class="dk">Source</span><span class="dv mono" title={sel.sourceId ?? ''}>{sourceName(sel.sourceId) || '—'}</span></div>
-              <div class="dfield"><span class="dk">Entity id</span><span class="dv mono" title={sel.id}>{sel.id}</span></div>
+            {:else}
+              <p class="pnote">No results for “{searchCtx.q}”.</p>
+            {/if}
+          </div>
 
-              {#if ROUTE[sel.entityType]}
-                <a class="dopen" href={ROUTE[sel.entityType](sel)}>Open in {ROUTE_LABEL[sel.entityType]} →</a>
-              {:else}
-                <p class="dnote">No dedicated detail screen for this entity type.</p>
+          <aside class="rail">
+            <Panel title="Query fields">
+              {#snippet action()}
+                <button class="collapse" onclick={() => (fieldsOpen = !fieldsOpen)} aria-expanded={fieldsOpen} aria-label="Toggle query fields">{fieldsOpen ? '−' : '+'}</button>
+              {/snippet}
+              {#if fieldsOpen}
+                <div class="fields">
+                  <p class="fhint">Click a field to insert <code>field:</code>. Where a field maps to a loaded column, use <span class="pluschip">+col</span> to add it to the table.</p>
+                  {#each QUERY_FIELDS as fg}
+                    <div class="fgroup">
+                      <div class="fgroup-label">{fg.group}</div>
+                      <div class="fchips">
+                        {#each fg.fields as f}
+                          {@const ck = fieldColKey(f)}
+                          <span class="fchipwrap">
+                            <button class="fchip" onclick={() => insertField(f)} title={`Insert ${f}:`}>{f}</button>
+                            {#if ck && !selectedCols.includes(ck)}
+                              <button class="pluschip" onclick={() => addCol(ck)} title={`Add "${ck.slice(2)}" column`}>+col</button>
+                            {/if}
+                          </span>
+                        {/each}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
               {/if}
+            </Panel>
 
-              <!-- TODO(search-enrich): deeper correlations — persona membership, linkage
-                   evidence, actor neighbors, crew — need new API data on the SearchHit
-                   (or a per-entity detail fetch). Do NOT fabricate; wire once the backend
-                   ships an enriched search-hit / detail endpoint. -->
-            </div>
-          {/if}
-        </aside>
-      </div>
+            {#if selRow}
+              <EntityDetail entity={selRow} fields={selRow.fields} {sourceName} onClose={() => (selRow = null)} />
+            {/if}
+          </aside>
+        </div>
+
+      <!-- ═══ GRAPH VIEW ═══ -->
+      {:else}
+        <div class="layout">
+          <div class="results">
+            {#if graphCtx.loading && !graphCtx.nodes.length}
+              <p class="pnote">Building graph…</p>
+            {:else if graphCtx.error}
+              <p class="pnote">Graph failed: {graphCtx.error}</p>
+            {:else if !graphCtx.nodes.length}
+              <p class="pnote">No graph for “{searchCtx.q}”.</p>
+            {:else}
+              <div class="gwrap">
+                <GraphCanvas
+                  nodes={graphCtx.nodes}
+                  edges={graphCtx.edges}
+                  {connectMode}
+                  onNodeClick={(n) => (selNode = n)}
+                  onConnectReady={openConnect}
+                  onEdgeRetract={openRetract}
+                />
+                <div class="legend">
+                  <div class="lrow"><span class="lline solid"></span> asserted (operator)</div>
+                  <div class="lrow"><span class="lline dashed"></span> derived (read-only)</div>
+                  <div class="lrow lcount">{graphCtx.nodes.length} nodes · {graphCtx.edges.length} edges</div>
+                </div>
+              </div>
+            {/if}
+          </div>
+
+          <aside class="rail">
+            <Panel title="Graph legend">
+              <div class="palette">
+                <p class="fhint">Nodes colored by entity type. Tap a node to inspect it. Arm <b>Connect edge</b>, then tap a source node and a target node to map an operator edge. Tap an <b>asserted</b> edge to remove it.</p>
+                <div class="swatches">
+                  {#each ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'] as t}
+                    <span class="sw"><span class="dot" style="background:var(--etype-{t})"></span>{t}</span>
+                  {/each}
+                </div>
+              </div>
+            </Panel>
+
+            {#if selNode}
+              <EntityDetail entity={selNode} sourceName={graphSourceName} onClose={() => (selNode = null)} />
+            {/if}
+          </aside>
+        </div>
+      {/if}
     {/if}
   </div>
 </main>
+
+{#if modal}
+  <EdgeModal
+    mode={modal.mode}
+    src={modal.src}
+    dst={modal.dst}
+    edge={modal.edge}
+    busy={graphCtx.mutating}
+    error={graphCtx.mutateError}
+    onConfirm={confirmModal}
+    onCancel={closeModal}
+  />
+{/if}
 
 <style>
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .count { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
 
-  /* The ONE vertical scroll region. Children never shrink (flex:0 0 auto), so the
-     result groups grow to their content and the whole column scrolls — instead of
-     flexbox squishing each Panel into its own tiny scroll area (the old bug). */
+  /* The ONE vertical scroll region (Phase-1 scroll fix). Children never shrink so
+     result groups grow to content and the whole column scrolls. */
   .body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
   .body > * { flex: 0 0 auto; }
 
@@ -282,52 +391,50 @@
   .chip .n { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .chip.active .n { color: var(--accent-text); }
 
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .toolbar-right { display: flex; align-items: center; gap: 8px; }
+  .tbtn { height: 28px; display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-12); padding: 0 10px; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+  .tbtn:hover { border-color: var(--accent); }
+  .tbtn.on { border-color: var(--accent); background: var(--accent-fill); color: var(--accent-text); }
+
   .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
   .results { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 
-  /* Framed group section. overflow:visible so the sticky head + the table's sticky
-     <thead> can pin to the page scroll (.body), not to the section. */
-  .rgroup { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: visible; }
-  .rhead {
-    position: sticky; top: 0; z-index: 3;
-    height: 33px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border);
-    border-radius: var(--radius) var(--radius) 0 0;
-  }
-  .rlabel { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
-  .rcount { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); }
-
+  .rframe { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: visible; }
   .more { display: flex; justify-content: center; padding: 2px 0; }
+
+  /* Graph canvas gets a fixed box inside the scrolling body so Cytoscape has a
+     height to fill and resizes cleanly. */
+  .gwrap { position: relative; height: 72vh; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .legend { position: absolute; left: 10px; bottom: 10px; z-index: 2; display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; background: rgba(12, 13, 16, 0.85); border: 1px solid var(--border-strong); border-radius: var(--radius); backdrop-filter: blur(2px); }
+  .lrow { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-muted); }
+  .lrow.lcount { color: var(--text-faint); margin-top: 2px; }
+  .lline { width: 22px; height: 0; border-top: 2px solid var(--edge-asserted); }
+  .lline.dashed { border-top-style: dashed; border-top-color: var(--edge-derived); }
 
   .rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .collapse { appearance: none; background: transparent; border: none; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-16); line-height: 1; cursor: pointer; padding: 0 4px; }
   .collapse:hover { color: var(--accent-text); }
 
-  .fields { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
+  .fields, .palette { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
   .fhint { margin: 0; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); line-height: var(--lh-normal); }
   .fhint code { font-family: var(--font-mono); color: var(--accent-text); }
   .fgroup { display: flex; flex-direction: column; gap: 5px; }
   .fgroup-label { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-muted); }
   .fchips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fchipwrap { display: inline-flex; align-items: center; gap: 3px; }
   .fchip {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
     color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data);
     padding: 3px 7px; cursor: pointer; transition: border-color 120ms ease, color 120ms ease;
   }
   .fchip:hover { border-color: var(--accent); color: var(--accent-text); }
+  .pluschip { background: var(--accent-fill); border: 1px solid rgba(162, 89, 196, 0.4); border-radius: var(--radius-sm); color: var(--accent-text); font-family: var(--font-mono); font-size: var(--fs-11); padding: 3px 5px; cursor: pointer; }
+  .pluschip:hover { background: var(--accent-fill-strong); }
 
-  .detail { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-  .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .detail-close { appearance: none; background: transparent; border: none; color: var(--text-faint); font-size: var(--fs-18); line-height: 1; cursor: pointer; padding: 0 4px; }
-  .detail-close:hover { color: var(--accent-text); }
-  .dtitle { font-family: var(--font-sans); font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); line-height: var(--lh-tight); word-break: break-word; }
-  .dfield { display: flex; flex-direction: column; gap: 2px; }
-  .dk { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
-  .dv { font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); word-break: break-word; }
-  .dv.mono { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); }
-  .dopen { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); text-decoration: none; margin-top: 2px; }
-  .dopen:hover { color: var(--link-hover); text-decoration: underline; }
-  .dnote { margin: 2px 0 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .sw { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-muted); }
+  .sw .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; border: 1px solid #000; }
 
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }

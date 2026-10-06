@@ -15,10 +15,11 @@ a table that is cheap to drop and rebuild.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlalchemy import JSON, UniqueConstraint
+from sqlmodel import Column, Field, SQLModel
 
 from ._base import new_uuid7
 
@@ -47,6 +48,10 @@ class SearchDocumentTable(SQLModel, table=True):
     haystack: str = Field(default="")
     # Identifiers (handles, aliases, t.me, wallets) for substring/trigram match.
     handles: str | None = None
+    # Structured per-entity fields (the Kibana `_source` analog): author,
+    # timestamp, aliases, kind, ... Drives configurable result columns and,
+    # later, the query-DSL field predicates. Extensible without a migration.
+    fields: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     updated_at: datetime
 
 

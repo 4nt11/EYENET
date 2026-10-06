@@ -1005,6 +1005,74 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/search/graph:
+    get:
+      tags: [search]
+      operationId: search_graph
+      summary: Induced subgraph for a query (nodes = hits, edges = relations).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 256 }
+        - { name: types, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { type: string } }
+        - { name: source, in: query, required: false, schema: { type: string, format: uuid } }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 300 }
+      responses:
+        "200":
+          description: The induced subgraph (nodes + derived/asserted edges).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchGraph' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/graph/edges:
+    post:
+      tags: [graph]
+      operationId: graph_assert_edge
+      summary: Map a durable, audited operator-asserted edge.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssertEdgeRequest' }
+      responses:
+        "200":
+          description: The asserted edge.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssertEdgeResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/graph/edges/{edge_id}:
+    delete:
+      tags: [graph]
+      operationId: graph_retract_edge
+      summary: Retract (soft-delete) an operator-asserted edge.
+      parameters:
+        - { name: edge_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: reason
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 1024 }
+      responses:
+        "204": { description: Retracted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   # ────────────────────────────────────────────────────────────────────────
   # 3.3 Audit
   # ────────────────────────────────────────────────────────────────────────
@@ -3828,6 +3896,10 @@ components:
         status: { type: string, nullable: true }
         title: { type: string }
         subtitle: { type: string, nullable: true }
+        fields:
+          type: object
+          additionalProperties: true
+          description: Structured per-entity fields for configurable result columns.
     CursorPageSearchHit:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }
@@ -3848,6 +3920,51 @@ components:
               type: object
               additionalProperties: { type: string }
               description: Human display name per source_id, for rendering rows/facets.
+
+    SearchGraphNode:
+      type: object
+      required: [entity_type, entity_id, title]
+      properties:
+        entity_type: { $ref: '#/components/schemas/EntityType' }
+        entity_id: { type: string, format: uuid }
+        title: { type: string }
+        status: { type: string, nullable: true }
+        source_id: { type: string, format: uuid, nullable: true }
+    SearchGraphEdge:
+      type: object
+      required: [src_id, dst_id, kind, provenance]
+      properties:
+        src_id: { type: string, format: uuid }
+        dst_id: { type: string, format: uuid }
+        kind: { type: string }
+        weight: { type: number, nullable: true }
+        provenance: { type: string, description: "derived | asserted" }
+        edge_id: { type: string, format: uuid, nullable: true }
+        reason: { type: string, nullable: true }
+    SearchGraph:
+      type: object
+      properties:
+        nodes: { type: array, items: { $ref: '#/components/schemas/SearchGraphNode' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/SearchGraphEdge' } }
+        source_labels: { type: object, additionalProperties: { type: string } }
+    AssertEdgeRequest:
+      type: object
+      required: [src_type, src_id, dst_type, dst_id, kind, reason]
+      properties:
+        src_type: { $ref: '#/components/schemas/EntityType' }
+        src_id: { type: string, format: uuid }
+        dst_type: { $ref: '#/components/schemas/EntityType' }
+        dst_id: { type: string, format: uuid }
+        kind: { type: string, minLength: 1, maxLength: 64 }
+        reason: { type: string, minLength: 3, maxLength: 1024 }
+    AssertEdgeResult:
+      type: object
+      required: [edge_id, src_id, dst_id, kind]
+      properties:
+        edge_id: { type: string, format: uuid }
+        src_id: { type: string, format: uuid }
+        dst_id: { type: string, format: uuid }
+        kind: { type: string }
 
     # ── Enums (mirrors of eyenet/contracts/enums.py) ──────────────────────
     LinkageState:
