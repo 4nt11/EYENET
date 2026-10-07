@@ -185,6 +185,8 @@
   let sim = null;
   const SPRING_K = 0.035; // softer → edges visibly STRETCH during a pull then retract (rubber-band)
   const SPRING_DAMP = 0.9; // retain more velocity so the stretch/retract actually swings
+  const MIN_SEP = 52; // anti-overlap floor: nodes never crowd closer than this (readability)
+  const SEP_K = 0.5; // how hard overlapping nodes push apart
   function simTick() {
     if (!sim) return;
     const S = sim.state;
@@ -212,6 +214,23 @@
       fy[e.a] += uy;
       fx[e.b] -= ux;
       fy[e.b] -= uy;
+    }
+    // Anti-overlap: any pair closer than MIN_SEP pushes apart. Pull-only springs have no
+    // restoring force, so without this the mesh folds into an unreadable clump and never
+    // re-expands. Short-range only — you can still tuck nodes close, just not overlapping;
+    // and grabbing any node re-spreads an already-collapsed graph.
+    for (let i = 0; i < S.length; i++) {
+      for (let j = i + 1; j < S.length; j++) {
+        const dx = S[i].x - S[j].x;
+        const dy = S[i].y - S[j].y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        if (d >= MIN_SEP) continue;
+        const push = ((MIN_SEP - d) * SEP_K) / d;
+        fx[i] += dx * push;
+        fy[i] += dy * push;
+        fx[j] -= dx * push;
+        fy[j] -= dy * push;
+      }
     }
     let energy = 0;
     for (let i = 0; i < S.length; i++) {
