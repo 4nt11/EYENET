@@ -7,6 +7,8 @@ linkage/actor_relation/shared-infra/persona) plus operator-asserted edges.
 
 from __future__ import annotations
 
+from collections import defaultdict
+from itertools import combinations
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -72,28 +74,32 @@ async def search_graph(
 
     edges: list[SearchGraphEdge] = []
 
-    # Thread -> OP author: inject the author as a NODE (if not already a hit) and
-    # spoke every thread into it, so same-author threads cluster on the real actor
-    # instead of linking to each other. The author also joins the actor set so
+    # Thread/message -> attributed author: inject the author as a NODE (if not already
+    # a hit) and spoke every thread (its OP author) and message (its sender) into it, so
+    # author-owned content clusters on the real actor. Authors also join the actor set so
     # linkage/relation edges among authors show too.
     actor_ids = list(by_type.get("actor", []))
-    op_authors = await storage.thread_op_authors(by_type.get("thread", []))
-    authored: list[tuple[UUID, UUID]] = []  # (thread_id, actor_id)
-    for thread_id, (actor_id, handle, src_id) in op_authors.items():
-        if actor_id not in all_ids:
-            nodes.append(
-                SearchGraphNode(
-                    entity_type="actor",  # type: ignore[arg-type]
-                    entity_id=actor_id,
-                    title=handle,
-                    status=None,
-                    source_id=src_id,
-                    fields={},
+    authored: list[tuple[UUID, UUID]] = []  # (content_id, author_actor_id)
+
+    def _inject(author_map: dict[UUID, tuple[UUID, str, UUID | None]]) -> None:
+        for ent_id, (actor_id, handle, src_id) in author_map.items():
+            if actor_id not in all_ids:
+                nodes.append(
+                    SearchGraphNode(
+                        entity_type="actor",  # type: ignore[arg-type]
+                        entity_id=actor_id,
+                        title=handle,
+                        status=None,
+                        source_id=src_id,
+                        fields={},
+                    )
                 )
-            )
-            all_ids.add(actor_id)
-            actor_ids.append(actor_id)
-        authored.append((thread_id, actor_id))
+                all_ids.add(actor_id)
+                actor_ids.append(actor_id)
+            authored.append((ent_id, actor_id))
+
+    _inject(await storage.thread_op_authors(by_type.get("thread", [])))
+    _inject(await storage.message_authors(by_type.get("message", [])))
 
     derived = await storage.induced_edges(
         actor_ids=actor_ids,
@@ -110,12 +116,25 @@ async def search_graph(
                 provenance="derived",
             )
         )
-    for thread_id, actor_id in authored:
+    for content_id, actor_id in authored:
         edges.append(
             SearchGraphEdge(
-                src_id=thread_id, dst_id=actor_id, kind="authored_by", provenance="derived"
+                src_id=content_id, dst_id=actor_id, kind="authored_by", provenance="derived"
             )
         )
+    # same_handle: actors sharing an EXACT handle across sources are probably one account
+    # (e.g. "LaPampaLeaks" on telegram + a forum). Derived hint, dashed — the operator
+    # promotes it to a persona when confirmed; we never auto-assert identity.
+    by_handle: dict[str, list[UUID]] = defaultdict(list)
+    for n in nodes:
+        if n.entity_type == "actor" and n.title:
+            by_handle[n.title.strip().lower()].append(n.entity_id)
+    for same in by_handle.values():
+        uniq = list(dict.fromkeys(same))
+        for a_id, b_id in combinations(uniq, 2):
+            edges.append(
+                SearchGraphEdge(src_id=a_id, dst_id=b_id, kind="same_handle", provenance="derived")
+            )
     for ae in cast("list[AssertedEdgeTable]", await storage.list_asserted_edges_for(all_ids)):
         edges.append(
             SearchGraphEdge(

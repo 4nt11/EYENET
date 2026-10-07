@@ -1914,6 +1914,12 @@ class BaseRepository(ABC):
     ) -> dict[UUID, tuple[UUID, str, UUID | None]]:
         """Each thread -> its OP author as {thread_id: (actor_id, handle, source_id)}."""
 
+    @abstractmethod
+    async def message_authors(
+        self, message_ids: Collection[UUID]
+    ) -> dict[UUID, tuple[UUID, str, UUID | None]]:
+        """Each message -> its attributed author as {message_id: (actor_id, handle, source_id)}."""
+
     # -- Operator-asserted graph edges (GLOBAL_SEARCH.md §10.4) --------------
     @abstractmethod
     async def assert_edge(

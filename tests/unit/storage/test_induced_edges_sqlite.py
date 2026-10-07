@@ -135,3 +135,27 @@ async def test_thread_op_authors_resolves_earliest_poster(storage: BaseRepositor
     assert authors[threads["t3"]][0] == other
     assert authors[threads["t1"]][1] == "auth"  # handle
     await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_message_authors_maps_sender(storage: BaseRepository) -> None:
+    """message_authors maps each message to its attributed sender (actor_id, handle)."""
+    src, group_id, _a = await seed_telegram_fixture(
+        storage, [{"actor_key": "k", "platform_msgid": "0", "body": "seed"}], _NOW
+    )
+    sender, _ = await storage.upsert_actor(
+        source_id=src, actor_key="k_s", platform_userid="sender",
+        handle="sender", display_name="sender", seen_at=_NOW,
+    )
+    msg = MessageTable(
+        source_id=src, group_id=group_id, actor_id=sender, platform_msgid="m1",
+        evidence_ref="msg:1", body="leak drop", length_chars=9, length_words=2,
+        sent_at_source=_NOW, ingested_at=_NOW,
+    )
+    await storage.put_message(msg, [])
+
+    got = await storage.message_authors([msg.id])
+    assert got[msg.id][0] == sender
+    assert got[msg.id][1] == "sender"
+    assert await storage.message_authors([]) == {}
+    await storage.close()

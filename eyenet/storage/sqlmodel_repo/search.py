@@ -442,6 +442,29 @@ class SearchMixin:
                 out[gid] = (actor.id, handle, actor.source_id)
         return out
 
+    async def message_authors(
+        self, message_ids: Collection[UUID]
+    ) -> dict[UUID, tuple[UUID, str, UUID | None]]:
+        """Map each message → its attributed author as
+        ``{message_id: (actor_id, handle, source_id)}`` (MessageTable.actor_id). The
+        graph endpoint injects the author node and draws a ``authored_by`` edge, so
+        message hits cluster on their senders instead of floating. Node set is capped
+        (<=500) upstream — a single IN is safe."""
+        ids = list(message_ids)
+        out: dict[UUID, tuple[UUID, str, UUID | None]] = {}
+        if not ids:
+            return out
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            rows = await session.exec(
+                select(MessageTable.id, ActorTable).join(
+                    ActorTable, col(MessageTable.actor_id) == col(ActorTable.id)
+                ).where(col(MessageTable.id).in_(ids))
+            )
+            for mid, actor in rows:
+                handle = actor.current_handle or actor.current_display_name or str(actor.id)[:8]
+                out[mid] = (actor.id, handle, actor.source_id)
+        return out
+
 
 def _enum(v: Any) -> str:
     return v.value if hasattr(v, "value") else str(v)
