@@ -103,6 +103,12 @@ _DEFAULT_MAX_THREAD_PAGES = 1
 # leak that spam already pushed to page 2-3 between sweeps; the creation-date sort
 # makes the top N a deterministic newest-first window. 0 = page 1 only.
 _DEFAULT_STEADY_PAGES = 3
+# Hard per-request deadline (backstop ABOVE the httpx/curl 30s). Over SOCKS/Tor the
+# client's own timeout has proven unreliable — a slow onion wedged a whole sweep for
+# hours with no timeout firing, freezing the backfill cursor. asyncio.wait_for bounds
+# EVERY board request no matter what the transport does, so a hang raises promptly,
+# the existing HTTPError handlers log it + persist the cursor, and the sweep resumes.
+_REQUEST_HARD_TIMEOUT = 45.0
 # Subforum-discovery depth default (DEFAULT_DISCOVERY_DEPTH) lives in
 # _timing_presets alongside the per-level overrides.
 
@@ -521,7 +527,7 @@ class ForumCollector(CollectorSkeleton):
         self._guard_cooldown()
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
-        resp = await self._client.get(url, headers=headers, **kw)
+        resp = await self._request(self._client.get(url, headers=headers, **kw), url)
         self._note_rate_limit(resp)
         return resp
 
@@ -534,9 +540,20 @@ class ForumCollector(CollectorSkeleton):
         self._guard_cooldown()
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
-        resp = await self._client.post(url, headers=headers, **kw)
+        resp = await self._request(self._client.post(url, headers=headers, **kw), url)
         self._note_rate_limit(resp)
         return resp
+
+    @staticmethod
+    async def _request(coro: Any, url: str) -> Any:
+        """Await a board request under a HARD deadline. The transport's own timeout has
+        proven unreliable over SOCKS/Tor (a hung onion froze a sweep for hours), so this
+        backstops EVERY request; a timeout surfaces as httpx.ReadTimeout, which the
+        callers already handle (log + persist cursor + resume) instead of wedging."""
+        try:
+            return await asyncio.wait_for(coro, timeout=_REQUEST_HARD_TIMEOUT)
+        except (TimeoutError, asyncio.TimeoutError) as exc:  # noqa: UP041 - explicit for <3.11 alias
+            raise httpx.ReadTimeout(f"hard {_REQUEST_HARD_TIMEOUT:.0f}s deadline on {url}") from exc
 
     @staticmethod
     def _visible_group(slug: str) -> VisibleGroup:

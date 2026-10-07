@@ -298,3 +298,21 @@ def test_identity_entry_round_trips_evasion_level(tmp_path: Path) -> None:
     out = tmp_path / "identities.toml"
     dump(IdentityFile(identities=[entry]), out)
     assert 'forum_evasion_level = "lurker"' in out.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_request_hard_timeout_backstops_a_hung_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A board request that hangs past the hard deadline raises httpx.ReadTimeout (which
+    the callers handle) instead of wedging the sweep — the pwnforums-over-Tor freeze."""
+    import asyncio
+
+    import eyenet.collectors.forum.real as fr
+
+    monkeypatch.setattr(fr, "_REQUEST_HARD_TIMEOUT", 0.05)
+
+    async def _hang() -> None:
+        await asyncio.sleep(10)
+
+    with pytest.raises(httpx.ReadTimeout):
+        await fr.MyBBForumCollector._request(_hang(), "http://host.onion/slow")
