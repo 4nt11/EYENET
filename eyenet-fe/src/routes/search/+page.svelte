@@ -11,13 +11,14 @@
   import GraphCanvas from '$lib/components/GraphCanvas.svelte';
   import EdgeModal from '$lib/components/EdgeModal.svelte';
   import ReasonModal from '$lib/components/ReasonModal.svelte';
+  import CaseCreateModal from '$lib/components/CaseCreateModal.svelte';
   import {
     searchCtx, runSearch, loadMoreSearch, setTypeFilter, setSourceFilter,
     sourceName, fieldKeyUnion, fieldValue
   } from '$lib/search.svelte.js';
   import {
     graphCtx, runGraph, assertEdge, retractEdge, graphSourceName,
-    mergeActors, splitActorFromPersona, mergePersonas, addActorToCase, loadGraphCases
+    mergeActors, splitActorFromPersona, mergePersonas, addActorToCase, loadGraphCases, createCase
   } from '$lib/searchGraph.svelte.js';
 
   const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
@@ -205,6 +206,29 @@
       minLen: 16, confirmLabel: 'Add to case',
       run: async (reason) => { for (const a of actorIds) await addActorToCase(c.id, a, reason); }
     });
+  }
+
+  // ── Create a NEW case seeded from actors (a right-clicked selection, or the whole
+  // current search). createCaseCtx carries the seed set + a default description.
+  let createCaseCtx = $state(null); // { actorIds, defaultDescription } | null
+  const graphActorIds = () =>
+    graphCtx.nodes.filter((n) => n.entityType === 'actor').map((n) => n.id);
+
+  function openCreateCase(actorIds, defaultDescription) {
+    closeGraphMenu();
+    ctxMenu = null;
+    graphCtx.mutateError = null;
+    createCaseCtx = { actorIds, defaultDescription };
+  }
+  async function doCreateCase(title, description) {
+    try {
+      const detail = await createCase(title, description);
+      const reason = 'Seeded from the search graph on case creation';
+      for (const a of createCaseCtx.actorIds) await addActorToCase(detail.case_id, a, reason);
+      createCaseCtx = null;
+    } catch {
+      /* error surfaces via graphCtx.mutateError inside the modal */
+    }
   }
 
   function onEdgeContext(edge, pos) {
@@ -412,6 +436,7 @@
               <div class="ctxmenu" style="left:{casePicker.x}px; top:{casePicker.y}px">
                 <div class="ctxsec">
                   <div class="ctxlabel">Add to case</div>
+                  <button class="ctxitem act newcase" onclick={() => openCreateCase(casePicker.actorIds, '')}>＋ New case from selection…</button>
                   {#if caseList.length}
                     {#each caseList as c}
                       <button class="ctxitem" onclick={() => chooseCase(c)}>{c.title}</button>
@@ -444,6 +469,10 @@
                     {/each}
                   </div>
                 {/if}
+                <div class="ctxsec">
+                  <div class="ctxlabel">Case</div>
+                  <button class="ctxitem act newcase" onclick={() => openCreateCase(graphActorIds(), `Induced from search: ${searchCtx.q}`)}>＋ Create case from this search…</button>
+                </div>
               </div>
             {/if}
 
@@ -497,6 +526,17 @@
     error={graphCtx.mutateError}
     onConfirm={confirmReason}
     onCancel={() => (reasonModal = null)}
+  />
+{/if}
+
+{#if createCaseCtx}
+  <CaseCreateModal
+    seedCount={createCaseCtx.actorIds.length}
+    defaultDescription={createCaseCtx.defaultDescription}
+    busy={graphCtx.mutating}
+    error={graphCtx.mutateError}
+    onConfirm={doCreateCase}
+    onCancel={() => (createCaseCtx = null)}
   />
 {/if}
 
@@ -578,6 +618,8 @@
   .ctxitem.danger { color: var(--red-text); }
   .ctxitem.danger:hover { border-color: var(--red-text); background: var(--surface); }
   .ctxempty { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); padding: 4px 8px; }
+  .ctxitem.newcase { color: var(--accent-text); }
+  .ctxitem.newcase:hover { background: var(--accent-fill); border-color: var(--accent); }
 
   .rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .collapse { appearance: none; background: transparent; border: none; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-16); line-height: 1; cursor: pointer; padding: 0 4px; }

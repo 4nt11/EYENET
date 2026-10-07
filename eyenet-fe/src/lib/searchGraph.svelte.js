@@ -213,6 +213,21 @@ export async function addActorToCase(caseId, actorId, reason) {
   }
 }
 
+// Create a new case (creator auto-enrolled as OWNER). Returns the CaseDetail (has
+// case_id) so the caller can seed it with actors. Reason/seeding is the caller's job.
+export async function createCase(title, description) {
+  graphCtx.mutating = true;
+  graphCtx.mutateError = null;
+  try {
+    return await apiPost('/v1/cases', { title, description: description || null }, { auth: true });
+  } catch (e) {
+    graphCtx.mutateError = e.message ?? String(e);
+    throw e;
+  } finally {
+    graphCtx.mutating = false;
+  }
+}
+
 // Cases for the "add to case" submenu (newest first). Quiet-degrades to [] on failure.
 export async function loadGraphCases() {
   try {
