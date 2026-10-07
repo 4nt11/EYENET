@@ -316,3 +316,38 @@ async def test_request_hard_timeout_backstops_a_hung_fetch(monkeypatch: pytest.M
 
     with pytest.raises(httpx.ReadTimeout):
         await fr.MyBBForumCollector._request(_hang(), "http://host.onion/slow")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_watchdog_cancels_and_logs_a_wedged_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sweep that wedges OFF-request (every request is hard-capped) is detected by the
+    watchdog: it logs the stuck async stack at ERROR (bypasses 10% sampling) and cancels
+    the pass so the next tick recovers instead of the collector freezing indefinitely."""
+    import asyncio
+
+    import eyenet.collectors.forum.real as fr
+    from eyenet.contracts.enums import SystemLogLevel
+
+    monkeypatch.setattr(fr, "_SWEEP_WATCHDOG_S", 0.05)
+
+    col = object.__new__(fr.MyBBForumCollector)
+    col._identity_name = "pwnf1"  # type: ignore[attr-defined]
+    logged: list[tuple[SystemLogLevel, str]] = []
+
+    async def _fake_syslog(*, level: SystemLogLevel, event: str, message: str) -> None:
+        logged.append((level, event))
+
+    hung = asyncio.Event()  # set when the wedged coro is actually running
+
+    async def _wedge(slug: str) -> None:
+        hung.set()
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(col, "syslog", _fake_syslog)
+    monkeypatch.setattr(col, "_crawl_category", _wedge)
+
+    await col._crawl_category_watched("Databases")
+
+    assert hung.is_set()  # the pass really started before the watchdog fired
+    assert (SystemLogLevel.ERROR, "forum.sweep_watchdog") in logged

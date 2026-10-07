@@ -21,10 +21,14 @@ Session lifecycle:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import faulthandler
 import hashlib
 import json
 import random
+import signal
 import time
+import traceback
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
@@ -109,6 +113,13 @@ _DEFAULT_STEADY_PAGES = 3
 # EVERY board request no matter what the transport does, so a hang raises promptly,
 # the existing HTTPError handlers log it + persist the cursor, and the sweep resumes.
 _REQUEST_HARD_TIMEOUT = 45.0
+# Sweep watchdog: a single category sweep should never run this long. If it does, the
+# sweep is wedged somewhere OTHER than a request (requests are already hard-capped) —
+# dump WHERE (the coroutine's async stack) at ERROR level (which bypasses the 10%
+# non-error log sampling), then cancel the sweep so the collector stays alive and the
+# next tick retries. This is how we catch the pwnforums-style stall that sampled logs
+# can't show. Generous so lurker-paced (20-60s/req) real work isn't flagged.
+_SWEEP_WATCHDOG_S = 600.0
 # Subforum-discovery depth default (DEFAULT_DISCOVERY_DEPTH) lives in
 # _timing_presets alongside the per-level overrides.
 
@@ -302,6 +313,11 @@ class ForumCollector(CollectorSkeleton):
 
     async def on_subscribe(self) -> None:
         await super().on_subscribe()
+        # `kill -USR1 <pid>` dumps every thread's Python stack to stderr (container
+        # logs) — a live, zero-dependency probe for a wedged collector when the
+        # minimal image has no py-spy. Harmless if SIGUSR1 is unavailable.
+        with contextlib.suppress(ValueError, OSError, RuntimeError):
+            faulthandler.register(signal.SIGUSR1, all_threads=True)
         entry = cast("IdentityFileEntry", self._claimed)
         self._board = urlparse(entry.forum_base_url or "").netloc or (entry.forum_base_url or "")
         self._base_url = (entry.forum_base_url or "").rstrip("/")
@@ -789,7 +805,7 @@ class ForumCollector(CollectorSkeleton):
         # the first minute instead of after a full multi-hour enumeration.
         for slug in sorted(monitored):
             try:
-                await self._crawl_category(slug)
+                await self._crawl_category_watched(slug)
             except OperationalError as exc:
                 # A DB lock (SQLITE_BUSY past busy_timeout) on ONE category must not
                 # abort the whole sweep and starve the others — that is exactly what
@@ -848,6 +864,35 @@ class ForumCollector(CollectorSkeleton):
                     message=f"{self._identity_name}: {thread_url} DB-locked, skipped ({exc!r})",
                 )
         return threads
+
+    async def _crawl_category_watched(self, slug: str) -> None:
+        """Run one category sweep under a wall-clock watchdog.
+
+        Every request is already hard-capped (``_REQUEST_HARD_TIMEOUT``), so a
+        sweep that runs past ``_SWEEP_WATCHDOG_S`` is wedged OUTSIDE a request —
+        an await that never returns somewhere in the crawl. Logs the stuck
+        coroutine's async stack at ERROR (which bypasses the 10% log sampling, so
+        it actually reaches us) and cancels the pass; the next tick retries the
+        category from its cursor.
+        """
+        task = asyncio.create_task(self._crawl_category(slug))
+        done, _pending = await asyncio.wait({task}, timeout=_SWEEP_WATCHDOG_S)
+        if task in done:
+            await task  # propagate result / re-raise (OperationalError, RateLimited)
+            return
+        frames = task.get_stack()
+        where = "".join(traceback.format_stack(frames[-1])) if frames else "<no stack captured>"
+        await self.syslog(
+            level=SystemLogLevel.ERROR,
+            event="forum.sweep_watchdog",
+            message=(
+                f"{self._identity_name}: {slug} sweep exceeded {_SWEEP_WATCHDOG_S:.0f}s "
+                f"- WEDGED off-request, cancelling. Stuck at:\n{where}"
+            ),
+        )
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     async def _crawl_category(self, slug: str) -> None:
         """Sweep one MONITORED category, CREATION-sorted: top N pages steady, deep by cursor.
