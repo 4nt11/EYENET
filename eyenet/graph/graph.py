@@ -24,6 +24,7 @@ from opentelemetry import trace
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.attribution import (
     SUBJECT_PERSONA_MERGE,
+    SUBJECT_PERSONA_MERGE_ACTORS,
     SUBJECT_PERSONA_SPLIT,
     SUBJECT_PERSONA_UPDATED,
     LinkageConfirmedEnvelope,
@@ -31,6 +32,7 @@ from eyenet.contracts.attribution import (
     LinkageRejectedEnvelope,
     LinkageSuspectedEnvelope,
     PersonaChangeKind,
+    PersonaMergeActorsCommandEnvelope,
     PersonaMergeCommandEnvelope,
     PersonaRow,
     PersonaSplitCommandEnvelope,
@@ -73,6 +75,7 @@ class Graph(ServiceBase):
         await self._bus.subscribe("attribution.persona.updated", _on_persona)
         await self._bus.subscribe(SUBJECT_PERSONA_MERGE, _on_persona_cmd)
         await self._bus.subscribe(SUBJECT_PERSONA_SPLIT, _on_persona_cmd)
+        await self._bus.subscribe(SUBJECT_PERSONA_MERGE_ACTORS, _on_persona_cmd)
 
     # -- profile.current -------------------------------------------------------
 
@@ -391,7 +394,9 @@ class Graph(ServiceBase):
                 await self._handle_persona_merge(payload)
             elif subject == SUBJECT_PERSONA_SPLIT:
                 await self._handle_persona_split(payload)
-            else:  # pragma: no cover — only the two subjects are subscribed
+            elif subject == SUBJECT_PERSONA_MERGE_ACTORS:
+                await self._handle_merge_actors(payload)
+            else:  # pragma: no cover — only the subscribed subjects reach here
                 _log.debug("graph.unknown_persona_command", subject=subject)
 
     async def _handle_persona_merge(self, payload: bytes) -> None:
@@ -414,6 +419,24 @@ class Graph(ServiceBase):
             "PersonaRow",
             await self._storage.merge_actors_into_persona(
                 a_members[0], b_members[0], via_linkage_id=None
+            ),
+        )
+        await self._sync_and_emit_persona(persona_row, PersonaChangeKind.MERGED_WITH)
+
+    async def _handle_merge_actors(self, payload: bytes) -> None:
+        try:
+            env = PersonaMergeActorsCommandEnvelope.model_validate_json(payload)
+        except Exception as exc:
+            _log.error("graph.persona_merge_actors_parse_error", error=str(exc))
+            return
+        if env.actor_a == env.actor_b:
+            _log.warning("graph.persona_merge_actors_same", actor=str(env.actor_a))
+            return
+        # Union-find: creates a persona if neither actor has one, else merges clusters.
+        persona_row = cast(
+            "PersonaRow",
+            await self._storage.merge_actors_into_persona(
+                env.actor_a, env.actor_b, via_linkage_id=None
             ),
         )
         await self._sync_and_emit_persona(persona_row, PersonaChangeKind.MERGED_WITH)

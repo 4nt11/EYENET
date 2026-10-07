@@ -16,6 +16,7 @@ from eyenet.contracts.attribution import (
     SUBJECT_LINKAGE_REJECTED,
     SUBJECT_LINKAGE_SUSPECTED,
     SUBJECT_PERSONA_MERGE,
+    SUBJECT_PERSONA_MERGE_ACTORS,
     SUBJECT_PERSONA_SPLIT,
     SUBJECT_PERSONA_UPDATED,
     SUBJECT_PROFILE_CURRENT,
@@ -23,6 +24,7 @@ from eyenet.contracts.attribution import (
     LinkageProposedEnvelope,
     LinkageRejectedEnvelope,
     LinkageSuspectedEnvelope,
+    PersonaMergeActorsCommandEnvelope,
     PersonaMergeCommandEnvelope,
     PersonaSplitCommandEnvelope,
     PersonaUpdatedEnvelope,
@@ -288,6 +290,41 @@ async def test_persona_merge_command_merges_two_personas(
 
     resolved = {(await storage.persona_for_actor(a)).id for a in (a1, a2, b1, b2)}
     assert len(resolved) == 1, "merge command must union both personas"
+    assert SUBJECT_PERSONA_UPDATED in seen, "Graph must emit persona.updated after applying"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_persona_merge_actors_command_unions_two_actors(
+    storage: BaseRepository, bus: MemoryBus
+) -> None:
+    """Operator 'these two actors are the same person' from the graph menu: the command
+    union-finds two LOOSE actors into one persona and emits persona.updated."""
+    await _start_graph(bus, storage)
+    a, b = _new_uuid7(), _new_uuid7()  # two loose actors, neither in a persona
+
+    seen: list[str] = []
+
+    async def _rec(s: str, _p: bytes, _h: dict[str, str]) -> None:
+        seen.append(s)
+
+    await bus.subscribe(SUBJECT_PERSONA_UPDATED, _rec)
+
+    env = PersonaMergeActorsCommandEnvelope(
+        actor_a=a,
+        actor_b=b,
+        decided_by="op",
+        decided_at=_NOW,
+        reason="same handle across sources",
+        trace_context=_TC,
+    )
+    await bus.publish(SUBJECT_PERSONA_MERGE_ACTORS, env.model_dump_json().encode())
+    await asyncio.sleep(0.05)
+
+    pa = await storage.persona_for_actor(a)
+    pb = await storage.persona_for_actor(b)
+    assert pa is not None and pb is not None
+    assert pa.id == pb.id, "merge_actors must place both in the same persona"
     assert SUBJECT_PERSONA_UPDATED in seen, "Graph must emit persona.updated after applying"
 
 

@@ -795,6 +795,24 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [personas]
+      operationId: personas_merge_actors
+      summary: Operator declares two actors the same person. Publishes `attribution.persona.merge_actors`.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonaMergeActorsRequest' }
+      responses:
+        "202": { $ref: '#/components/responses/WriteAcceptedResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/personas/{persona_id}:
     get:
@@ -4794,6 +4812,19 @@ components:
           type: string
           enum: [I_UNDERSTAND]
           description: Mandatory blocking acknowledgment to prevent accidental fires.
+
+    PersonaMergeActorsRequest:
+      type: object
+      additionalProperties: false
+      required: [actor_a, actor_b, reason]
+      properties:
+        actor_a: { type: string, format: uuid }
+        actor_b: { type: string, format: uuid }
+        reason: { type: string, minLength: 3, maxLength: 1024 }
+        case_refs:
+          type: array
+          items: { type: string }
+          maxItems: 64
 
     PersonaMergeRequest:
       type: object

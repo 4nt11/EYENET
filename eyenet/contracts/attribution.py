@@ -73,6 +73,7 @@ SUBJECT_LINKAGE_REJECTED: str = "attribution.linkage.rejected"
 SUBJECT_PERSONA_UPDATED: str = "attribution.persona.updated"
 SUBJECT_PERSONA_MERGE: str = "attribution.persona.merge"
 SUBJECT_PERSONA_SPLIT: str = "attribution.persona.split"
+SUBJECT_PERSONA_MERGE_ACTORS: str = "attribution.persona.merge_actors"
 
 
 # -- Profile ------------------------------------------------------------------
@@ -353,6 +354,19 @@ class PersonaSplitCommandEnvelope(BusEnvelope):
     case_refs: list[str] = Field(default_factory=list)
 
 
+class PersonaMergeActorsCommandEnvelope(BusEnvelope):
+    """`attribution.persona.merge_actors` — operator declares two actors the same
+    person from the graph. Graph union-finds them into a persona (creating one if
+    neither has one) and emits `attribution.persona.updated`."""
+
+    actor_a: UUID
+    actor_b: UUID
+    decided_by: str = Field(description="system_user id")
+    decided_at: datetime
+    reason: str
+    case_refs: list[str] = Field(default_factory=list)
+
+
 # -- Persona / cluster --------------------------------------------------------
 
 
@@ -392,6 +406,7 @@ __all__ = [
     "SUBJECT_LINKAGE_REJECTED",
     "SUBJECT_LINKAGE_SUSPECTED",
     "SUBJECT_PERSONA_MERGE",
+    "SUBJECT_PERSONA_MERGE_ACTORS",
     "SUBJECT_PERSONA_SPLIT",
     "SUBJECT_PERSONA_UPDATED",
     "SUBJECT_PROFILE_CANDIDATE",
@@ -403,6 +418,7 @@ __all__ = [
     "LinkageSuspectedEnvelope",
     "PersonaChangeKind",
     "PersonaMembershipRow",
+    "PersonaMergeActorsCommandEnvelope",
     "PersonaMergeCommandEnvelope",
     "PersonaRow",
     "PersonaSplitCommandEnvelope",

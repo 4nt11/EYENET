@@ -34,6 +34,7 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "attribution.persona.updated",
     "attribution.persona.merge",
     "attribution.persona.split",
+    "attribution.persona.merge_actors",
     "classify.document.uploaded",
     "classify.attachment.stored",
     "incident.detected",
