@@ -147,6 +147,82 @@ export async function retractEdge(edgeId, reason) {
   }
 }
 
+// ── Edge/node context-menu actions (all audited server-side). Each sets
+// graphCtx.mutating/mutateError for the menu to surface, and throws on failure so the
+// caller can keep its prompt open. Persona writes are async (202 WriteAccepted).
+const _idem = () => ({ auth: true, headers: { 'Idempotency-Key': crypto.randomUUID() } });
+
+export async function mergeActors(actorA, actorB, reason) {
+  graphCtx.mutating = true;
+  graphCtx.mutateError = null;
+  try {
+    return await apiPost('/v1/personas', { actor_a: actorA, actor_b: actorB, reason }, _idem());
+  } catch (e) {
+    graphCtx.mutateError = e.message ?? String(e);
+    throw e;
+  } finally {
+    graphCtx.mutating = false;
+  }
+}
+
+export async function splitActorFromPersona(personaId, actorId, reason) {
+  graphCtx.mutating = true;
+  graphCtx.mutateError = null;
+  try {
+    return await apiPost(`/v1/personas/${personaId}/split`, { actor_id: actorId, reason }, _idem());
+  } catch (e) {
+    graphCtx.mutateError = e.message ?? String(e);
+    throw e;
+  } finally {
+    graphCtx.mutating = false;
+  }
+}
+
+export async function mergePersonas(personaId, otherPersonaId, reason) {
+  graphCtx.mutating = true;
+  graphCtx.mutateError = null;
+  try {
+    return await apiPost(
+      `/v1/personas/${personaId}/merge`,
+      { other_persona_id: otherPersonaId, reason },
+      _idem()
+    );
+  } catch (e) {
+    graphCtx.mutateError = e.message ?? String(e);
+    throw e;
+  } finally {
+    graphCtx.mutating = false;
+  }
+}
+
+// add_reason requires >=16 chars server-side; the menu enforces it too.
+export async function addActorToCase(caseId, actorId, reason) {
+  graphCtx.mutating = true;
+  graphCtx.mutateError = null;
+  try {
+    return await apiPost(
+      `/v1/cases/${caseId}/members/by-actor`,
+      { actor_id: actorId, include_posts: false, add_reason: reason },
+      _idem()
+    );
+  } catch (e) {
+    graphCtx.mutateError = e.message ?? String(e);
+    throw e;
+  } finally {
+    graphCtx.mutating = false;
+  }
+}
+
+// Cases for the "add to case" submenu (newest first). Quiet-degrades to [] on failure.
+export async function loadGraphCases() {
+  try {
+    const page = await apiGet('/v1/cases?limit=100', { auth: true });
+    return (page.items ?? []).map((c) => ({ id: c.case_id, title: c.title }));
+  } catch {
+    return [];
+  }
+}
+
 // Human-readable name for a source id within the graph view.
 const short = (id) => (id ? id.slice(0, 8) : '');
 export function graphSourceName(id) {

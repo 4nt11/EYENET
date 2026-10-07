@@ -10,12 +10,14 @@
   import EntityDetail from '$lib/components/EntityDetail.svelte';
   import GraphCanvas from '$lib/components/GraphCanvas.svelte';
   import EdgeModal from '$lib/components/EdgeModal.svelte';
+  import ReasonModal from '$lib/components/ReasonModal.svelte';
   import {
     searchCtx, runSearch, loadMoreSearch, setTypeFilter, setSourceFilter,
     sourceName, fieldKeyUnion, fieldValue
   } from '$lib/search.svelte.js';
   import {
-    graphCtx, runGraph, assertEdge, retractEdge, graphSourceName
+    graphCtx, runGraph, assertEdge, retractEdge, graphSourceName,
+    mergeActors, splitActorFromPersona, mergePersonas, addActorToCase, loadGraphCases
   } from '$lib/searchGraph.svelte.js';
 
   const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
@@ -59,7 +61,7 @@
     if (view === 'graph' && q) runGraph(q);
   });
 
-  function onView() { saveView(view); clearSel(); ctxMenu = null; }
+  function onView() { saveView(view); clearSel(); ctxMenu = null; closeGraphMenu(); }
   function submitInPage(e) {
     if (e.key !== 'Enter') return;
     goto(`/search?q=${encodeURIComponent(query.trim())}`);
@@ -153,7 +155,7 @@
 
   // ── Right-click facet menu (graph view): opened at the pointer over empty canvas.
   let ctxMenu = $state(null); // { x, y } container-relative px | null
-  function openCtxMenu(pos) { ctxMenu = { x: pos.x, y: pos.y }; }
+  function openCtxMenu(pos) { closeGraphMenu(); ctxMenu = { x: pos.x, y: pos.y }; }
   function pickType(arg) { setTypeFilter(arg); ctxMenu = null; }
   function pickSource(arg) { setSourceFilter(arg); ctxMenu = null; }
 
@@ -172,6 +174,78 @@
     } catch {
       // error surfaces via graphCtx.mutateError inside the modal; keep it open
     }
+  }
+
+  // ── Graph right-click action menu (edges + nodes) ──────────────────────────
+  const nodeById = (id) => graphCtx.nodes.find((n) => n.id === id) || null;
+  let graphMenu = $state(null);   // { x, y, items: [{label, danger?, run}] }
+  let casePicker = $state(null);  // { x, y, actorIds } — the "add to case" submenu
+  let caseList = $state([]);      // [{id, title}]
+  let reasonModal = $state(null); // { title, hint, presets, minLen, confirmLabel, destructive, run }
+
+  function closeGraphMenu() { graphMenu = null; casePicker = null; }
+  function openReason(cfg) { graphCtx.mutateError = null; closeGraphMenu(); reasonModal = cfg; }
+  async function confirmReason(reason) {
+    try { await reasonModal.run(reason); reasonModal = null; }
+    catch { /* error shows via graphCtx.mutateError inside the modal */ }
+  }
+
+  async function openCasePicker(pos, actorIds) {
+    graphMenu = null;
+    caseList = await loadGraphCases();
+    casePicker = { x: pos.x, y: pos.y, actorIds };
+  }
+  function chooseCase(c) {
+    const actorIds = casePicker.actorIds;
+    casePicker = null;
+    openReason({
+      title: `Add to case: ${c.title}`,
+      hint: `Add ${actorIds.length} actor(s) to this case (audited).`,
+      presets: ['Mapped from the search graph', 'Part of the same cluster', 'Operator-linked in graph'],
+      minLen: 16, confirmLabel: 'Add to case',
+      run: async (reason) => { for (const a of actorIds) await addActorToCase(c.id, a, reason); }
+    });
+  }
+
+  function onEdgeContext(edge, pos) {
+    ctxMenu = null; // mutually exclusive with the facet menu
+    const src = nodeById(edge.srcId);
+    const dst = nodeById(edge.dstId);
+    const items = [];
+    if (edge.provenance === 'asserted') {
+      items.push({ label: 'Retract relation', danger: true, run: () => { closeGraphMenu(); openRetract(edge); } });
+    } else if (edge.kind === 'member_of_persona') {
+      items.push({ label: 'Split actor from persona', danger: true, run: () => openReason({
+        title: 'Split actor from persona', hint: 'Pull this actor out of the persona.',
+        presets: ['Misattributed', 'Not the same person', 'Split in error'],
+        minLen: 3, confirmLabel: 'Split', destructive: true,
+        run: (reason) => splitActorFromPersona(edge.dstId, edge.srcId, reason) }) });
+    } else if (src?.entityType === 'persona' && dst?.entityType === 'persona') {
+      items.push({ label: 'Merge personas', run: () => openReason({
+        title: 'Merge personas', hint: 'Fold these two personas into one identity.',
+        presets: ['Same person', 'Confirmed same operator', 'Shared infrastructure'],
+        minLen: 3, confirmLabel: 'Merge',
+        run: (reason) => mergePersonas(edge.srcId, edge.dstId, reason) }) });
+    } else if (src?.entityType === 'actor' && dst?.entityType === 'actor') {
+      items.push({ label: 'Merge into persona (same person)', run: () => openReason({
+        title: 'Merge actors into persona', hint: `${src.title} and ${dst.title} are the same person.`,
+        presets: ['Same handle across sources', 'Same person', 'Confirmed same operator'],
+        minLen: 3, confirmLabel: 'Merge',
+        run: (reason) => mergeActors(edge.srcId, edge.dstId, reason) }) });
+      items.push({ label: 'Confirm as operator edge', run: () => { closeGraphMenu(); openConnect(src, dst); } });
+    } else if (src && dst) {
+      items.push({ label: 'Confirm as operator edge', run: () => { closeGraphMenu(); openConnect(src, dst); } });
+    }
+    const actorIds = [src, dst].filter((n) => n?.entityType === 'actor').map((n) => n.id);
+    if (actorIds.length) items.push({ label: 'Add actor(s) to case ▸', run: () => openCasePicker(pos, actorIds) });
+    graphMenu = { x: pos.x, y: pos.y, title: `${edge.kind} · ${edge.provenance}`, items };
+  }
+
+  function onNodeContext(node, pos) {
+    ctxMenu = null; // mutually exclusive with the facet menu
+    const items = [{ label: 'Inspect', run: () => { closeGraphMenu(); selNode = node; } }];
+    if (node.entityType === 'actor') items.push({ label: 'Add to case ▸', run: () => openCasePicker(pos, [node.id]) });
+    graphMenu = { x: pos.x, y: pos.y, title: cap(node.entityType), items };
   }
 </script>
 
@@ -315,10 +389,39 @@
               edges={graphCtx.edges}
               onNodeClick={(n) => (selNode = n)}
               onConnectReady={openConnect}
-              onEdgeRetract={openRetract}
+              onEdgeContext={onEdgeContext}
+              onNodeContext={onNodeContext}
               onBackgroundContext={openCtxMenu}
-              onCanvasTap={() => (ctxMenu = null)}
+              onCanvasTap={() => { ctxMenu = null; closeGraphMenu(); }}
             />
+
+            <!-- right-click ACTION menu on an edge/node -->
+            {#if graphMenu}
+              <div class="ctxmenu" style="left:{graphMenu.x}px; top:{graphMenu.y}px">
+                <div class="ctxsec">
+                  <div class="ctxlabel">{graphMenu.title}</div>
+                  {#each graphMenu.items as it}
+                    <button class="ctxitem act" class:danger={it.danger} onclick={it.run}>{it.label}</button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <!-- "add to case" submenu -->
+            {#if casePicker}
+              <div class="ctxmenu" style="left:{casePicker.x}px; top:{casePicker.y}px">
+                <div class="ctxsec">
+                  <div class="ctxlabel">Add to case</div>
+                  {#if caseList.length}
+                    {#each caseList as c}
+                      <button class="ctxitem" onclick={() => chooseCase(c)}>{c.title}</button>
+                    {/each}
+                  {:else}
+                    <span class="ctxempty">no open cases</span>
+                  {/if}
+                </div>
+              </div>
+            {/if}
 
             <!-- right-click facet menu (replaces the inline chip rows in graph view) -->
             {#if ctxMenu}
@@ -379,6 +482,21 @@
     error={graphCtx.mutateError}
     onConfirm={confirmModal}
     onCancel={closeModal}
+  />
+{/if}
+
+{#if reasonModal}
+  <ReasonModal
+    title={reasonModal.title}
+    hint={reasonModal.hint}
+    presets={reasonModal.presets}
+    minLen={reasonModal.minLen}
+    confirmLabel={reasonModal.confirmLabel}
+    destructive={reasonModal.destructive}
+    busy={graphCtx.mutating}
+    error={graphCtx.mutateError}
+    onConfirm={confirmReason}
+    onCancel={() => (reasonModal = null)}
   />
 {/if}
 
@@ -456,6 +574,10 @@
   .ctxitem.active { background: var(--accent-fill); border-color: var(--accent); color: var(--accent-text); }
   .ctxitem .n { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .ctxitem.active .n { color: var(--accent-text); }
+  .ctxitem.act { justify-content: flex-start; }
+  .ctxitem.danger { color: var(--red-text); }
+  .ctxitem.danger:hover { border-color: var(--red-text); background: var(--surface); }
+  .ctxempty { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); padding: 4px 8px; }
 
   .rail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .collapse { appearance: none; background: transparent; border: none; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-16); line-height: 1; cursor: pointer; padding: 0 4px; }

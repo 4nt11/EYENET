@@ -14,16 +14,17 @@
   //
   // Connect an operator edge by SHIFT+dragging from a source node to a target
   // node (cytoscape-edgehandles draws the ghost arrow) → onConnectReady(src,dst).
-  // Tapping (or right-clicking) an ASSERTED edge fires onEdgeRetract(edge);
-  // derived edges are read-only. Right-clicking empty canvas fires
-  // onBackgroundContext(pos) so the parent can pop the facet menu; a plain tap on
-  // empty canvas fires onCanvasTap (parent closes the menu).
+  // Right-clicking an edge fires onEdgeContext(edge, pos) and a node fires
+  // onNodeContext(node, pos) so the parent pops the action menu; right-clicking empty
+  // canvas fires onBackgroundContext(pos) (facet menu); a plain tap fires onCanvasTap
+  // (parent closes any open menu).
   let {
     nodes = [],
     edges = [],
     onNodeClick = () => {},
     onConnectReady = () => {},
-    onEdgeRetract = () => {},
+    onEdgeContext = () => {},
+    onNodeContext = () => {},
     onBackgroundContext = () => {},
     onCanvasTap = () => {}
   } = $props();
@@ -334,15 +335,18 @@
 
     cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
 
-    const onEdgeTap = (evt) => {
-      const e = evt.target.data('raw');
-      if (e?.provenance === 'asserted') onEdgeRetract(e);
-    };
-    cy.on('tap', 'edge', onEdgeTap);
-    cy.on('cxttap', 'edge', onEdgeTap);
+    // Right-click an edge/node → context menu (retract/merge/split/add-to-case/…).
+    cy.on('cxttap', 'edge', (evt) => {
+      evt.stopPropagation?.();
+      onEdgeContext(evt.target.data('raw'), evt.renderedPosition);
+    });
+    cy.on('cxttap', 'node', (evt) => {
+      evt.stopPropagation?.();
+      onNodeContext(evt.target.data('raw'), evt.renderedPosition);
+    });
 
-    // Background: plain tap closes the facet menu; right-click opens it at the
-    // pointer (container-relative renderedPosition).
+    // Background: plain tap closes any open menu; right-click opens the facet menu at
+    // the pointer (container-relative renderedPosition).
     cy.on('tap', (evt) => { if (evt.target === cy) onCanvasTap(); });
     cy.on('cxttap', (evt) => { if (evt.target === cy) onBackgroundContext(evt.renderedPosition); });
     const noCtx = (e) => e.preventDefault(); // suppress the browser menu over the canvas
