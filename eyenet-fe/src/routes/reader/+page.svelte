@@ -94,11 +94,15 @@
   h1 { margin: 4px 0 0; font-size: var(--fs-20); color: var(--text-body); }
   .desc { color: var(--text-secondary); font-size: var(--fs-13); max-width: 70ch; }
   .body { flex: 1; min-height: 0; overflow: auto; padding: 8px 24px 24px; }
-  .cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-  .card { display: flex; flex-direction: column; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; text-decoration: none; }
+  .cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: stretch; }
+  .cards > li { display: flex; min-width: 0; }
+  /* height:100% so a card fills its grid cell — otherwise a tall neighbour (a 2-line
+     title) stretches the row and the shorter cards leave dead space below them. */
+  .card { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; text-decoration: none; }
   .card:hover { border-color: var(--accent); }
   .kind { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--accent); }
-  .title { color: var(--text-body); font-size: var(--fs-14); word-break: break-word; }
+  /* clamp to 2 lines so titles don't swing card heights wildly (full text in the link) */
+  .title { color: var(--text-body); font-size: var(--fs-14); word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .pid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); word-break: break-all; }
   /* brighter than --accent so the disambiguating forum URL pops */
   .src { font-family: var(--font-mono); font-size: var(--fs-11); color: #c88bff; word-break: break-all; }
