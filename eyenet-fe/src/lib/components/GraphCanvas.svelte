@@ -287,7 +287,12 @@
       minZoom: 0.15,
       maxZoom: 3,
       wheelSensitivity: 1.5, // snappy zoom (0.2 was sluggish, 0.6 still slow)
-      boxSelectionEnabled: false
+      boxSelectionEnabled: false,
+      // Crisp labels when zoomed out: supersample the canvas (>=2x) and never swap in
+      // the low-res viewport texture during pan/zoom — otherwise small text pixelates.
+      pixelRatio: Math.max(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1),
+      textureOnViewport: false,
+      motionBlur: false
     });
     lastNodeSig = nodeSig();
     runLayout();
