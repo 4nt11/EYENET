@@ -443,23 +443,26 @@ class SQLiteRepository(SQLModelRepository):
         >=3 chars, since the trigram tokenizer cannot match shorter terms and
         would raise. Replaces the generic LIKE full-scan from ``SearchMixin``.
         """
+        import uuid as _uuid  # noqa: PLC0415
+
         from sqlalchemy import text  # noqa: PLC0415
 
         fts = self._fts_query(q)
-        prose = (
-            "search_document.rowid IN "
-            "(SELECT rowid FROM search_fts_prose WHERE search_fts_prose MATCH :sfts_q)"
-        )
+        # UNIQUE bind-param names per call: the DSL compiles one _search_predicate per
+        # text term, so fixed names would COLLIDE across terms in one statement and
+        # SQLAlchemy would bind a single shared value — making `a AND b` match `b AND b`.
+        u = _uuid.uuid4().hex[:12]
+        qp, hp = f"sfts_q_{u}", f"sfts_hq_{u}"
+        # Only the param NAME (a server-generated uuid) is interpolated; the MATCH value
+        # is always bound below — not an injection vector despite S608.
+        prose = f"search_document.rowid IN (SELECT rowid FROM search_fts_prose WHERE search_fts_prose MATCH :{qp})"  # noqa: S608, E501
         if len(q.strip()) >= _TRIGRAM_MIN_CHARS:
-            handles = (
-                "search_document.rowid IN "
-                "(SELECT rowid FROM search_fts_handles WHERE search_fts_handles MATCH :sfts_hq)"
-            )
+            handles = f"search_document.rowid IN (SELECT rowid FROM search_fts_handles WHERE search_fts_handles MATCH :{hp})"  # noqa: S608, E501
             # MUST parenthesize: without it, the AND that `.where(types=...)` appends
             # binds tighter than this OR (SQL precedence), so the prose branch would
             # escape the type/source/status filter and leak other entity types.
-            return text(f"({prose} OR {handles})").bindparams(sfts_q=fts, sfts_hq=fts)
-        return text(prose).bindparams(sfts_q=fts)
+            return text(f"({prose} OR {handles})").bindparams(**{qp: fts, hp: fts})
+        return text(prose).bindparams(**{qp: fts})
 
     async def put_search_documents_bulk(self, rows: Sequence[dict[str, Any]]) -> None:
         """SQLite override: atomic upsert on (entity_type, entity_id).

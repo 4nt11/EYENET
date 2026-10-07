@@ -107,6 +107,19 @@ async def test_boolean_and_or_not(storage: BaseRepository) -> None:
 
 
 @pytest.mark.asyncio
+async def test_two_text_terms_and_vs_or_differ(storage: BaseRepository) -> None:
+    # regression: each text term compiles its own FTS predicate; fixed bind-param names
+    # collided so `a AND b` == `a OR b` (both bound the same value). They MUST differ.
+    await _seed(storage)
+    both = await storage.search_global("santiago AND leak", limit=50)  # only zfo's message
+    either = await storage.search_global("santiago OR leak", limit=50)  # both messages
+    assert len(both) == 1
+    assert len(either) == 2
+    assert len(await storage.search_global("leak AND share", limit=50)) == 0  # no msg has both
+    await storage.close()
+
+
+@pytest.mark.asyncio
 async def test_like_operator_substring(storage: BaseRepository) -> None:
     await _seed(storage)
     # =~ is case-insensitive substring: "ZF" matches author "zfo"
