@@ -249,6 +249,12 @@ class StylometricSensor(ServiceBase, SensorBase):
             if _delta and any(s.supports_incremental and s.requires_bodies for s in PRIMITIVES):
                 _delta_bodies = await _batch_fetch_bodies(self._storage, _delta)
 
+        # Follow-up: the (non-reply) window primitives share one since-cursor fetch per
+        # distinct cursor instead of each doing its own corpus+bodies round-trips. In
+        # steady state every window primitive sits at the same cursor, so this is one
+        # fetch for all of them instead of N.
+        _window_cache = await self._prefetch_window_fetches(actor_id, _cursor_cache)
+
         for spec in PRIMITIVES:
             span_name = f"sensor.primitive.{spec.name.replace('.', '.')}"
             with _tracer.start_as_current_span(
@@ -270,6 +276,7 @@ class StylometricSensor(ServiceBase, SensorBase):
                         delta_bodies=_delta_bodies,
                         cursor=_cursor_cache.get(spec.name),
                         full_bodies_box=_full_bodies_box,
+                        window_cache=_window_cache,
                     )
                     duration_ms = (time.monotonic() - t0) * 1000
                     span.set_attribute("primitive.duration_ms", duration_ms)
@@ -318,6 +325,31 @@ class StylometricSensor(ServiceBase, SensorBase):
             failed=failed,
         )
 
+    async def _prefetch_window_fetches(
+        self, actor_id: UUID, cursor_cache: dict[str, tuple[datetime, UUID]]
+    ) -> dict[tuple[datetime, UUID], tuple[list[tuple[datetime, UUID, str]], dict[str, str]]]:
+        """Fetch each distinct since-cursor window (corpus + bodies) ONCE for the whole
+        dispatch, so the non-reply window primitives share it instead of each hitting the
+        DB. Keyed by resolved cursor; a missing cursor defaults to (epoch, null) exactly
+        like the per-primitive path would. Reply + full-corpus primitives are excluded
+        (they have their own fetch shapes)."""
+        needs_bodies: dict[tuple[datetime, UUID], bool] = {}
+        for spec in PRIMITIVES:
+            if spec.requires_full_corpus or spec.requires_reply_corpus:
+                continue
+            cur = cursor_cache.get(spec.name) or (_EPOCH, _NULL_UUID)
+            needs_bodies[cur] = needs_bodies.get(cur, False) or spec.requires_bodies
+        out: dict[
+            tuple[datetime, UUID], tuple[list[tuple[datetime, UUID, str]], dict[str, str]]
+        ] = {}
+        for (since_ts, since_mid), want_bodies in needs_bodies.items():
+            corpus = await self._storage.iter_corpus_since(actor_id, since_ts, since_mid)
+            bodies = (
+                await _batch_fetch_bodies(self._storage, corpus) if want_bodies and corpus else {}
+            )
+            out[(since_ts, since_mid)] = (corpus, bodies)
+        return out
+
     async def _dispatch_primitive(
         self,
         spec: PrimitiveSpec,
@@ -329,6 +361,9 @@ class StylometricSensor(ServiceBase, SensorBase):
         delta_bodies: dict[str, str],
         cursor: tuple[datetime, UUID] | None,
         full_bodies_box: list[dict[str, str] | None],
+        window_cache: dict[
+            tuple[datetime, UUID], tuple[list[tuple[datetime, UUID, str]], dict[str, str]]
+        ],
     ) -> ObservationEnvelope | None:
         """Route one primitive to the right path: incremental fold, cached full-corpus
         recompute, or since-cursor window. Extracted from the dispatch loop to keep it
@@ -359,8 +394,14 @@ class StylometricSensor(ServiceBase, SensorBase):
                 _precomputed_corpus=entry.corpus,
                 _precomputed_bodies=full_bodies_box[0] if spec.requires_bodies else None,
             )
-        # Window primitive: since-cursor delta, unchanged.
-        return await self._compute_primitive(spec, actor_id, env, _cursor=cursor)
+        # Reply-graph window primitive: its own fetch shape (iter_corpus_since_with_reply).
+        if spec.requires_reply_corpus:
+            return await self._compute_primitive(spec, actor_id, env, _cursor=cursor)
+        # Window primitive: serve from the shared per-cursor prefetch (no own DB round-trip).
+        corpus, bodies = window_cache.get(cursor or (_EPOCH, _NULL_UUID), ([], {}))
+        if not corpus:
+            return None
+        return spec.compute(corpus=corpus, bodies=bodies if spec.requires_bodies else {})
 
     async def _compute_primitive(
         self,
