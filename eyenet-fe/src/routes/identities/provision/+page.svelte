@@ -115,7 +115,10 @@
       if (forumWafBypass) fd.append('forum_enable_waf_bypass', 'true');
     }
 
-    if (cooldown.trim()) fd.append('cooldown_seconds', cooldown.trim());
+    // cooldown is bound to a type=number input, so Svelte hands back a number once
+    // edited (and '' when blank) — coerce before trimming so neither case throws.
+    const cd = String(cooldown ?? '').trim();
+    if (cd) fd.append('cooldown_seconds', cd);
     if (proxyUri.trim()) fd.append('proxy_uri', proxyUri.trim());
     if (notes.trim()) fd.append('notes', notes.trim());
 
