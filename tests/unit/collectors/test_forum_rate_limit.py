@@ -10,6 +10,7 @@ evasion level is just a pacing preset expanded at provision time.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -318,36 +319,90 @@ async def test_request_hard_timeout_backstops_a_hung_fetch(monkeypatch: pytest.M
         await fr.MyBBForumCollector._request(_hang(), "http://host.onion/slow")
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_sweep_watchdog_cancels_and_logs_a_wedged_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A sweep that wedges OFF-request (every request is hard-capped) is detected by the
-    watchdog: it logs the stuck async stack at ERROR (bypasses 10% sampling) and cancels
-    the pass so the next tick recovers instead of the collector freezing indefinitely."""
-    import asyncio
-
+def _watched_collector(
+    monkeypatch: pytest.MonkeyPatch, crawl: Any
+) -> tuple[Any, list[tuple[Any, str]]]:
     import eyenet.collectors.forum.real as fr
     from eyenet.contracts.enums import SystemLogLevel
 
-    monkeypatch.setattr(fr, "_SWEEP_WATCHDOG_S", 0.05)
-
+    monkeypatch.setattr(fr, "_SWEEP_INACTIVITY_S", 0.1)
+    monkeypatch.setattr(fr, "_SWEEP_WATCHDOG_POLL_S", 0.03)
+    monkeypatch.setattr(fr, "_SWEEP_CANCEL_GRACE_S", 0.1)
     col = object.__new__(fr.MyBBForumCollector)
-    col._identity_name = "pwnf1"  # type: ignore[attr-defined]
+    col._identity_name = "pwnf1"
+    col._last_request_at = 0.0
     logged: list[tuple[SystemLogLevel, str]] = []
 
     async def _fake_syslog(*, level: SystemLogLevel, event: str, message: str) -> None:
         logged.append((level, event))
 
-    hung = asyncio.Event()  # set when the wedged coro is actually running
+    monkeypatch.setattr(col, "syslog", _fake_syslog)
+    monkeypatch.setattr(col, "_crawl_category", crawl)
+    return col, logged
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_watchdog_fires_on_inactivity_not_slowness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sweep that makes NO request for _SWEEP_INACTIVITY_S is wedged: log ERROR
+    (bypasses sampling) + cancel. A cancellable hang unwinds cleanly (no raise)."""
+    import asyncio
+
+    from eyenet.contracts.enums import SystemLogLevel
+
+    started = asyncio.Event()
 
     async def _wedge(slug: str) -> None:
-        hung.set()
-        await asyncio.sleep(10)
+        started.set()
+        await asyncio.sleep(10)  # never bumps _last_request_at -> looks inactive
 
-    monkeypatch.setattr(col, "syslog", _fake_syslog)
-    monkeypatch.setattr(col, "_crawl_category", _wedge)
-
+    col, logged = _watched_collector(monkeypatch, _wedge)
     await col._crawl_category_watched("Databases")
-
-    assert hung.is_set()  # the pass really started before the watchdog fired
+    assert started.is_set()
     assert (SystemLogLevel.ERROR, "forum.sweep_watchdog") in logged
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_watchdog_does_not_fire_on_a_slow_but_progressing_sweep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression that killed pwnforums-clearnet: a slow-but-live sweep that keeps
+    completing requests must NOT be guillotined. Bumping _last_request_at keeps it alive."""
+    import asyncio
+    import time
+
+    async def _slow_but_alive(slug: str) -> None:
+        # Four "requests", each slower than the inactivity window on its own, but each
+        # bumps the clock on completion the way a real _get does -> never flagged.
+        for _ in range(4):
+            await asyncio.sleep(0.08)
+            col._last_request_at = time.monotonic()
+
+    col, logged = _watched_collector(monkeypatch, _slow_but_alive)
+    await col._crawl_category_watched("Databases")
+    assert logged == []  # never tripped
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sweep_watchdog_escalates_when_cancel_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the wedged await ignores cancellation past the grace window, the watchdog
+    raises so the process exits and the supervisor respawns - no forever-zombie
+    (the bug that zombied pwnforums-clearnet for 76 minutes)."""
+    import asyncio
+
+    async def _uncancellable(slug: str) -> None:
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.5)  # unwind slower than _SWEEP_CANCEL_GRACE_S (0.1)
+            raise
+
+    col, _logged = _watched_collector(monkeypatch, _uncancellable)
+    with pytest.raises(RuntimeError, match="uncancellable"):
+        await col._crawl_category_watched("Databases")

@@ -98,6 +98,24 @@ async def test_aclose_destroys_session_and_closes_http() -> None:
 
 
 @pytest.mark.unit
+def test_challenge_cookies_are_not_injected() -> None:
+    """FlareSolverr mints cf_clearance/Anubis itself (right IP/UA/TLS); replaying our
+    stale foreign tokens fights its session. Only board-login cookies get injected."""
+    cookies = httpx.Cookies()
+    cookies.set("mybbuser", "123_abc", domain="pwnforums.st")
+    cookies.set("sid", "deadbeef", domain="pwnforums.st")
+    cookies.set("cf_clearance", "STALE", domain="pwnforums.st")
+    cookies.set("anubis.pwnforums-auth", "eyJ...", domain="pwnforums.st")
+    c = FlareSolverrClient(
+        endpoint="http://flaresolverr:8191", base_url="https://pwnforums.st/", cookies=cookies
+    )
+    names = {ck["name"] for ck in c._cookies}
+    assert names == {"mybbuser", "sid"}
+    assert "cf_clearance" not in names
+    assert not any(n.startswith("anubis") for n in names)
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_non_ok_status_raises() -> None:
     c, fake = _client()
@@ -105,6 +123,6 @@ async def test_non_ok_status_raises() -> None:
     async def _boom(url: str, *, json: dict[str, Any]) -> _FakeResp:
         return _FakeResp({"status": "error", "message": "challenge not solved"})
 
-    fake.post = _boom  # type: ignore[assignment]
+    fake.post = _boom  # type: ignore[method-assign]
     with pytest.raises(httpx.HTTPError, match="challenge not solved"):
         await c.get("/")

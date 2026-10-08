@@ -70,10 +70,15 @@ class FlareSolverrClient:
         self._endpoint = endpoint.rstrip("/")
         self._base = base_url if base_url.endswith("/") else base_url + "/"
         self._domain = urlsplit(base_url).hostname or ""
+        # Inject only the cookies FlareSolverr can't earn itself: the board login
+        # (MyBB sid/mybbuser, etc.). The challenge-clearance cookies are FlareSolverr's
+        # to mint in its own browser (right IP/UA/TLS); replaying our stale, foreign
+        # cf_clearance/Anubis token on every request fights its session and can trigger
+        # re-challenge loops. So drop them and let the sidecar own that layer.
         self._cookies = [
             {"name": c.name, "value": c.value, "domain": self._domain}
             for c in cookies.jar
-            if c.value is not None
+            if c.value is not None and not _is_challenge_cookie(c.name)
         ]
         self._proxy = proxy_uri or None
         self._session_id: str | None = None
@@ -134,6 +139,12 @@ class FlareSolverrClient:
                 # Sidecar already reaped the session (restart/TTL) - nothing to free.
                 self._session_id = None
         await self._http.aclose()
+
+
+def _is_challenge_cookie(name: str) -> bool:
+    """A WAF/anti-bot clearance cookie FlareSolverr mints itself - not ours to inject."""
+    n = name.lower()
+    return n == "cf_clearance" or n.startswith(("anubis", "__cf", "cf_chl"))
 
 
 def _urlencode(data: Any) -> str:

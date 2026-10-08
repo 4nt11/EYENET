@@ -115,13 +115,22 @@ _DEFAULT_STEADY_PAGES = 3
 # EVERY board request no matter what the transport does, so a hang raises promptly,
 # the existing HTTPError handlers log it + persist the cursor, and the sweep resumes.
 _REQUEST_HARD_TIMEOUT = 45.0
-# Sweep watchdog: a single category sweep should never run this long. If it does, the
-# sweep is wedged somewhere OTHER than a request (requests are already hard-capped) —
-# dump WHERE (the coroutine's async stack) at ERROR level (which bypasses the 10%
-# non-error log sampling), then cancel the sweep so the collector stays alive and the
-# next tick retries. This is how we catch the pwnforums-style stall that sampled logs
-# can't show. Generous so lurker-paced (20-60s/req) real work isn't flagged.
-_SWEEP_WATCHDOG_S = 600.0
+# Sweep watchdog: INACTIVITY-based, not wall-clock. A single sweep legitimately runs
+# for 20-30min+ at lurker pace (20-60s/req over 23 threads, plus FlareSolverr solve
+# time), so total duration says NOTHING about health — an earlier wall-clock cap
+# guillotined healthy-but-slow sweeps. What a real wedge looks like is NO request
+# completing for a long stretch. Each request is already hard-capped at
+# _REQUEST_HARD_TIMEOUT (45s) and the jitter sleep caps at 60s, so a live sweep marks
+# activity at least every ~105s; this threshold sits well above that. Cross it and the
+# sweep is genuinely stuck OFF-request (an unbounded await) — dump the async stack at
+# ERROR (bypasses the 10% non-error sampling), cancel, and if it won't die, exit for a
+# clean supervisor respawn.
+_SWEEP_INACTIVITY_S = 300.0
+# How often the watchdog wakes to check the inactivity clock.
+_SWEEP_WATCHDOG_POLL_S = 30.0
+# After cancelling a wedged sweep, how long to let it unwind before concluding the
+# await is uncancellable and exiting the process for a respawn.
+_SWEEP_CANCEL_GRACE_S = 15.0
 # Subforum-discovery depth default (DEFAULT_DISCOVERY_DEPTH) lives in
 # _timing_presets alongside the per-level overrides.
 
@@ -305,6 +314,9 @@ class ForumCollector(CollectorSkeleton):
         # Monotonic deadline: while now < this, every request is refused BEFORE it
         # hits the wire (poking during a 429 cooldown re-arms the server's timer).
         self._cooldown_until = 0.0
+        # Monotonic timestamp of the last completed request, for the inactivity-based
+        # sweep watchdog. Bumped in _get/_post; a live sweep keeps it fresh.
+        self._last_request_at = 0.0
         # Fail-closed halt reason. Set when the collector hits data it refuses to
         # ingest (an unparseable post date). While set, tick() is a no-op: the
         # collector stays alive but makes ZERO board requests and writes NOTHING,
@@ -568,6 +580,7 @@ class ForumCollector(CollectorSkeleton):
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
         resp = await self._request(self._client.get(url, headers=headers, **kw), url)
+        self._last_request_at = time.monotonic()  # progress signal for the sweep watchdog
         self._note_rate_limit(resp)
         return resp
 
@@ -581,6 +594,7 @@ class ForumCollector(CollectorSkeleton):
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
         await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
         resp = await self._request(self._client.post(url, headers=headers, **kw), url)
+        self._last_request_at = time.monotonic()  # progress signal for the sweep watchdog
         self._note_rate_limit(resp)
         return resp
 
@@ -890,31 +904,56 @@ class ForumCollector(CollectorSkeleton):
         return threads
 
     async def _crawl_category_watched(self, slug: str) -> None:
-        """Run one category sweep under a wall-clock watchdog.
+        """Run one category sweep under an INACTIVITY watchdog.
 
-        Every request is already hard-capped (``_REQUEST_HARD_TIMEOUT``), so a
-        sweep that runs past ``_SWEEP_WATCHDOG_S`` is wedged OUTSIDE a request —
-        an await that never returns somewhere in the crawl. Logs the stuck
-        coroutine's async stack at ERROR (which bypasses the 10% log sampling, so
-        it actually reaches us) and cancels the pass; the next tick retries the
-        category from its cursor.
+        A sweep legitimately runs for 20-30min+ at lurker pace, so total duration
+        is NOT a health signal (a wall-clock cap guillotines healthy-but-slow work).
+        Instead we watch for *no request completing* for ``_SWEEP_INACTIVITY_S``:
+        every request is hard-capped at ``_REQUEST_HARD_TIMEOUT`` and bumps
+        ``_last_request_at``, so a live sweep stays fresh and only a genuine
+        off-request wedge (an unbounded await) crosses the line. When it does, dump
+        the async stack at ERROR (bypasses the 10% non-error sampling), cancel, and
+        if the await is uncancellable, exit the process for a clean supervisor
+        respawn rather than zombie forever.
         """
         task = asyncio.create_task(self._crawl_category(slug))
-        done, _pending = await asyncio.wait({task}, timeout=_SWEEP_WATCHDOG_S)
-        if task in done:
-            await task  # propagate result / re-raise (OperationalError, RateLimited)
-            return
+        self._last_request_at = time.monotonic()  # arm the clock at sweep start
+        while True:
+            done, _pending = await asyncio.wait({task}, timeout=_SWEEP_WATCHDOG_POLL_S)
+            if task in done:
+                await task  # propagate result / re-raise (OperationalError, RateLimited)
+                return
+            if time.monotonic() - self._last_request_at >= _SWEEP_INACTIVITY_S:
+                break  # no request has completed in too long -> genuinely wedged
+        idle = time.monotonic() - self._last_request_at
+        # get_stack() returns the full await chain (oldest->newest). Render each frame
+        # on its own (limit=1) so we see the DEEPEST await, not just the outer call
+        # site - the earlier frames[-1]+format_stack only showed the outermost frame.
         frames = task.get_stack()
-        where = "".join(traceback.format_stack(frames[-1])) if frames else "<no stack captured>"
+        where = (
+            "".join("".join(traceback.format_stack(f, limit=1)) for f in frames)
+            if frames
+            else "<no stack captured>"
+        )
         await self.syslog(
             level=SystemLogLevel.ERROR,
             event="forum.sweep_watchdog",
             message=(
-                f"{self._identity_name}: {slug} sweep exceeded {_SWEEP_WATCHDOG_S:.0f}s "
+                f"{self._identity_name}: {slug} sweep made no request for {idle:.0f}s "
                 f"- WEDGED off-request, cancelling. Stuck at:\n{where}"
             ),
         )
         task.cancel()
+        # Bounded wait: asyncio.wait (not await task) so an uncancellable coroutine
+        # can't hang us here the way the old `await task` did.
+        done, _pending = await asyncio.wait({task}, timeout=_SWEEP_CANCEL_GRACE_S)
+        if task not in done:
+            # The await ignored cancellation. We cannot safely continue on this event
+            # loop; exit so the supervisor respawns a fresh process (fresh client too).
+            raise RuntimeError(
+                f"{self._identity_name}: {slug} sweep is uncancellable after "
+                f"{_SWEEP_CANCEL_GRACE_S:.0f}s; exiting for respawn"
+            )
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
