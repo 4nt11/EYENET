@@ -25,6 +25,7 @@ import contextlib
 import faulthandler
 import hashlib
 import json
+import os
 import random
 import signal
 import time
@@ -46,6 +47,7 @@ from eyenet.collectors.forum import (
     parse_reply_form,
     posted_at_to_utc,
 )
+from eyenet.collectors.forum._flaresolverr import FlareSolverrClient
 from eyenet.collectors.forum._timing_presets import (
     DEFAULT_DELAY_MAX,
     DEFAULT_DELAY_MIN,
@@ -131,6 +133,10 @@ _SWEEP_WATCHDOG_S = 600.0
 # rest are TB-uniform. Sec-Fetch-Site is per-request (set in _get: "none" for a
 # fresh navigation, "same-origin" once a Referer chains it).
 _DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
+# FlareSolverr sidecar endpoint for the WAF-bypass path (forum_enable_waf_bypass).
+# The compose service name resolves inside the docker network; override for a
+# differently-placed sidecar.
+_FLARESOLVERR_URL = os.environ.get("EYENET_FLARESOLVERR_URL", "http://flaresolverr:8191")
 _BASE_HEADERS: dict[str, str] = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
@@ -437,6 +443,24 @@ class ForumCollector(CollectorSkeleton):
         See CLAUDE.md "4a. load-bearing TLS/evasion defaults"."""
         cookies = materialize_forum_session(entry, self._session_key)
         proxy = getattr(entry, "proxy_uri", None) or None
+        # WAF-bypass path: a clearnet board stacking a Cloudflare JS/behavioural
+        # challenge + Anubis PoW can only be cleared by a real browser. Route every
+        # request through the FlareSolverr sidecar, which drives that browser and
+        # returns solved HTML. Our warmed jar is injected so the browser is logged
+        # in. Plain on/off per identity - independent of pacing/evasion (a WAF
+        # challenge implies nothing about rate limits). See _flaresolverr.py.
+        if getattr(entry, "forum_enable_waf_bypass", False):
+            await self.syslog(
+                level=SystemLogLevel.NOTICE,
+                event="forum.waf_bypass_enabled",
+                message=f"{self._identity_name}: routing via FlareSolverr {_FLARESOLVERR_URL}",
+            )
+            return FlareSolverrClient(
+                endpoint=_FLARESOLVERR_URL,
+                base_url=entry.forum_base_url or "",
+                cookies=cookies,
+                proxy_uri=proxy,
+            )
         user_agent = getattr(entry, "forum_user_agent", None) or _DEFAULT_USER_AGENT
         headers = {**_BASE_HEADERS, "User-Agent": user_agent}
         impersonate = getattr(entry, "forum_tls_impersonate", None)

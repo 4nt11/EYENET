@@ -107,6 +107,13 @@ class IdentityFileEntry(BaseModel):
     # the cookie-mint browser — see CLAUDE.md "load-bearing TLS/evasion defaults" and
     # _TLS_IMPERSONATE_TARGETS in the forum collector.
     forum_tls_impersonate: str | None = None
+    # Route every forum request through the FlareSolverr sidecar (a real browser)
+    # to clear a Cloudflare JS/behavioural challenge + Anubis proof-of-work that no
+    # bare HTTP client can solve. Plain on/off, independent of pacing/evasion — a
+    # WAF challenge says nothing about rate limits, so the operator decides it
+    # separately. None/False → the direct httpx/curl-cffi path. See the forum
+    # collector's _build_forum_client + _flaresolverr.py.
+    forum_enable_waf_bypass: bool = False
 
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:

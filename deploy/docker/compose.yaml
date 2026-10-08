@@ -62,6 +62,17 @@ services:
     image: eyenet:tor
     restart: unless-stopped
 
+  # FlareSolverr: a headless-browser sidecar that clears stacked browser-only gates
+  # (Cloudflare JS/behavioural challenge + Anubis proof-of-work) on clearnet boards
+  # no bare HTTP client can pass. A forum identity with forum_enable_waf_bypass=true
+  # routes every request through here (http://flaresolverr:8191). MIT-licensed, so
+  # fine alongside our AGPL. Reachable only on the private compose network.
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
+
   # The API owns first-boot schema creation (create_all) and binds the only
   # host-published port. Every worker depends on it being healthy.
   api:

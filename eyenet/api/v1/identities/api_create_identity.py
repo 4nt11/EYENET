@@ -94,6 +94,10 @@ async def identities_create(
             description="curl-cffi Firefox target for a clearnet WAF board (e.g. firefox147)",
         ),
     ] = None,
+    forum_enable_waf_bypass: Annotated[
+        bool,
+        Form(description="route via FlareSolverr to clear a CF JS challenge + Anubis PoW"),
+    ] = False,
     cooldown_seconds: Annotated[int, Form(ge=0)] = 21_600,
     proxy_uri: Annotated[str | None, Form(max_length=1024)] = None,
     role: Annotated[IdentityRole, Form()] = IdentityRole.MONITOR,
@@ -122,6 +126,7 @@ async def identities_create(
         forum_user_agent=forum_user_agent,
         forum_evasion_level=forum_evasion_level,
         forum_tls_impersonate=forum_tls_impersonate,
+        forum_enable_waf_bypass=forum_enable_waf_bypass,
     )
 
     try:
@@ -171,6 +176,7 @@ def _build_source_config(
     forum_user_agent: str | None = None,
     forum_evasion_level: str | None = None,
     forum_tls_impersonate: str | None = None,
+    forum_enable_waf_bypass: bool = False,
 ) -> dict[str, object]:
     """Assemble the non-secret per-source config, keyed by IdentityFileEntry field
     names so the pool can splat it back into an entry. New sources add a branch."""
@@ -254,6 +260,10 @@ def _build_source_config(
                     ]
                 )
             config["forum_tls_impersonate"] = forum_tls_impersonate
+        # WAF bypass: route via FlareSolverr (a real browser) for a CF JS challenge
+        # + Anubis PoW. Only emit when enabled so the entry keeps its default (off).
+        if forum_enable_waf_bypass:
+            config["forum_enable_waf_bypass"] = True
         return config
     raise RequestValidationError(
         [
