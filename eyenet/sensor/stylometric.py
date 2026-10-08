@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import OrderedDict
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import structlog
@@ -41,6 +43,27 @@ _RETRY_DELAY = 0.05  # seconds to wait on actor-not-yet-ingested race
 # no cursor row exists — see `eyenet/storage/cursors.py`.
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _NULL_UUID = UUID("00000000-0000-0000-0000-000000000000")
+
+# Per-actor full-corpus cache (Layer 1): the full-corpus primitives used to re-fetch
+# and re-decrypt an actor's ENTIRE history from the DB every dispatch (O(corpus) I/O)
+# and re-tokenize it (O(corpus) CPU). We instead keep the corpus tuples per actor and,
+# each dispatch, fetch only the delta since the high-water mark. Incremental primitives
+# (Layer 2) additionally fold that delta into cached per-actor state so they never
+# re-chew history. LRU-bounded by actor count; an evicted actor just does one cold
+# reload. Process-local (rebuilds after a restart). KNOWN BOUND: a late body EDIT to an
+# already-folded message won't retro-update the fold — rare (edits are uncommon, retain-
+# only store), self-heals on eviction/restart, and a single message is negligible in a
+# cumulative-vocabulary aggregate.
+_CORPUS_CACHE_MAX_ACTORS = 512
+
+
+@dataclass
+class _ActorCorpusCache:
+    corpus: list[tuple[datetime, UUID, str]] = field(default_factory=list)
+    last_ts: datetime = _EPOCH
+    last_msg_id: UUID = _NULL_UUID
+    # primitive name -> its folded state (opaque; owned by the primitive's fold/finalize)
+    fold_state: dict[str, Any] = field(default_factory=dict)
 
 
 class StylometricSensor(ServiceBase, SensorBase):
@@ -158,10 +181,44 @@ class StylometricSensor(ServiceBase, SensorBase):
         ):
             await self._run_primitives(actor_id, env, body)
 
-    async def _run_primitives(self, actor_id: UUID, env: RawMessageEnvelope, _body: str) -> None:
-        _full_corpus: list[tuple[datetime, UUID, str]] | None = None
-        _full_bodies: dict[str, str] | None = None
+    def _corpus_cache_dict(self) -> OrderedDict[UUID, _ActorCorpusCache]:
+        # Lazy init without an __init__ override (mirrors _copypasta_state).
+        cache: OrderedDict[UUID, _ActorCorpusCache] | None = getattr(
+            self, "_corpus_cache_map", None
+        )
+        if cache is None:
+            cache = OrderedDict()
+            self._corpus_cache_map = cache
+        return cache
 
+    async def _load_full_corpus_incremental(
+        self, actor_id: UUID
+    ) -> tuple[_ActorCorpusCache, list[tuple[datetime, UUID, str]]]:
+        """Return the actor's cached full corpus + the delta fetched this dispatch.
+
+        Cold entry: fetch the whole history (and the delta IS the whole history).
+        Warm entry: fetch only rows after the high-water mark and append. LRU-bounded.
+        """
+        cache = self._corpus_cache_dict()
+        entry = cache.get(actor_id)
+        if entry is None:
+            entry = _ActorCorpusCache()
+            delta = await self._storage.iter_corpus_since(actor_id, _EPOCH, _NULL_UUID)
+        else:
+            delta = await self._storage.iter_corpus_since(
+                actor_id, entry.last_ts, entry.last_msg_id
+            )
+        if delta:
+            entry.corpus.extend(delta)
+            last_ts, last_mid, _ = delta[-1]
+            entry.last_ts, entry.last_msg_id = last_ts, last_mid
+        cache[actor_id] = entry
+        cache.move_to_end(actor_id)
+        while len(cache) > _CORPUS_CACHE_MAX_ACTORS:
+            cache.popitem(last=False)
+        return entry, delta
+
+    async def _run_primitives(self, actor_id: UUID, env: RawMessageEnvelope, _body: str) -> None:
         _cursor_names = [s.name for s in PRIMITIVES if not s.requires_full_corpus]
         _cursor_cache = await self._storage.get_cursors_bulk(actor_id, _cursor_names)
 
@@ -178,6 +235,20 @@ class StylometricSensor(ServiceBase, SensorBase):
         _observation_rows: list[ObservationRow] = []
         succeeded = failed = 0
 
+        # Layer 1: load the per-actor full corpus incrementally (delta-only fetch),
+        # shared by every full-corpus primitive. Fetch the delta's bodies once iff an
+        # incremental body-reading primitive (dialect_region) will fold them.
+        _entry: _ActorCorpusCache | None = None
+        _delta: list[tuple[datetime, UUID, str]] = []
+        _delta_bodies: dict[str, str] = {}
+        # One-element box so the lazy non-incremental full-body fetch is memoized across
+        # the primitive loop without inflating _run_primitives' branch/statement count.
+        _full_bodies_box: list[dict[str, str] | None] = [None]
+        if any(s.requires_full_corpus for s in PRIMITIVES):
+            _entry, _delta = await self._load_full_corpus_incremental(actor_id)
+            if _delta and any(s.supports_incremental and s.requires_bodies for s in PRIMITIVES):
+                _delta_bodies = await _batch_fetch_bodies(self._storage, _delta)
+
         for spec in PRIMITIVES:
             span_name = f"sensor.primitive.{spec.name.replace('.', '.')}"
             with _tracer.start_as_current_span(
@@ -190,28 +261,15 @@ class StylometricSensor(ServiceBase, SensorBase):
             ) as span:
                 try:
                     t0 = time.monotonic()
-                    if spec.requires_full_corpus and _full_corpus is None:
-                        _full_corpus = await self._storage.iter_corpus_since(
-                            actor_id, _EPOCH, _NULL_UUID
-                        )
-                    if (
-                        spec.requires_full_corpus
-                        and spec.requires_bodies
-                        and _full_bodies is None
-                        and _full_corpus is not None
-                    ):
-                        _full_bodies = await _batch_fetch_bodies(self._storage, _full_corpus)
-                    obs = await self._compute_primitive(
+                    obs = await self._dispatch_primitive(
                         spec,
                         actor_id,
                         env,
-                        _precomputed_corpus=_full_corpus if spec.requires_full_corpus else None,
-                        _precomputed_bodies=(
-                            _full_bodies
-                            if spec.requires_full_corpus and spec.requires_bodies
-                            else None
-                        ),
-                        _cursor=_cursor_cache.get(spec.name),
+                        entry=_entry,
+                        delta=_delta,
+                        delta_bodies=_delta_bodies,
+                        cursor=_cursor_cache.get(spec.name),
+                        full_bodies_box=_full_bodies_box,
                     )
                     duration_ms = (time.monotonic() - t0) * 1000
                     span.set_attribute("primitive.duration_ms", duration_ms)
@@ -259,6 +317,50 @@ class StylometricSensor(ServiceBase, SensorBase):
             succeeded=succeeded,
             failed=failed,
         )
+
+    async def _dispatch_primitive(
+        self,
+        spec: PrimitiveSpec,
+        actor_id: UUID,
+        env: RawMessageEnvelope,
+        *,
+        entry: _ActorCorpusCache | None,
+        delta: list[tuple[datetime, UUID, str]],
+        delta_bodies: dict[str, str],
+        cursor: tuple[datetime, UUID] | None,
+        full_bodies_box: list[dict[str, str] | None],
+    ) -> ObservationEnvelope | None:
+        """Route one primitive to the right path: incremental fold, cached full-corpus
+        recompute, or since-cursor window. Extracted from the dispatch loop to keep it
+        under the branch/statement budget."""
+        fold_fn, finalize_fn = spec.fold, spec.finalize
+        if (
+            spec.requires_full_corpus
+            and fold_fn is not None
+            and finalize_fn is not None
+            and entry is not None
+        ):
+            # Layer 2: fold ONLY the delta into cached per-actor state, then finalize.
+            # Bit-identical to a full recompute (see the equivalence test).
+            bodies_delta = delta_bodies if spec.requires_bodies else {}
+            state = fold_fn(entry.fold_state.get(spec.name), delta, bodies_delta)
+            entry.fold_state[spec.name] = state
+            obs: ObservationEnvelope | None = finalize_fn(state)
+            return obs
+        if spec.requires_full_corpus and entry is not None:
+            # Non-incremental full-corpus (meta.*): recompute over the cached corpus —
+            # no DB re-fetch. Bodies fetched once (lazily) only if the primitive needs them.
+            if spec.requires_bodies and full_bodies_box[0] is None:
+                full_bodies_box[0] = await _batch_fetch_bodies(self._storage, entry.corpus)
+            return await self._compute_primitive(
+                spec,
+                actor_id,
+                env,
+                _precomputed_corpus=entry.corpus,
+                _precomputed_bodies=full_bodies_box[0] if spec.requires_bodies else None,
+            )
+        # Window primitive: since-cursor delta, unchanged.
+        return await self._compute_primitive(spec, actor_id, env, _cursor=cursor)
 
     async def _compute_primitive(
         self,

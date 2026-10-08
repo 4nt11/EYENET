@@ -76,6 +76,21 @@ _EN_GATE: frozenset[str] = frozenset(
 )
 
 
+def is_spanish_set(token_set: set[str]) -> bool:
+    """Set-based core of :func:`is_spanish`.
+
+    The gate only ever looks at the DISTINCT tokens, so an incremental caller
+    that already maintains the running token set (e.g. ``dialect_region``'s
+    folded state) can call this directly without rebuilding a list — the result
+    is identical to ``is_spanish(list_whose_set_equals(token_set))``.
+    """
+    if not token_set:
+        return False
+    es_score = len(token_set & _ES_GATE)
+    en_score = len(token_set & _EN_GATE)
+    return es_score >= en_score
+
+
 def is_spanish(token_bag: list[str]) -> bool:
     """Return True when the token bag looks like Spanish (not English).
 
@@ -83,12 +98,7 @@ def is_spanish(token_bag: list[str]) -> bool:
     "skip." Ties resolve to Spanish — the only locale ruleset shipped in
     M6.5; non-Spanish callers must use a stricter classifier downstream.
     """
-    if not token_bag:
-        return False
-    token_set = set(token_bag)
-    es_score = len(token_set & _ES_GATE)
-    en_score = len(token_set & _EN_GATE)
-    return es_score >= en_score
+    return is_spanish_set(set(token_bag))
 
 
 def detect_language(token_bag: list[str]) -> str | None:
@@ -114,4 +124,4 @@ def detect_language(token_bag: list[str]) -> str | None:
     return None
 
 
-__all__ = ["detect_language", "is_spanish"]
+__all__ = ["detect_language", "is_spanish", "is_spanish_set"]

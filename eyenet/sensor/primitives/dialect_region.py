@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
 from behave_text.spec import Observation, Window
 
-from ._locale_rules._language_gate import is_spanish
+from ._locale_rules._language_gate import is_spanish_set
 from ._regional_markers import MARKERS_VERSION, REGIONAL_MARKERS
 
 PRIMITIVE_NAME: str = "lexical.dialect_region"
@@ -64,12 +65,10 @@ def _tokens(text: str) -> list[str]:
     return [m.group(0).lower() for m in _TOKENIZE.finditer(text)]
 
 
-def _score_regions(token_bag: list[str]) -> dict[str, float]:
-    """Return per-region marker-hit rate (hits / total_tokens)."""
-    total = len(token_bag)
+def _score_regions_from(token_set: set[str], total: int) -> dict[str, float]:
+    """Return per-region marker-hit rate (distinct marker hits / total token count)."""
     if total == 0:
         return {}
-    token_set = set(token_bag)
     scores: dict[str, float] = {}
     for region, markers in REGIONAL_MARKERS.items():
         hits = len(token_set & markers)
@@ -78,36 +77,62 @@ def _score_regions(token_bag: list[str]) -> dict[str, float]:
     return scores
 
 
-def compute(
-    *,
+@dataclass
+class DialectState:
+    """Foldable accumulator for incremental dialect detection.
+
+    Every input to the gating logic is a monotonic aggregate, so folding new
+    messages into an existing state is bit-identical to recomputing over the
+    whole corpus (``set(all) == union(set(deltas))``, ``len(all) == sum(len(delta))``,
+    min/max over the union, last-ref by corpus order). The equivalence test pins
+    this. Note the asymmetry preserved from the original ``compute``: the token
+    bag + message count come from body-bearing entries ONLY, while the window
+    and evidence_ref span ALL corpus entries (with or without a fetched body).
+    """
+
+    token_set: set[str] = field(default_factory=set)
+    total_tokens: int = 0  # with duplicates — the _score_regions denominator
+    msg_count: int = 0  # body-bearing messages — the MIN_MESSAGES gate
+    min_ts: float | None = None  # over ALL corpus entries
+    max_ts: float | None = None
+    last_ref: str | None = None  # ref of the last corpus entry (corpus order)
+
+
+def fold(
+    state: DialectState | None,
     corpus: list[tuple[datetime, UUID, str]],
     bodies: dict[str, str],
-) -> Observation | None:
-    """Detect the actor's dominant regional variety.
+) -> DialectState:
+    """Fold a corpus delta into ``state`` (None = start fresh). Order-stable."""
+    st = state if state is not None else DialectState()
+    for ts, _, ref in corpus:
+        t = ts.timestamp()
+        st.min_ts = t if st.min_ts is None else min(st.min_ts, t)
+        st.max_ts = t if st.max_ts is None else max(st.max_ts, t)
+        st.last_ref = ref  # corpus is creation-ordered; the last entry wins
+        body = bodies.get(ref)
+        if body is None:
+            continue
+        toks = _tokens(body)
+        st.token_set.update(toks)
+        st.total_tokens += len(toks)
+        st.msg_count += 1
+    return st
 
-    ``corpus``  — [(ts, msg_id, evidence_ref), …] from CorpusStore.iter_since
-    ``bodies``  — evidence_ref → plaintext body
-    Returns None when the corpus is too small or when no Spanish text detected.
-    Returns an Observation with value ``unknown`` when Spanish is detected but
-    below the confidence threshold.
-    """
-    bodies_list = [bodies[ref] for _, _, ref in corpus if ref in bodies]
-    if len(bodies_list) < MIN_MESSAGES:
+
+def finalize(state: DialectState) -> Observation | None:
+    """Emit the Observation from an accumulated state (same gating as compute)."""
+    if state.msg_count < MIN_MESSAGES:
+        return None
+    if not is_spanish_set(state.token_set):
         return None
 
-    token_bag: list[str] = []
-    for body in bodies_list:
-        token_bag.extend(_tokens(body))
+    scores = _score_regions_from(state.token_set, state.total_tokens)
 
-    if not is_spanish(token_bag):
-        return None
-
-    scores = _score_regions(token_bag)
-
-    ts_vals = [ts.timestamp() for ts, _, _ in corpus]
-    window = Window(start_ts=min(ts_vals), end_ts=max(ts_vals))
+    # min/max are set whenever msg_count>0 (body-bearing implies a corpus entry).
+    window = Window(start_ts=state.min_ts or 0.0, end_ts=state.max_ts or 0.0)
     source = f"eyenet/sensor/primitives/dialect-region:v{PRIMITIVE_VERSION}#{MARKER_VERSION_TAG}"
-    evidence_ref = corpus[-1][2] if corpus else None
+    evidence_ref = state.last_ref
 
     if not scores:
         return Observation(
@@ -165,6 +190,26 @@ def compute(
     )
 
 
+def compute(
+    *,
+    corpus: list[tuple[datetime, UUID, str]],
+    bodies: dict[str, str],
+) -> Observation | None:
+    """Detect the actor's dominant regional variety (full recompute).
+
+    ``corpus``  — [(ts, msg_id, evidence_ref), …] from CorpusStore.iter_since
+    ``bodies``  — evidence_ref → plaintext body
+    Returns None when the corpus is too small or when no Spanish text detected;
+    an Observation with value ``unknown`` when Spanish is detected but below the
+    confidence threshold.
+
+    Defined as a fold-from-empty + finalize so the one-shot and the sensor's
+    incremental path share ONE code path and cannot drift (see the equivalence
+    test). The old inline recompute is gone on purpose.
+    """
+    return finalize(fold(None, corpus, bodies))
+
+
 __all__ = [
     "CONFIDENCE_MARGIN",
     "MARKER_VERSION_TAG",
@@ -173,5 +218,8 @@ __all__ = [
     "PRIMITIVE_NAME",
     "PRIMITIVE_VERSION",
     "UNKNOWN_SENTINEL",
+    "DialectState",
     "compute",
+    "finalize",
+    "fold",
 ]

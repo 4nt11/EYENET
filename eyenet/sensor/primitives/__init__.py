@@ -55,6 +55,15 @@ AsyncComputeWithReplyFn = Callable[
     "Awaitable[Observation | None]",
 ]
 
+# Incremental interface for full-corpus primitives whose output is a pure function
+# of monotonic aggregates. `fold(state|None, corpus_delta, bodies_delta) -> state`
+# accumulates; `finalize(state) -> Observation|None` emits. The sensor keeps the
+# state per actor and folds only new messages each dispatch, so a growing corpus
+# costs O(new) instead of O(all). MUST be bit-identical to compute over the full
+# corpus — compute() for such a primitive is literally finalize(fold(None, ...)).
+FoldFn = Callable[..., object]  # (state | None, corpus, bodies) -> state
+FinalizeFn = Callable[..., "Observation | None"]  # (state) -> Observation | None
+
 
 @dataclass(frozen=True)
 class PrimitiveSpec:
@@ -74,6 +83,15 @@ class PrimitiveSpec:
     # skips the MessageStore batch fetch when False, saving body I/O.
     # The default is True because most primitives read message text.
     requires_bodies: bool = True
+    # Optional incremental fold/finalize (full-corpus primitives only). When both
+    # are set the sensor folds only the per-dispatch delta into cached per-actor
+    # state instead of recomputing over the whole corpus. See FoldFn above.
+    fold: FoldFn | None = field(default=None, compare=False)
+    finalize: FinalizeFn | None = field(default=None, compare=False)
+
+    @property
+    def supports_incremental(self) -> bool:
+        return self.requires_full_corpus and self.fold is not None and self.finalize is not None
 
 
 PRIMITIVES: tuple[PrimitiveSpec, ...] = (
@@ -130,6 +148,8 @@ PRIMITIVES: tuple[PrimitiveSpec, ...] = (
         version=dialect_region.PRIMITIVE_VERSION,
         compute=dialect_region.compute,
         requires_full_corpus=True,
+        fold=dialect_region.fold,
+        finalize=dialect_region.finalize,
     ),
     # ── meta.* (corpus-level, see BEHAVE-TEXT 0.1.2) ─────────────────────
     PrimitiveSpec(
