@@ -26,6 +26,11 @@
   // JA3/JA4 WAF (DDoS-Guard/Cloudflare). Blank = httpx (onion/Tor + default).
   let forumTls = $state('');
   const TLS_TARGETS = ['firefox133', 'firefox135', 'firefox144', 'firefox147'];
+  // Route every request through the FlareSolverr sidecar (a real browser) to clear a
+  // Cloudflare JS/behavioural challenge + Anubis proof-of-work no bare HTTP client can
+  // solve. Plain on/off, independent of pacing/evasion — a WAF challenge says nothing
+  // about rate limits, so it's a separate operator decision.
+  let forumWafBypass = $state(false);
   let cookiesText = $state('');
   let curlBlob = $state('');
   let curlMsg = $state('');
@@ -107,6 +112,7 @@
       if (forumUserAgent.trim()) fd.append('forum_user_agent', forumUserAgent.trim());
       if (forumEvasion) fd.append('forum_evasion_level', forumEvasion);
       if (forumTls) fd.append('forum_tls_impersonate', forumTls);
+      if (forumWafBypass) fd.append('forum_enable_waf_bypass', 'true');
     }
 
     if (cooldown.trim()) fd.append('cooldown_seconds', cooldown.trim());
@@ -125,6 +131,7 @@
       forumEngine = 'mybb';
       forumEvasion = '';
       forumTls = '';
+      forumWafBypass = false;
       curlBlob = '';
       curlMsg = '';
       cookiesText = '';
@@ -236,6 +243,10 @@
           {#each TLS_TARGETS as t}<option value={t}>{t}</option>{/each}
         </select>
         <span class="hint">Clearnet https board behind a JA3/JA4 WAF (DDoS-Guard/Cloudflare)? Speak TLS as a real Firefox via curl-cffi instead of httpx (whose OpenSSL fingerprint is a bot tell). Pick the target that matches the browser that minted these cookies (FF152 → firefox147). Leave as none for .onion/Tor — Tor wraps the TLS, and setting a proxy ignores this anyway.</span></label>
+
+      <label class="fld"><span class="flabel">WAF bypass (FlareSolverr)</span>
+        <label class="check"><input type="checkbox" bind:checked={forumWafBypass} /> route every request through the FlareSolverr sidecar</label>
+        <span class="hint">For a board that stacks a Cloudflare JS/behavioural challenge or an Anubis proof-of-work in front of every page — gates no bare HTTP client (httpx or curl-cffi) can clear. Drives a real browser to solve them. Independent of pacing above: a WAF challenge doesn't imply rate-limiting. Needs the flaresolverr sidecar running. Leave off for onion/Tor boards.</span></label>
     {:else if sourceId}
       <p class="hint">This source kind can't be provisioned from this form.</p>
     {/if}
@@ -286,6 +297,8 @@
   .fin::placeholder { color: var(--text-faint); }
   .fin.file { padding: 6px 8px; }
   .fin.mono { font-family: var(--font-mono); font-size: var(--fs-12); resize: vertical; }
+  .check { display: flex; align-items: center; gap: 8px; font-family: var(--font-sans); font-size: var(--fs-13); color: var(--text-body); cursor: pointer; }
+  .check input { accent-color: var(--accent, #743093); width: 15px; height: 15px; }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .hint.ok { color: var(--accent, #743093); }
   .curl-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
