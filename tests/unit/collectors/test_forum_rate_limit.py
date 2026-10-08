@@ -342,6 +342,37 @@ def _watched_collector(
 
 
 @pytest.mark.unit
+def test_slow_down_now_200_throttle_is_treated_as_rate_limit() -> None:
+    """pf-auto throttles with HTTP 200 + a tiny 'Slow down now' body (not a 429). The
+    collector must treat it as a rate-limit and back off, else it reads the stub as an
+    empty thread and marches the cursor over un-ingested pages (the clearnet poisoning)."""
+    import time
+    import types
+
+    import eyenet.collectors.forum.real as fr
+    from eyenet.collectors.forum.real import RateLimited
+
+    col = object.__new__(fr.MyBBForumCollector)
+    col._cooldown_until = 0.0  # type: ignore[attr-defined]
+
+    stub = types.SimpleNamespace(
+        status_code=200,
+        headers={},
+        text='<html><body><pre>Slow down now</pre></body></html>',
+    )
+    with pytest.raises(RateLimited, match="Slow down now"):
+        col._note_rate_limit(stub)
+    assert col._cooldown_until > time.monotonic()  # cooldown armed
+
+    # A real (large) page that merely contains the phrase must NOT trip it.
+    col._cooldown_until = 0.0
+    real = types.SimpleNamespace(
+        status_code=200, headers={}, text="<html>" + ("x slow down x " * 500) + "</html>"
+    )
+    col._note_rate_limit(real)  # no raise
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_sweep_watchdog_fires_on_inactivity_not_slowness(
     monkeypatch: pytest.MonkeyPatch,

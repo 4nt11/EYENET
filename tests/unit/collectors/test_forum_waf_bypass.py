@@ -98,9 +98,10 @@ async def test_aclose_destroys_session_and_closes_http() -> None:
 
 
 @pytest.mark.unit
-def test_challenge_cookies_are_not_injected() -> None:
-    """FlareSolverr mints cf_clearance/Anubis itself (right IP/UA/TLS); replaying our
-    stale foreign tokens fights its session. Only board-login cookies get injected."""
+def test_cf_clearance_dropped_but_anubis_pass_kept() -> None:
+    """cf_clearance is IP/TLS-bound (FlareSolverr mints its own), so drop it. The Anubis
+    auth cookie is a portable signed PoW pass FlareSolverr does NOT auto-solve, so keep
+    injecting it along with the board-login cookies."""
     cookies = httpx.Cookies()
     cookies.set("mybbuser", "123_abc", domain="pwnforums.st")
     cookies.set("sid", "deadbeef", domain="pwnforums.st")
@@ -110,9 +111,8 @@ def test_challenge_cookies_are_not_injected() -> None:
         endpoint="http://flaresolverr:8191", base_url="https://pwnforums.st/", cookies=cookies
     )
     names = {ck["name"] for ck in c._cookies}
-    assert names == {"mybbuser", "sid"}
+    assert names == {"mybbuser", "sid", "anubis.pwnforums-auth"}
     assert "cf_clearance" not in names
-    assert not any(n.startswith("anubis") for n in names)
 
 
 @pytest.mark.unit

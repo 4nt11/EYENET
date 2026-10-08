@@ -142,9 +142,15 @@ class FlareSolverrClient:
 
 
 def _is_challenge_cookie(name: str) -> bool:
-    """A WAF/anti-bot clearance cookie FlareSolverr mints itself - not ours to inject."""
+    """A Cloudflare clearance cookie FlareSolverr mints itself in its own browser.
+
+    cf_clearance is bound to the issuing client's IP/UA/TLS, so replaying ours (minted
+    on a different machine/browser) is invalid and fights FlareSolverr's session. The
+    Anubis auth cookie is NOT dropped: it is a portable signed proof-of-work pass that
+    clears the Anubis gate FlareSolverr does not auto-solve, so we keep injecting it.
+    """
     n = name.lower()
-    return n == "cf_clearance" or n.startswith(("anubis", "__cf", "cf_chl"))
+    return n == "cf_clearance" or n.startswith(("__cf", "cf_chl"))
 
 
 def _urlencode(data: Any) -> str:

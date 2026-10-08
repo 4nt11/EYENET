@@ -131,6 +131,13 @@ _SWEEP_WATCHDOG_POLL_S = 30.0
 # After cancelling a wedged sweep, how long to let it unwind before concluding the
 # await is uncancellable and exiting the process for a respawn.
 _SWEEP_CANCEL_GRACE_S = 15.0
+# pf-auto's per-account thread throttle answers with HTTP 200 and a ~160-byte
+# "Slow down now" stub instead of a 429 (measured on pwnforums onion + clearnet). A
+# real forum page is tens of KB, so a sub-2KB body carrying that marker is the throttle,
+# never genuine content. Treated as a rate-limit so the collector backs off instead of
+# marching the cursor over empty pages. Re-measure if the stub changes.
+_THROTTLE_BODY_MAX = 2048
+_THROTTLE_MARKERS = ("slow down now", "slow down")
 # Subforum-discovery depth default (DEFAULT_DISCOVERY_DEPTH) lives in
 # _timing_presets alongside the per-level overrides.
 
@@ -203,6 +210,20 @@ class UnparseableDateError(Exception):
 
 def _zero_traceparent() -> str:
     return "00-" + "0" * 32 + "-" + "0" * 16 + "-00"
+
+
+def _is_throttle_body(resp: Any) -> bool:
+    """True if ``resp`` is pf-auto's 200 "Slow down now" throttle stub, not real content.
+
+    Measured: a ~160-byte page whose body is just ``<pre>Slow down now</pre>``. Gated on
+    a small body so a genuine thread that merely contains the phrase in a post can't
+    false-trip (real pages are tens of KB). See ``_THROTTLE_BODY_MAX``.
+    """
+    body = resp.text or ""
+    if len(body) > _THROTTLE_BODY_MAX:
+        return False
+    low = body.lower()
+    return any(m in low for m in _THROTTLE_MARKERS)
 
 
 def _reply_outcome(html: str) -> str:
@@ -552,17 +573,30 @@ class ForumCollector(CollectorSkeleton):
             raise RateLimited(f"in cooldown, ~{remaining:.0f}s of silence left")
 
     def _note_rate_limit(self, resp: httpx.Response) -> None:
-        """Arm the silent cooldown on a 429 and abort the sweep. We wait the
-        Retry-After PADDED with jitter (never the exact second — a robotic tell)."""
-        if resp.status_code != httpx.codes.TOO_MANY_REQUESTS:
+        """Arm the silent cooldown + abort the sweep on a rate-limit. We wait the
+        Retry-After PADDED with jitter (never the exact second — a robotic tell).
+
+        Covers two shapes: a real 429 (with Retry-After), and pf-auto's SNEAKY
+        per-account throttle that returns HTTP 200 with a tiny "Slow down now" body
+        (measured on pwnforums, both onion and clearnet). Without the second check the
+        collector reads the throttle stub as an empty thread and marches the cursor over
+        un-ingested pages — poisoning the backfill. A 200 throttle carries no
+        Retry-After, so it uses the measured default backoff.
+        """
+        is_429 = resp.status_code == httpx.codes.TOO_MANY_REQUESTS
+        throttled_200 = not is_429 and _is_throttle_body(resp)
+        if not (is_429 or throttled_200):
             return
-        ra = resp.headers.get("retry-after", "")
+        ra = resp.headers.get("retry-after", "") if is_429 else ""
         # ponytail: integer-seconds only (what real boards send); an HTTP-date
         # Retry-After falls back to the measured default — add dateparse if ever seen.
         base = float(ra) if ra.isdigit() else DEFAULT_RETRY_AFTER
         pad = random.uniform(*RETRY_AFTER_PAD)  # noqa: S311 - jitter, not crypto
         self._cooldown_until = time.monotonic() + base + pad
-        raise RateLimited(f"429 -> silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})")
+        shape = "429" if is_429 else "200 'Slow down now' throttle"
+        raise RateLimited(
+            f"{shape} -> silent for ~{base + pad:.0f}s (Retry-After={ra or 'absent'})"
+        )
 
     # -> Any: the response is an httpx.Response OR a curl-cffi Response (impersonation
     # path); both expose .status_code/.headers/.text, which is all callers touch.
