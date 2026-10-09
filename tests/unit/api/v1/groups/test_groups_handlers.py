@@ -686,3 +686,67 @@ async def test_groups_backfill_rejects_non_forum_kind(storage: BaseRepository) -
         await groups_backfill(
             group_id=gid, current_user=_user(), storage=storage, audit=_audit(storage)
         )
+
+
+@pytest.mark.unit
+async def test_join_cross_source_collector_rejected(storage: BaseRepository) -> None:
+    """A collector may only be assigned a group from its OWN source."""
+    now = datetime.now(tz=UTC)
+    sid_a = await storage.upsert_source(
+        kind=SourceKind.FORUM, display_name="board-a", created_at=now
+    )
+    sid_b = await storage.upsert_source(
+        kind=SourceKind.FORUM, display_name="board-b", created_at=now
+    )
+    coll_a = await _seed_forum_collector(storage, sid_a)
+    # Same slug a board-A category might use, but this one lives on board B.
+    cand_b = await storage.ensure_candidate(
+        source_id=sid_b,
+        platform_groupid="Forum-The-Lounge",
+        seen_at=now,
+        kind=GroupKind.FORUM_CATEGORY,
+    )
+    with pytest.raises(RequestValidationError):
+        await groups_join(
+            body=JoinGroupRequest(collector_id=coll_a.id, candidate_id=cand_b.id),
+            current_user=_user(),
+            storage=storage,
+            audit=_audit(storage),
+        )
+    assert not await storage.list_active_memberships(collector_id=coll_a.id)
+
+
+@pytest.mark.unit
+async def test_monitor_forum_category_remonitors_parked(storage: BaseRepository) -> None:
+    """A parked forum category can be re-monitored (PARKED -> APPROVED -> JOINED)."""
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=now)
+    coll = await _seed_forum_collector(storage, sid)
+    cand = await storage.ensure_candidate(
+        source_id=sid,
+        platform_groupid="Forum-The-Lounge",
+        seen_at=now,
+        kind=GroupKind.FORUM_CATEGORY,
+    )
+    join = JoinGroupRequest(collector_id=coll.id, candidate_id=cand.id)
+    await groups_join(body=join, current_user=_user(), storage=storage, audit=_audit(storage))
+
+    # Operator unmonitors -> parked + membership closed.
+    await groups_leave(
+        body=LeaveGroupRequest(candidate_id=cand.id),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+        bus=MemoryBus(),
+    )
+    row = await storage.get_candidate(cand.id)
+    assert row is not None and row.state is CandidateState.PARKED
+
+    # Re-monitor from PARKED must succeed and reopen the membership.
+    result = await groups_join(
+        body=join, current_user=_user(), storage=storage, audit=_audit(storage)
+    )
+    assert result.status == "monitored"
+    row = await storage.get_candidate(cand.id)
+    assert row is not None and row.state is CandidateState.JOINED
+    assert len(await storage.list_active_memberships(collector_id=coll.id)) == 1

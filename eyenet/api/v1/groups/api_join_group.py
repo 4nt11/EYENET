@@ -46,6 +46,8 @@ _FORUM_WALK_FROM = {
     CandidateState.QUEUED: 1,
     CandidateState.APPROVED: 2,
     CandidateState.JOINING: 3,
+    # PARKED re-monitors via the existing PARKED -> APPROVED edge (walk from APPROVED).
+    CandidateState.PARKED: 1,
 }
 _FORUM_WALK = (
     CandidateState.QUEUED,
@@ -67,12 +69,31 @@ async def groups_join(
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
 ) -> GroupSummary:
-    if await storage.get_collector(body.collector_id) is None:
+    collector = await storage.get_collector(body.collector_id)
+    if collector is None:
         raise RequestValidationError(
             [{"loc": ("body", "collector_id"), "msg": "collector not found", "type": "value_error"}]
         )
 
     row = await _resolve_target(storage, body)
+
+    # A collector only ever crawls its OWN source's board. Assigning it a group
+    # from a different source produces an inert cross-source membership (the slug
+    # is swept against the wrong board) — the exact bug that stranded a forum
+    # category whose name collides across two boards. Fail loud instead.
+    if collector.source_id != row.source_id:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "collector_id"),
+                    "msg": (
+                        f"collector belongs to source {collector.source_id}, "
+                        f"not the group's source {row.source_id}"
+                    ),
+                    "type": "value_error",
+                }
+            ]
+        )
 
     # Forum categories have NO platform join to perform: monitoring one is a
     # purely internal membership. Complete it synchronously and never route it
