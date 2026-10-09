@@ -243,6 +243,19 @@ def _last_segment(url: str) -> str:
     return urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
 
 
+def _category_slug(url: str) -> str:
+    """Storable category slug = the link's path relative to the board root.
+
+    Keeps the WHOLE path (minus leading/trailing slashes), not just the last
+    segment: MyBB forums are flat (``Forum-Databases``) so this is unchanged, but
+    XenForo routes are multi-segment (``/forums/db-leaks/`` -> ``forums/db-leaks``,
+    or a custom route ``/foros/x/`` -> ``foros/x``). category_url rebuilds the
+    fetch URL from this slug, so dropping ``forums/`` sends every sweep to a
+    soft-404. The route prefix must survive.
+    """
+    return urlparse(url).path.strip("/")
+
+
 def _thread_id_from_url(url: str) -> str:
     """MyBB ``Thread-<slug>--<tid>`` -> ``<tid>``; fall back to the slug."""
     slug = _last_segment(url)
@@ -665,7 +678,7 @@ class ForumCollector(CollectorSkeleton):
         frontier: list[tuple[str, int]] = []
         # Top-level categories from the single index request — yield them ALL now.
         for url in self._parser.parse_forum_links(index.text):
-            slug = _last_segment(url)
+            slug = _category_slug(url)
             if slug not in seen:
                 seen.add(slug)
                 yield self._visible_group(slug)
@@ -694,7 +707,7 @@ class ForumCollector(CollectorSkeleton):
                 continue
             new = 0
             for child_url in self._parser.parse_subforum_links(page.text):
-                child = _last_segment(child_url)
+                child = _category_slug(child_url)
                 if child not in seen:
                     seen.add(child)
                     yield self._visible_group(child)

@@ -155,3 +155,17 @@ async def test_cycle_guard_no_dupes(tmp_path: Path) -> None:
         _PAGES["/Forum-Databases-Removed-Deep"] = "<p>leaf</p>"
     slugs = [g.platform_groupid for g in groups]
     assert len(slugs) == len(set(slugs))  # no duplicate despite the back-edge
+
+
+@pytest.mark.unit
+def test_category_slug_keeps_full_path_for_multisegment_routes() -> None:
+    from eyenet.collectors.forum.real import _category_slug
+
+    # MyBB: flat slug, unchanged.
+    assert _category_slug("Forum-Databases") == "Forum-Databases"
+    assert _category_slug("https://darkforums.as/Forum-Databases") == "Forum-Databases"
+    # XenForo: multi-segment route must survive (last-segment would soft-404).
+    assert _category_slug("/forums/db-leaks/") == "forums/db-leaks"
+    assert _category_slug("/forums/stealer-logs.15/") == "forums/stealer-logs.15"
+    # XenForo custom route prefix is preserved, not hardcoded to forums/.
+    assert _category_slug("/foros/novedades/") == "foros/novedades"
