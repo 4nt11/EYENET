@@ -211,7 +211,7 @@ async def _put_array_obs(
     await storage.put_observation(
         ObservationRow(
             actor_id=actor_id,
-            primitive_namespace=name.split(".")[0],
+            primitive_namespace=name.split(".", 1)[0],
             primitive_name=name,
             primitive_version="0.1",
             value_kind=ValueKind.ARRAY_NUMERIC,
