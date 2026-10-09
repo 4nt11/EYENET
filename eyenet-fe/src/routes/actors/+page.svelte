@@ -4,6 +4,7 @@
   import DossierLayout from '$lib/components/DossierLayout.svelte';
   import Segmented from '$lib/components/Segmented.svelte';
   import BehavePanel from '$lib/components/BehavePanel.svelte';
+  import CircadianPanel from '$lib/components/CircadianPanel.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
   import Panel from '$lib/components/Panel.svelte';
   import Badge from '$lib/components/Badge.svelte';
@@ -142,6 +143,8 @@
       </div>
 
       {#if actorView.behave}<BehavePanel behave={actorView.behave} />{/if}
+
+      {#if actorView.circadian}<CircadianPanel circadian={actorView.circadian} />{/if}
 
       <div class="cols">
         <Panel title="Observations" class="grow">

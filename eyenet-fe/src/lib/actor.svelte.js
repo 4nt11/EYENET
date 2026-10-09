@@ -157,6 +157,7 @@ export const actorView = $state({
   aliases: [],
   assessment: '',
   behave: null,
+  circadian: null, // {hour_histogram, dow_histogram, hour_dow_histogram, quiet_span_utc, inferred_tz}
   observations: [],
   neighbors: [],
   relationships: { outbound: [], inbound: [] },
@@ -237,6 +238,9 @@ function buildBehave(observations, calibration, verifier) {
   const lexical = [];
   const stylometric = [];
   for (const o of _latestPerPrimitive(observations)) {
+    // circadian.* has its own CircadianPanel — keep its 24/168-wide arrays out of
+    // the BEHAVE readout (they'd fall through to the lexical bucket as a wall).
+    if (o.primitive_namespace === 'circadian') continue;
     const row = { primitive: o.kind, label: o.primitive ?? o.kind, value: obsValue(o), kind: o.value_kind ?? '' };
     const bucket = _BUCKET[o.primitive_namespace] ?? 'lexical';
     if (bucket === 'activity') activity.push(row);
@@ -311,6 +315,7 @@ export async function loadActorDetail(id) {
   actorView.aliases = [];
   actorView.assessment = '';
   actorView.behave = null;
+  actorView.circadian = null;
   actorView.observations = [];
   actorView.neighbors = [];
   actorView.relationships = { outbound: [], inbound: [] };
@@ -347,13 +352,17 @@ export async function loadActorDetail(id) {
     };
     actorView.aliases = (detail.aliases ?? []).map((al) => `${al.value} (${al.kind})`);
     actorView.assessment = detail.assessment ?? '';
-    actorView.observations = observations.map((o) => ({
-      observation_id: o.observation_id,
-      kind: o.kind,
-      ts: shortTs(o.ts),
-      value: obsValue(o),
-      sensitivity: o.sensitivity
-    }));
+    actorView.observations = observations
+      // circadian.* is rendered by CircadianPanel; its 24/168-wide arrays would be
+      // a wall of "0.00, ..." in the raw stream.
+      .filter((o) => !String(o.kind ?? '').startsWith('circadian.'))
+      .map((o) => ({
+        observation_id: o.observation_id,
+        kind: o.kind,
+        ts: shortTs(o.ts),
+        value: obsValue(o),
+        sensitivity: o.sensitivity
+      }));
     actorView.neighbors = neighbors.map((n) =>
       n.edge_type === 'belongs_to_persona'
         ? { edge_type: 'belongs_to_persona', target_id: short(n.target_id), since: shortTs(n.attrs?.since) }
@@ -371,6 +380,7 @@ export async function loadActorDetail(id) {
     };
     actorView.timeline = _mapTimeline(tlPage.items);
     actorView.behave = buildBehave(observations, calibration, verifier);
+    actorView.circadian = detail.circadian ?? null;
     actorView.error = null;
   } catch (e) {
     if (mine !== detailSeq) return;
