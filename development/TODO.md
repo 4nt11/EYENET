@@ -204,3 +204,58 @@ vs return a new object the driver must reassign?), and that the FE `$effect` in
 change (poll cadence is 2s, so a changed url should re-render within 2s). Likely a
 driver-side reassignment bug or the poll not observing the new url. Add a visible
 "code refreshed" tick + a manual "regenerate" button as a fallback.
+
+## Circadian timezone inference + operator presentation
+
+**Status:** the four `circadian.*` primitives (BEHAVE-TEXT 0.1.4) are LANDED and
+backfilling — `hour_histogram[24]`, `dow_histogram[7]`, `hour_dow_histogram[168]`,
+`quiet_span_utc[2]`, all UTC, in `temporal_summary`. This TODO is the CONSUMER
+side: turn those raw UTC distributions into an operator-facing "Place/Timezone"
+(e.g. `America/Santiago`) panel. Deliberately deferred so the overnight backfill
+produces the data the recipe reads.
+
+**Dumb-extractor / smart-consumer boundary (already decided):** BEHAVE never emits
+an inferred tz. The inference lives EYENET-side as an engine recipe + a derived
+profile field. The primitives stay UTC.
+
+**Inference recipe (new, over `temporal_summary`):**
+- Offset: cross-correlate `hour_histogram` against the 24 candidate UTC offsets,
+  OR map the `quiet_span_utc` midpoint to a local sleep-center (~03:00-04:00 local)
+  → best UTC offset. Produces e.g. `UTC-03:00`.
+- **Offset → IANA name is many-to-one** (`-03:00` = Santiago / São Paulo / Buenos
+  Aires …) and DST-ambiguous. Timing ALONE must only yield an offset + a candidate
+  zone LIST, never a single zone asserted as fact.
+- **Disambiguate by fusing signals** — this is the money path and what makes a
+  single IANA name defensible:
+  - `dialect_region` (es-CL Chilean Spanish → America/Santiago)
+  - victim-country / geo signals on the actor
+  - observed languages
+  Offset + dialect agreeing on one zone ⇒ high confidence.
+- DST: pick standard vs daylight using the actor's active date range.
+
+**Derived profile field:** `temporal_summary.inferred_tz = {offset, zone_best,
+zone_candidates, confidence, supporting_signals, local_active_window,
+local_quiet_window}`. `zone_best` is null when only timing is available (show the
+candidate list instead).
+
+**Operator panel (actor detail → "Activity rhythm"):**
+```
+Local timezone   America/Santiago  (UTC-3)   ◆ high · circadian + es-CL
+Active window    09:00 - 01:00  (local)
+Sleep gap        04:00 - 11:00 UTC  ->  01:00 - 08:00 local
+Hours (UTC)   ▁▁▁▂▅▇▇▆▅▃▂▁▁▁▁▂▃▅▆▇▇▅▃▂     (24-bin sparkline)
+Week          M▇ T▇ W▇ T▆ F▇ S▃ S▂          (weekday vs weekend)
+```
+Degraded (timing only, no dialect): `UTC-03 · candidates: Santiago / São Paulo /
+Buenos Aires · medium`. NEVER a false single zone.
+
+**Honesty rules (load-bearing — this is forensic evidence):**
+- Confidence must reflect `meta.total_messages` (a 3-msg histogram is noise).
+- When `hour_histogram` is poisoned by day-granular timestamps (bin 0 spike), fall
+  back to `dow_histogram` and down-rank the offset confidence.
+- The tz is always a HINT with its supporting signals shown, never bare fact —
+  breaks for shift workers, teams, scheduled bots, and cross-tz merged personas.
+
+**Verifier:** circadian overlap (histogram cosine / EMD) is a cheap,
+language-agnostic linkage feature — unlike the Spanish-disabled stylometric
+simhashes. Worth adding to the linkage score once profiles carry the histograms.

@@ -689,6 +689,50 @@ def search_backfill(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("sensor-backfill")
+def sensor_backfill(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    actor: str | None = typer.Option(None, "--actor", help="backfill ONE actor (UUID)"),
+    all_actors: bool = typer.Option(False, "--all", help="backfill EVERY actor with messages"),
+    force: bool = typer.Option(
+        False, "--force", help="recompute even if the actor already has circadian observations"
+    ),
+    batch: int = typer.Option(500, "--batch", help="actors per page when using --all"),
+) -> None:
+    """Backfill circadian.* observations over the existing corpus.
+
+    O(actors), not O(messages): each actor's full corpus is fetched once and the
+    circadian primitives recomputed (no bus replay). Idempotent — actors that
+    already have circadian observations are skipped unless --force. Pass one
+    --actor <uuid>, or --all to sweep the whole corpus.
+    """
+    from uuid import UUID  # noqa: PLC0415
+
+    from eyenet.sensor.backfill import run_circadian_backfill  # noqa: PLC0415
+
+    if not actor and not all_actors:
+        typer.echo("pass --actor <uuid> or --all", err=True)
+        raise typer.Exit(2)
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        res = await run_circadian_backfill(
+            storage,
+            actor_id=UUID(actor) if actor else None,
+            all_actors=all_actors,
+            force=force,
+            batch=batch,
+        )
+        await storage.close()
+        typer.echo(
+            f"actors processed {res.actors_processed}, skipped {res.actors_skipped}, "
+            f"observations written {res.observations_written}"
+        )
+
+    asyncio.run(_main())
+
+
 @app.command("incidents-export-labels")
 def incidents_export_labels(  # pragma: no cover
     out: Path = typer.Option(
