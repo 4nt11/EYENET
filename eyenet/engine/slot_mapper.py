@@ -133,6 +133,24 @@ _SLOT_MAP: dict[str, tuple[str, str]] = {
         "temporal_summary",
         "fingerprint_confidence",
     ),
+    # circadian.* (BEHAVE-TEXT 0.1.4) — also land in temporal_summary. The tz
+    # inference recipe reads these; see development/TODO.md.
+    "circadian.hour_histogram": (
+        "temporal_summary",
+        "hour_histogram",
+    ),
+    "circadian.dow_histogram": (
+        "temporal_summary",
+        "dow_histogram",
+    ),
+    "circadian.hour_dow_histogram": (
+        "temporal_summary",
+        "hour_dow_histogram",
+    ),
+    "circadian.quiet_span_utc": (
+        "temporal_summary",
+        "quiet_span_utc",
+    ),
 }
 
 

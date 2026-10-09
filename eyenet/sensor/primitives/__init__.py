@@ -24,6 +24,10 @@ from behave_text.spec import Observation
 
 from . import (
     character_ngram_simhash,
+    circadian_dow_histogram,
+    circadian_hour_dow_histogram,
+    circadian_hour_histogram,
+    circadian_quiet_span,
     conversation_initiation_rate,
     dialect_region,
     distinctive_vocabulary_signature,
@@ -205,6 +209,35 @@ PRIMITIVES: tuple[PrimitiveSpec, ...] = (
         name=meta_fingerprint_confidence.PRIMITIVE_NAME,
         version=meta_fingerprint_confidence.PRIMITIVE_VERSION,
         compute=meta_fingerprint_confidence.compute,
+        requires_full_corpus=True,
+        requires_bodies=False,
+    ),
+    # ── circadian.* (hour/day activity rhythm, same single kernel pass) ──
+    PrimitiveSpec(
+        name=circadian_hour_histogram.PRIMITIVE_NAME,
+        version=circadian_hour_histogram.PRIMITIVE_VERSION,
+        compute=circadian_hour_histogram.compute,
+        requires_full_corpus=True,
+        requires_bodies=False,
+    ),
+    PrimitiveSpec(
+        name=circadian_dow_histogram.PRIMITIVE_NAME,
+        version=circadian_dow_histogram.PRIMITIVE_VERSION,
+        compute=circadian_dow_histogram.compute,
+        requires_full_corpus=True,
+        requires_bodies=False,
+    ),
+    PrimitiveSpec(
+        name=circadian_hour_dow_histogram.PRIMITIVE_NAME,
+        version=circadian_hour_dow_histogram.PRIMITIVE_VERSION,
+        compute=circadian_hour_dow_histogram.compute,
+        requires_full_corpus=True,
+        requires_bodies=False,
+    ),
+    PrimitiveSpec(
+        name=circadian_quiet_span.PRIMITIVE_NAME,
+        version=circadian_quiet_span.PRIMITIVE_VERSION,
+        compute=circadian_quiet_span.compute,
         requires_full_corpus=True,
         requires_bodies=False,
     ),

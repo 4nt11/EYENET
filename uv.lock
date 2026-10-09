@@ -357,15 +357,15 @@ wheels = [
 
 [[package]]
 name = "behave-text"
-version = "0.1.3"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "behave-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/45/1864dc50a846835dac116123257886b53290e6da226cc76b6118f313d8df/behave_text-0.1.3.tar.gz", hash = "sha256:ff15004178d98c46b49908bf4d3cd5f0fdaed493eb7b5585121aa82f2f853440", size = 26967, upload-time = "2026-05-23T05:40:58.022Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/ef/ced66580419f9807717d475915bf77ceec21a3f4dee74b709f344001c807/behave_text-0.1.4.tar.gz", hash = "sha256:fcc0918179870a5d39bad241661149c23a0e1b96fba1713d2ba337923748f2a2", size = 32524, upload-time = "2026-10-09T01:44:32.314Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/9b/335f6f55eb7e177b93b688f9c20b88b4f383d0a3b16b64b25303d054f57f/behave_text-0.1.3-py3-none-any.whl", hash = "sha256:392fcfc21a4b78e67f1257bf67f38a989d43015ba8674850c30c8d15b6998370", size = 21355, upload-time = "2026-05-23T05:40:56.766Z" },
+    { url = "https://files.pythonhosted.org/packages/81/8b/55847c446e8e60476a5c899f1e2beba8ecc09fb748b92055a25dad369e44/behave_text-0.1.4-py3-none-any.whl", hash = "sha256:4143b65441b0a02236bea9f302426fb5c582f7569ef152e31d3fec2a0e8650b8", size = 24553, upload-time = "2026-10-09T01:44:29.594Z" },
 ]
 
 [[package]]
@@ -1177,7 +1177,7 @@ requires-dist = [
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "beautifulsoup4", specifier = ">=4.15.0" },
     { name = "behave-core", specifier = ">=0.1.1" },
-    { name = "behave-text", specifier = ">=0.1.3" },
+    { name = "behave-text", specifier = ">=0.1.4" },
     { name = "brotli", specifier = ">=1.1" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=43" },

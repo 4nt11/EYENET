@@ -57,6 +57,13 @@ class MetaStats:
     first_seen_ts: str
     last_seen_ts: str
     fingerprint_confidence: str
+    # circadian.* (BEHAVE-TEXT 0.1.4): normalized UTC activity distributions.
+    # Fractions sum to ~1.0 (volume rides on total_messages). quiet_span_utc is
+    # None unless the actor clears the volume gate (>=30 msgs AND >=2 active days).
+    hour_histogram: tuple[float, ...]  # len 24, UTC hour
+    dow_histogram: tuple[float, ...]  # len 7, Mon=0..Sun=6
+    hour_dow_histogram: tuple[float, ...]  # len 168, index = dow*24 + hour
+    quiet_span_utc: tuple[int, int] | None  # [start, end) integer UTC hours, wrap legal
     # Underlying span in seconds, surfaced for `Window` construction on each
     # primitive Observation (avoids re-parsing the ISO strings).
     window_start_ts: float
@@ -89,10 +96,28 @@ def compute_meta_stats(
     corpus_span_days = span_seconds / _SECONDS_PER_DAY
 
     active_days_set: set[tuple[int, int, int]] = set()
+    hour_counts = [0] * 24
+    dow_counts = [0] * 7
+    joint_counts = [0] * 168
     for ts in timestamps:
         utc = ts.astimezone(UTC)
         active_days_set.add((utc.year, utc.month, utc.day))
+        h = utc.hour
+        d = utc.weekday()  # Mon=0 .. Sun=6, matches BEHAVE-TEXT dow convention
+        hour_counts[h] += 1
+        dow_counts[d] += 1
+        joint_counts[d * 24 + h] += 1
     active_days = len(active_days_set)
+
+    n = float(total_messages)
+    hour_histogram = tuple(c / n for c in hour_counts)
+    dow_histogram = tuple(c / n for c in dow_counts)
+    hour_dow_histogram = tuple(c / n for c in joint_counts)
+    # quiet_span is a thin-actor-sensitive derived anchor: gate it exactly as the
+    # BEHAVE-TEXT 0.1.4 contract requires (>=30 msgs AND >=2 active days).
+    quiet_span_utc: tuple[int, int] | None = None
+    if total_messages >= _MEDIUM_MIN_MESSAGES and active_days >= _MEDIUM_MIN_ACTIVE_DAYS:
+        quiet_span_utc = _longest_quiet_span(hour_counts)
 
     msg_per_day: float | None
     activity_density: float | None
@@ -117,9 +142,61 @@ def compute_meta_stats(
         first_seen_ts=first_ts.astimezone(UTC).isoformat(),
         last_seen_ts=last_ts.astimezone(UTC).isoformat(),
         fingerprint_confidence=fingerprint_confidence,
+        hour_histogram=hour_histogram,
+        dow_histogram=dow_histogram,
+        hour_dow_histogram=hour_dow_histogram,
+        quiet_span_utc=quiet_span_utc,
         window_start_ts=first_ts.timestamp(),
         window_end_ts=last_ts.timestamp(),
     )
+
+
+_QUIET_PEAK_FRACTION: float = 0.10  # a bin is "quiet" when below 10% of the peak bin
+
+
+def _longest_quiet_span(hour_counts: list[int]) -> tuple[int, int] | None:
+    """Longest low-activity run on the circular 24h UTC grid -> ``[start, end)``.
+
+    BEHAVE-TEXT 0.1.4 conventions: a bin is quiet when below 10% of the peak bin
+    (not strictly zero, so a sparse actor's empty hours don't form one giant run);
+    wrap-around is legal (``start > end`` crosses midnight, e.g. ``(22, 6)``); among
+    equal-length runs, pick the one containing the global-min-density hour. Returns
+    None only in the degenerate all-quiet / all-active case.
+    """
+    n = 24
+    peak = max(hour_counts)
+    if peak == 0:
+        return None
+    threshold = _QUIET_PEAK_FRACTION * peak
+    quiet = [c < threshold for c in hour_counts]
+    if not any(quiet) or all(quiet):
+        return None
+
+    # Start the scan on a NON-quiet bin so no run straddles the wrap boundary.
+    offset = next(i for i in range(n) if not quiet[i])
+    runs: list[tuple[int, int]] = []  # (start_hour, length)
+    i = 0
+    while i < n:
+        if quiet[(offset + i) % n]:
+            start = (offset + i) % n
+            length = 0
+            while i < n and quiet[(offset + i) % n]:
+                length += 1
+                i += 1
+            runs.append((start, length))
+        else:
+            i += 1
+
+    best_len = max(length for _, length in runs)
+    candidates = [r for r in runs if r[1] == best_len]
+    min_hour = min(range(n), key=lambda h: hour_counts[h])
+
+    def _contains(start: int, length: int) -> bool:
+        return any((start + k) % n == min_hour for k in range(length))
+
+    containing = [r for r in candidates if _contains(*r)]
+    start, length = containing[0] if containing else candidates[0]
+    return (start, (start + length) % n)
 
 
 def _classify_confidence(*, total_messages: int, active_days: int) -> str:
