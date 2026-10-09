@@ -60,6 +60,10 @@ class ForumParser(Protocol):
     # Boot canary: the logged-in signal differs per engine (MyBB action=logout /
     # usercp links vs XenForo's data-logged-in="true"), so each engine owns it.
     def is_logged_in(self, html: str) -> bool: ...
+    # URL-derived thread key (fallback when a page yields no canonical tid): MyBB
+    # Thread-x--tid vs XenForo /threads/slug.tid/, with engine-specific suffixes
+    # (XenForo's /unread, /page-N) that must not leak into the key.
+    def thread_key_from_url(self, url: str) -> str: ...
 
 
 # The modules structurally satisfy ForumParser; mypy can't verify a module

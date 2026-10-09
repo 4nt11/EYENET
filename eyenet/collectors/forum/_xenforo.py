@@ -362,11 +362,37 @@ def is_logged_in(html: str) -> bool:
     return _LOGGED_IN_RE.search(html) is not None
 
 
+def thread_key_from_url(url: str) -> str:
+    """XenForo ``/threads/<slug>.<tid>/[unread|page-N|post-N|latest]`` -> ``<tid>``.
+
+    The tid is the trailing ``.<digits>`` of the segment right after ``threads/``
+    (or the whole segment when the board omits the slug). Trailing action segments
+    like ``/unread`` or ``/page-2`` are IGNORED, so they can never become the
+    thread key — keying on them collapses distinct threads under one value (e.g.
+    "unread"), silently overwriting threads. Falls back to the raw segment only
+    when no tid is present.
+    """
+    parts = [p for p in urlparse(url).path.split("/") if p]
+    seg = ""
+    if "threads" in parts:
+        i = parts.index("threads")
+        if i + 1 < len(parts):
+            seg = parts[i + 1]
+    elif parts:
+        seg = parts[-1]
+    if "." in seg:
+        tail = seg.rsplit(".", 1)[-1]
+        if tail.isdigit():
+            return tail
+    return seg
+
+
 __all__ = [
     "ParsedPost",
     "category_url",
     "is_logged_in",
     "parse_thread",
+    "thread_key_from_url",
     "thread_page_count",
     "thread_page_url",
 ]

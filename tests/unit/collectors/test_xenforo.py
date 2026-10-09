@@ -111,6 +111,23 @@ def test_subforum_links_are_scoped_to_the_inline_list() -> None:
 
 
 @pytest.mark.unit
+def test_thread_key_from_url_extracts_tid_ignoring_action_suffix() -> None:
+    f = _xenforo.thread_key_from_url
+    assert f("/threads/passport-data.88566/") == "88566"
+    # The /unread, /page-N, /post-N, /latest suffixes must NOT become the key.
+    assert f("/threads/passport-data.88566/unread") == "88566"
+    assert f("/threads/passport-data.88566/page-3") == "88566"
+    assert f("/threads/passport-data.88566/post-680278") == "88566"
+    assert f("https://breached.st/threads/x.88566/latest") == "88566"
+    # Slug containing a dot: tid is the LAST .digits of the threads segment.
+    assert f("/threads/v1.2-leak.88571/unread") == "88571"
+    # Board that omits the slug.
+    assert f("/threads/88566/") == "88566"
+    # No tid: fall back to the segment (never the action suffix).
+    assert f("/threads/weird-slug/unread") == "weird-slug"
+
+
+@pytest.mark.unit
 def test_is_logged_in_reads_data_logged_in_attr() -> None:
     assert _xenforo.is_logged_in('<html data-logged-in="true" lang="en">') is True
     assert _xenforo.is_logged_in('<html data-logged-in="false" lang="en">') is False

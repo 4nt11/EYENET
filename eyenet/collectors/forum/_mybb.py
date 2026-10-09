@@ -500,11 +500,26 @@ def is_logged_in(html: str) -> bool:
     return any(marker in body for marker in _LOGGED_IN_MARKERS)
 
 
+def thread_key_from_url(url: str) -> str:
+    """MyBB ``Thread-<slug>--<tid>`` -> ``<tid>``; fall back to the slug.
+
+    URL-derived fallback key, used only when a thread page yields no canonical
+    tid. The caller still normalizes the slug for move-dedup.
+    """
+    slug = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    if "--" in slug:
+        tail = slug.rsplit("--", 1)[-1]
+        if tail.isdigit():
+            return tail
+    return slug
+
+
 __all__ = [
     "ParsedPost",
     "category_url",
     "is_logged_in",
     "parse_thread",
+    "thread_key_from_url",
     "thread_page_count",
     "thread_page_url",
 ]

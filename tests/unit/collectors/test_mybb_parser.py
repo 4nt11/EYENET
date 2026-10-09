@@ -341,3 +341,13 @@ def test_is_logged_in_detects_mybb_session() -> None:
     assert is_logged_in('<a href="member.php?action=login">Login</a>') is False
     # A XenForo logged-in page must NOT register as a MyBB session.
     assert is_logged_in('<html data-logged-in="true">') is False
+
+
+@pytest.mark.unit
+def test_thread_key_from_url_mybb_shape() -> None:
+    from eyenet.collectors.forum._mybb import thread_key_from_url
+
+    assert thread_key_from_url("Thread-some-leak--12345") == "12345"
+    assert thread_key_from_url("/Thread-some-leak--12345?pid=9") == "12345"
+    # No numeric tid: fall back to the slug.
+    assert thread_key_from_url("Thread-no-tid-slug") == "Thread-no-tid-slug"

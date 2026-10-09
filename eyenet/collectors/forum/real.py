@@ -239,10 +239,6 @@ def _reply_outcome(html: str) -> str:
     return "ok"
 
 
-def _last_segment(url: str) -> str:
-    return urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
-
-
 def _category_slug(url: str) -> str:
     """Storable category slug = the link's path relative to the board root.
 
@@ -254,16 +250,6 @@ def _category_slug(url: str) -> str:
     soft-404. The route prefix must survive.
     """
     return urlparse(url).path.strip("/")
-
-
-def _thread_id_from_url(url: str) -> str:
-    """MyBB ``Thread-<slug>--<tid>`` -> ``<tid>``; fall back to the slug."""
-    slug = _last_segment(url)
-    if "--" in slug:
-        tail = slug.rsplit("--", 1)[-1]
-        if tail.isdigit():
-            return tail
-    return slug
 
 
 # Section prefixes DarkForums prepends to a thread slug per forum; dropped when a
@@ -1113,7 +1099,7 @@ class ForumCollector(CollectorSkeleton):
         yields no tid (rare), fall back to a section-prefix-normalized slug.
         Returns None if the first fetch fails (nothing ingested).
         """
-        url_key = _thread_id_from_url(url)
+        url_key = self._parser.thread_key_from_url(url)
         try:
             first = await self._get(url, referer=referer)
         except httpx.HTTPError as exc:
