@@ -109,6 +109,32 @@ class AliasEntry(ApiSchema):
         )
 
 
+class InferredTimezone(ApiSchema):
+    """EYENET-side timezone inference from the circadian signals. A HINT, not a
+    fact: ``zone_best`` is only set when a second signal (dialect region) agrees
+    with the circadian offset; otherwise read ``zone_candidates`` + ``offset_hours``."""
+
+    offset_hours: int | None = None
+    zone_best: str | None = None
+    zone_candidates: list[str] = Field(default_factory=list)
+    confidence: Literal["none", "low", "medium", "high"] = "none"
+    supporting_signals: list[str] = Field(default_factory=list)
+    local_active_window: tuple[int, int] | None = None  # [start, end) local hours
+    quiet_window_utc: tuple[int, int] | None = None
+
+
+class ActorCircadian(ApiSchema):
+    """Per-actor activity-rhythm panel: the raw UTC distributions (BEHAVE-TEXT
+    circadian.*) plus the derived timezone inference. None when the actor has no
+    circadian observations yet."""
+
+    hour_histogram: list[float] = Field(default_factory=list)  # 24, UTC
+    dow_histogram: list[float] = Field(default_factory=list)  # 7, Mon=0
+    hour_dow_histogram: list[float] = Field(default_factory=list)  # 168
+    quiet_span_utc: tuple[int, int] | None = None
+    inferred_tz: InferredTimezone = Field(default_factory=InferredTimezone)
+
+
 class ActorDetail(ActorSummary):
     """Projection of MODELS.md §2.1 Actor for `GET /v1/actors/{id}`.
 
@@ -125,6 +151,7 @@ class ActorDetail(ActorSummary):
     assessment: str | None = Field(
         default=None, description="Operator free-text assessment (write:actors)."
     )
+    circadian: ActorCircadian | None = None
 
 
 class LinkedToAttrs(ApiSchema):

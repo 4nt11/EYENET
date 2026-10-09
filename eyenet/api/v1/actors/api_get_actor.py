@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
+from eyenet.api.v1.actors._circadian import build_actor_circadian
 from eyenet.api.v1.schemas.actors import ActorDetail, AliasEntry, actor_primary_handle
 from eyenet.contracts.actor import ActorRow
 from eyenet.contracts.attribution import PersonaRow
@@ -42,6 +43,7 @@ async def actors_get(
     # Persona's job. So `platforms` is the single source kind (or empty if the
     # source row is somehow absent).
     platforms = [source.kind.value] if source is not None else []
+    circadian = await build_actor_circadian(storage, actor_id)
     return ActorDetail(
         actor_id=actor.id,
         primary_handle=actor_primary_handle(actor),
@@ -55,4 +57,5 @@ async def actors_get(
         observation_count=observation_count,
         persona_id=persona.id if persona is not None else None,
         assessment=actor.operator_assessment,
+        circadian=circadian,
     )

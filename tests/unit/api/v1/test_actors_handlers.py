@@ -203,3 +203,46 @@ async def test_actors_timeline_unknown_raises(
 ) -> None:
     with pytest.raises(ResourceNotFound):
         await actors_timeline(uuid4(), mkuser("read:observations"), storage, _page())
+
+
+async def _put_array_obs(
+    storage: BaseRepository, actor_id, name: str, arr: list[float], now: datetime
+) -> None:
+    await storage.put_observation(
+        ObservationRow(
+            actor_id=actor_id,
+            primitive_namespace=name.split(".")[0],
+            primitive_name=name,
+            primitive_version="0.1",
+            value_kind=ValueKind.ARRAY_NUMERIC,
+            value_array_numeric=arr,
+            observed_at=now,
+            sensor_instance="test",
+        )
+    )
+
+
+async def test_actors_get_includes_circadian(
+    storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
+) -> None:
+    actor_id = await _seed_actor(storage, now)
+    hour = [0.0] * 24
+    for h in (10, 12, 14, 16, 18, 20):
+        hour[h] = 1 / 6
+    await _put_array_obs(storage, actor_id, "circadian.hour_histogram", hour, now)
+    await _put_array_obs(storage, actor_id, "circadian.dow_histogram", [1 / 7] * 7, now)
+    await _put_array_obs(storage, actor_id, "circadian.quiet_span_utc", [22.0, 8.0], now)
+
+    detail = await actors_get(actor_id, mkuser("read:actors"), storage)
+    assert detail.circadian is not None
+    assert len(detail.circadian.hour_histogram) == 24
+    assert detail.circadian.quiet_span_utc == (22, 8)
+    assert detail.circadian.inferred_tz.offset_hours is not None
+
+
+async def test_actors_get_circadian_none_without_observations(
+    storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
+) -> None:
+    actor_id = await _seed_actor(storage, now)
+    detail = await actors_get(actor_id, mkuser("read:actors"), storage)
+    assert detail.circadian is None
