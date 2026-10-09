@@ -86,11 +86,6 @@ if TYPE_CHECKING:
 
 _log = get_logger()
 
-# ponytail: theme-cosmetic markers. A member session renders a logout link and
-# the usercp; a guest gets a login form. If a custom theme renames these, the
-# canary goes falsely-dead - upgrade to a stable per-board element then.
-_LOGGED_IN_MARKERS = ("action=logout", "usercp")
-
 # Pacing + 429-backoff timing live in _timing_presets (the examinable profiles).
 # One paced discovery sweep, then rest. Re-enumerating 500-page categories every
 # minute would be its own DoS; a category rarely gains threads that fast.
@@ -781,8 +776,7 @@ class ForumCollector(CollectorSkeleton):
                 message=f"{self._identity_name}: board index unreachable ({exc!r})",
             )
             return False
-        body = resp.text.lower()
-        logged_in = any(marker in body for marker in _LOGGED_IN_MARKERS)
+        logged_in = self._parser.is_logged_in(resp.text)
         if not logged_in:
             await self.syslog(
                 level=SystemLogLevel.WARN,

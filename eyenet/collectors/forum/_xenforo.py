@@ -154,6 +154,11 @@ def parse_thread(html: str) -> list[ParsedPost]:
             body = container.select_one(".bbWrapper")
         if body is not None:
             _decode_cf_emails(body)
+            # XenForo nests a js-extraPhrases <script> (lightbox JSON) inside
+            # .bbWrapper; strip scripts/styles so their source never leaks into
+            # the post body (text or html).
+            for noise in body.select("script, style"):
+                noise.decompose()
         body_html = body.decode_contents() if body else ""
         if body is not None:
             # Strip quoted blocks so body_text is the poster's OWN words — a reply
@@ -346,9 +351,21 @@ def thread_page_url(url: str, page: int) -> str:
     return f"{url.rstrip('/')}/page-{page}"
 
 
+# XenForo stamps the <html> element with data-logged-in="true" for an
+# authenticated session and "false" for a guest — reliable across templates,
+# where the MyBB action=logout / usercp markers never appear.
+_LOGGED_IN_RE = re.compile(r'data-logged-in\s*=\s*["\']true["\']', re.IGNORECASE)
+
+
+def is_logged_in(html: str) -> bool:
+    """True if the session jar is still authenticated on this XenForo board."""
+    return _LOGGED_IN_RE.search(html) is not None
+
+
 __all__ = [
     "ParsedPost",
     "category_url",
+    "is_logged_in",
     "parse_thread",
     "thread_page_count",
     "thread_page_url",

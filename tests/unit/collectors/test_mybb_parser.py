@@ -330,3 +330,14 @@ def test_cloudflare_email_decoded() -> None:
     assert email in post.body_text
     assert email in post.body_html
     assert "cf_email" not in post.body_html  # the obfuscation element is gone
+
+
+@pytest.mark.unit
+def test_is_logged_in_detects_mybb_session() -> None:
+    from eyenet.collectors.forum._mybb import is_logged_in
+
+    assert is_logged_in('<a href="member.php?action=logout&amp;logoutkey=ab">Log Out</a>') is True
+    assert is_logged_in('<a href="usercp.php">User CP</a>') is True
+    assert is_logged_in('<a href="member.php?action=login">Login</a>') is False
+    # A XenForo logged-in page must NOT register as a MyBB session.
+    assert is_logged_in('<html data-logged-in="true">') is False

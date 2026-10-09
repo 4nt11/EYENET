@@ -57,6 +57,9 @@ class ForumParser(Protocol):
     # asks the parser to build them instead of hard-coding MyBB query syntax.
     def category_url(self, slug: str, page: int, *, by_created: bool = False) -> str: ...
     def thread_page_url(self, url: str, page: int) -> str: ...
+    # Boot canary: the logged-in signal differs per engine (MyBB action=logout /
+    # usercp links vs XenForo's data-logged-in="true"), so each engine owns it.
+    def is_logged_in(self, html: str) -> bool: ...
 
 
 # The modules structurally satisfy ForumParser; mypy can't verify a module

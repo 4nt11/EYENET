@@ -64,6 +64,26 @@ def test_parse_thread_strips_quotes_from_body_text_only() -> None:
 
 
 @pytest.mark.unit
+def test_parse_thread_strips_in_body_scripts() -> None:
+    # breached.st's XenForo nests a js-extraPhrases <script> inside .bbWrapper;
+    # its JSON must not leak into the post body (text or html).
+    html = (
+        '<article class="message--post" data-content="post-5" data-author="op">'
+        '<span class="message-name">op</span>'
+        '<time datetime="2026-10-08T14:14:44-0400"></time>'
+        '<div class="message-userContent"><div class="bbWrapper">'
+        '<script class="js-extraPhrases" type="application/json">'
+        '{"lightbox_close":"Close"}</script>'
+        "REAL_BODY_TEXT</div></div></article>"
+    )
+    post = _xenforo.parse_thread(html)[0]
+    assert post.body_text == "REAL_BODY_TEXT"
+    assert "lightbox_close" not in post.body_text
+    assert "lightbox_close" not in post.body_html
+    assert "<script" not in post.body_html
+
+
+@pytest.mark.unit
 def test_parse_thread_title_and_tid_and_pages() -> None:
     assert _xenforo.parse_thread_title(_THREAD) == "Thread Subject"
     assert _xenforo.parse_canonical_tid(_THREAD) == "60371"
@@ -88,6 +108,17 @@ def test_forum_links_scope_to_forum_nodes_and_keep_custom_route() -> None:
 @pytest.mark.unit
 def test_subforum_links_are_scoped_to_the_inline_list() -> None:
     assert _xenforo.parse_subforum_links(_INDEX) == ["/foros/anuncios.9/"]
+
+
+@pytest.mark.unit
+def test_is_logged_in_reads_data_logged_in_attr() -> None:
+    assert _xenforo.is_logged_in('<html data-logged-in="true" lang="en">') is True
+    assert _xenforo.is_logged_in('<html data-logged-in="false" lang="en">') is False
+    assert _xenforo.is_logged_in("<html lang=en>") is False
+    # Quote-style / spacing tolerant.
+    assert _xenforo.is_logged_in("<html data-logged-in = 'TRUE'>") is True
+    # The MyBB markers must NOT be mistaken for a XenForo session.
+    assert _xenforo.is_logged_in('<a href="member.php?action=logout">x</a>') is False
 
 
 @pytest.mark.unit

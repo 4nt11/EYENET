@@ -489,9 +489,21 @@ def thread_page_url(url: str, page: int) -> str:
     return f"{url}{sep}page={page}"
 
 
+# A logged-in MyBB page carries a logout link (member.php?action=logout) and the
+# User CP; a guest page has neither.
+_LOGGED_IN_MARKERS = ("action=logout", "usercp")
+
+
+def is_logged_in(html: str) -> bool:
+    """True if the session jar is still authenticated on this MyBB board."""
+    body = html.lower()
+    return any(marker in body for marker in _LOGGED_IN_MARKERS)
+
+
 __all__ = [
     "ParsedPost",
     "category_url",
+    "is_logged_in",
     "parse_thread",
     "thread_page_count",
     "thread_page_url",
