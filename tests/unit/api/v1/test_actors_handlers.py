@@ -119,6 +119,28 @@ async def test_actors_neighbors_typed_and_skips_member_of(
     assert result.estimated_total == 3  # count is over all outbound edges
 
 
+async def test_actors_neighbors_accepts_decided_by_attr(
+    storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
+) -> None:
+    # Operator-confirmed linkages stamp decided_by; the projection must not 500.
+    a = await _seed_actor(storage, now)
+    await storage.upsert_graph_edge(
+        "linked_to",
+        a,
+        uuid4(),
+        {
+            "state": "confirmed",
+            "method": "operator",
+            "score": 1.0,
+            "linkage_id": str(uuid4()),
+            "decided_by": "operator:alice",
+        },
+    )
+    result = await actors_neighbors(a, mkuser("read:actors"), storage, _page())
+    edge = next(e for e in result.items if e.edge_type == "linked_to")
+    assert edge.attrs.decided_by == "operator:alice"
+
+
 async def test_actors_neighbors_unknown_raises(
     storage: BaseRepository, mkuser: Callable[..., CurrentUser]
 ) -> None:

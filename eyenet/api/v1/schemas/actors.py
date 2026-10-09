@@ -164,6 +164,9 @@ class LinkedToAttrs(ApiSchema):
     # The graph applier stamps every LINKED_TO edge with when it last changed.
     # Model it (ApiSchema forbids extras) so neighbor projection doesn't 500.
     updated_at: datetime | None = None
+    # Operator-confirmed/rejected linkages also carry who decided — same reason,
+    # model it so extra="forbid" doesn't 500 the neighbors projection.
+    decided_by: str | None = None
 
 
 class BelongsToPersonaAttrs(ApiSchema):
