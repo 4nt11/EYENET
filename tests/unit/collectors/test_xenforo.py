@@ -98,6 +98,33 @@ def test_thread_links_keep_custom_post_route() -> None:
 
 
 @pytest.mark.unit
+def test_thread_links_skip_the_prefix_label_link() -> None:
+    # Prefix-using boards (e.g. xforums.st) render an a.labelLink pointing at the
+    # category's prefix filter BEFORE the real thread link inside .structItem-title.
+    # The prefix link must not win: it would canonicalize to the category URL and
+    # collapse every row to one bogus link.
+    html = """
+    <div class="structItem structItem--thread">
+      <div class="structItem-title">
+        <a class="labelLink" href="/forums/index-database.36/?prefix_id=22">Leaks</a>
+        <a data-tp-primary="on" href="/threads/casa-io-crypto-database.585033/">Casa.io</a>
+      </div>
+    </div>
+    <div class="structItem structItem--thread">
+      <div class="structItem-title">
+        <a href="/threads/no-prefix-here.42/">Plain row</a>
+      </div>
+    </div>
+    """
+    links = _xenforo.parse_thread_links(html)
+    assert links == [
+        "/threads/casa-io-crypto-database.585033/",
+        "/threads/no-prefix-here.42/",
+    ]
+    assert not any("/forums/" in link for link in links)
+
+
+@pytest.mark.unit
 def test_forum_links_scope_to_forum_nodes_and_keep_custom_route() -> None:
     links = _xenforo.parse_forum_links(_INDEX)
     # Only the two node--forum entries, NOT the node--category header.

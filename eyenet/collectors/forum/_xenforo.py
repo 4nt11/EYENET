@@ -233,12 +233,20 @@ def parse_thread_links(html: str) -> list[str]:
 
     Scoped to ``.structItem--thread`` title anchors so preview/unread/author
     links in the same row don't duplicate the thread. Query/fragment stripped.
+
+    ``:not(.labelLink)`` skips the thread-PREFIX link XenForo renders first inside
+    ``.structItem-title`` when a board uses prefixes (e.g. a "Leaks" tag -> an
+    ``a.labelLink`` pointing at ``/forums/<id>/?prefix_id=N``). Without it the
+    prefix link wins ``select_one``, every row canonicalizes to the category URL,
+    and the whole page dedupes to a single bogus link. The reference board
+    (nodo313) used no prefixes, so this only surfaces on prefix-using boards like
+    xforums.st. The real thread link (``data-tp-primary="on"``) is the next anchor.
     """
     soup = BeautifulSoup(html, "html5lib")
     out: list[str] = []
     seen: set[str] = set()
     for row in soup.select(".structItem--thread"):
-        anchor = row.select_one(".structItem-title a[href]")
+        anchor = row.select_one(".structItem-title a[href]:not(.labelLink)")
         if anchor is None:
             continue
         canon = _canonical(str(anchor.get("href", "")))
