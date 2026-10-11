@@ -883,6 +883,19 @@ def api_run(  # pragma: no cover
     )
 
     async def _main() -> None:
+        import os  # noqa: PLC0415
+        import socket  # noqa: PLC0415
+
+        from eyenet.telemetry import init_telemetry  # noqa: PLC0415
+
+        # The API hand-rolls its spans but, unlike the worker runner
+        # (service/runner.py), never built a TracerProvider — so every span was a
+        # non-recording no-op and nothing reached the collector. Mirror the worker
+        # path, but only when telemetry is actually requested (an OTLP endpoint is
+        # set); otherwise init_telemetry would attach a ConsoleSpanExporter and spam
+        # a plain run. Keyed by host so replicas stay distinct.
+        if os.environ.get("EYENET_OTEL_ENDPOINT", "").strip():
+            init_telemetry(service="api", instance_id=socket.gethostname())
         bus = await _connect_bus(cfg)
         storage = get_repository(data_dir=cfg.data_dir)
         try:

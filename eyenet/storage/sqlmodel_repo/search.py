@@ -19,6 +19,7 @@ from itertools import combinations
 from typing import Any
 from uuid import UUID
 
+from opentelemetry import trace
 from sqlalchemy import and_, case, func, not_, or_
 from sqlmodel import col, select
 
@@ -77,6 +78,8 @@ _COLUMNS = (
     "fields",
     "updated_at",
 )
+
+_tracer = trace.get_tracer("eyenet.storage.sqlmodel_repo.search")
 
 
 class SearchMixin:
@@ -181,17 +184,25 @@ class SearchMixin:
         limit: int,
         offset: int = 0,
     ) -> list[object]:
-        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            stmt = select(SearchDocumentTable).where(self._compile_query(q))
-            stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
-            stmt = (
-                stmt.order_by(self._type_rank())
-                .order_by(col(SearchDocumentTable.updated_at).desc())
-                .limit(limit)
-                .offset(offset)
-            )
-            result = await session.exec(stmt)
-            return list(result)
+        # Span lets us measure the query cost per op (e.g. the LIKE seq-scan vs a
+        # pg_trgm index). q itself is not recorded (operator free text); length is.
+        with _tracer.start_as_current_span(
+            "storage.search.search_global",
+            attributes={"search.q_len": len(q), "search.limit": limit},
+        ) as span:
+            async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+                stmt = select(SearchDocumentTable).where(self._compile_query(q))
+                stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
+                stmt = (
+                    stmt.order_by(self._type_rank())
+                    .order_by(col(SearchDocumentTable.updated_at).desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                result = await session.exec(stmt)
+                rows = list(result)
+            span.set_attribute("search.result_count", len(rows))
+            return rows
 
     async def count_search_global(
         self,
@@ -456,9 +467,9 @@ class SearchMixin:
             return out
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             rows = await session.exec(
-                select(MessageTable.id, ActorTable).join(
-                    ActorTable, col(MessageTable.actor_id) == col(ActorTable.id)
-                ).where(col(MessageTable.id).in_(ids))
+                select(MessageTable.id, ActorTable)
+                .join(ActorTable, col(MessageTable.actor_id) == col(ActorTable.id))
+                .where(col(MessageTable.id).in_(ids))
             )
             for mid, actor in rows:
                 handle = actor.current_handle or actor.current_display_name or str(actor.id)[:8]
