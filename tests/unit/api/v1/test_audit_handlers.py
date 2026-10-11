@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -60,18 +61,25 @@ async def test_audit_list_filters_by_subject_and_user(
 
 
 async def test_audit_verify_clean(
-    storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
+    storage: BaseRepository,
+    now: datetime,
+    mkuser: Callable[..., CurrentUser],
+    tmp_path: Path,
 ) -> None:
     await _append(storage, event="eyenet.test.one", at=now)
     await _append(storage, event="eyenet.test.two", at=now)
-    result = await audit_verify(mkuser("read:audit"), storage)
+    # No anchor seeded -> anchored verify falls back to a full walk.
+    result = await audit_verify(mkuser("read:audit"), storage, tmp_path)
     assert result.verified is True
     assert result.first_break is None
     assert result.rows_checked == 2
 
 
 async def test_audit_verify_detects_tamper(
-    storage: BaseRepository, now: datetime, mkuser: Callable[..., CurrentUser]
+    storage: BaseRepository,
+    now: datetime,
+    mkuser: Callable[..., CurrentUser],
+    tmp_path: Path,
 ) -> None:
     await _append(storage, event="eyenet.test.one", at=now)
     await _append(storage, event="eyenet.test.two", at=now)
@@ -83,7 +91,7 @@ async def test_audit_verify_detects_tamper(
             ),
             {"h": "f" * 64},
         )
-    result = await audit_verify(mkuser("read:audit"), storage)
+    result = await audit_verify(mkuser("read:audit"), storage, tmp_path)
     assert result.verified is False
     assert result.first_break is not None
     assert result.first_break.actual_hash == "f" * 64

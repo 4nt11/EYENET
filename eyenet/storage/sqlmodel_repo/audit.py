@@ -87,6 +87,45 @@ class AuditMixin:
                 rows.append(AuditLogRow.model_validate(data))
             return rows
 
+    async def audit_seq_for_self_hash(self, self_hash: str) -> int | None:
+        """seq of the audit row with this ``self_hash`` (uniquely indexed), or None.
+
+        A signed anchor records the chain head's ``self_hash`` (``audit_head``), not
+        the audit seq; resolving it here gives the checkpoint position to rehash the
+        tail from. None means the attested head is not in the live chain (rollback
+        or fork)."""
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            row = (
+                await session.exec(
+                    select(AuditLogTable).where(col(AuditLogTable.self_hash) == self_hash)
+                )
+            ).first()
+            return None if row is None or row.seq is None else int(row.seq)
+
+    async def audit_chain_page(
+        self, *, after_seq: int, limit: int
+    ) -> list[tuple[int, AuditLogRow]]:
+        """One seq-ordered page of the chain (seq > after_seq) as ``(seq, row)``,
+        for streaming verification. Bounded memory: the caller walks pages keyed by
+        the returned seq, carrying the running prev_hash, instead of materializing
+        the whole (3M-row) chain at once."""
+        async with safe_session(self._audit_session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(AuditLogTable)
+                .where(col(AuditLogTable.seq) > after_seq)
+                .order_by(text("seq ASC"))
+                .limit(limit)
+            )
+            page: list[tuple[int, AuditLogRow]] = []
+            for t in (await session.exec(stmt)).all():
+                data = t.model_dump()
+                raw_seq = data.pop("seq")
+                seq = int(raw_seq) if raw_seq is not None else 0
+                if data["at"].tzinfo is None:
+                    data["at"] = data["at"].replace(tzinfo=UTC)
+                page.append((seq, AuditLogRow.model_validate(data)))
+            return page
+
     async def list_audit(
         self,
         *,

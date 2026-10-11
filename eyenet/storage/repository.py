@@ -121,6 +121,17 @@ class BaseRepository(ABC):
         """Return the full audit chain in rowid (= INSERT-commit) order."""
 
     @abstractmethod
+    async def audit_seq_for_self_hash(self, self_hash: str) -> int | None:
+        """seq of the audit row with this self_hash (anchored-verify checkpoint)."""
+
+    @abstractmethod
+    async def audit_chain_page(
+        self, *, after_seq: int, limit: int
+    ) -> list[tuple[int, AuditLogRow]]:
+        """One seq-ordered ``(seq, row)`` page (seq > after_seq) for streaming
+        chain verification."""
+
+    @abstractmethod
     async def list_audit(
         self,
         *,
@@ -505,6 +516,9 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def audit_head(self) -> str: ...
+
+    @abstractmethod
+    async def latest_anchor(self, deployment_id: UUID) -> AnchorRow | None: ...
 
     @abstractmethod
     async def latest_anchor_seq(self, deployment_id: UUID) -> int: ...

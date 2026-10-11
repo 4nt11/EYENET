@@ -39,6 +39,19 @@ class AnchorsMixin:
             row = (await session.exec(stmt)).first()
             return GENESIS_PREV_HASH if row is None else row.self_hash
 
+    async def latest_anchor(self, deployment_id: UUID) -> AnchorRow | None:
+        """Highest-seq anchor for the deployment (the freshest signed checkpoint),
+        or None when none exist — the anchored-verify starting point."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(AuditAnchorTable)
+                .where(col(AuditAnchorTable.deployment_id) == deployment_id)
+                .order_by(col(AuditAnchorTable.anchor_seq).desc())
+                .limit(1)
+            )
+            row = (await session.exec(stmt)).first()
+            return None if row is None else _row_from_table(row)
+
     async def latest_anchor_seq(self, deployment_id: UUID) -> int:
         """Highest anchor_seq for the deployment, or -1 when none exist."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]

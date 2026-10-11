@@ -94,15 +94,18 @@ def compute_self_hash(row: AuditLogRow) -> str:
     return hashlib.sha256(_canonicalize_for_hash(row)).hexdigest()
 
 
-def verify_chain(rows: list[AuditLogRow]) -> tuple[bool, int | None]:
+def verify_chain(
+    rows: list[AuditLogRow], *, expected_prev: str = GENESIS_PREV_HASH
+) -> tuple[bool, int | None]:
     """Walk the chain forward.
 
     Returns `(ok, broken_index)`. `broken_index=None` when the chain is sound;
     otherwise it's the index of the first row whose `prev_hash` or
-    `self_hash` failed to verify.
+    `self_hash` failed to verify. ``expected_prev`` is the hash the FIRST row must
+    chain from — ``GENESIS_PREV_HASH`` for a full walk, or a trusted checkpoint
+    head (a signed anchor's ``audit_head``) when verifying only a tail segment.
     """
 
-    expected_prev = GENESIS_PREV_HASH
     for idx, row in enumerate(rows):
         if row.prev_hash != expected_prev:
             return False, idx

@@ -76,6 +76,13 @@ class AuditVerifyResult(ApiSchema):
     verified: bool
     rows_checked: int = Field(ge=0)
     first_break: AuditChainBreak | None = None
+    # "anchored" (default): verified the tail since the latest signed anchor, which
+    # attests the prefix. "full": rehashed the entire chain (admin-only, ?full=1).
+    mode: str = "anchored"
+    # anchored mode: the checkpoint seq the tail was verified from, and whether its
+    # Ed25519 external-witness signature checked out.
+    anchor_seq: int | None = None
+    anchor_signature_ok: bool | None = None
 
 
 class CursorPageAuditRow(CursorPage[AuditRow]):
