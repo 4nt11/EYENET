@@ -48,6 +48,13 @@ processors:
         string_attribute:
           key: eyenet.keep
           values: ["supervisor"]
+      # Always keep slow traces — the ones worth debugging. Matches the dashboard's
+      # "Slow traces (> 1s)" panel and guarantees a latency outlier is never sampled
+      # away. First-match-wins, so this must sit before the probabilistic default.
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1000
       # Everything else: keep 10%.
       - name: default-10pct
         type: probabilistic
@@ -61,18 +68,52 @@ exporters:
     endpoint: tempo:4317
     tls:
       insecure: true
-  # Metrics → Prometheus (scraped by Prometheus at :8889). Operators running
-  # plain Prometheus can skip this and scrape the API's /v1/metrics directly.
+  # Metrics → Prometheus (scraped by Prometheus at :8889). Carries BOTH the OTel
+  # metrics the services emit directly AND the span-derived RED + service-graph
+  # metrics from the connectors below. Operators on plain Prometheus can skip this
+  # and scrape only the API's /v1/metrics.
   prometheus:
     endpoint: 0.0.0.0:8889
+    # Keep resource attributes (service.name etc.) as labels so dashboards can
+    # template by service; don't let the exporter drop them.
+    resource_to_telemetry_conversion:
+      enabled: true
+
+# Connectors turn the trace stream into metrics. They are fed from a PRE-sampling
+# traces branch (see service.pipelines) so RED/service-graph counts reflect ALL
+# spans, not the ~10% tail_sampling keeps for Tempo.
+connectors:
+  # RED metrics per span: eyenet_spans_calls_total + eyenet_spans_duration_milliseconds_*
+  # labelled by service_name, span_name, span_kind, status_code (+ eyenet.subject).
+  spanmetrics:
+    namespace: eyenet_spans
+    histogram:
+      explicit:
+        buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s, 30s, 60s]
+    dimensions:
+      - name: eyenet.subject
+    metrics_flush_interval: 15s
+  # Edge metrics for the service map: traces_service_graph_request_* labelled by
+  # client/server. Grafana's Tempo "Service Graph" renders the node graph from these.
+  servicegraph:
+    latency_histogram_buckets: [10ms, 50ms, 100ms, 250ms, 1s, 5s, 30s]
+    store:
+      ttl: 5s
+      max_items: 2000
 
 service:
   pipelines:
-    traces:
+    # Sampled traces → Tempo (the subset worth storing/reading).
+    traces/tempo:
       receivers: [otlp]
       processors: [tail_sampling, batch]
       exporters: [otlp/traces]
-    metrics:
+    # ALL traces → the connectors, BEFORE sampling, so metrics are complete.
+    traces/metrics:
       receivers: [otlp]
+      processors: [batch]
+      exporters: [spanmetrics, servicegraph]
+    metrics:
+      receivers: [otlp, spanmetrics, servicegraph]
       processors: [batch]
       exporters: [prometheus]

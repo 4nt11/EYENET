@@ -1,0 +1,212 @@
+{
+  "title": "EYENET — Fleet Overview",
+  "uid": "eyenet-fleet",
+  "tags": ["eyenet", "fleet", "observability", "traces", "metrics"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": { "from": "now-3h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+        "query": { "query": "label_values(eyenet_spans_calls_total, service_name)", "refId": "A" },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Fleet health", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 1, "type": "stat", "title": "API", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+      "targets": [ { "expr": "max(eyenet_api_healthy)", "refId": "A" } ]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Storage", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "OPEN", "color": "green" } } } ] } },
+      "targets": [ { "expr": "max(eyenet_api_storage_open)", "refId": "A" } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Bus", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 },
+      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+      "targets": [ { "expr": "max(eyenet_api_bus_connected)", "refId": "A" } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Services emitting", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "targets": [ { "expr": "count(count by (service_name) (eyenet_spans_calls_total))", "refId": "A" } ]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Audit publish failures (5m)", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } } },
+      "targets": [ { "expr": "increase(eyenet_api_audit_publish_failures_total[5m])", "refId": "A" } ]
+    },
+    {
+      "id": 6, "type": "stat", "title": "Trace-missing SLI (15m)", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] } } },
+      "targets": [ { "expr": "increase(eyenet_api_trace_propagation_missing_total[15m])", "refId": "A" } ]
+    },
+    {
+      "id": 7, "type": "stat", "title": "Host CPU", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 } ] } } },
+      "targets": [ { "expr": "max(eyenet_sys_cpu_percent)", "refId": "A" } ]
+    },
+    {
+      "id": 8, "type": "stat", "title": "Host memory", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 } ] } } },
+      "targets": [ { "expr": "max(eyenet_sys_mem_used_percent)", "refId": "A" } ]
+    },
+
+    { "id": 101, "type": "row", "title": "Service RED (from traces) — $service", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+    {
+      "id": 10, "type": "timeseries", "title": "Span rate by service", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 15, "stacking": { "mode": "normal" } } } },
+      "targets": [ { "expr": "sum by (service_name) (rate(eyenet_spans_calls_total{service_name=~\"$service\"}[5m]))", "legendFormat": "{{service_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "p95 operation latency by service", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(eyenet_spans_duration_milliseconds_bucket{service_name=~\"$service\"}[5m])))", "legendFormat": "{{service_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Error rate by service (status=ERROR)", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 20 }, "color": { "mode": "palette-classic" } } },
+      "targets": [ { "expr": "sum by (service_name) (rate(eyenet_spans_calls_total{service_name=~\"$service\", status_code=\"STATUS_CODE_ERROR\"}[5m]))", "legendFormat": "{{service_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 13, "type": "table", "title": "Top operations by rate (5m)", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [ { "expr": "topk(15, sum by (service_name, span_name) (rate(eyenet_spans_calls_total{service_name=~\"$service\"}[5m])))", "format": "table", "instant": true, "refId": "A" } ]
+    },
+
+    { "id": 102, "type": "row", "title": "Ingest & storage", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 } },
+    {
+      "id": 20, "type": "timeseries", "title": "Message ingest rate by collector", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 22 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [ { "expr": "sum by (service_name) (rate(eyenet_spans_calls_total{span_name=\"collector.ingest\"}[5m]))", "legendFormat": "{{service_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "DB put_message rate", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 22 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [ { "expr": "sum (rate(eyenet_spans_calls_total{span_name=\"storage.messages.put_message\"}[5m]))", "legendFormat": "put_message", "refId": "A" }, { "expr": "sum (rate(eyenet_spans_calls_total{span_name=\"storage.observations.by_evidence\"}[5m]))", "legendFormat": "observations.by_evidence", "refId": "B" } ]
+    },
+    {
+      "id": 22, "type": "timeseries", "title": "Storage write latency p95", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 22 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (span_name, le) (rate(eyenet_spans_duration_milliseconds_bucket{span_name=~\"storage\\\\..*\"}[5m])))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    },
+
+    { "id": 103, "type": "row", "title": "Pipeline (sensor / linker / graph / engine / verifier)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 } },
+    {
+      "id": 30, "type": "timeseries", "title": "Pipeline op rate", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [ { "expr": "sum by (span_name) (rate(eyenet_spans_calls_total{span_name=~\"sensor.dispatch|linker.compare|graph.upsert|engine.update_profile|verifier.evaluate\"}[5m]))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 31, "type": "timeseries", "title": "Pipeline op p95 latency", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (span_name, le) (rate(eyenet_spans_duration_milliseconds_bucket{span_name=~\"sensor.dispatch|linker.compare|graph.upsert|engine.update_profile|verifier.evaluate\"}[5m])))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 32, "type": "timeseries", "title": "Stylometric primitive p95 (top 12)", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 38 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [ { "expr": "topk(12, histogram_quantile(0.95, sum by (span_name, le) (rate(eyenet_spans_duration_milliseconds_bucket{span_name=~\"sensor.primitive..*\"}[5m]))))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    },
+
+    { "id": 104, "type": "row", "title": "Bus & supervisor", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 45 } },
+    {
+      "id": 40, "type": "timeseries", "title": "Bus publish / deliver rate by service", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 46 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [ { "expr": "sum by (span_name) (rate(eyenet_spans_calls_total{span_name=~\"bus.publish|bus.deliver\"}[5m]))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    },
+    {
+      "id": 41, "type": "timeseries", "title": "Supervisor fleet events", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 46 },
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 20 } } },
+      "targets": [ { "expr": "sum by (span_name) (rate(eyenet_spans_calls_total{span_name=~\"supervisor..*\"}[5m]))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    },
+
+    { "id": 105, "type": "row", "title": "API", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 53 } },
+    {
+      "id": 50, "type": "timeseries", "title": "Request rate by route", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [ { "expr": "sum by (route) (rate(eyenet_api_requests_total[5m]))", "legendFormat": "{{route}}", "refId": "A" } ]
+    },
+    {
+      "id": 51, "type": "timeseries", "title": "Request latency p95 by route", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 54 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (route, le) (rate(eyenet_api_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}", "refId": "A" } ]
+    },
+    {
+      "id": 52, "type": "timeseries", "title": "5xx ratio", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 62 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } } },
+      "targets": [ { "expr": "sum(rate(eyenet_api_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(eyenet_api_requests_total[5m])), 1)", "refId": "A" } ]
+    },
+    {
+      "id": 53, "type": "timeseries", "title": "Auth events by outcome", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 62 },
+      "targets": [ { "expr": "sum by (event, outcome) (rate(eyenet_api_auth_events_total[5m]))", "legendFormat": "{{event}}/{{outcome}}", "refId": "A" } ]
+    },
+    {
+      "id": 54, "type": "timeseries", "title": "SSE delivered vs dropped / lag p95", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 62 },
+      "targets": [ { "expr": "sum by (stream) (rate(eyenet_api_sse_events_delivered_total[5m]))", "legendFormat": "delivered {{stream}}", "refId": "A" }, { "expr": "sum by (stream) (rate(eyenet_api_sse_events_dropped_total[5m]))", "legendFormat": "dropped {{stream}}", "refId": "B" } ]
+    },
+
+    { "id": 106, "type": "row", "title": "Traces (Tempo)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 69 } },
+    {
+      "id": 60, "type": "nodeGraph", "title": "Service map", "datasource": { "type": "tempo", "uid": "eyenet-tempo" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 70 },
+      "targets": [ { "datasource": { "type": "tempo", "uid": "eyenet-tempo" }, "queryType": "serviceMap", "refId": "A" } ]
+    },
+    {
+      "id": 61, "type": "traces", "title": "Errored traces", "datasource": { "type": "tempo", "uid": "eyenet-tempo" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 70 },
+      "targets": [ { "datasource": { "type": "tempo", "uid": "eyenet-tempo" }, "queryType": "traceql", "query": "{ status = error }", "limit": 20, "refId": "A" } ]
+    },
+    {
+      "id": 62, "type": "traces", "title": "Slow traces (> 1s)", "datasource": { "type": "tempo", "uid": "eyenet-tempo" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 79 },
+      "targets": [ { "datasource": { "type": "tempo", "uid": "eyenet-tempo" }, "queryType": "traceql", "query": "{ duration > 1s }", "limit": 20, "refId": "A" } ]
+    },
+    {
+      "id": 107, "type": "timeseries", "title": "Operation latency p95 (per span — from spanmetrics, pre-sampling)", "datasource": { "type": "prometheus", "uid": "eyenet-prometheus" },
+      "description": "Per-operation p95 latency from the spanmetrics connector (eyenet_spans_duration_milliseconds). Covers EVERY span, not the tail-sampled subset in Tempo, so it is never empty. Shows what each op actually costs.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 87 },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never", "lineInterpolation": "smooth" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": [ "lastNotNull", "max" ] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (le, span_name) (rate(eyenet_spans_duration_milliseconds_bucket[$__rate_interval])))", "legendFormat": "{{span_name}}", "refId": "A" } ]
+    }
+  ]
+}
