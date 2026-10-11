@@ -75,10 +75,11 @@ _RAW_DDL_OBJECTS: frozenset[str] = frozenset(
         "ix_vs_primitive",
         "uq_signing_pubkey_active",
         "hamming64",
-        # pg_trgm GIN expression indexes (0002) — raw DDL, not in SQLModel metadata,
+        # pg_trgm GIN indexes (0002, 0003) — raw DDL, not in SQLModel metadata,
         # so --autogenerate must never propose dropping them.
         "ix_search_document_haystack_trgm",
         "ix_search_document_handles_trgm",
+        "ix_message_body_trgm",
     }
 )
 
