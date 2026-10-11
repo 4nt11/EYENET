@@ -70,7 +70,16 @@ _SIGNING_PUBKEY_ACTIVE_UNIQUE_INDEX = (
 # Names excluded from autogenerate (env.py) so a future --autogenerate never
 # proposes DROPs for schema it cannot see in the models.
 _RAW_DDL_OBJECTS: frozenset[str] = frozenset(
-    {"vector_signature", "ix_vs_primitive", "uq_signing_pubkey_active", "hamming64"}
+    {
+        "vector_signature",
+        "ix_vs_primitive",
+        "uq_signing_pubkey_active",
+        "hamming64",
+        # pg_trgm GIN expression indexes (0002) — raw DDL, not in SQLModel metadata,
+        # so --autogenerate must never propose dropping them.
+        "ix_search_document_haystack_trgm",
+        "ix_search_document_handles_trgm",
+    }
 )
 
 
