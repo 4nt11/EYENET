@@ -19,12 +19,20 @@
 
 x-eyenet-env: &eyenet-env
   EYENET_DATA_DIR: /var/lib/eyenet
+  # Storage backend. Default is now postgres (the M-postgres cutover); flip to
+  # sqlite for rollback. Request path rides pgbouncer (transaction pooling); the
+  # DDL/migration path (run at every service boot) MUST bypass the pooler and hit
+  # Postgres directly -> EYENET_PG_DDL_URL. Password comes from deploy/docker/.env.
+  EYENET_STORAGE_TYPE: ${EYENET_STORAGE_TYPE:-postgres}
+  EYENET_PG_URL: postgresql://eyenet:${EYENET_PG_PASSWORD:?set EYENET_PG_PASSWORD in deploy/docker/.env}@pgbouncer:6432/eyenet
+  EYENET_PG_DDL_URL: postgresql://eyenet:${EYENET_PG_PASSWORD}@postgres:5432/eyenet
   EYENET_NATS_URL: nats://nats:4222
-  # OTLP push endpoint (traces for every service + metrics from the API). Empty =
-  # off (spans go to the console, current default). Set it to the collector when
-  # running --profile observability, e.g. in .env:
-  #   EYENET_OTEL_ENDPOINT=http://otel-collector:4317
-  EYENET_OTEL_ENDPOINT: ${EYENET_OTEL_ENDPOINT:-}
+  # OTLP push endpoint (traces for every service + metrics from the API). Defaults to
+  # the in-stack collector so every service's spans actually reach Tempo + feed the
+  # span-metrics/service-graph connectors (empty = spans go only to the console).
+  # Override in the environment to point elsewhere or set empty to disable. When the
+  # observability profile is down the OTLP exporter just retries/drops, harmlessly.
+  EYENET_OTEL_ENDPOINT: ${EYENET_OTEL_ENDPOINT:-http://otel-collector:4317}
 
 # Shared config for the bus workers (everything except api/nats): reuse the built
 # image, wait for the API (which owns first-boot schema creation) to be healthy.
@@ -37,6 +45,10 @@ x-eyenet-worker: &eyenet-worker
   depends_on:
     api:
       condition: service_healthy
+    postgres:
+      condition: service_healthy
+    pgbouncer:
+      condition: service_started
 
 services:
   nats:
@@ -49,6 +61,49 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # PostgreSQL — the operating store (M-postgres cutover from SQLite). Two
+  # logical DBs live here (eyenet + eyenet_audit, the audit DB created by the
+  # cutover/boot path). max_connections bumped for the fleet + pgbouncer backends.
+  # Not host-published: reachable only on the private compose network.
+  postgres:
+    image: postgres@sha256:44c4ee9810eff91f7eab4d822642e01115b1a9eccce4bcbdde7604752d68eac6  # postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eyenet
+      POSTGRES_PASSWORD: ${EYENET_PG_PASSWORD:?set EYENET_PG_PASSWORD in deploy/docker/.env}
+      # Maintenance DB only; the cutover creates eyenet + eyenet_audit.
+      POSTGRES_DB: postgres
+    command: ["postgres", "-c", "max_connections=200"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eyenet -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  # pgbouncer — transaction-pooling in front of Postgres (POSTGRES_PORT.md §5.1).
+  # DB_NAME unset -> wildcard, so BOTH eyenet and eyenet_audit route to postgres.
+  # Services reach it as EYENET_PG_URL=...@pgbouncer:6432/eyenet; the DDL path
+  # bypasses it via EYENET_PG_DDL_URL=...@postgres:5432/... (session features).
+  pgbouncer:
+    image: edoburu/pgbouncer@sha256:9c78945868a6a142c7fc40ccd843bbe5a606df163c7ffce4de70e0d628d696a2  # edoburu/pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: eyenet
+      DB_PASSWORD: ${EYENET_PG_PASSWORD:?set EYENET_PG_PASSWORD in deploy/docker/.env}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      LISTEN_PORT: "6432"
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "25"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Self-contained Tor SOCKS proxy. Forum collectors reach .onion mirrors
   # through it (identity proxy_uri = socks5h://tor:9050) — e.g. pwnforums'
@@ -73,8 +128,9 @@ services:
     environment:
       LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
 
-  # The API owns first-boot schema creation (create_all) and binds the only
-  # host-published port. Every worker depends on it being healthy.
+  # The API owns first-boot schema creation (Alembic upgrade_to_head, run by the
+  # repository on construct) and binds the only host-published port. Every worker
+  # depends on it being healthy.
   api:
     build:
       context: ../..
@@ -102,6 +158,10 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
     healthcheck:
       # Self-signed TLS -> unverified context. /v1/healthz is 200 once live.
       test:
@@ -242,6 +302,9 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      # Explicit metric retention (matches Prometheus' 15d-ish default, pinned to 14d
+      # so it's deliberate and can't drift on a version bump).
+      - --storage.tsdb.retention.time=14d
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
       - ../../operations/alerts/eyenet-api.rules.yml:/etc/prometheus/rules/eyenet-api.rules.yml:ro,Z
@@ -267,7 +330,7 @@ services:
       - ../../operations/dashboards:/etc/grafana/dashboards:ro,Z
       - grafana-data:/var/lib/grafana
     ports:
-      - "${EYENET_GRAFANA_PORT:-3000}:3000"
+      - "${EYENET_GRAFANA_PORT:-3735}:3000"
     depends_on:
       - prometheus
 
@@ -304,6 +367,7 @@ services:
 
 volumes:
   eyenet-data:
+  postgres-data:
   prometheus-data:
   grafana-data:
   tempo-data:

@@ -90,8 +90,10 @@ class PostgresRepository(SQLModelRepository):
 
         # The DDL/migration path uses SESSION features and must NOT go through a
         # transaction-pooling pgbouncer. When pooling, point ``url``/``audit_url``
-        # at pgbouncer and ``ddl_url`` at Postgres DIRECTLY. Default: same URL
-        # (direct deployments, no pooler).
+        # at pgbouncer and ``ddl_url`` at Postgres DIRECTLY (via arg or the
+        # ``EYENET_PG_DDL_URL`` env). Default: same URL (direct deploy, no pooler).
+        if ddl_url is None:
+            ddl_url = os.environ.get("EYENET_PG_DDL_URL")
         ddl_main = ddl_url if ddl_url is not None else url
         if ddl_audit_url is not None:
             ddl_audit = ddl_audit_url
