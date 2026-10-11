@@ -292,6 +292,16 @@ class PostgresRepository(SQLModelRepository):
             await session.execute(stmt)
             await session.commit()
 
+    def _audit_uuid_eq(self, column: Any, value: UUID) -> Any:
+        """Native uuid equality (Rule 1 override of the mixin's text-cast).
+
+        Postgres stores subject_id/system_user_id as real ``uuid`` (the typed data
+        move + ORM append path), so a native compare uses ``ix_audit_subject`` /
+        the subject_id+at index instead of a 3M-row seq scan the ``::text`` cast
+        forced. Mirrors the SQLite-text rationale in AuditMixin._audit_uuid_eq.
+        """
+        return column == value
+
     async def close(self) -> None:
         await self.engine.dispose()
         await self.audit_engine.dispose()

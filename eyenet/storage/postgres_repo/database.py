@@ -80,6 +80,9 @@ _RAW_DDL_OBJECTS: frozenset[str] = frozenset(
         "ix_search_document_haystack_trgm",
         "ix_search_document_handles_trgm",
         "ix_message_body_trgm",
+        # audit list/count filter indexes (0004), on the audit DB.
+        "ix_audit_log_subject_at",
+        "ix_audit_log_user_at",
     }
 )
 

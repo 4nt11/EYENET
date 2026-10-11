@@ -10,6 +10,7 @@ override. Reading the chain (``all_audit``) is dialect-agnostic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -31,6 +32,7 @@ def _audit_filters(
     user: UUID | None,
     subject: str | None,
     subject_id: UUID | None,
+    id_match: Callable[[Any, UUID], Any],
 ) -> Any:
     """Shared WHERE clauses for the audit list/count (M9.F4).
 
@@ -45,18 +47,26 @@ def _audit_filters(
     if until is not None:
         stmt = stmt.where(col(AuditLogTable.at) < until)
     if user is not None:
-        # Audit rows are raw-inserted with the dashed UUID string (the
-        # hash-chain write path bypasses the column's UUID type), so compare
-        # against the stored TEXT form rather than the ORM's binary encoding.
-        stmt = stmt.where(cast(col(AuditLogTable.system_user_id), String) == str(user))
+        stmt = stmt.where(id_match(col(AuditLogTable.system_user_id), user))
     if subject is not None:
         stmt = stmt.where(col(AuditLogTable.event) == subject)
     if subject_id is not None:
-        stmt = stmt.where(cast(col(AuditLogTable.subject_id), String) == str(subject_id))
+        stmt = stmt.where(id_match(col(AuditLogTable.subject_id), subject_id))
     return stmt
 
 
 class AuditMixin:
+    def _audit_uuid_eq(self, column: Any, value: UUID) -> Any:
+        """Equality on a UUID audit column, for the list/count filters.
+
+        SQLite stores these UUIDs as the dashed TEXT form (the hash-chain write
+        path raw-inserts, bypassing the column's UUID type), so the generic path
+        compares against the text. Postgres overrides with a NATIVE uuid compare
+        so the query can use the btree index (Rule 1) — the text cast made the
+        operator audit trail a 3M-row seq scan.
+        """
+        return cast(column, String) == str(value)
+
     async def append_audit(self, row_data: dict[str, Any]) -> AuditLogRow:
         return await self._append_audit_locked(row_data)
 
@@ -101,6 +111,7 @@ class AuditMixin:
                 user=user,
                 subject=subject,
                 subject_id=subject_id,
+                id_match=self._audit_uuid_eq,
             )
             stmt = (
                 stmt.order_by(col(AuditLogTable.at).desc())
@@ -136,6 +147,7 @@ class AuditMixin:
                 user=user,
                 subject=subject,
                 subject_id=subject_id,
+                id_match=self._audit_uuid_eq,
             )
             result = await session.exec(stmt)
             return int(result.one())
