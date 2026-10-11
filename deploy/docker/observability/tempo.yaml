@@ -16,3 +16,9 @@ storage:
       path: /var/tempo/blocks
     wal:
       path: /var/tempo/wal
+
+# Explicit trace retention (matches Tempo's own default, pinned so a version bump
+# can't change it silently). The compactor deletes blocks older than this.
+compactor:
+  compaction:
+    block_retention: 336h  # 14 days

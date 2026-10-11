@@ -26,3 +26,12 @@ scrape_configs:
       credentials_file: /etc/prometheus/eyenet.pat
     static_configs:
       - targets: ["api:8443"]
+
+  # The OTel collector re-exposes, in Prometheus format, EVERY non-API service's OTel
+  # metrics PLUS the span-derived RED (eyenet_spans_*) and service-graph
+  # (traces_service_graph_*) metrics from its connectors. Plain HTTP on the private
+  # compose network, no auth/TLS (unlike the API). Without this job all of that data
+  # is produced and never scraped.
+  - job_name: eyenet-otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]

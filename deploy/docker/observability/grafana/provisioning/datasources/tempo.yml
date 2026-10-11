@@ -7,3 +7,18 @@ datasources:
     access: proxy
     url: http://tempo:3200
     editable: false
+    jsonData:
+      # Render the service map / node graph from the servicegraph connector's
+      # traces_service_graph_* metrics (scraped off the otel-collector into Prometheus).
+      serviceMap:
+        datasourceUid: eyenet-prometheus
+      nodeGraph:
+        enabled: true
+      # "View span metrics" jumps from a trace to the span's RED metrics.
+      tracesToMetrics:
+        datasourceUid: eyenet-prometheus
+        spanStartTimeShift: -2m
+        spanEndTimeShift: 2m
+        queries:
+          - name: Span rate
+            query: 'sum(rate(eyenet_spans_calls_total{service_name="$${__span.tags[\"service.name\"]}"}[5m]))'
