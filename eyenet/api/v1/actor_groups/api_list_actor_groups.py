@@ -67,11 +67,13 @@ async def actor_groups_list(
     # the posts" view). Needs a messages_with_indicator(actor_ids, token) query +
     # GET /v1/actor-groups/{crew_key}/evidence-messages. Deferred per operator.
 
-    # Resolve labels for every member (bounded by crew membership — operator scale).
+    # Resolve labels for every member in ONE batch query (was a per-member get_actor
+    # N+1 — one pooled round-trip per crew member, seconds at crew scale).
     member_ids: set[UUID] = {m for crew in crews for m in crew.members}
+    actors = cast("dict[UUID, ActorRow | None]", await storage.actors_by_ids(list(member_ids)))
     labels: dict[UUID, str] = {}
     for aid in member_ids:
-        actor = cast("ActorRow | None", await storage.get_actor(aid))
+        actor = actors.get(aid)
         labels[aid] = actor_primary_handle(actor) if actor is not None else f"id:{aid}"
 
     items = [

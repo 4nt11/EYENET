@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -72,6 +73,20 @@ class ActorsMixin:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             row = await session.get(ActorTable, actor_id)
             return _row_to_actor(row) if row is not None else None
+
+    async def actors_by_ids(self, ids: Sequence[UUID]) -> dict[UUID, object]:
+        """Batch actor fetch by primary-key id -> ``{id: ActorRow}`` in ONE query.
+
+        Replaces a per-id ``get_actor`` N+1 (the actor-groups label resolver fired
+        one round-trip per crew member; hundreds of members = seconds of pooled
+        round-trips). Missing ids are simply absent from the map."""
+        if not ids:
+            return {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            rows = (
+                await session.exec(select(ActorTable).where(col(ActorTable.id).in_(list(ids))))
+            ).all()
+            return {row.id: _row_to_actor(row) for row in rows}
 
     async def get_source(self, source_id: UUID) -> object | None:
         """Return the :class:`SourceRow` for a primary-key id, or None (M9.F1).

@@ -1837,6 +1837,10 @@ class BaseRepository(ABC):
         """Return the ActorRow for a primary-key id, or None (M9.F1)."""
 
     @abstractmethod
+    async def actors_by_ids(self, ids: Sequence[UUID]) -> dict[UUID, object]:
+        """Batch actor fetch by id -> {id: ActorRow} in one query (N+1 killer)."""
+
+    @abstractmethod
     async def get_source(self, source_id: UUID) -> object | None:
         """Return the SourceRow for a primary-key id, or None (M9.F1)."""
 
