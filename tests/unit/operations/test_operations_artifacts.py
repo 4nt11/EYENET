@@ -37,7 +37,8 @@ def test_alert_rules_valid_and_reference_sli_metrics() -> None:
 def test_collector_config_has_tail_sampling() -> None:
     cfg = yaml.safe_load((_OPS / "otel-collector.sample.yaml").read_text())
     assert "tail_sampling" in cfg["processors"]
-    assert cfg["service"]["pipelines"]["traces"]["processors"][0] == "tail_sampling"
+    # The sampled-to-Tempo branch (split from the pre-sampling connectors branch).
+    assert cfg["service"]["pipelines"]["traces/tempo"]["processors"][0] == "tail_sampling"
 
 
 def test_promtool_check_rules_if_available() -> None:
