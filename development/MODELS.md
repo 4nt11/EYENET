@@ -442,7 +442,7 @@ A group discovered through cross-references but not yet joined by any collector.
 | `platform_groupid` | str | telegram chat_id, matrix room alias, etc. — composite unique with `source_id` |
 | `kind_hint` | `GroupKind` enum \| None | best-effort from mention context — `channel` if `t.me/X` resolved to a channel, `chat` if a group invite link, null if unknown |
 | `display_name_hint` | str \| None | from the mention context — e.g. forwarded-from header, link preview title |
-| `state` | enum | `discovered`, `queued`, `approved`, `joining`, `joined`, `rejected`, `failed`, `parked` |
+| `state` | enum | `discovered`, `queued`, `approved`, `joining`, `joined`, `requested`, `rejected`, `failed`, `parked`, `dead` |
 | `score` | float | aggregate signal strength; recomputed when new mentions arrive |
 | `score_breakdown` | dict (JSON) | `{distinct_mentioning_groups, distinct_mentioning_actors, recency_decay, role_signal_boost}` — explainability |
 | `first_observed_at_ingest` | datetime | when first GroupCandidateMention landed |
@@ -472,6 +472,7 @@ discovered → queued → approved → joining → joined
 - `rejected` = operator declined or auto-policy filtered out; no retry without explicit operator action.
 - `failed` = join attempt failed at the platform layer (banned, invite-link expired, anti-spam triggered); supervisor backs off, may retry per policy.
 - `parked` = formerly `joined`, but the collector left (operator-initiated or supervisor-detected ban). Distinct from `rejected` — we WERE in, we're not anymore. Re-entry is a fresh operator decision.
+- `dead` = the group was nuked platform-side (deleted / TOS-banned / renamed), detected when a monitored group fails to resolve with an unambiguous telethon signal (`UsernameNotOccupiedError` / `ChannelPrivateError`). Terminal: the collector closes the membership (`left_reason = channel_deleted | channel_unavailable`) and stops monitoring. Reachable only from the live-belief states (`joining` / `joined` / `requested`). Distinct from `parked` — nobody left, the group ceased to exist.
 
 ### 2.21 `GroupCandidateMention`
 One row per signal that points to a `GroupCandidate`. The provenance trail. Multiple collectors observing the same mention each add a row. Multiple mentions across different paths each add a row. This is the substrate for the score function AND for the per-collector eligibility evaluation in §2.19.

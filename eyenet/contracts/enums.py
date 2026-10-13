@@ -420,6 +420,12 @@ class CandidateState(StrEnum):
     approval-gated group (telethon ``InviteRequestSentError``); it awaits a
     platform-side admin decision. Resolution (``requested → joined``) needs
     live membership detection — a follow-on; the entry + give-up edges land now.
+
+    ``dead``: the group was nuked platform-side (deleted / TOS-banned / renamed),
+    detected when a monitored group fails to resolve with an unambiguous telethon
+    signal (``UsernameNotOccupiedError`` / ``ChannelPrivateError``). Terminal:
+    the collector closes the membership and stops monitoring it. Reachable only
+    from the live-belief states (``joining`` / ``joined`` / ``requested``).
     """
 
     DISCOVERED = "discovered"
@@ -431,6 +437,7 @@ class CandidateState(StrEnum):
     REJECTED = "rejected"
     FAILED = "failed"
     PARKED = "parked"
+    DEAD = "dead"
 
 
 class MentionKind(StrEnum):

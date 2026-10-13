@@ -96,6 +96,23 @@ def _make_include_object(
 def run_migrations_online() -> None:
     for name, engine in _engines().items():
         with engine.connect() as connection:  # type: ignore[attr-defined]
+            # SQLite enforces FK on DROP TABLE, which breaks the batch table-rewrite
+            # (copy → DROP old → RENAME) for any table with INBOUND FKs — e.g.
+            # group_candidate, referenced by membership / access_artifact /
+            # group_candidate_mention (migration 0009). Disable FK enforcement for
+            # the MIGRATION connection only, set on the raw DBAPI connection BEFORE
+            # any transaction (SQLite silently ignores this pragma inside a txn).
+            # Runtime engines keep foreign_keys=ON. We do NOT run a global
+            # foreign_key_check afterwards: the live corpus already carries
+            # pre-existing orphans (retention deletes without cascade), so a global
+            # check would conflate that debt with migration correctness and brick
+            # every deploy. A batch rewrite preserves the rewritten table's ids, so
+            # inbound FKs stay valid; verify the specific change on a DB copy.
+            raw = connection.connection
+            pre = raw.cursor()
+            prev_fk = pre.execute("PRAGMA foreign_keys").fetchone()[0]
+            pre.execute("PRAGMA foreign_keys=OFF")
+            pre.close()
             context.configure(
                 connection=connection,
                 target_metadata=target_metadata,
@@ -112,6 +129,13 @@ def run_migrations_online() -> None:
             )
             with context.begin_transaction():
                 context.run_migrations(engine_name=name)
+            # Restore the connection's prior FK setting before it returns to the
+            # pool — SQLite pools reuse connections, and the connect-event pragma
+            # only fires on NEW physical connections. Without this the migration's
+            # FK=OFF would leak into runtime use of a reused connection.
+            post = connection.connection.cursor()
+            post.execute(f"PRAGMA foreign_keys={'ON' if prev_fk else 'OFF'}")
+            post.close()
 
 
 if context.is_offline_mode():  # pragma: no cover — EYENET never uses --sql offline mode

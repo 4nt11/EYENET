@@ -43,24 +43,28 @@ async def _make_source(storage: BaseRepository, name: str = "SRC") -> UUID:
 
 
 async def _make_group(storage: BaseRepository, source_id: UUID, name: str) -> UUID:
-    return (await storage.upsert_group(
-        source_id=source_id,
-        platform_groupid=name,
-        kind=GroupKind.CHANNEL,
-        title=name,
-        seen_at=_NOW,
-    ))[0]
+    return (
+        await storage.upsert_group(
+            source_id=source_id,
+            platform_groupid=name,
+            kind=GroupKind.CHANNEL,
+            title=name,
+            seen_at=_NOW,
+        )
+    )[0]
 
 
 async def _make_actor(storage: BaseRepository, source_id: UUID, key_suffix: str) -> UUID:
-    return (await storage.upsert_actor(
-        source_id=source_id,
-        actor_key=f"actor:{'a' * 60}{key_suffix[:4]}",
-        platform_userid=key_suffix,
-        handle=None,
-        display_name=None,
-        seen_at=_NOW,
-    ))[0]
+    return (
+        await storage.upsert_actor(
+            source_id=source_id,
+            actor_key=f"actor:{'a' * 60}{key_suffix[:4]}",
+            platform_userid=key_suffix,
+            handle=None,
+            display_name=None,
+            seen_at=_NOW,
+        )
+    )[0]
 
 
 async def _record(
@@ -352,6 +356,26 @@ async def _drive_to_joining(storage: BaseRepository) -> GroupCandidateRow:
         assigned_collector_id=_FAKE_COLLECTOR,
     )
     return await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINING)
+
+
+@pytest.mark.unit
+async def test_transition_joined_to_dead(storage: BaseRepository) -> None:
+    # A group nuked platform-side: joined → dead (terminal). Mirrors the
+    # collector detecting an unambiguous resolve failure.
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINED)
+    cand = await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.DEAD)
+    assert cand.state is CandidateState.DEAD
+
+
+@pytest.mark.unit
+async def test_dead_is_terminal(storage: BaseRepository) -> None:
+    cand = await _drive_to_joining(storage)
+    cand = await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINED)
+    cand = await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.DEAD)
+    # No edge leaves DEAD — not even back to a live state.
+    with pytest.raises(ValueError, match="illegal candidate transition"):
+        await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.JOINED)
 
 
 @pytest.mark.unit

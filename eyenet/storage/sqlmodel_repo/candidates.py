@@ -36,20 +36,34 @@ _ALLOWED: dict[CandidateState, frozenset[CandidateState]] = {
     CandidateState.APPROVED: frozenset({CandidateState.JOINING, CandidateState.REJECTED}),
     # JOINING → REQUESTED (M9.E5.5): an approval-gated group accepted a join
     # *request* (telethon InviteRequestSentError) rather than joining outright.
+    # → DEAD on every live-belief state: a group can be nuked platform-side while
+    # we are joining, requesting, or already a member.
     CandidateState.JOINING: frozenset(
-        {CandidateState.JOINED, CandidateState.FAILED, CandidateState.REQUESTED}
+        {
+            CandidateState.JOINED,
+            CandidateState.FAILED,
+            CandidateState.REQUESTED,
+            CandidateState.DEAD,
+        }
     ),
-    CandidateState.JOINED: frozenset({CandidateState.PARKED}),
+    CandidateState.JOINED: frozenset({CandidateState.PARKED, CandidateState.DEAD}),
     # REQUESTED → JOINED is the (future) approval-detected edge; FAILED/PARKED
     # are the denied / give-up edges wired now (M9.E5.5).
     CandidateState.REQUESTED: frozenset(
-        {CandidateState.JOINED, CandidateState.FAILED, CandidateState.PARKED}
+        {
+            CandidateState.JOINED,
+            CandidateState.FAILED,
+            CandidateState.PARKED,
+            CandidateState.DEAD,
+        }
     ),
     # FAILED → QUEUED is the M9.D3 retry edge (admin:candidates, can burn an
     # identity); FAILED → PARKED is the give-up edge.
     CandidateState.FAILED: frozenset({CandidateState.PARKED, CandidateState.QUEUED}),
     CandidateState.REJECTED: frozenset({CandidateState.PARKED}),
     CandidateState.PARKED: frozenset({CandidateState.APPROVED}),
+    # DEAD is terminal — a nuked group is not re-offered or re-monitored.
+    CandidateState.DEAD: frozenset(),
 }
 
 

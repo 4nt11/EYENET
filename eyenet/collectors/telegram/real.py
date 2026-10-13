@@ -49,11 +49,13 @@ from eyenet.collectors.telegram._join import (
     parse_invite_hash,
     select_join_action,
 )
+from eyenet.collectors.telegram._liveness import GroupLiveness, classify_liveness
 from eyenet.contracts._base import TraceContext
 from eyenet.contracts.bus import Bus
 from eyenet.contracts.collector import CollectorHealth
 from eyenet.contracts.enums import (
     AttachmentKind,
+    CandidateState,
     CollectorState,
     GroupKind,
     IdentityState,
@@ -90,6 +92,10 @@ _MARKED_PEER_PREFIX_LEN = 3
 # many seconds, regardless of the runner's tick_interval. The event path is the
 # primary detector; the probe just catches approvals that arrived silently.
 _REQUESTED_PROBE_INTERVAL_S = 300.0
+# Low-cadence mid-run liveness sweep: at most one dead-group sweep per this many
+# seconds. Dead/TOS'd groups are rare and a nuke is not time-critical to detect,
+# so this stays cheap (one get_entity per active membership per sweep).
+_DEAD_SWEEP_INTERVAL_S = 3600.0
 
 
 def _zero_traceparent() -> str:
@@ -142,6 +148,8 @@ class TelegramCollector(CollectorSkeleton):
         self._backfill_task: asyncio.Task[None] | None = None
         # Monotonic timestamp of the last REQUESTED-membership probe sweep.
         self._last_requested_probe: float = 0.0
+        # Monotonic timestamp of the last mid-run dead-group liveness sweep.
+        self._last_dead_sweep: float = 0.0
         # Hot-path guard (Defect 6): lowercased event-matchable platform_groupid
         # forms of this collector's REQUESTED candidates. Empty ⇒ _maybe_confirm
         # does ZERO DB work per message. Refreshed in tick(); seeded in
@@ -226,21 +234,7 @@ class TelegramCollector(CollectorSkeleton):
         # discards.
         if self._collector_id is not None:
             for m in await self._storage.list_active_memberships(collector_id=self._collector_id):
-                grp = await self._storage.get_group(m.group_id)
-                if grp is None:
-                    continue
-                try:
-                    self._monitor_raw_ids.add(_to_raw_entity_id(grp.platform_groupid))
-                except ValueError:
-                    try:
-                        entity = await self._client.get_entity(grp.platform_groupid)
-                        self._monitor_raw_ids.add(entity.id)
-                    except Exception as exc:
-                        _log.warning(
-                            "collector.monitor_seed_resolve_failed",
-                            group=grp.platform_groupid,
-                            error=str(exc),
-                        )
+                await self._seed_or_retire_membership(m)
         self._join = CollectorJoinHandler(
             storage=self._storage,
             audit=self.audit,
@@ -520,12 +514,15 @@ class TelegramCollector(CollectorSkeleton):
             return
 
     async def tick(self) -> None:
-        """Periodic heartbeat. Refreshes the hot-path match-form set (Defect 6)
-        and runs the low-cadence REQUESTED-membership probe backstop (E5.6) — the
-        event path is primary; this catches approvals that produced no observed
-        message AND is the ONLY path that can confirm invite-link candidates."""
+        """Periodic heartbeat. Refreshes the hot-path match-form set (Defect 6),
+        runs the low-cadence REQUESTED-membership probe backstop (E5.6) — the event
+        path is primary; this catches approvals that produced no observed message
+        AND is the ONLY path that can confirm invite-link candidates — and runs the
+        low-cadence dead-group liveness sweep so a group nuked mid-run is retired
+        without waiting for the next (re)subscribe."""
         await self._refresh_requested_match_forms()
         await self._probe_requested_memberships()
+        await self._sweep_dead_groups()
 
     async def _probe_requested_memberships(self) -> None:
         """Backstop approval detector: for each REQUESTED candidate assigned to
@@ -703,6 +700,153 @@ class TelegramCollector(CollectorSkeleton):
             _log.info("collector.left_group", group_id=str(cmd.group_id), reason=cmd.reason)
         except Exception as exc:
             _log.warning("collector.leave_failed", group_id=str(cmd.group_id), error=str(exc))
+
+    async def _seed_or_retire_membership(self, membership: object) -> None:
+        """Add one active membership's group to the monitor set, OR retire it if
+        the group has been nuked platform-side.
+
+        A monitored group that no longer resolves may simply be unreachable right
+        now (FloodWait, network) OR gone for good (deleted / TOS-banned /
+        renamed). Only an unambiguous "it's gone" signal (classify_liveness)
+        marks it DEAD and stops monitoring; anything else stays a transient
+        warning. This is the subscribe-time pass (fast path: numeric ids are added
+        without a network probe); ``_sweep_dead_groups`` is the mid-run backstop
+        that re-probes every membership, including numeric-id groups.
+        """
+        if self._client is None:  # pragma: no cover — guarded at call site
+            return
+        group = await self._storage.get_group(
+            membership.group_id  # type: ignore[attr-defined]
+        )
+        if group is None:
+            return
+        try:
+            self._monitor_raw_ids.add(_to_raw_entity_id(group.platform_groupid))
+        except ValueError:
+            # Not a raw numeric id — resolve the @username via the client.
+            try:
+                entity = await self._client.get_entity(group.platform_groupid)
+                self._monitor_raw_ids.add(entity.id)
+            except (errors.RPCError, ValueError, OSError) as exc:
+                verdict = classify_liveness(type(exc).__name__)
+                if verdict is GroupLiveness.ALIVE:
+                    _log.warning(
+                        "collector.monitor_seed_resolve_failed",
+                        group=group.platform_groupid,
+                        error=str(exc),
+                    )
+                else:
+                    await self._mark_group_dead(membership, group, verdict)
+
+    async def _sweep_dead_groups(self) -> None:
+        """Mid-run liveness backstop: re-probe every active membership and retire
+        any group Telegram nuked SINCE subscribe (the subscribe-time seed only
+        catches deaths present at boot, and skips numeric-id groups entirely).
+
+        Throttled to one sweep per ``_DEAD_SWEEP_INTERVAL_S``. Per-membership
+        isolation (Defect 5): one bad group is logged and skipped, never aborting
+        the sweep. Relies on the on-start dialog scan having warmed the session
+        entity cache so a live (cached) group never false-positives on resolve.
+        """
+        if self._client is None or self._collector_id is None:
+            return
+        now = _time.monotonic()
+        if now - self._last_dead_sweep < _DEAD_SWEEP_INTERVAL_S:
+            return
+        self._last_dead_sweep = now
+        for membership in await self._storage.list_active_memberships(
+            collector_id=self._collector_id
+        ):
+            try:
+                await self._probe_group_liveness(membership)
+            except (RuntimeError, errors.RPCError, ValueError, SQLAlchemyError) as exc:
+                _log.warning(
+                    "collector.dead_sweep_group_error",
+                    group_id=str(membership.group_id),
+                    error=str(exc),
+                )
+
+    async def _probe_group_liveness(self, membership: object) -> None:
+        """Resolve one membership's group and retire it on an unambiguous dead
+        signal. Unlike the subscribe-time seed, this ALWAYS resolves (numeric ids
+        included), so a nuked numeric-id group is caught too."""
+        if self._client is None:  # pragma: no cover — guarded at call site
+            return
+        group = await self._storage.get_group(
+            membership.group_id  # type: ignore[attr-defined]
+        )
+        if group is None:
+            return
+        exc_name: str | None = None
+        try:
+            await self._client.get_entity(group.platform_groupid)
+        except (errors.RPCError, ValueError, OSError) as exc:
+            exc_name = type(exc).__name__
+        verdict = classify_liveness(exc_name)
+        if verdict is not GroupLiveness.ALIVE:
+            await self._mark_group_dead(membership, group, verdict)
+
+    async def _mark_group_dead(
+        self,
+        membership: object,
+        group: object,
+        verdict: GroupLiveness,
+    ) -> None:
+        """Retire a group Telegram nuked: candidate → DEAD, close membership, stop
+        monitoring. Without this a deleted/TOS-banned group lingers as an active
+        membership and re-fails resolution forever. Robust by design — a failure
+        in any one step is logged, never raised, so the boot loop that calls this
+        is not aborted by a dead group.
+        """
+        if self._collector_id is None:  # pragma: no cover — guarded at call site
+            return
+        now = datetime.now(tz=UTC)
+        reason = verdict.value
+        group_id = cast("UUID", group.id)  # type: ignore[attr-defined]
+        platform_groupid = cast("str", group.platform_groupid)  # type: ignore[attr-defined]
+        candidate_id = cast(
+            "UUID | None",
+            membership.joined_via_candidate_id,  # type: ignore[attr-defined]
+        )
+
+        if candidate_id is not None:
+            try:
+                await self._storage.transition_candidate(
+                    candidate_id=candidate_id, to_state=CandidateState.DEAD
+                )
+            except ValueError as exc:
+                # Illegal edge (already terminal) or candidate gone — the close
+                # below still stops monitoring. Log, do not abort.
+                _log.warning(
+                    "collector.group_dead_transition_skipped",
+                    candidate_id=str(candidate_id),
+                    error=str(exc),
+                )
+        try:
+            await self._storage.close_membership(
+                collector_id=self._collector_id,
+                group_id=group_id,
+                left_at=now,
+                left_reason=reason,
+            )
+        except ValueError as exc:
+            # No active membership (raced with a leave) — nothing to close.
+            _log.warning(
+                "collector.group_dead_close_skipped",
+                group_id=str(group_id),
+                error=str(exc),
+            )
+        try:
+            self._monitor_raw_ids.discard(_to_raw_entity_id(platform_groupid))
+        except ValueError:
+            # @username id never entered the raw-id set; nothing to discard.
+            _log.debug("collector.group_dead_no_raw_id", platform_groupid=platform_groupid)
+        _log.info(
+            "collector.group_dead",
+            group_id=str(group_id),
+            platform_groupid=platform_groupid,
+            reason=reason,
+        )
 
     async def _scan_on_start(self) -> None:
         """One-shot visible-group scan after connect (fire-and-forget helper)."""
