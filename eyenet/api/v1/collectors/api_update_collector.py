@@ -42,6 +42,12 @@ async def collectors_update(
     # dispatches BackfillCommand to the running collector on its next tick and
     # clears the flag. Merges onto whatever config this PATCH is already writing.
     config_update = body.config if "config" in fields else None
+    # Persistent opt-out toggle for auto-backfill-on-join; folds into config so a
+    # typo-free single boolean reaches the collector's next boot (it reads
+    # config["backfill_on_join"] in on_subscribe).
+    if "backfill_on_join" in fields and body.backfill_on_join is not None:
+        config_update = dict(config_update if config_update is not None else current.config)
+        config_update["backfill_on_join"] = body.backfill_on_join
     if "backfill" in fields and body.backfill:
         config_update = dict(config_update if config_update is not None else current.config)
         config_update["_backfill_pending"] = True

@@ -172,6 +172,30 @@ async def test_update_collector(
     assert updated.desired_state is CollectorDesiredState.RUNNING
 
 
+async def test_backfill_on_join_toggle_persists(
+    storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
+) -> None:
+    # The opt-out must be reachable over the API as a first-class field, and the
+    # read model must reflect the effective state (default ON when absent).
+    user = mkuser("write:collectors", "read:collectors_config")
+    cid = await _make(storage, audit, user)
+    fresh = await collectors_update(cid, UpdateCollectorRequest(notes="x"), user, storage, audit)
+    assert fresh.backfill_on_join is True  # default ON, no config key set
+
+    # Opt out via the single boolean; it folds into config AND composes with a
+    # one-shot backfill request in the same PATCH.
+    updated = await collectors_update(
+        cid,
+        UpdateCollectorRequest(backfill_on_join=False, backfill=True),
+        user,
+        storage,
+        audit,
+    )
+    assert updated.backfill_on_join is False
+    assert updated.config["backfill_on_join"] is False
+    assert updated.config["_backfill_pending"] is True
+
+
 async def test_start_and_stop(
     storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
 ) -> None:

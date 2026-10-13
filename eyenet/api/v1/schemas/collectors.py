@@ -77,6 +77,10 @@ class CollectorDetail(CollectorSummary):
     identity_id: UUID
     created_at: datetime
     notes: str | None = None
+    # Effective on-join backfill toggle (default ON). Surfaced as a first-class
+    # field — not sensitive, so visible even without the config-read grant that
+    # redacts `config`.
+    backfill_on_join: bool = True
 
     @classmethod
     def from_domain_detail(cls, row: CollectorRow, *, has_config_grant: bool) -> CollectorDetail:
@@ -95,6 +99,7 @@ class CollectorDetail(CollectorSummary):
             last_error_message=row.last_error_message,
             created_at=row.created_at,
             notes=row.notes,
+            backfill_on_join=bool(row.config.get("backfill_on_join", True)),
         )
 
 
@@ -171,6 +176,16 @@ class UpdateCollectorRequest(ApiSchema):
             "MONITORED groups; the supervisor dispatches it to the running "
             "collector on its next tick. Scoped to the monitor set (never the "
             "wider visible set)."
+        ),
+    )
+    backfill_on_join: bool | None = Field(
+        default=None,
+        description=(
+            "Persistent toggle (default ON): auto-backfill a group's full history "
+            "the moment this collector JOINS it. Set false to opt a collector out "
+            "— e.g. an account in very large (100k+ message) groups where a full "
+            "on-join sweep risks a 429. Applies to future joins; takes effect on "
+            "the collector's next boot."
         ),
     )
 

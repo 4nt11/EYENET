@@ -138,6 +138,17 @@ class TelegramCollector(CollectorSkeleton):
         # "monitor everything" mode: that is the firehose + ban risk we reject.
         self._monitor_raw_ids: set[int] = set()
         self._backfill = backfill
+        # Auto-backfill a group's full visible history the moment we JOIN it, so a
+        # collector never silently starts mid-conversation (operator-grade
+        # evidence). Opt-out PER COLLECTOR via config {"backfill_on_join": false},
+        # reachable over the API (PATCH /v1/collectors/{id} backfill_on_join=false)
+        # — some 100k-message groups 429 on a full sweep, so the operator can
+        # disable it. Resolved from the DB collector row in on_subscribe; True
+        # until then.
+        self._backfill_on_join = True
+        # On-join backfill tasks, kept referenced so the loop's weak task refs
+        # can't GC them mid-sweep (RUF006); each self-discards on completion.
+        self._bg_backfills: set[asyncio.Task[None]] = set()
         self._recent: deque[float] = deque(maxlen=3600)
         # E5 discovery recursion: this collector's own DB row + the join core.
         self._collector_id: UUID | None = None
@@ -221,6 +232,9 @@ class TelegramCollector(CollectorSkeleton):
         # (the supervisor publishes JoinGroupCommand here for the leased scout).
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
+        if collector is not None:
+            # Default ON (opt-out). Any non-false value keeps the default.
+            self._backfill_on_join = bool(collector.config.get("backfill_on_join", True))
         # Bind our row to the source we actually ingest into (the placeholder
         # source it was registered against has zero of our messages).
         await self._bind_collector_row_source(collector, self._source_uuid)
@@ -444,6 +458,17 @@ class TelegramCollector(CollectorSkeleton):
             candidate_id=str(cmd.candidate_id),
             group_id=str(group_id),
         )
+        # Auto-backfill the freshly joined group's history (opt-out via the
+        # backfill_on_join config toggle). Scoped to THIS group only — a FloodWait
+        # on a huge backbuffer is absorbed inside _backfill_one, so a slow sweep
+        # never blocks or fails the join.
+        if self._backfill_on_join:
+            from telethon import utils as _tl_utils  # noqa: PLC0415
+
+            task = asyncio.create_task(self._backfill_one(entity, _tl_utils.get_peer_id(entity)))
+            self._bg_backfills.add(task)
+            task.add_done_callback(self._bg_backfills.discard)
+            _log.info("collector.backfill_on_join_queued", group_id=str(group_id))
 
     async def _refresh_requested_match_forms(self) -> None:
         """Rebuild the hot-path event-matchable form set (Defect 6).
@@ -876,36 +901,7 @@ class TelegramCollector(CollectorSkeleton):
             if raw not in self._monitor_raw_ids:
                 continue
             found.add(raw)
-            entity = dialog.entity
-            chat_id = dialog.id
-            written = skipped = 0
-            _log.info("collector.backfill_start", chat_id=chat_id, title=dialog.title)
-            total = 0
-            try:
-                async for msg in self._client.iter_messages(entity, reverse=True, limit=None):
-                    total += 1
-                    if total % 500 == 0:
-                        _log.info(
-                            "collector.backfill_progress",
-                            chat_id=chat_id,
-                            seen=total,
-                            written=written,
-                        )
-                    if not isinstance(msg, TLMessage) or not msg.message:
-                        continue
-                    ok = await self._ingest_msg(
-                        msg,
-                        chat_id=chat_id,
-                        sender=getattr(msg, "sender", None),
-                        chat=entity,
-                    )
-                    if ok:
-                        written += 1
-                    else:
-                        skipped += 1
-            except Exception as exc:
-                _log.error("collector.backfill_error", chat_id=chat_id, error=str(exc))
-            _log.info("collector.backfill_done", chat_id=chat_id, written=written, skipped=skipped)
+            await self._backfill_one(dialog.entity, dialog.id)
 
         not_found = self._monitor_raw_ids - found
         if not_found:
@@ -914,6 +910,41 @@ class TelegramCollector(CollectorSkeleton):
                 missing_ids=sorted(not_found),
                 hint="identity may not be a member, or IDs are wrong format",
             )
+
+    async def _backfill_one(self, entity: object, chat_id: int) -> None:
+        """Replay ONE group's full history oldest-first (deduped by platform_msgid
+        in _ingest_msg). Shared by the monitor-set sweep (_run_backfill) and the
+        on-join auto-backfill. A FloodWait/429 on a huge group is caught and
+        logged here, never crashing live capture or the join path."""
+        if self._client is None:
+            raise RuntimeError("backfill called before on_subscribe attached a client")
+        written = skipped = total = 0
+        _log.info("collector.backfill_start", chat_id=chat_id, title=getattr(entity, "title", None))
+        try:
+            async for msg in self._client.iter_messages(entity, reverse=True, limit=None):
+                total += 1
+                if total % 500 == 0:
+                    _log.info(
+                        "collector.backfill_progress",
+                        chat_id=chat_id,
+                        seen=total,
+                        written=written,
+                    )
+                if not isinstance(msg, TLMessage) or not msg.message:
+                    continue
+                ok = await self._ingest_msg(
+                    msg,
+                    chat_id=chat_id,
+                    sender=getattr(msg, "sender", None),
+                    chat=entity,
+                )
+                if ok:
+                    written += 1
+                else:
+                    skipped += 1
+        except Exception as exc:
+            _log.error("collector.backfill_error", chat_id=chat_id, error=str(exc))
+        _log.info("collector.backfill_done", chat_id=chat_id, written=written, skipped=skipped)
 
     async def _ingest_msg(
         self,
