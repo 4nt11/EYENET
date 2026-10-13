@@ -125,6 +125,14 @@ class JoinGroupRequest(ApiSchema):
     source_id: UUID | None = None
     platform_groupid: str | None = Field(default=None, max_length=512)
     kind: GroupKind | None = None
+    backfill: bool = Field(
+        default=True,
+        description=(
+            "Backfill this group's full history on join (default true). The "
+            "collector deep-fetches the pre-join backbuffer, deduped by message "
+            "id. Uncheck for a very large group where a full sweep risks a 429."
+        ),
+    )
 
     @model_validator(mode="after")
     def _exactly_one_target(self) -> Self:

@@ -505,6 +505,7 @@ class CollectorSupervisor(ServiceBase):
             platform_groupid=candidate.platform_groupid,
             scout_identity_id=scout.id,
             access_artifact_id=selected.id if selected is not None else None,
+            backfill=candidate.backfill_on_join,
         )
         await self._storage.transition_candidate(
             candidate_id=candidate.id,

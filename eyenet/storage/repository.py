@@ -2426,11 +2426,14 @@ class BaseRepository(ABC):
         rejection_reason: str | None = None,
         assigned_collector_id: UUID | None = None,
         resulting_group_id: UUID | None = None,
+        backfill_on_join: bool | None = None,
     ) -> GroupCandidateRow:
         """Apply a legal state transition to a GroupCandidate.
 
         Raises :class:`ValueError` on an illegal transition or if the
-        candidate doesn't exist.
+        candidate doesn't exist. ``backfill_on_join`` records the operator's
+        per-join backfill choice on the ``approved`` transition (None leaves it
+        unchanged).
         """
 
     @abstractmethod

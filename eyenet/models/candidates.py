@@ -68,6 +68,11 @@ class GroupCandidateTable(SQLModel, table=True):
     # recursive descent. Lets /monitored-groups show "you're in this, not
     # monitoring it" vs "reachable, not joined".
     member_dialog: bool = Field(default=False)
+    # Per-join operator choice: backfill this group's full history on join?
+    # Set on the APPROVED transition from the /groups/join request. NULL means
+    # "unspecified" (e.g. a programmatic auto-discovery join) and the collector
+    # falls back to its own backfill_on_join default.
+    backfill_on_join: bool | None = Field(default=None)
 
 
 class GroupCandidateMentionTable(SQLModel, table=True):

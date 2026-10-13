@@ -28,6 +28,10 @@ class JoinGroupCommand(BaseModel):
     scout_identity_id: UUID
     # E5 supervisor selects the access artifact before dispatch (MODELS §2.24).
     access_artifact_id: UUID | None = None
+    # Operator's per-join backfill choice, carried from the candidate. None =
+    # unspecified (programmatic join) → the collector falls back to its own
+    # backfill_on_join default.
+    backfill: bool | None = None
 
 
 class LeaveGroupCommand(BaseModel):

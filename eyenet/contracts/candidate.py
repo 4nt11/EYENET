@@ -31,6 +31,9 @@ class GroupCandidateRow(DbRowBase):
     assigned_collector_id: UUID | None = None
     resulting_group_id: UUID | None = None
     member_dialog: bool = False
+    # Per-join backfill choice (None = unspecified → collector default). See
+    # GroupCandidateTable.backfill_on_join.
+    backfill_on_join: bool | None = None
 
 
 class GroupCandidateMentionRow(DbRowBase):

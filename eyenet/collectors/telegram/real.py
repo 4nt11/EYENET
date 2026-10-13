@@ -458,11 +458,14 @@ class TelegramCollector(CollectorSkeleton):
             candidate_id=str(cmd.candidate_id),
             group_id=str(group_id),
         )
-        # Auto-backfill the freshly joined group's history (opt-out via the
-        # backfill_on_join config toggle). Scoped to THIS group only — a FloodWait
-        # on a huge backbuffer is absorbed inside _backfill_one, so a slow sweep
-        # never blocks or fails the join.
-        if self._backfill_on_join:
+        # Auto-backfill the freshly joined group's history. The per-join operator
+        # choice (cmd.backfill, from the /groups/join checkbox) is authoritative;
+        # a programmatic join carries None and falls back to this collector's
+        # backfill_on_join default. Scoped to THIS group only — a FloodWait on a
+        # huge backbuffer is absorbed inside _backfill_one, so a slow sweep never
+        # blocks or fails the join.
+        should_backfill = cmd.backfill if cmd.backfill is not None else self._backfill_on_join
+        if should_backfill:
             from telethon import utils as _tl_utils  # noqa: PLC0415
 
             task = asyncio.create_task(self._backfill_one(entity, _tl_utils.get_peer_id(entity)))

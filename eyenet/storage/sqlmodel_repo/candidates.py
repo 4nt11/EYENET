@@ -441,6 +441,7 @@ class CandidatesMixin:
         rejection_reason: str | None = None,
         assigned_collector_id: UUID | None = None,
         resulting_group_id: UUID | None = None,
+        backfill_on_join: bool | None = None,
     ) -> GroupCandidateRow:
         """Apply a state transition to a GroupCandidate (state guard enforced).
 
@@ -476,6 +477,10 @@ class CandidatesMixin:
                 candidate.assigned_collector_id = assigned_collector_id
             if resulting_group_id is not None:
                 candidate.resulting_group_id = resulting_group_id
+            # Explicit False is meaningful (operator opted this join out), so only
+            # skip on None (unspecified).
+            if backfill_on_join is not None:
+                candidate.backfill_on_join = backfill_on_join
 
             session.add(candidate)
             await session.commit()

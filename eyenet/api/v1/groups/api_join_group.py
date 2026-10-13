@@ -114,6 +114,7 @@ async def groups_join(
             reviewed_by=f"operator:{current_user.user_id}",
             reviewed_at=datetime.now(tz=UTC),
             assigned_collector_id=body.collector_id,
+            backfill_on_join=body.backfill,
         )
     except ValueError as exc:
         raise ConflictError(str(exc)) from exc

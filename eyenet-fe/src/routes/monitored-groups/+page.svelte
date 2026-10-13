@@ -103,9 +103,11 @@
     loadSources();
   });
 
+  let backfillOnJoin = $state(true);
+
   async function join() {
     if (!sel || !collectorId) return;
-    await joinGroup(sel.id, collectorId);
+    await joinGroup(sel.id, collectorId, backfillOnJoin);
   }
 
   async function leave() {
@@ -157,6 +159,11 @@
               {#each collectors as c}<option value={c.id}>{c.name} · {c.observed}</option>{/each}
             </select>
             {#if !collectors.length}<span class="hint">No collector on this platform — create one first.</span>{/if}
+            <label class="backfill-opt">
+              <input type="checkbox" bind:checked={backfillOnJoin} />
+              Backfill full history on join
+              <span class="sub">uncheck for very large groups (429 risk)</span>
+            </label>
             <Button variant="primary" size="sm" disabled={groupView.submitting || !collectorId} onclick={join}>Join group</Button>
           {:else if sel.status === 'monitored'}
             <Button variant="destructive" size="sm" disabled={groupView.submitting} onclick={leave}>Leave group</Button>
@@ -190,6 +197,9 @@
   .fin { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; }
   .fin:focus { outline: none; border-color: var(--accent); }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); margin: 0; }
+  .backfill-opt { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-secondary); cursor: pointer; }
+  .backfill-opt input { cursor: pointer; }
+  .backfill-opt .sub { flex-basis: 100%; padding-left: 22px; font-size: var(--fs-11); color: var(--text-faint); }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   @media (max-width: 900px) { .body { grid-template-columns: 1fr; overflow: auto; } }
 </style>

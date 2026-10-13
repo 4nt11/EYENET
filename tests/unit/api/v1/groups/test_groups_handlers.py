@@ -92,6 +92,27 @@ async def test_join_walks_discovered_to_approved(storage: BaseRepository) -> Non
     row = await storage.get_candidate(cand.id)
     assert row is not None and row.state is CandidateState.APPROVED
     assert row.assigned_collector_id == coll.id
+    # Per-join backfill defaults ON and is recorded on the candidate so the
+    # supervisor can carry it into JoinGroupCommand at dispatch.
+    assert row.backfill_on_join is True
+
+
+@pytest.mark.unit
+async def test_join_backfill_opt_out_persists_on_candidate(storage: BaseRepository) -> None:
+    sid = await _source(storage)
+    coll = await _seed_collector(storage, sid)
+    cand = await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@big", seen_at=datetime.now(tz=UTC)
+    )
+    await groups_join(
+        body=JoinGroupRequest(collector_id=coll.id, candidate_id=cand.id, backfill=False),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+    )
+    row = await storage.get_candidate(cand.id)
+    # Explicit opt-out survives to the candidate (not overwritten by the default).
+    assert row is not None and row.backfill_on_join is False
 
 
 @pytest.mark.unit

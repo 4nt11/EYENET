@@ -78,16 +78,18 @@ export async function loadGroups(search = '', sourceId = '') {
 
 export const groupView = $state({ submitting: false, submitMsg: null });
 
-export async function joinGroup(candidateId, collectorId) {
+export async function joinGroup(candidateId, collectorId, backfill = true) {
   groupView.submitting = true;
   groupView.submitMsg = null;
   try {
     await apiPost(
       '/v1/groups/join',
-      { candidate_id: candidateId, collector_id: collectorId },
+      { candidate_id: candidateId, collector_id: collectorId, backfill },
       { auth: true, accept: [202] }
     );
-    groupView.submitMsg = 'Join requested — the collector will join off-path.';
+    groupView.submitMsg = backfill
+      ? 'Join requested — the collector will join and backfill history off-path.'
+      : 'Join requested — the collector will join off-path (no backfill).';
     await loadGroups();
   } catch (e) {
     groupView.submitMsg = `Failed: ${e.message ?? e}`;
