@@ -414,6 +414,58 @@ async def test_groups_messages_returns_thread_posts_oldest_first(storage: BaseRe
 
 
 @pytest.mark.unit
+async def test_groups_messages_author_falls_back_to_actor_row(storage: BaseRepository) -> None:
+    """Telegram chat messages carry no author_display/author_username in
+    source_specific (that is a forum stamp); the author lives on the actor row.
+    The reader must resolve it from there, not render "unknown"."""
+    from eyenet.api.deps_paging import CursorParams
+    from eyenet.api.v1.groups.api_list_group_messages import groups_messages
+    from eyenet.models import MessageTable
+    from eyenet.models._base import new_uuid7
+
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.TELEGRAM, display_name="tg", created_at=now)
+    gid, _ = await storage.upsert_group(
+        source_id=sid, platform_groupid="99", kind=GroupKind.CHAT, title="g", seen_at=now
+    )
+    aid, _ = await storage.upsert_actor(
+        source_id=sid,
+        actor_key="actor:roro",
+        platform_userid="6361155821",
+        handle="@roro111000",
+        display_name="Local",
+        seen_at=now,
+    )
+    await storage.put_message(
+        MessageTable(
+            id=new_uuid7(),
+            source_id=sid,
+            group_id=gid,
+            actor_id=aid,
+            platform_msgid="68",
+            evidence_ref="telegram:99:68",
+            body="O me perdi de algo ?",
+            length_chars=20,
+            length_words=5,
+            sent_at_source=now,
+            ingested_at=now,
+            has_attachment=False,
+            source_specific={},  # no author_* keys — the Telegram case
+        ),
+        [],
+    )
+
+    page = await groups_messages(
+        group_id=gid,
+        _=_user(),
+        storage=storage,
+        page=CursorParams(offset=0, limit=50, include_total=False),
+    )
+    assert page.items[0].author_display == "Local"  # from the actor row, not "unknown"
+    assert page.items[0].author_username == "@roro111000"
+
+
+@pytest.mark.unit
 async def test_groups_messages_unknown_group_404(storage: BaseRepository) -> None:
     from uuid import uuid4
 

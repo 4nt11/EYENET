@@ -184,16 +184,27 @@ class GroupMessage(ApiSchema):
         incident_labels: list[str] | None = None,
         correction: IncidentLabelRow | None = None,
         geo: MessageGeoRow | None = None,
+        actor: object | None = None,
     ) -> GroupMessage:
         ss = msg.source_specific or {}
+        # Forum collectors stamp author_display/author_username into source_specific;
+        # the Telegram collector does not (the author lives on the actor row). Prefer
+        # source_specific (keeps the forum slug), fall back to the actor's resolved
+        # handle/display so chat messages don't render as "unknown".
+        author_display = _s(ss.get("author_display")) or _s(
+            getattr(actor, "current_display_name", None)
+        )
+        author_username = _s(ss.get("author_username")) or _s(
+            getattr(actor, "current_handle", None)
+        )
         return cls(
             id=msg.id,
             evidence_ref=msg.evidence_ref,
             platform_msgid=msg.platform_msgid,
             ts=msg.sent_at_source,
             actor_id=msg.actor_id,
-            author_display=_s(ss.get("author_display")),
-            author_username=_s(ss.get("author_username")),
+            author_display=author_display,
+            author_username=author_username,
             body=msg.body,
             body_html=_s(ss.get("body_html")),
             reply_gated=bool(ss.get("reply_gated", False)),

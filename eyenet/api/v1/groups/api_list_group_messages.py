@@ -53,8 +53,13 @@ async def groups_messages(
         "dict[UUID, IncidentLabelRow]", await storage.incident_labels_by_message_ids(ids)
     )
     geo = cast("dict[UUID, MessageGeoRow]", await storage.message_geo_by_message_ids(ids))
+    # Author identity (handle/display) lives on the actor row for chat collectors;
+    # batch-resolve it so the reader shows the real name instead of "unknown".
+    actors = await storage.actors_by_ids([m.actor_id for m in page_rows])
     items = [
-        GroupMessage.from_message(m, labels.get(m.id), corrections.get(m.id), geo.get(m.id))
+        GroupMessage.from_message(
+            m, labels.get(m.id), corrections.get(m.id), geo.get(m.id), actors.get(m.actor_id)
+        )
         for m in page_rows
     ]
     estimated_total = (
