@@ -287,6 +287,7 @@ class InfrastructureKind(StrEnum):
     WALLET_BTC = "wallet_btc"
     WALLET_XMR = "wallet_xmr"
     WALLET_ETH = "wallet_eth"
+    WALLET_TRON = "wallet_tron"  # TRON base58 (USDT-TRC20 scam rail)
     PGP_KEY = "pgp_key"
     DOMAIN = "domain"
     ONION = "onion"
@@ -294,6 +295,8 @@ class InfrastructureKind(StrEnum):
     PHONE = "phone"
     HANDLE_OTHER_PLATFORM = "handle_other_platform"
     PASTE_URL = "paste_url"
+    SESSION = "session"  # Session messenger ID (05 + 64 hex)
+    TOX = "tox"  # Tox ID (76 hex)
 
 
 class ActorAliasKind(StrEnum):

@@ -64,6 +64,10 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "collector",
         "infrastructure_artifact",
         "actor_artifact",
+        # per-message provenance edge for extracted artifacts (post-baseline)
+        "infrastructure_artifact_mention",
+        # operator-tunable indicator extraction ruleset (post-baseline)
+        "indicator_rule",
         "group_access_artifact",
         "system_user",
         # observations
@@ -523,6 +527,70 @@ def _drop_asserted_edge_schema(conn: Any) -> None:
     tables = _filtered_tables(frozenset({"asserted_edge"}))
     if tables:
         SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+_INDICATOR_TABLES = frozenset({"infrastructure_artifact_mention", "indicator_rule"})
+
+
+def _apply_indicator_schema(conn: Any) -> None:
+    """Create ``infrastructure_artifact_mention`` + ``indicator_rule`` (pg-0007 /
+    sqlite-0010). Plain tables, no raw DDL. Created from the model for index/
+    constraint parity with the no-drift test. Main DB only."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_INDICATOR_TABLES)
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_indicator_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_indicator_schema`."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_INDICATOR_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+def seed_indicator_rules(conn: Any) -> int:
+    """Insert the vendored default indicator rules not already present; return the
+    count inserted.
+
+    Dialect-neutral (SELECT-missing-then-INSERT, no ``ON CONFLICT``) so it runs
+    identically on Postgres and SQLite. Idempotent: a re-run inserts nothing. It
+    NEVER updates an existing row, so an operator ``enabled=False`` survives a
+    later vendored-catalog upgrade.
+    """
+
+    from sqlalchemy import insert, select  # noqa: PLC0415
+
+    from eyenet.linker.indicator_rules import VENDORED_INDICATOR_RULES  # noqa: PLC0415
+    from eyenet.models._base import new_uuid7, now_utc  # noqa: PLC0415
+    from eyenet.models.indicator_rule import IndicatorRuleTable  # noqa: F401, PLC0415
+
+    tbl = SQLModel.metadata.tables["indicator_rule"]
+    existing = {(k, p) for k, p in conn.execute(select(tbl.c.kind, tbl.c.pattern)).all()}
+    now = now_utc()
+    rows = [
+        {
+            "id": new_uuid7(),
+            "kind": r["kind"],
+            "pattern": r["pattern"],
+            "fold_case": r["fold_case"],
+            "enabled": True,
+            "vendored": True,
+            "description": r["description"],
+            "created_at": now,
+            "updated_at": now,
+        }
+        for r in VENDORED_INDICATOR_RULES
+        if (r["kind"], r["pattern"]) not in existing
+    ]
+    if rows:
+        conn.execute(insert(tbl), rows)
+    return len(rows)
 
 
 # Objects that live OUTSIDE SQLModel.metadata (raw DDL). ``env.py`` excludes

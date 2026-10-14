@@ -56,7 +56,12 @@ from .identity import (
 from .incident import IncidentTable
 from .incident_label import IncidentLabelTable
 from .incident_rule import IncidentRuleTable
-from .infrastructure import ActorArtifactTable, InfrastructureArtifactTable
+from .indicator_rule import IndicatorRuleTable
+from .infrastructure import (
+    ActorArtifactTable,
+    InfrastructureArtifactMentionTable,
+    InfrastructureArtifactTable,
+)
 from .linkage import LinkageTable
 from .linkage_verifier_result import LinkageVerifierResultTable
 from .manual_crew import ManualCrewMemberTable, ManualCrewTable
@@ -120,6 +125,8 @@ __all__ = [
     "IncidentLabelTable",
     "IncidentRuleTable",
     "IncidentTable",
+    "IndicatorRuleTable",
+    "InfrastructureArtifactMentionTable",
     "InfrastructureArtifactTable",
     "JwtDenylistTable",
     "LinkageEventLogTable",

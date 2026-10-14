@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Index
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from eyenet.contracts.enums import InfrastructureKind, ResolutionState
@@ -58,4 +58,33 @@ class ActorArtifactTable(SQLModel, table=True):
     confidence: float
 
 
-__all__ = ["ActorArtifactTable", "InfrastructureArtifactTable"]
+class InfrastructureArtifactMentionTable(SQLModel, table=True):
+    """`infrastructure_artifact_mention` — provenance edge: artifact seen in a message.
+
+    One row per ``(artifact_id, message_id)``. The deduped artifact lives once in
+    ``infrastructure_artifact``; this records every message it appeared in, so the
+    actor, source, group, thread/template and timing are all reachable by joining
+    ``message`` (MessageTable). Per-mention ``ts`` feeds the temporal linkage
+    signals (cross-forum synchrony, burstiness) that need per-sighting timestamps,
+    which the actor-level ``actor_artifact`` rollup cannot provide.
+    """
+
+    __tablename__ = "infrastructure_artifact_mention"
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "message_id", name="uq_artifact_mention_edge"),
+    )
+
+    id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    artifact_id: UUID = Field(foreign_key="infrastructure_artifact.id", index=True)
+    message_id: UUID = Field(foreign_key="message.id", index=True)
+    # Char offset of the match in the message body, when known.
+    char_offset: int | None = None
+    # When the artifact was mentioned (the message's ingest/source time).
+    ts: datetime
+
+
+__all__ = [
+    "ActorArtifactTable",
+    "InfrastructureArtifactMentionTable",
+    "InfrastructureArtifactTable",
+]
