@@ -2730,6 +2730,19 @@ class BaseRepository(ABC):
         """Return InfrastructureArtifacts resolved to ``source_id``."""
 
     @abstractmethod
+    async def record_artifact_mention(
+        self,
+        *,
+        artifact_id: UUID,
+        message_id: UUID,
+        char_offset: int | None,
+        ts: datetime,
+    ) -> bool:
+        """Record a per-message provenance edge for an InfrastructureArtifact.
+        Idempotent on ``(artifact_id, message_id)``; returns whether a new edge
+        was inserted."""
+
+    @abstractmethod
     async def list_indicator_rules(
         self,
         *,

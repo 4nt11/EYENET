@@ -30,7 +30,10 @@ from eyenet.contracts.enums import (
 )
 from eyenet.contracts.infrastructure import InfrastructureArtifactRow
 from eyenet.models.access_artifact import GroupAccessArtifactTable
-from eyenet.models.infrastructure import InfrastructureArtifactTable
+from eyenet.models.infrastructure import (
+    InfrastructureArtifactMentionTable,
+    InfrastructureArtifactTable,
+)
 from eyenet.models.source_domain import SourceDomainTable
 from eyenet.util.domain import (
     BRIDGEABLE_KINDS,
@@ -179,6 +182,37 @@ class ArtifactsMixin:
             )
             result = await session.exec(stmt)
             return [_artifact_row(r) for r in list(result)]
+
+    async def record_artifact_mention(
+        self,
+        *,
+        artifact_id: UUID,
+        message_id: UUID,
+        char_offset: int | None,
+        ts: datetime,
+    ) -> bool:
+        """Record a per-message provenance edge for an artifact. Idempotent on
+        ``(artifact_id, message_id)``: a second call for the same pair is a no-op
+        returning ``False``; a new edge returns ``True``."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            existing = await session.exec(
+                select(InfrastructureArtifactMentionTable).where(
+                    InfrastructureArtifactMentionTable.artifact_id == artifact_id,
+                    InfrastructureArtifactMentionTable.message_id == message_id,
+                )
+            )
+            if existing.one_or_none() is not None:
+                return False
+            session.add(
+                InfrastructureArtifactMentionTable(
+                    artifact_id=artifact_id,
+                    message_id=message_id,
+                    char_offset=char_offset,
+                    ts=ts,
+                )
+            )
+            await session.commit()
+            return True
 
     async def add_group_access_artifact(
         self,

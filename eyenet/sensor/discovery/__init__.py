@@ -18,18 +18,21 @@ from __future__ import annotations
 
 from ._base import DiscoveryExtractor, MessageContext
 from .channel_reference_extraction import ChannelReferenceExtractor
+from .indicator_extraction import IndicatorExtractor
 from .url_extraction import UrlExtractor
 
 # The extractor registry the DiscoverySensor (E2) iterates per raw message.
 DISCOVERY_EXTRACTORS: tuple[DiscoveryExtractor, ...] = (
     UrlExtractor(),
     ChannelReferenceExtractor(),
+    IndicatorExtractor(),
 )
 
 __all__ = [
     "DISCOVERY_EXTRACTORS",
     "ChannelReferenceExtractor",
     "DiscoveryExtractor",
+    "IndicatorExtractor",
     "MessageContext",
     "UrlExtractor",
 ]

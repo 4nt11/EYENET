@@ -81,13 +81,26 @@ class UrlExtractor(DiscoveryExtractor):
 
     async def process(self, ctx: MessageContext, storage: BaseRepository) -> int:
         artifacts = _extract(ctx.text)
+        if not artifacts:
+            return 0
+        # Provenance edge back to the message (best-effort: the message is
+        # normally persisted before discovery runs, but older direct-call sites
+        # pass a context whose message is not stored).
+        message_id = await storage.get_message_id_by_evidence_ref(ctx.evidence_ref)
         for kind, value in artifacts:
-            await storage.put_infrastructure_artifact(
+            artifact = await storage.put_infrastructure_artifact(
                 kind=kind,
                 value=value,
                 first_seen_at_ingest=ctx.collected_at,
                 last_seen_at_ingest=ctx.collected_at,
             )
+            if message_id is not None:
+                await storage.record_artifact_mention(
+                    artifact_id=artifact.id,
+                    message_id=message_id,
+                    char_offset=None,
+                    ts=ctx.sent_at_source,
+                )
         return len(artifacts)
 
 
