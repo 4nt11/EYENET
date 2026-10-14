@@ -27,7 +27,7 @@ from itertools import combinations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from eyenet.linker.indicators import extract_indicators
+from eyenet.linker.indicators import extract_indicators, load_ruleset
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -122,9 +122,10 @@ async def run_infra_linker(
     scale). A live per-message indicator sensor + an ``actor_indicator`` index is
     the streaming upgrade (spec §3) when corpora outgrow a single pass.
     """
+    ruleset = await load_ruleset(storage)
     bodies_by_actor = await storage.message_bodies_by_actor()
     actor_indicators = {
-        actor: set().union(*(extract_indicators(b) for b in bodies)) if bodies else set()
+        actor: set().union(*(extract_indicators(b, ruleset) for b in bodies)) if bodies else set()
         for actor, bodies in bodies_by_actor.items()
     }
     edges = propose_infra_edges(actor_indicators, max_df=max_df, weight_floor=weight_floor)

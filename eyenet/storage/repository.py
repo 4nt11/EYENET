@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.group import GroupRow
     from eyenet.contracts.idempotency import IdempotencyRecordRow, ReserveResult
     from eyenet.contracts.identity import IdentityRow
+    from eyenet.contracts.indicator import IndicatorRuleRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
@@ -2727,6 +2728,15 @@ class BaseRepository(ABC):
         source_id: UUID,
     ) -> list[InfrastructureArtifactRow]:
         """Return InfrastructureArtifacts resolved to ``source_id``."""
+
+    @abstractmethod
+    async def list_indicator_rules(
+        self,
+        *,
+        enabled_only: bool = False,
+    ) -> list[IndicatorRuleRow]:
+        """Return indicator-extraction rules, newest first. ``enabled_only``
+        filters to the rules the extractor runs."""
 
     @abstractmethod
     async def add_group_access_artifact(

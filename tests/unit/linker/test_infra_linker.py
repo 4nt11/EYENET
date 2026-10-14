@@ -23,14 +23,13 @@ D = UUID("00000000-0000-0000-0000-0000000000d4")
 @pytest.mark.unit
 def test_extract_indicators_kinds_and_normalization() -> None:
     text = (
-        "Contact @WBpay_MM1888 or t.me/WBpay_wh — pay TRX "
+        "Contact @WBpay_MM1888 — pay TRX "
         "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t or 0xAbCdef0123456789abcdef0123456789ABCDEF01"
     )
     got = extract_indicators(text)
-    assert "handle:wbpay_mm1888" in got  # case-folded
-    assert "tme:wbpay_wh" in got
-    assert "wallet_trx:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" in got  # case preserved
-    assert "wallet_evm:0xabcdef0123456789abcdef0123456789abcdef01" in got  # folded
+    assert "handle_other_platform:wbpay_mm1888" in got  # case-folded
+    assert "wallet_tron:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" in got  # base58 case preserved
+    assert "wallet_eth:0xabcdef0123456789abcdef0123456789abcdef01" in got  # folded
 
 
 @pytest.mark.unit

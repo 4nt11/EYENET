@@ -35,9 +35,10 @@ class VendoredRule(TypedDict):
 VENDORED_INDICATOR_RULES: tuple[VendoredRule, ...] = (
     {
         "kind": "handle_other_platform",
-        "pattern": r"(?<![\w.%+-])@([A-Za-z0-9_]{4,32})\b",
+        "pattern": r"(?:\A|[^\w.%+-])@([A-Za-z0-9_]{4,32})\b",
         "fold_case": True,
-        "description": "Telegram-style @handle; lookbehind excludes email domains",
+        "description": "Telegram-style @handle; requires a non-word char (or start) "
+        "before '@' so email domains are not captured (RE2-safe, no lookbehind)",
     },
     {
         "kind": "wallet_eth",
