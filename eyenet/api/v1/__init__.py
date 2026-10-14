@@ -120,6 +120,18 @@ from eyenet.api.v1.collectors.api_stop_collector import router as collectors_sto
 from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
 from eyenet.api.v1.crews.api_crews import router as crews_router
 
+# === indicator-extraction ruleset CRUD ===
+from eyenet.api.v1.indicators.api_create_indicator_rule import (
+    router as indicator_rule_create_router,
+)
+from eyenet.api.v1.indicators.api_delete_indicator_rule import (
+    router as indicator_rule_delete_router,
+)
+from eyenet.api.v1.indicators.api_list_indicator_rules import router as indicator_rules_list_router
+from eyenet.api.v1.indicators.api_update_indicator_rule import (
+    router as indicator_rule_update_router,
+)
+
 # === documents (M10 classifier) ===
 from eyenet.api.v1.documents.api_access_document import router as documents_access_router
 from eyenet.api.v1.documents.api_get_document_manifest import (
@@ -309,6 +321,10 @@ v1_router.include_router(incident_rules_list_router)
 v1_router.include_router(incident_rule_create_router)
 v1_router.include_router(incident_rule_update_router)
 v1_router.include_router(incident_rule_delete_router)
+v1_router.include_router(indicator_rules_list_router)
+v1_router.include_router(indicator_rule_create_router)
+v1_router.include_router(indicator_rule_update_router)
+v1_router.include_router(indicator_rule_delete_router)
 
 # graph
 v1_router.include_router(graph_stats_router)

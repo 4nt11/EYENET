@@ -2752,6 +2752,38 @@ class BaseRepository(ABC):
         filters to the rules the extractor runs."""
 
     @abstractmethod
+    async def get_indicator_rule(self, rule_id: UUID) -> IndicatorRuleRow | None:
+        """Return one indicator rule by id, or ``None``."""
+
+    @abstractmethod
+    async def create_indicator_rule(
+        self,
+        *,
+        kind: str,
+        pattern: str,
+        fold_case: bool = True,
+        description: str = "",
+        enabled: bool = True,
+    ) -> IndicatorRuleRow:
+        """Create an operator-custom rule (``vendored=False``). Duplicate
+        ``(kind, pattern)`` raises IntegrityError -> 409."""
+
+    @abstractmethod
+    async def update_indicator_rule(
+        self,
+        *,
+        rule_id: UUID,
+        enabled: bool | None = None,
+        description: str | None = None,
+    ) -> IndicatorRuleRow | None:
+        """Patch ``enabled`` / ``description`` (``None`` = leave). Returns the
+        updated row or ``None`` if missing."""
+
+    @abstractmethod
+    async def delete_indicator_rule(self, rule_id: UUID) -> bool:
+        """Delete a rule; return whether a row was removed. Caller guards vendored."""
+
+    @abstractmethod
     async def add_group_access_artifact(
         self,
         *,

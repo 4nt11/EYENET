@@ -1920,6 +1920,75 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
 
+  # ── Indicator-extraction ruleset (Wazuh-style tunable rules) ────────────
+  /v1/indicators/rules:
+    get:
+      tags: [indicators]
+      operationId: indicator_rules_list
+      summary: List the indicator-extraction ruleset (vendored + custom). Requires `read:collectors`.
+      responses:
+        "200":
+          description: Indicator-extraction rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IndicatorRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [indicators]
+      operationId: indicator_rules_create
+      summary: Create an operator-custom extraction rule (RE2 pattern to InfrastructureKind). Requires `write:collectors`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IndicatorRuleCreate' }
+      responses:
+        "201":
+          description: Rule created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndicatorRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+  /v1/indicators/rules/{rule_id}:
+    patch:
+      tags: [indicators]
+      operationId: indicator_rules_update
+      summary: Enable/disable or re-describe a rule (a vendored disable survives re-seed). Requires `write:collectors`.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IndicatorRuleUpdate' }
+      responses:
+        "200":
+          description: Rule updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndicatorRuleOut' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [indicators]
+      operationId: indicator_rules_delete
+      summary: Delete an operator-custom rule (vendored rules cannot be deleted). Requires `admin:collectors`.
+      parameters:
+        - { name: rule_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Rule deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+
   # ── Attachments (API_PLAN §5.6) ─────────────────────────────────────────
   /v1/attachments:
     get:
@@ -5142,6 +5211,40 @@ components:
         pattern:     { type: string, minLength: 1, maxLength: 4096, nullable: true }
         label:       { type: string, nullable: true }
         weight:      { type: integer, nullable: true }
+        enabled:     { type: boolean, nullable: true }
+        description: { type: string, nullable: true }
+
+    IndicatorRuleOut:
+      description: An indicator-extraction rule (vendored default or operator-custom).
+      type: object
+      additionalProperties: false
+      required: [id, kind, pattern, fold_case, enabled, vendored, description, created_at, updated_at]
+      properties:
+        id:          { type: string, format: uuid }
+        kind:        { type: string, description: InfrastructureKind value the match stores under }
+        pattern:     { type: string }
+        fold_case:   { type: boolean }
+        enabled:     { type: boolean }
+        vendored:    { type: boolean }
+        description: { type: string }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+    IndicatorRuleCreate:
+      description: Create an operator-custom extraction rule (RE2 pattern to InfrastructureKind).
+      type: object
+      additionalProperties: false
+      required: [kind, pattern]
+      properties:
+        kind:        { type: string }
+        pattern:     { type: string, minLength: 1, maxLength: 512 }
+        fold_case:   { type: boolean, default: true }
+        description: { type: string, default: "" }
+        enabled:     { type: boolean, default: true }
+    IndicatorRuleUpdate:
+      description: Patch a rule (only provided fields change). Pattern/kind are immutable.
+      type: object
+      additionalProperties: false
+      properties:
         enabled:     { type: boolean, nullable: true }
         description: { type: string, nullable: true }
 
