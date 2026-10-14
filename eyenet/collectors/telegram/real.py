@@ -904,7 +904,12 @@ class TelegramCollector(CollectorSkeleton):
             if raw not in self._monitor_raw_ids:
                 continue
             found.add(raw)
-            await self._backfill_one(dialog.entity, dialog.id)
+            # The operator-triggered monitor-set sweep reconciles authorship:
+            # it re-points existing messages whose author resolves differently now
+            # (e.g. channel post_author signatures the old rule collapsed). The
+            # on-join sweep leaves reconcile off — a freshly joined group has no
+            # prior rows to correct.
+            await self._backfill_one(dialog.entity, dialog.id, reconcile=True)
 
         not_found = self._monitor_raw_ids - found
         if not_found:
@@ -914,14 +919,17 @@ class TelegramCollector(CollectorSkeleton):
                 hint="identity may not be a member, or IDs are wrong format",
             )
 
-    async def _backfill_one(self, entity: object, chat_id: int) -> None:
+    async def _backfill_one(self, entity: object, chat_id: int, *, reconcile: bool = False) -> None:
         """Replay ONE group's full history oldest-first (deduped by platform_msgid
         in _ingest_msg). Shared by the monitor-set sweep (_run_backfill) and the
         on-join auto-backfill. A FloodWait/429 on a huge group is caught and
-        logged here, never crashing live capture or the join path."""
+        logged here, never crashing live capture or the join path.
+
+        ``reconcile``: when a message already exists, re-point its author to the
+        freshly resolved actor if it differs (counted as ``reattributed``)."""
         if self._client is None:
             raise RuntimeError("backfill called before on_subscribe attached a client")
-        written = skipped = total = 0
+        written = skipped = reattributed = total = 0
         _log.info("collector.backfill_start", chat_id=chat_id, title=getattr(entity, "title", None))
         try:
             async for msg in self._client.iter_messages(entity, reverse=True, limit=None):
@@ -935,19 +943,28 @@ class TelegramCollector(CollectorSkeleton):
                     )
                 if not isinstance(msg, TLMessage) or not msg.message:
                     continue
-                ok = await self._ingest_msg(
+                outcome = await self._ingest_msg(
                     msg,
                     chat_id=chat_id,
                     sender=getattr(msg, "sender", None),
                     chat=entity,
+                    reconcile=reconcile,
                 )
-                if ok:
+                if outcome == "inserted":
                     written += 1
+                elif outcome == "reattributed":
+                    reattributed += 1
                 else:
                     skipped += 1
         except Exception as exc:
             _log.error("collector.backfill_error", chat_id=chat_id, error=str(exc))
-        _log.info("collector.backfill_done", chat_id=chat_id, written=written, skipped=skipped)
+        _log.info(
+            "collector.backfill_done",
+            chat_id=chat_id,
+            written=written,
+            skipped=skipped,
+            reattributed=reattributed,
+        )
 
     async def _ingest_msg(
         self,
@@ -956,8 +973,11 @@ class TelegramCollector(CollectorSkeleton):
         chat_id: int,
         sender: object,
         chat: object,
-    ) -> bool:
-        """Core ingest: persist + publish one message. Returns True if written.
+        reconcile: bool = False,
+    ) -> str:
+        """Core ingest: persist + publish one message. Returns the outcome:
+        ``"inserted"`` (new), ``"reattributed"`` (existing row's author corrected
+        under ``reconcile``), or ``"skipped"`` (duplicate, unchanged).
 
         Trace root: every inbound Telegram message produces one
         ``collector.ingest`` span. ``current_traceparent()`` inside the
@@ -976,7 +996,7 @@ class TelegramCollector(CollectorSkeleton):
             },
         ) as span:
             return await self._ingest_msg_inner(
-                msg, chat_id=chat_id, sender=sender, chat=chat, span=span
+                msg, chat_id=chat_id, sender=sender, chat=chat, span=span, reconcile=reconcile
             )
 
     async def _ingest_msg_inner(
@@ -987,7 +1007,8 @@ class TelegramCollector(CollectorSkeleton):
         sender: object,
         chat: object,
         span: trace.Span,
-    ) -> bool:
+        reconcile: bool = False,
+    ) -> str:
         sent_at = msg.date.replace(tzinfo=UTC) if msg.date.tzinfo is None else msg.date
         collected_at = datetime.now(tz=UTC)
 
@@ -1124,7 +1145,23 @@ class TelegramCollector(CollectorSkeleton):
                 words=len(body.split()),
                 actor_key=actor_key[:16],
             )
-        return written
+            return "inserted"
+
+        # Duplicate. In reconcile mode, correct a stale author in place (e.g. a
+        # channel post the old rule collapsed onto the broadcast id that now
+        # resolves to a post_author signature).
+        if reconcile and await self._storage.reattribute_message(
+            evidence_ref=evidence_ref,
+            actor_id=actor_id,
+            forward_origin_actor_id=actor_id if author.is_forward else None,
+        ):
+            _log.info(
+                "collector.reattributed",
+                evidence_ref=evidence_ref,
+                actor_key=actor_key[:16],
+            )
+            return "reattributed"
+        return "skipped"
 
     async def health(self) -> CollectorHealth:
         now = _time.monotonic()
@@ -1266,6 +1303,24 @@ def _authorship(msg: object, sender: object) -> _Authorship:
         handle = f"@{sender.username}" if sender.username else None
         display = " ".join(filter(None, [sender.first_name, sender.last_name])) or None
         is_bot = bool(getattr(sender, "bot", False))
+    else:
+        # Channel post with "Sign messages" enabled: the only attribution is the
+        # per-post signature (Message.post_author). Key by (channel, signature) so
+        # signed authors become distinct actors instead of all collapsing into the
+        # channel broadcast id. Still a channel author (no resolvable uid → not
+        # profiled); the channel is recorded as the relay.
+        sig = getattr(msg, "post_author", None)
+        if sig:
+            token = f"sig:{uid}:{sig}"
+            return _Authorship(
+                actor_key=_actor_key(token),
+                platform_userid=token,
+                handle=None,
+                display_name=sig,
+                is_forward=False,
+                is_channel_author=True,
+                relayed_by_platform_userid=uid,
+            )
     return _Authorship(
         actor_key=_actor_key(uid),
         platform_userid=uid,

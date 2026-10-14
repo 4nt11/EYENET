@@ -1119,6 +1119,22 @@ class BaseRepository(ABC):
         Returns True on insert, False if `evidence_ref` already exists."""
 
     @abstractmethod
+    async def reattribute_message(
+        self,
+        *,
+        evidence_ref: str,
+        actor_id: UUID,
+        forward_origin_actor_id: UUID | None = None,
+    ) -> bool:
+        """Re-point an already-stored message's author to ``actor_id``.
+
+        For reconcile-mode backfill: after an authorship-rule change (e.g. channel
+        ``post_author`` signatures), a re-sweep resolves the correct author but
+        ``put_message`` skips the existing row. This corrects it in place. Returns
+        True only if a row existed AND its ``actor_id`` actually changed; False if
+        the message is absent or already attributed to ``actor_id``."""
+
+    @abstractmethod
     async def recent_message_bodies_for_actor(
         self,
         actor_id: UUID,

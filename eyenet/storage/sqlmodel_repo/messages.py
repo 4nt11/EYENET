@@ -203,6 +203,28 @@ class MessagesMixin:
                 _log.debug("message.duplicate", evidence_ref=evidence_ref)
                 return False
 
+    async def reattribute_message(
+        self,
+        *,
+        evidence_ref: str,
+        actor_id: UUID,
+        forward_origin_actor_id: UUID | None = None,
+    ) -> bool:
+        """Re-point a stored message's author (see BaseRepository). Generic ORM
+        SELECT-then-update — no dialect SQL, so it stays in the mixin layer."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MessageTable).where(MessageTable.evidence_ref == evidence_ref)
+            )
+            row = result.first()
+            if row is None or row.actor_id == actor_id:
+                return False
+            row.actor_id = actor_id
+            row.forward_origin_actor_id = forward_origin_actor_id
+            session.add(row)
+            await session.commit()
+            return True
+
     async def recent_message_bodies_for_actor(
         self,
         actor_id: UUID,

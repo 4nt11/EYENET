@@ -135,6 +135,51 @@ async def test_put_message_with_attachment(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_reattribute_message_repoints_author(
+    storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
+) -> None:
+    # Reconcile-mode backfill: an existing message gets re-pointed to the author
+    # a corrected authorship rule now resolves (e.g. a channel post_author sig).
+    source_id, group_id, actor_id = fk_ids
+    row = _make_row(source_id, group_id, actor_id)
+    await storage.put_message(row)
+    new_actor_id, _ = await storage.upsert_actor(
+        source_id=source_id,
+        actor_key="actor:" + "b" * 64,
+        platform_userid="sig:-100:Belial01Bit",
+        handle=None,
+        display_name="Belial01Bit",
+        seen_at=_NOW,
+    )
+    changed = await storage.reattribute_message(
+        evidence_ref=row.evidence_ref, actor_id=new_actor_id
+    )
+    assert changed is True
+    _title, _gid, aid, _handle = (await storage.message_context_by_ids([row.id]))[row.id]
+    assert aid == new_actor_id  # author corrected in place, no new message row
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reattribute_message_noop_and_missing(
+    storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
+) -> None:
+    source_id, group_id, actor_id = fk_ids
+    row = _make_row(source_id, group_id, actor_id)
+    await storage.put_message(row)
+    # Same author -> no change.
+    assert (
+        await storage.reattribute_message(evidence_ref=row.evidence_ref, actor_id=actor_id) is False
+    )
+    # Unknown evidence_ref -> no change (never raises).
+    assert (
+        await storage.reattribute_message(evidence_ref="telegram:-100:999", actor_id=actor_id)
+        is False
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_message_context_by_ids_joins_group_and_actor(
     storage: BaseRepository, fk_ids: tuple[UUID, UUID, UUID]
 ) -> None:

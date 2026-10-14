@@ -11,8 +11,10 @@ from telethon.tl.types import PeerChannel, PeerUser, User
 from eyenet.collectors.telegram.real import _authorship, _group_platform_id
 
 
-def _msg(sender_id: int, fwd: object | None = None) -> SimpleNamespace:
-    return SimpleNamespace(sender_id=sender_id, fwd_from=fwd)
+def _msg(
+    sender_id: int, fwd: object | None = None, post_author: str | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(sender_id=sender_id, fwd_from=fwd, post_author=post_author)
 
 
 @pytest.mark.unit
@@ -53,6 +55,22 @@ def test_channel_broadcast_is_not_individual() -> None:
     assert a.is_channel_author
     assert not a.is_forward
     assert a.platform_userid == "-1003573398394"
+
+
+@pytest.mark.unit
+def test_signed_channel_post_credits_the_signature() -> None:
+    # "Sign messages" channel post: post_author signature attributes the post and
+    # keys a distinct actor per (channel, signature) instead of the channel id.
+    a = _authorship(_msg(-1003944752815, post_author="Belial01Bit"), SimpleNamespace())
+    assert a.is_channel_author
+    assert not a.is_forward
+    assert a.display_name == "Belial01Bit"
+    assert a.platform_userid == "sig:-1003944752815:Belial01Bit"
+    assert a.relayed_by_platform_userid == "-1003944752815"
+    # Two signatures in the same channel are two actors; the bare channel is a third.
+    b = _authorship(_msg(-1003944752815, post_author="OtherAdmin"), SimpleNamespace())
+    assert b.platform_userid != a.platform_userid
+    assert _authorship(_msg(-1003944752815), SimpleNamespace()).platform_userid == "-1003944752815"
 
 
 @pytest.mark.unit
