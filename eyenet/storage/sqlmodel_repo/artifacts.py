@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy import Select, distinct, func
 from sqlmodel import col, select
 
 from eyenet.contracts.access_artifact import GroupAccessArtifactRow
@@ -29,10 +30,13 @@ from eyenet.contracts.enums import (
 )
 from eyenet.contracts.infrastructure import InfrastructureArtifactRow
 from eyenet.models.access_artifact import GroupAccessArtifactTable
+from eyenet.models.actor import ActorTable
+from eyenet.models.group import GroupTable
 from eyenet.models.infrastructure import (
     InfrastructureArtifactMentionTable,
     InfrastructureArtifactTable,
 )
+from eyenet.models.message import MessageTable
 from eyenet.models.source_domain import SourceDomainTable
 from eyenet.util.domain import (
     BRIDGEABLE_KINDS,
@@ -68,6 +72,28 @@ def _access_row(table: GroupAccessArtifactTable) -> GroupAccessArtifactRow:
 
 def _value_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _apply_artifact_filters[SelectT: Select[Any]](
+    stmt: SelectT,
+    *,
+    kind: str | None,
+    q: str | None,
+    resolution_state: ResolutionState | None,
+) -> SelectT:
+    """Apply the shared browse filters to a SELECT over InfrastructureArtifact."""
+    a = InfrastructureArtifactTable
+    if kind is not None:
+        stmt = stmt.where(col(a.kind) == kind)
+    if resolution_state is not None:
+        stmt = stmt.where(col(a.resolution_state) == resolution_state)
+    if q:
+        # Case-insensitive substring. Generic lower()+LIKE, NOT Postgres ILIKE, so
+        # the mixin stays dialect-free. Artifact values (domains/IPs/wallets/handles)
+        # never contain LIKE metachars, so q is used unescaped. ponytail: a pg_trgm
+        # index is the postgres-side speedup if this scan ever proves slow.
+        stmt = stmt.where(func.lower(col(a.value)).like(f"%{q.lower()}%"))
+    return stmt
 
 
 async def _resolve_artifact_in_session(
@@ -212,6 +238,123 @@ class ArtifactsMixin:
             )
             await session.commit()
             return True
+
+    async def list_infrastructure_artifacts(
+        self,
+        *,
+        kind: str | None = None,
+        q: str | None = None,
+        resolution_state: ResolutionState | None = None,
+        sort: str = "recent",
+        limit: int,
+        offset: int,
+    ) -> list[tuple[InfrastructureArtifactRow, int, int, int, datetime | None, datetime | None]]:
+        """Browse artifacts with read-time mention aggregates (GROUP BY over the
+        mention edge joined to message). Generic SQL — no dialect leak."""
+        a = InfrastructureArtifactTable
+        m = InfrastructureArtifactMentionTable
+        msg = MessageTable
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                # sqlmodel's select() typed overloads cap below this arity (model +
+                # 5 aggregates); runtime is fine. Same reason list_actors returns
+                # type-erased rows.
+                select(  # type: ignore[call-overload]
+                    a,
+                    func.count(distinct(col(m.message_id))),
+                    func.count(distinct(col(msg.actor_id))),
+                    func.count(distinct(col(msg.group_id))),
+                    func.min(col(m.ts)),
+                    func.max(col(m.ts)),
+                )
+                .outerjoin(m, col(m.artifact_id) == col(a.id))
+                .outerjoin(msg, col(msg.id) == col(m.message_id))
+                .group_by(col(a.id))
+            )
+            stmt = _apply_artifact_filters(stmt, kind=kind, q=q, resolution_state=resolution_state)
+            if sort == "mentions":
+                order = [func.count(distinct(col(m.message_id))).desc(), col(a.id)]
+            elif sort == "value":
+                order = [col(a.value).asc(), col(a.id)]
+            elif sort == "first_seen":
+                order = [col(a.first_seen_at_ingest).desc(), col(a.id)]
+            else:  # recent
+                order = [col(a.last_seen_at_ingest).desc(), col(a.id)]
+            stmt = stmt.order_by(*order).limit(limit).offset(offset)
+            result = await session.exec(stmt)
+            return [
+                (_artifact_row(art), mentions, actors, groups, _coerce_utc(fts), _coerce_utc(lts))
+                for art, mentions, actors, groups, fts, lts in result
+            ]
+
+    async def count_infrastructure_artifacts(
+        self,
+        *,
+        kind: str | None = None,
+        q: str | None = None,
+        resolution_state: ResolutionState | None = None,
+    ) -> int:
+        """Count artifacts matching the list filters (capped at 10000)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = _apply_artifact_filters(
+                select(func.count()).select_from(InfrastructureArtifactTable),
+                kind=kind,
+                q=q,
+                resolution_state=resolution_state,
+            )
+            total = (await session.exec(stmt)).one()
+            return min(int(total), 10000)
+
+    async def list_artifact_mentions(
+        self,
+        artifact_id: UUID,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[
+        tuple[UUID, UUID, str | None, str | None, UUID, str | None, UUID, datetime, int | None]
+    ]:
+        """The 'mentioned by' drill-down: one row per sighting, newest first.
+        Joins the mention edge to message + actor + group for display."""
+        m = InfrastructureArtifactMentionTable
+        msg = MessageTable
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(  # type: ignore[call-overload]  # 9 columns > sqlmodel select overload arity
+                    col(msg.id),
+                    col(msg.actor_id),
+                    col(ActorTable.current_handle),
+                    col(ActorTable.current_display_name),
+                    col(msg.group_id),
+                    col(GroupTable.current_title),
+                    col(msg.source_id),
+                    col(m.ts),
+                    col(m.char_offset),
+                )
+                .select_from(m)
+                .join(msg, col(msg.id) == col(m.message_id))
+                .outerjoin(ActorTable, col(ActorTable.id) == col(msg.actor_id))
+                .outerjoin(GroupTable, col(GroupTable.id) == col(msg.group_id))
+                .where(col(m.artifact_id) == artifact_id)
+                .order_by(col(m.ts).desc(), col(msg.id))
+                .limit(limit)
+                .offset(offset)
+            )
+            result = await session.exec(stmt)
+            return [
+                (mid, aid, ah, adn, gid, gt, sid, _coerce_utc(ts), off)  # type: ignore[misc]
+                for mid, aid, ah, adn, gid, gt, sid, ts, off in result
+            ]
+
+    async def count_artifact_mentions(self, artifact_id: UUID) -> int:
+        """Count mention edges for one artifact (capped at 10000)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(func.count())
+                .select_from(InfrastructureArtifactMentionTable)
+                .where(col(InfrastructureArtifactMentionTable.artifact_id) == artifact_id)
+            )
+            return min(int((await session.exec(stmt)).one()), 10000)
 
     async def add_group_access_artifact(
         self,

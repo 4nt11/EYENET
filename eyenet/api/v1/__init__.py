@@ -29,6 +29,10 @@ from eyenet.api.v1.actors.api_list_actors import router as actors_list_router
 from eyenet.api.v1.actors.api_list_observations import router as actors_observations_router
 from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
 
+# === artifacts ===
+from eyenet.api.v1.artifacts.api_list_artifact_mentions import router as artifacts_mentions_router
+from eyenet.api.v1.artifacts.api_list_artifacts import router as artifacts_list_router
+
 # === attachments ===
 from eyenet.api.v1.attachments.api_access_file import router as attachments_access_router
 from eyenet.api.v1.attachments.api_get_manifest import router as attachments_manifest_router
@@ -120,18 +124,6 @@ from eyenet.api.v1.collectors.api_stop_collector import router as collectors_sto
 from eyenet.api.v1.collectors.api_update_collector import router as collectors_update_router
 from eyenet.api.v1.crews.api_crews import router as crews_router
 
-# === indicator-extraction ruleset CRUD ===
-from eyenet.api.v1.indicators.api_create_indicator_rule import (
-    router as indicator_rule_create_router,
-)
-from eyenet.api.v1.indicators.api_delete_indicator_rule import (
-    router as indicator_rule_delete_router,
-)
-from eyenet.api.v1.indicators.api_list_indicator_rules import router as indicator_rules_list_router
-from eyenet.api.v1.indicators.api_update_indicator_rule import (
-    router as indicator_rule_update_router,
-)
-
 # === documents (M10 classifier) ===
 from eyenet.api.v1.documents.api_access_document import router as documents_access_router
 from eyenet.api.v1.documents.api_get_document_manifest import (
@@ -183,6 +175,18 @@ from eyenet.api.v1.incidents.api_list_incident_rules import router as incident_r
 from eyenet.api.v1.incidents.api_list_incidents import router as incidents_list_router
 from eyenet.api.v1.incidents.api_set_incident_label import router as incident_relabel_router
 from eyenet.api.v1.incidents.api_update_incident_rule import router as incident_rule_update_router
+
+# === indicator-extraction ruleset CRUD ===
+from eyenet.api.v1.indicators.api_create_indicator_rule import (
+    router as indicator_rule_create_router,
+)
+from eyenet.api.v1.indicators.api_delete_indicator_rule import (
+    router as indicator_rule_delete_router,
+)
+from eyenet.api.v1.indicators.api_list_indicator_rules import router as indicator_rules_list_router
+from eyenet.api.v1.indicators.api_update_indicator_rule import (
+    router as indicator_rule_update_router,
+)
 
 # === linkages ===
 from eyenet.api.v1.linkages.api_confirm_linkage import router as linkages_confirm_router
@@ -286,6 +290,8 @@ v1_router.include_router(actors_list_router)  # /actors (literal) before /actors
 v1_router.include_router(actors_stats_router)  # /actors/stats before /actors/{id}
 v1_router.include_router(actors_get_router)
 v1_router.include_router(actors_set_assessment_router)
+v1_router.include_router(artifacts_list_router)  # /artifacts (literal) before the detail route
+v1_router.include_router(artifacts_mentions_router)
 v1_router.include_router(calibration_get_router)
 v1_router.include_router(actors_neighbors_router)
 v1_router.include_router(actors_observations_router)

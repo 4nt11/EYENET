@@ -18,6 +18,7 @@ export const NAV = [
           { slug: 'reclassify', label: 'Reclassify', href: '/cases/reclassify', built: true, desc: 'Operator-promote-only reclassification' }
         ] },
       { slug: 'actors',     label: 'Actors',     href: '/actors', built: true, desc: 'Actor detail, neighbors, observations, timeline' },
+      { slug: 'artifacts',  label: 'Artifacts',  href: '/artifacts', built: true, desc: 'Deduped infrastructure artifacts · wallets, domains, IPs, onions, handles · mention counts and who/where/when' },
       { slug: 'personas',   label: 'Personas',   href: '/personas', built: true, desc: 'Persona detail and member list' },
       { slug: 'linkages',   label: 'Linkages',   href: '/linkages', built: true, desc: 'Linkage reads and confirm/reject/suspect decisions' },
       { slug: 'incidents',  label: 'Incidents',  href: '/incidents', built: true, desc: 'Classifier detections triage feed · taxonomy heads and per-head scores' },

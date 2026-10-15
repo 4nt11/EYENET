@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         MentionKind,
         RedundancyPolicy,
         RelationKind,
+        ResolutionState,
         SensitivityTier,
         SourceDomainPatternKind,
         SourceKind,
@@ -2740,6 +2741,57 @@ class BaseRepository(ABC):
         """Record a per-message provenance edge for an InfrastructureArtifact.
         Idempotent on ``(artifact_id, message_id)``; returns whether a new edge
         was inserted."""
+
+    @abstractmethod
+    async def list_infrastructure_artifacts(
+        self,
+        *,
+        kind: str | None = None,
+        q: str | None = None,
+        resolution_state: ResolutionState | None = None,
+        sort: str = "recent",
+        limit: int,
+        offset: int,
+    ) -> list[tuple[InfrastructureArtifactRow, int, int, int, datetime | None, datetime | None]]:
+        """Browse deduped artifacts with read-time mention aggregates.
+
+        Returns ``(artifact, mention_count, distinct_actors, distinct_groups,
+        first_mention_ts, last_mention_ts)`` per row. The aggregates come from a
+        GROUP BY over the ``infrastructure_artifact_mention`` edge joined to
+        ``message`` (no denormalized counter — small-operator scale, computed on
+        read). ``q`` is a case-insensitive substring match on ``value``. ``sort``
+        is one of recent|mentions|value|first_seen."""
+
+    @abstractmethod
+    async def count_infrastructure_artifacts(
+        self,
+        *,
+        kind: str | None = None,
+        q: str | None = None,
+        resolution_state: ResolutionState | None = None,
+    ) -> int:
+        """Count artifacts matching the same filters as
+        :meth:`list_infrastructure_artifacts` (for ``?include_total=1``)."""
+
+    @abstractmethod
+    async def list_artifact_mentions(
+        self,
+        artifact_id: UUID,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[
+        tuple[UUID, UUID, str | None, str | None, UUID, str | None, UUID, datetime, int | None]
+    ]:
+        """The 'mentioned by' drill-down: one row per sighting, newest first.
+
+        Returns ``(message_id, actor_id, actor_handle, actor_display_name,
+        group_id, group_title, source_id, ts, char_offset)`` — the who / where /
+        when for every message this artifact appeared in."""
+
+    @abstractmethod
+    async def count_artifact_mentions(self, artifact_id: UUID) -> int:
+        """Count mention edges for one artifact (for ``?include_total=1``)."""
 
     @abstractmethod
     async def list_indicator_rules(
