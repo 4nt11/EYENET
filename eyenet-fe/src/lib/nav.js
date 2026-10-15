@@ -42,6 +42,13 @@ export const NAV = [
     ]
   },
   {
+    group: 'Tuning',
+    items: [
+      { slug: 'tuning-indicators', label: 'Indicator rules', href: '/tuning/indicators', built: true, desc: 'Operator-tunable indicator-extraction ruleset · wallets, handles, email, PGP, Session, Tox' },
+      { slug: 'tuning-incidents', label: 'Incident rules', href: '/tuning/incidents', built: true, desc: 'RE2 → incident-taxonomy label overrides layered on the classifier' }
+    ]
+  },
+  {
     group: 'System',
     items: [
       { slug: 'auth',       label: 'Auth & tokens', href: '/auth', built: true, desc: 'Login, refresh, PAT and stream-token minting' },
