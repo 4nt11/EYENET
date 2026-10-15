@@ -259,3 +259,72 @@ Buenos Aires · medium`. NEVER a false single zone.
 **Verifier:** circadian overlap (histogram cosine / EMD) is a cheap,
 language-agnostic linkage feature — unlike the Spanish-disabled stylometric
 simhashes. Worth adding to the linkage score once profiles carry the histograms.
+
+---
+
+## Artifact enrichment — derived/external context per artifact
+
+**Vision:** the Artifacts browser (`/artifacts`, shipped 2026-10-15) shows a
+value + its mentions (who/where/when). Enrichment adds DERIVED context so an
+operator sees what an indicator *is*, not just that it appeared:
+- IPs → geolocation, ASN/owner, reverse DNS, passive-DNS history.
+- domains → WHOIS (registrar, creation/expiry), current resolving IPs, NS.
+- wallets → chain, balance, tx count, first/last activity (block explorers).
+- onions → liveness, page title/fingerprint.
+- emails → provider, breach appearances.
+
+**Architecture (direction; confirm scope before building):**
+- EVENT-DRIVEN on the bus — NOT a one-shot CLI, and NOT in the per-message
+  extraction hot path. An `EnrichmentService(ServiceBase)` subscribes to artifact-
+  change events: extraction ALREADY publishes `entity.artifact.changed` (the
+  SearchIndexer consumes it to reindex) — enrichment is a peer consumer of the
+  same subject. A new/changed artifact triggers enrichment reactively, exactly as
+  search reindexes reactively. Extraction stays dumb + fast; enrichment is a
+  downstream service, multi-instance from day one ([[plural-services]]).
+- Passive enrichment (offline GeoIP/ASN, cached passive-DNS, our own prior
+  observations) fires automatically on the event. ACTIVE enrichment (see OPSEC
+  below) is NOT auto-fired — it enqueues an operator-approval task, opt-in per
+  artifact.
+- Initial corpus catch-up is a REPLAY onto the same subject (an `enrich-backfill`
+  that only PUBLISHES artifact events for the existing rows, never a parallel
+  one-shot that does the enrichment inline) — the service stays the single code
+  path, same way search bootstrapping feeds its indexer. One path, not two.
+- Storage: a separate `artifact_enrichment` table (artifact_id FK, provider,
+  fetched_at, data JSONB, ttl) — NOT columns on `infrastructure_artifact`. The
+  artifact row is evidence; enrichment is derived, mutable, refreshable, may be
+  absent, and is one-to-many per provider.
+- Browser: render enrichment in the artifact detail panel (new API field/route).
+
+**OPSEC — load-bearing, this is covert tradecraft:**
+- An ACTIVE lookup (WHOIS, live DNS resolve, block-explorer query, onion fetch)
+  TOUCHES or LOGS against the target's infrastructure and can tip off the actor
+  or leak our interest to a third party. Distinguish it from PASSIVE enrichment
+  (offline GeoIP/ASN DBs, cached passive-DNS, our own prior observations), which
+  is safe.
+- Passive enrichment may be automatic; ACTIVE enrichment is OPT-IN, operator-
+  triggered per artifact, audited, and routed through our egress controls (Tor /
+  the identity proxy where appropriate) — never a bulk auto-sweep that
+  fingerprints the whole corpus to external services. Respect the curl/wget block;
+  use the sanctioned HTTP path.
+- Rate-limit + cache aggressively; external providers throttle and log.
+
+**Why deferred:** needs provider choices, the egress/OPSEC model, and the storage
++ API + FE surface. Parked after the Artifacts browser. See memory
+`project_artifact_browser_and_enrichment`.
+
+## Artifact kind — two edge cases from the coded extractor build (2026-10-15)
+
+The coded domain/IP extractors shipped; these are the remaining edges, NOT the
+extraction work itself:
+- **URL-host IPs still land as DOMAIN.** `_classify_and_normalize`
+  (`url_extraction.py`) runs `normalize_host` on a URL host, and
+  `idna.encode("1.2.3.4")` succeeds, so an IP inside `http://1.2.3.4/` is stored
+  as DOMAIN (the URL pass adds it before `_find_ips`, and value_hash dedupes on
+  value → DOMAIN wins). Fix: try `ipaddress.ip_address(host)` in
+  `_classify_and_normalize` and return None so the coded IP path owns it.
+- **Retag pre-existing DOMAIN rows that are actually IPs.** Old url_extraction
+  stored URL-host IPs as DOMAIN; `artifact-backfill` WON'T fix them because
+  value_hash dedupes on value alone (the existing DOMAIN row is found, kind
+  unchanged). One-off UPDATE: DOMAIN artifacts whose `value` parses as a non-
+  unspecified `ipaddress.ip_address` → retag ipv4/ipv6, then `search-backfill`
+  (do it after the fix above so new writes are already correct).
