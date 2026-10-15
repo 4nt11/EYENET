@@ -1,22 +1,35 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """`url_extraction` discovery extractor (API_PLAN §4.12, M9.E1).
 
-Pulls hosts out of message text, normalizes them, and upserts
-InfrastructureArtifact rows. ``put_infrastructure_artifact`` runs §2.25 Path-A
+Pulls network artifacts out of message text, normalizes them, and upserts
+InfrastructureArtifact rows: domains (from URLs and bare, PSL-validated), onion
+hosts, and IPv4/IPv6 literals. ``put_infrastructure_artifact`` runs §2.25 Path-A
 bridge resolution inline, so a host that matches an existing SourceDomain is
 recorded RESOLVED and one that doesn't stays UNRESOLVED — both in the same call.
+
+Domains and IPs are CODED, not ruleset (a simple regex can't tell a real domain
+from ``report.pdf`` or an IP from a version string): domains go through
+tldextract (Public Suffix List) so only a token with a real TLD is kept; IPs go
+through a regex candidate pass then :mod:`ipaddress` validation, which also
+separates ``ipv4`` from ``ipv6`` and lets us drop non-global addresses. The
+extractor name stays ``url_extraction`` (stable cursor identity) though it now
+covers more than URLs.
 
 Normalization collapses unicode ↔ punycode duplicates: ``münchen.de`` and
 ``xn--mnchen-3ya.de`` reduce to one ``value`` (hence one ``value_hash``, hence
 one artifact). Onion hosts bypass IDNA (they're already base32 ASCII) and are
-classified ``ONION`` rather than ``DOMAIN``.
+classified ``ONION`` rather than ``DOMAIN``. IPv6 is stored compressed+lowercase
+(``2001:db8::1``) so textual variants dedup to one artifact.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+import tldextract
 
 from eyenet.contracts.enums import InfrastructureKind
 from eyenet.search_indexer.events import publish_entity_changed
@@ -40,7 +53,28 @@ _URL_RE = re.compile(r"https?://[^\s<>\"'\)\]\}]+", re.IGNORECASE)
 # scheme — threat-actor text drops these bare constantly.
 _ONION_RE = re.compile(r"\b[a-z2-7]{16}\.onion\b|\b[a-z2-7]{56}\.onion\b", re.IGNORECASE)
 
+# Bare dotted-label domain candidate. Lookbehind skips an ``@`` (that domain is
+# an email local-part's domain — the email rule owns it) and mid-label starts;
+# lookahead skips ``domain@...`` and partial tails. tldextract does the real
+# accept/reject against the PSL — this only finds plausible tokens cheaply.
+_DOMAIN_CAND = re.compile(
+    r"(?<![@\w.-])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9])(?![@\w])",
+    re.IGNORECASE,
+)
+# IPv4 candidate: four dotted octets, bounded so a 5+ part version string
+# (1.2.3.4.5) does NOT yield a spurious IP. ipaddress validates the ranges.
+_IPV4_CAND = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])")
+# IPv6 candidate: >=2 colon-separated hex groups (so a time/MAC with one colon is
+# not a candidate), optional embedded v4 tail. Broad on purpose — ipaddress is
+# the real gate; over-matched junk fails parsing and is dropped.
+_IPV6_CAND = re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f.]{0,15}(?![\w:])")
+
 _ONION_SUFFIX = ".onion"
+
+# Offline PSL: the bundled snapshot only, never a network fetch (honors the
+# curl/wget block; deterministic in the collector env) and no disk cache writes
+# (cache_dir=None — safe in a locked-down container fs). One instance, module-wide.
+_tld = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 
 
 def _classify_and_normalize(host: str) -> tuple[InfrastructureKind, str] | None:
@@ -60,6 +94,49 @@ def _classify_and_normalize(host: str) -> tuple[InfrastructureKind, str] | None:
         return None
 
 
+def _find_bare_domains(text: str) -> set[tuple[InfrastructureKind, str]]:
+    """Bare domains in free text, PSL-validated. Onion tokens are left to the
+    onion pass; a candidate with no real TLD (``report.pdf``, ``node.js``) is
+    dropped because tldextract returns an empty suffix for it."""
+    found: set[tuple[InfrastructureKind, str]] = set()
+    for m in _DOMAIN_CAND.finditer(text):
+        cand = m.group(1)
+        if cand.lower().endswith(_ONION_SUFFIX):
+            continue
+        ext = _tld(cand)
+        if not (ext.suffix and ext.domain):
+            continue  # suffix not in the Public Suffix List -> not a domain
+        try:
+            found.add((InfrastructureKind.DOMAIN, normalize_host(cand)))
+        except ValueError:
+            continue
+    return found
+
+
+def _find_ips(text: str) -> set[tuple[InfrastructureKind, str]]:
+    """IPv4/IPv6 literals, ipaddress-validated. Non-global addresses (private,
+    loopback, reserved, link-local) are dropped — they are config/example noise,
+    not operator infrastructure. ponytail: a global quad like ``1.2.3.4`` that is
+    really a version string is an accepted false positive; context-gating is a
+    later add if it proves noisy."""
+    found: set[tuple[InfrastructureKind, str]] = set()
+    for m in _IPV4_CAND.finditer(text):
+        try:
+            ip4 = ipaddress.IPv4Address(m.group(0))
+        except ValueError:
+            continue
+        if ip4.is_global:
+            found.add((InfrastructureKind.IPV4, str(ip4)))
+    for m in _IPV6_CAND.finditer(text):
+        try:
+            ip6 = ipaddress.IPv6Address(m.group(0))
+        except ValueError:
+            continue
+        if ip6.is_global:
+            found.add((InfrastructureKind.IPV6, ip6.compressed))
+    return found
+
+
 def _extract(text: str) -> set[tuple[InfrastructureKind, str]]:
     """Return the distinct ``(kind, normalized_value)`` artifacts in ``text``."""
     found: set[tuple[InfrastructureKind, str]] = set()
@@ -73,11 +150,13 @@ def _extract(text: str) -> set[tuple[InfrastructureKind, str]]:
         classified = _classify_and_normalize(match.group(0))
         if classified is not None:
             found.add(classified)
+    found |= _find_bare_domains(text)
+    found |= _find_ips(text)
     return found
 
 
 class UrlExtractor(DiscoveryExtractor):
-    """Extract host artifacts (domains + onions) from message text (M9.E1)."""
+    """Extract network artifacts (domains, onions, IPv4/IPv6) from message text."""
 
     name = "url_extraction"
 

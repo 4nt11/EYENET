@@ -20,6 +20,7 @@ from eyenet.contracts.enums import (
     SourceKind,
 )
 from eyenet.sensor.discovery import DISCOVERY_EXTRACTORS, MessageContext, UrlExtractor
+from eyenet.sensor.discovery.url_extraction import _extract, _find_bare_domains, _find_ips
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
 
@@ -104,7 +105,7 @@ async def test_onion_classified(storage: BaseRepository) -> None:
         first_seen_at_ingest=_NOW,
         last_seen_at_ingest=_NOW,
     )
-    assert again.kind is InfrastructureKind.ONION
+    assert again.kind == InfrastructureKind.ONION
 
 
 @pytest.mark.unit
@@ -116,3 +117,70 @@ async def test_no_urls_writes_nothing(storage: BaseRepository) -> None:
 async def test_duplicate_host_across_urls_collapses(storage: BaseRepository) -> None:
     text = "https://dup.example/a https://dup.example/b https://DUP.example/c"
     assert await UrlExtractor().process(_ctx(text), storage) == 1
+
+
+# --- coded extractors: IPs (regex + ipaddress) and bare domains (tldextract) ---
+
+
+@pytest.mark.unit
+def test_ipv4_global_extracted_private_skipped() -> None:
+    found = _find_ips("c2 at 8.8.8.8 and gateway 192.168.1.1 or 127.0.0.1")
+    assert found == {(InfrastructureKind.IPV4, "8.8.8.8")}
+
+
+@pytest.mark.unit
+def test_ipv4_invalid_octet_and_version_quad_rejected() -> None:
+    # 999 is out of range; a 5-part version string is not a 4-octet IP.
+    assert _find_ips("ver 1.2.3.4.5 build 999.1.1.1") == set()
+
+
+@pytest.mark.unit
+def test_ipv6_extracted_and_compressed_dedup() -> None:
+    # Expanded and compressed forms of the same global address collapse to one.
+    found = _find_ips("hit 2606:4700:4700:0000:0000:0000:0000:1111 == 2606:4700:4700::1111")
+    assert found == {(InfrastructureKind.IPV6, "2606:4700:4700::1111")}
+
+
+@pytest.mark.unit
+def test_ipv6_non_global_and_macish_skipped() -> None:
+    # ::1 loopback is non-global; a MAC-style token is not a valid IPv6.
+    assert _find_ips("loop ::1 mac 00:11:22:33:44:55 time 12:34") == set()
+
+
+@pytest.mark.unit
+def test_bare_domain_psl_validated() -> None:
+    found = _find_bare_domains("mirror on evil-shop.su today")
+    assert found == {(InfrastructureKind.DOMAIN, "evil-shop.su")}
+
+
+@pytest.mark.unit
+def test_bare_domain_rejects_non_tld_tokens() -> None:
+    # report.pdf / node.js have no real TLD; tldextract returns an empty suffix.
+    assert _find_bare_domains("open report.pdf with node.js runtime") == set()
+
+
+@pytest.mark.unit
+def test_bare_domain_skips_email_and_onion() -> None:
+    # Email domain (owned by the email rule) and onion (owned by the onion pass).
+    text = "contact user@evil.su via " + "a" * 56 + ".onion"
+    assert _find_bare_domains(text) == set()
+
+
+@pytest.mark.unit
+def test_extract_unions_domains_and_ips() -> None:
+    found = _extract("shop badplace.io at 185.220.101.5")
+    assert (InfrastructureKind.DOMAIN, "badplace.io") in found
+    assert (InfrastructureKind.IPV4, "185.220.101.5") in found
+
+
+@pytest.mark.unit
+async def test_ip_artifacts_persisted_with_open_kind(storage: BaseRepository) -> None:
+    written = await UrlExtractor().process(_ctx("c2 1.1.1.1 and ::"), storage)
+    assert written == 1  # one global IPv4; :: is unspecified (non-global), dropped
+    again = await storage.put_infrastructure_artifact(
+        kind="ipv4",
+        value="203.0.113.7",
+        first_seen_at_ingest=_NOW,
+        last_seen_at_ingest=_NOW,
+    )
+    assert again.kind == "ipv4"

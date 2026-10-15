@@ -3,8 +3,10 @@
 // seeded and can be disabled but not deleted; operator-custom rules are full CRUD.
 import { apiDelete, apiGet, apiPatch, apiPost } from './api.js';
 
-// InfrastructureKind values the backend accepts (contracts/enums.py). A custom
-// rule must store its matches under one of these; the server re-validates (422).
+// Suggested kinds for the Kind combobox (datalist). Kinds are OPEN: the server
+// accepts any lowercase slug [a-z][a-z0-9_]{1,63}, so an operator can type a
+// custom kind too. These are the vendored InfrastructureKind values an operator
+// usually wants; ipv4/ipv6 are omitted on purpose (coded extractors, not rules).
 export const INDICATOR_KINDS = [
   'handle_other_platform',
   'wallet_btc',

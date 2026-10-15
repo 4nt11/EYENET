@@ -79,6 +79,12 @@ dependencies = [
   # domain normalization — IDNA2008 + UTS46 (stdlib codec is IDNA2003 only,
   # silently NFKC-folds adversarial input and defeats homograph defense).
   "idna>=3.7",
+  # bare-domain extraction — Public Suffix List validation so a dotted token is
+  # accepted as a domain only if its suffix is a real TLD (kills file.pdf, v1.2,
+  # node.js false positives a plain dotted-label regex can't). Used OFFLINE with
+  # the bundled PSL snapshot (suffix_list_urls=()) — no network, honors the
+  # curl/wget block. See eyenet/sensor/discovery/url_extraction.py.
+  "tldextract>=5.1",
   # cli
   "typer>=0.12",
   "rich>=13.7",
