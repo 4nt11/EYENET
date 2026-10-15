@@ -1296,6 +1296,21 @@ class BaseRepository(ABC):
         ``after_id`` to continue. Empty list ends the walk."""
 
     @abstractmethod
+    async def forum_messages_for_body_repair(
+        self, *, limit: int, after_id: UUID | None = None
+    ) -> list[tuple[UUID, str, str]]:
+        """``(id, body, body_html)`` for forum posts whose stored HTML has auto-
+        linkified URLs — the body-repair candidates, keyset by id ASC. Re-parsing
+        ``body_html`` recovers URLs MyBB truncated in the anchor display text."""
+
+    @abstractmethod
+    async def update_message_bodies_bulk(
+        self, rows: list[tuple[UUID, str, int, int]]
+    ) -> int:
+        """Rewrite ``body`` + ``length_chars``/``length_words`` for each
+        ``(id, body, length_chars, length_words)``; returns the count updated."""
+
+    @abstractmethod
     async def record_forum_thread_link(
         self,
         *,

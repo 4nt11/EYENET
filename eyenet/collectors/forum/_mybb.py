@@ -264,14 +264,11 @@ def parse_thread(html: str) -> list[ParsedPost]:
         # body_html keeps EVERYTHING (evidence-faithful), captured before we strip.
         body_html = body.decode_contents() if body else ""
         # body_text feeds the classifier/stylometry, so it must be the poster's
-        # OWN words only: strip MyBB quote blocks (someone else's content). Without
-        # this, a one-word reply quoting a breach dump gets tagged as a breach dump.
-        if body is not None:
-            for quote in body.select("blockquote.mycode_quote"):
-                quote.decompose()
-            body_text = body.get_text("\n", strip=True)
-        else:
-            body_text = ""
+        # OWN words only: _extract_body_text strips MyBB quote blocks (someone
+        # else's content) and expands auto-link hrefs (so a truncated display URL
+        # keeps its full target). Without the quote strip, a one-word reply quoting
+        # a breach dump gets tagged as a breach dump.
+        body_text = _extract_body_text(body) if body is not None else ""
 
         posts.append(
             ParsedPost(
@@ -288,6 +285,42 @@ def parse_thread(html: str) -> list[ParsedPost]:
         )
 
     return posts
+
+
+def _expand_link_hrefs(node: Tag) -> None:
+    """Replace each auto-linkified URL's visible text with its ``href``.
+
+    MyBB renders a long link with TRUNCATED display text
+    (``http://nanrwa6b4z7vo5hxi64faaidcomwylxlb...uqd.onion``) while the FULL URL
+    lives in the ``href``. ``get_text()`` would keep the elided display and throw
+    the real target away — silently mangling onions, paste URLs and every long
+    link. Rewrite each ``a.mycode_url`` anchor's text to its href so the full URL
+    survives into ``body_text``. Only auto-links are touched (their text IS the
+    URL); quote/profile/mention anchors are left alone. ``body_html`` is captured
+    before this runs, so the evidence-faithful HTML keeps the original markup."""
+    for anchor in node.select("a.mycode_url[href]"):
+        href = str(anchor.get("href", "")).strip()
+        if href:
+            anchor.string = href
+
+
+def _extract_body_text(body: Tag) -> str:
+    """The poster's own words from a ``post_body`` node: drop quote blocks
+    (someone else's content), expand auto-link hrefs (recover truncated URLs),
+    then flatten to text. Shared by live parsing and the body-repair backfill."""
+    for quote in body.select("blockquote.mycode_quote"):
+        quote.decompose()
+    _expand_link_hrefs(body)
+    return body.get_text("\n", strip=True)
+
+
+def body_text_from_html(body_html: str) -> str:
+    """Re-derive ``body_text`` from a stored ``body_html`` fragment — the repair
+    path for posts collected before :func:`_extract_body_text` expanded hrefs.
+    The stored HTML already has CF emails decoded and keeps quote blocks, so this
+    mirrors the live extraction exactly."""
+    soup = BeautifulSoup(body_html, "html5lib")
+    return _extract_body_text(soup)
 
 
 def _canonical(href: str) -> str:

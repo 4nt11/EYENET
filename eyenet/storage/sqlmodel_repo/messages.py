@@ -14,7 +14,7 @@ from uuid import UUID
 
 import structlog
 from opentelemetry import trace
-from sqlalchemy import func
+from sqlalchemy import String, func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
@@ -533,6 +533,50 @@ class MessagesMixin:
                 )
                 for msg in result
             ]
+
+    async def forum_messages_for_body_repair(
+        self, *, limit: int, after_id: UUID | None = None
+    ) -> list[tuple[UUID, str, str]]:
+        """``(id, body, body_html)`` for forum posts whose stored HTML carries
+        auto-linkified URLs (``mycode_url``) — the body-repair candidates, keyset
+        by id ASC. The ``->>`` JSON text accessor is portable SQLAlchemy (compiles
+        per dialect), so this stays in the shared mixin."""
+        # return_type=String so SQLAlchemy treats the ->> result as text, not JSON
+        # (without it, the JSON result-processor tries to json.loads the HTML).
+        html = col(MessageTable.source_specific).op("->>", return_type=String())("body_html")
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(col(MessageTable.id), col(MessageTable.body), html)
+                .where(html.like("%mycode_url%"))
+                .order_by(col(MessageTable.id).asc())
+                .limit(limit)
+            )
+            if after_id is not None:
+                stmt = stmt.where(col(MessageTable.id) > after_id)
+            result = await session.exec(stmt)
+            return [(mid, body, body_html) for mid, body, body_html in result]
+
+    async def update_message_bodies_bulk(
+        self, rows: list[tuple[UUID, str, int, int]]
+    ) -> int:
+        """Rewrite ``body`` (+ recomputed ``length_chars``/``length_words``) for
+        each ``(id, body, length_chars, length_words)``. Used by the forum body
+        repair after the ``body_html`` re-parse. Returns the count updated."""
+        if not rows:
+            return 0
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            updated = 0
+            for message_id, body, length_chars, length_words in rows:
+                msg = await session.get(MessageTable, message_id)
+                if msg is None:
+                    continue
+                msg.body = body
+                msg.length_chars = length_chars
+                msg.length_words = length_words
+                session.add(msg)
+                updated += 1
+            await session.commit()
+            return updated
 
 
 __all__ = ["DiscoveryBackfillMessage", "MessagesMixin"]

@@ -560,6 +560,53 @@ def artifact_backfill(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("forum-reparse-bodies")
+def forum_reparse_bodies(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    batch: int = typer.Option(500, "--batch", help="messages per keyset page"),
+    max_messages: int | None = typer.Option(None, "--max-messages", help="stop after N"),
+) -> None:
+    """Repair forum message bodies from the retained raw HTML.
+
+    MyBB truncates a long link's DISPLAY text (`http://nanrwa...uqd.onion`) while
+    the full URL sits in the `href`; the old parser kept the elided display, so
+    onions/paste-URLs/long links were mangled in `body`. The raw `body_html` was
+    retained, so re-parse it with the href-expanding extractor and rewrite `body`
+    (+ lengths) where it changed. Idempotent. Run BEFORE re-extracting artifacts
+    so extraction sees the recovered URLs."""
+    from eyenet.collectors.forum._mybb import body_text_from_html  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        after_id: UUID | None = None
+        seen = 0
+        repaired = 0
+        try:
+            while True:
+                page = await storage.forum_messages_for_body_repair(
+                    limit=batch, after_id=after_id
+                )
+                if not page:
+                    break
+                updates: list[tuple[UUID, str, int, int]] = []
+                for message_id, body, body_html in page:
+                    after_id = message_id
+                    seen += 1
+                    fixed = body_text_from_html(body_html)
+                    if fixed != body:
+                        updates.append((message_id, fixed, len(fixed), len(fixed.split())))
+                repaired += await storage.update_message_bodies_bulk(updates)
+                typer.echo(f"  scanned {seen} forum posts, {repaired} bodies repaired")
+                if max_messages is not None and seen >= max_messages:
+                    break
+        finally:
+            await storage.close()
+        typer.echo(f"done: {seen} forum posts scanned, {repaired} bodies repaired")
+
+    asyncio.run(_main())
+
+
 @app.command("incident-classifier")
 def incident_classifier_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),

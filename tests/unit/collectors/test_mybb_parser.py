@@ -351,3 +351,30 @@ def test_thread_key_from_url_mybb_shape() -> None:
     assert thread_key_from_url("/Thread-some-leak--12345?pid=9") == "12345"
     # No numeric tid: fall back to the slug.
     assert thread_key_from_url("Thread-no-tid-slug") == "Thread-no-tid-slug"
+
+
+def test_body_text_recovers_truncated_link_href() -> None:
+    """MyBB truncates a long link's display text but keeps the full URL in href;
+    body_text must recover the full target, not the elided '...' version."""
+    from eyenet.collectors.forum._mybb import body_text_from_html
+
+    full = "nanrwa6b4z7vo5hxi64faaidcomwylxlb6bhtwcoh6dkagp3ykhm3uqd.onion"
+    html = (
+        f'<a class="mycode_url" href="http://{full}/" rel="nofollow noopener" '
+        f'target="_blank">http://nanrwa6b4z7vo5hxi64faaidcomwylxlb...uqd.onion/</a>'
+    )
+    out = body_text_from_html(html)
+    assert full in out
+    assert "..." not in out
+
+
+def test_body_text_strips_quote_blocks() -> None:
+    from eyenet.collectors.forum._mybb import body_text_from_html
+
+    html = (
+        '<blockquote class="mycode_quote">someone elses breach dump</blockquote>'
+        "my own reply"
+    )
+    out = body_text_from_html(html)
+    assert "my own reply" in out
+    assert "breach dump" not in out
