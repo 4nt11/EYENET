@@ -64,7 +64,6 @@ if TYPE_CHECKING:
         GroupKind,
         IdentityRole,
         IdentityState,
-        InfrastructureKind,
         JoinedVia,
         MentionKind,
         RedundancyPolicy,
@@ -2703,7 +2702,7 @@ class BaseRepository(ABC):
     async def put_infrastructure_artifact(
         self,
         *,
-        kind: InfrastructureKind,
+        kind: str,
         value: str,
         first_seen_at_ingest: datetime,
         last_seen_at_ingest: datetime,

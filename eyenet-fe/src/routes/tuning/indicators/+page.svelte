@@ -86,9 +86,10 @@
     {#if showAdd}
       <form class="add" onsubmit={(e) => { e.preventDefault(); if (canCreate) submitAdd(); }}>
         <label>Kind
-          <select bind:value={fKind}>
-            {#each INDICATOR_KINDS as k}<option value={k}>{k}</option>{/each}
-          </select>
+          <input type="text" list="indicator-kinds" bind:value={fKind} spellcheck="false" placeholder="wallet_btc, ipv4, discord_handle" />
+          <datalist id="indicator-kinds">
+            {#each INDICATOR_KINDS as k}<option value={k}></option>{/each}
+          </datalist>
         </label>
         <label class="grow">Pattern (RE2)
           <input type="text" bind:value={fPattern} placeholder="\bT[1-9A-HJ-NP-Za-km-z]{'{33}'}\b" spellcheck="false" />

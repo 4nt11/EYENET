@@ -9,18 +9,21 @@ skip at extraction time.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from uuid import UUID
 
 import re2
 from pydantic import Field, field_validator
 
-from eyenet.contracts.enums import InfrastructureKind
 from eyenet.contracts.indicator import IndicatorRuleRow
 
 from ._base import ApiSchema
 
-_VALID_KINDS = frozenset(k.value for k in InfrastructureKind)
+# Kinds are OPEN (a vendored InfrastructureKind value or an operator-custom one),
+# constrained only to a clean lowercase slug so the search `by_kind` facet stays
+# tidy. The fixed anchored pattern is a developer regex -> stdlib re is fine.
+_KIND_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 
 
 class IndicatorRuleOut(ApiSchema):
@@ -48,9 +51,12 @@ class IndicatorRuleCreate(ApiSchema):
 
     @field_validator("kind")
     @classmethod
-    def _kind_known(cls, v: str) -> str:
-        if v not in _VALID_KINDS:
-            raise ValueError(f"unknown kind {v!r}; must be one of {sorted(_VALID_KINDS)}")
+    def _kind_slug(cls, v: str) -> str:
+        if not _KIND_RE.match(v):
+            raise ValueError(
+                "kind must be a lowercase slug matching [a-z][a-z0-9_]{1,63} "
+                "(e.g. wallet_btc, ipv4, discord_handle)"
+            )
         return v
 
     @field_validator("pattern")

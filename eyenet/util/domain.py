@@ -178,7 +178,7 @@ def _parents_reach_overlap(a: str, b: str) -> bool:
     return a == b or _is_strict_subdomain(a, b) or _is_strict_subdomain(b, a)
 
 
-def artifact_value_to_host(kind: InfrastructureKind, value: str) -> str | None:
+def artifact_value_to_host(kind: str, value: str) -> str | None:
     """Extract the canonical host from an artifact value, or ``None`` if the
     artifact kind carries no resolvable host (MODELS §2.25 bridge resolution).
 
@@ -195,7 +195,8 @@ def artifact_value_to_host(kind: InfrastructureKind, value: str) -> str | None:
     """
     if kind not in BRIDGEABLE_KINDS:
         return None
-    if kind is InfrastructureKind.PASTE_URL:
+    # == not is: kind may now be a plain str (open kinds), not the enum singleton.
+    if kind == InfrastructureKind.PASTE_URL:
         parsed = urlparse(value)
         host = parsed.hostname or ""
         if not host:

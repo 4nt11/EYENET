@@ -24,7 +24,6 @@ from eyenet.contracts.enums import (
     ArtifactSubjectKind,
     ArtifactValidationState,
     GroupAccessKind,
-    InfrastructureKind,
     ResolutionState,
     SourceDomainPatternKind,
 )
@@ -74,7 +73,7 @@ def _value_hash(value: str) -> str:
 async def _resolve_artifact_in_session(
     session: AsyncSession,
     *,
-    kind: InfrastructureKind,
+    kind: str,
     value: str,
 ) -> tuple[ResolutionState, UUID | None]:
     """Compute (resolution_state, resolved_to_source_id) for an artifact.
@@ -109,7 +108,7 @@ class ArtifactsMixin:
     async def put_infrastructure_artifact(
         self,
         *,
-        kind: InfrastructureKind,
+        kind: str,
         value: str,
         first_seen_at_ingest: datetime,
         last_seen_at_ingest: datetime,

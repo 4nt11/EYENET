@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic import Field
 
 from ._base import DbRowBase
-from .enums import InfrastructureKind, ResolutionState
+from .enums import ResolutionState
 
 
 class InfrastructureArtifactRow(DbRowBase):
@@ -23,7 +23,7 @@ class InfrastructureArtifactRow(DbRowBase):
     operator-triggered tool (MODELS §2.25).
     """
 
-    kind: InfrastructureKind
+    kind: str = Field(description="InfrastructureKind value or operator/coded custom kind")
     value: str = Field(description="normalized form")
     value_hash: str = Field(min_length=64, max_length=64, description="sha256(value)")
     first_seen_at_ingest: datetime

@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from eyenet.bus.memory import MemoryBus
 from eyenet.bus.publisher import BusEnvelopePublisher
-from eyenet.contracts.enums import GroupKind, InfrastructureKind, SourceKind
+from eyenet.contracts.enums import GroupKind, SourceKind
 from eyenet.sensor.discovery import DISCOVERY_EXTRACTORS, IndicatorExtractor, MessageContext
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -96,12 +96,12 @@ async def test_extracts_persists_and_records_mentions(storage: BaseRepository) -
 
     # The eth wallet landed as its typed kind, deduped by value_hash.
     again = await storage.put_infrastructure_artifact(
-        kind=InfrastructureKind.WALLET_ETH,
+        kind="wallet_eth",
         value="0xabcdef0123456789abcdef0123456789abcdef01",
         first_seen_at_ingest=_NOW,
         last_seen_at_ingest=_NOW,
     )
-    assert again.kind is InfrastructureKind.WALLET_ETH
+    assert again.kind == "wallet_eth"
 
 
 async def test_dedup_artifact_across_messages_keeps_distinct_mentions(

@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from eyenet.contracts.enums import InfrastructureKind, ResolutionState
+from eyenet.contracts.enums import ResolutionState
 
 from ._base import new_uuid7
 
@@ -38,7 +38,10 @@ class InfrastructureArtifactTable(SQLModel, table=True):
     )
 
     id: UUID = Field(default_factory=new_uuid7, primary_key=True)
-    kind: InfrastructureKind = Field(index=True)
+    # Open string, not a DB enum: a vendored InfrastructureKind value OR an
+    # operator/coded custom kind (e.g. ipv4/ipv6). See the extraction-architecture
+    # memory. Stored as varchar so new kinds need no schema change.
+    kind: str = Field(index=True)
     value: str
     value_hash: str = Field(index=True)
     first_seen_at_ingest: datetime

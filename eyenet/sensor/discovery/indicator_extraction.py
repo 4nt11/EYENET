@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from eyenet.contracts.enums import InfrastructureKind
 from eyenet.linker.indicators import extract, load_ruleset
 from eyenet.search_indexer.events import publish_entity_changed
 
@@ -59,15 +58,10 @@ class IndicatorExtractor(DiscoveryExtractor):
             _log.warning("indicator_extraction.unresolved_message", evidence_ref=ctx.evidence_ref)
             return 0
         for ind in indicators:
-            try:
-                kind = InfrastructureKind(ind.kind)
-            except ValueError:
-                # A rule's kind is operator data; a value outside the enum is a
-                # misconfiguration, not a crash — log and skip this match.
-                _log.warning("indicator_extraction.unknown_kind", kind=ind.kind)
-                continue
+            # kind is an open string (a vendored InfrastructureKind value or an
+            # operator-custom kind); the artifact store takes it verbatim.
             artifact = await storage.put_infrastructure_artifact(
-                kind=kind,
+                kind=ind.kind,
                 value=ind.value_norm,
                 first_seen_at_ingest=ctx.collected_at,
                 last_seen_at_ingest=ctx.collected_at,

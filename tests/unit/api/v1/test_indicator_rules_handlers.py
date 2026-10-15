@@ -51,9 +51,16 @@ async def test_create_custom_rule(storage: BaseRepository, mkuser, audit: AuditE
     assert len(rows) == len(VENDORED_INDICATOR_RULES) + 1
 
 
-def test_create_rejects_unknown_kind() -> None:
-    with pytest.raises(ValidationError):
-        IndicatorRuleCreate(kind="not_a_kind", pattern=r"\bx\b")
+def test_create_accepts_custom_slug_kind() -> None:
+    # Kinds are OPEN now: a custom slug outside InfrastructureKind is valid.
+    assert IndicatorRuleCreate(kind="ipv4", pattern=r"\bx\b").kind == "ipv4"
+
+
+def test_create_rejects_non_slug_kind() -> None:
+    # Still constrained to a clean lowercase slug so the search facet stays tidy.
+    for bad in ("Not A Kind", "UPPER", "has space", "sym!bol", "1leading"):
+        with pytest.raises(ValidationError):
+            IndicatorRuleCreate(kind=bad, pattern=r"\bx\b")
 
 
 def test_create_rejects_lookbehind_pattern() -> None:
