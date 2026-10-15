@@ -114,25 +114,40 @@ def _find_bare_domains(text: str) -> set[tuple[InfrastructureKind, str]]:
 
 
 def _find_ips(text: str) -> set[tuple[InfrastructureKind, str]]:
-    """IPv4/IPv6 literals, ipaddress-validated. Non-global addresses (private,
-    loopback, reserved, link-local) are dropped — they are config/example noise,
-    not operator infrastructure. ponytail: a global quad like ``1.2.3.4`` that is
-    really a version string is an accepted false positive; context-gating is a
-    later add if it proves noisy."""
+    """IPv4/IPv6 literals, ipaddress-validated.
+
+    We keep NON-GLOBAL addresses (private/RFC1918, loopback, link-local,
+    reserved, documentation): an artifact is tied to the message that mentions
+    it, so a private IP in "I'm on the 192.168.12.0/24 net of ACME Corp, wts" is
+    real victim-network evidence we must not throw away. The only drop is the
+    unspecified address (``0.0.0.0`` / ``::``) — that is "no address", never an
+    indicator of a host.
+
+    CAREFUL-HANDLING CONTRACT: a non-global IP is NOT globally unique (every LAN
+    has a 192.168.1.1), so it is CONTEXT-ONLY — never use it as an identity /
+    cross-actor linkage join key, or you link ACME's actor to everyone who ever
+    named their home router. The scope is recomputable from the value
+    (``ipaddress.ip_address(value).is_global``); whatever builds artifact-based
+    actor linkage MUST filter on it. Today's infra_linker reads the RE2 ruleset,
+    not these artifacts, so no join exists yet — this contract guards the next one.
+
+    ponytail: a global quad that is really a version string (1.2.3.4) is an
+    accepted false positive; context-gating is a later add if it proves noisy.
+    """
     found: set[tuple[InfrastructureKind, str]] = set()
     for m in _IPV4_CAND.finditer(text):
         try:
             ip4 = ipaddress.IPv4Address(m.group(0))
         except ValueError:
             continue
-        if ip4.is_global:
+        if not ip4.is_unspecified:
             found.add((InfrastructureKind.IPV4, str(ip4)))
     for m in _IPV6_CAND.finditer(text):
         try:
             ip6 = ipaddress.IPv6Address(m.group(0))
         except ValueError:
             continue
-        if ip6.is_global:
+        if not ip6.is_unspecified:
             found.add((InfrastructureKind.IPV6, ip6.compressed))
     return found
 

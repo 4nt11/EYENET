@@ -291,7 +291,7 @@ class InfrastructureKind(StrEnum):
     PGP_KEY = "pgp_key"
     DOMAIN = "domain"
     ONION = "onion"
-    IPV4 = "ipv4"  # coded extractor: regex candidate + ipaddress validation (global only)
+    IPV4 = "ipv4"  # coded extractor: regex candidate + ipaddress validation (unspecified dropped)
     IPV6 = "ipv6"  # distinct kind from ipv4 — different address space, stored compressed
     EMAIL = "email"
     PHONE = "phone"

@@ -123,9 +123,14 @@ async def test_duplicate_host_across_urls_collapses(storage: BaseRepository) -> 
 
 
 @pytest.mark.unit
-def test_ipv4_global_extracted_private_skipped() -> None:
-    found = _find_ips("c2 at 8.8.8.8 and gateway 192.168.1.1 or 127.0.0.1")
-    assert found == {(InfrastructureKind.IPV4, "8.8.8.8")}
+def test_ipv4_keeps_global_and_nonglobal_drops_unspecified() -> None:
+    # Private/loopback are kept (victim-network evidence); 0.0.0.0 is "no address".
+    found = _find_ips("c2 8.8.8.8 lan 192.168.12.4 loop 127.0.0.1 bind 0.0.0.0")
+    assert found == {
+        (InfrastructureKind.IPV4, "8.8.8.8"),
+        (InfrastructureKind.IPV4, "192.168.12.4"),
+        (InfrastructureKind.IPV4, "127.0.0.1"),
+    }
 
 
 @pytest.mark.unit
@@ -142,9 +147,12 @@ def test_ipv6_extracted_and_compressed_dedup() -> None:
 
 
 @pytest.mark.unit
-def test_ipv6_non_global_and_macish_skipped() -> None:
-    # ::1 loopback is non-global; a MAC-style token is not a valid IPv6.
-    assert _find_ips("loop ::1 mac 00:11:22:33:44:55 time 12:34") == set()
+def test_ipv6_keeps_loopback_drops_unspecified_rejects_macish() -> None:
+    # ::1 loopback kept (non-global but real); :: unspecified dropped; a MAC-style
+    # token and a one-colon time are not valid IPv6 and never become candidates.
+    assert _find_ips("loop ::1 un :: mac 00:11:22:33:44:55 time 12:34") == {
+        (InfrastructureKind.IPV6, "::1")
+    }
 
 
 @pytest.mark.unit
