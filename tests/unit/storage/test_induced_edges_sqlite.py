@@ -12,8 +12,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from eyenet.contracts.enums import GroupKind, LinkageState
-from eyenet.models import MessageTable
+from eyenet.contracts.enums import GroupKind, LinkageState, ResolutionState
+from eyenet.models import (
+    InfrastructureArtifactMentionTable,
+    InfrastructureArtifactTable,
+    MessageTable,
+)
 from eyenet.models.linkage import LinkageTable
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -158,4 +162,44 @@ async def test_message_authors_maps_sender(storage: BaseRepository) -> None:
     assert got[msg.id][0] == sender
     assert got[msg.id][1] == "sender"
     assert await storage.message_authors([]) == {}
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_artifact_mention_edges_scopes_to_node_set(storage: BaseRepository) -> None:
+    """artifact->message provenance edges appear only when BOTH are result nodes."""
+    src, group_id, _a = await seed_telegram_fixture(
+        storage, [{"actor_key": "k", "platform_msgid": "0", "body": "seed"}], _NOW
+    )
+    hit = MessageTable(
+        source_id=src, group_id=group_id, actor_id=_a["k"], platform_msgid="hit",
+        evidence_ref="msg:hit", body="onion drop", length_chars=10, length_words=2,
+        sent_at_source=_NOW, ingested_at=_NOW,
+    )
+    miss = MessageTable(
+        source_id=src, group_id=group_id, actor_id=_a["k"], platform_msgid="miss",
+        evidence_ref="msg:miss", body="onion drop", length_chars=10, length_words=2,
+        sent_at_source=_NOW, ingested_at=_NOW,
+    )
+    await storage.put_message(hit, [])
+    await storage.put_message(miss, [])
+
+    art = InfrastructureArtifactTable(
+        kind="onion", value="x.onion", value_hash="h",
+        first_seen_at_ingest=_NOW, last_seen_at_ingest=_NOW,
+        resolution_state=ResolutionState.UNRESOLVED,
+    )
+    async with storage.session() as s:
+        s.add(art)
+        await s.flush()
+        s.add(InfrastructureArtifactMentionTable(artifact_id=art.id, message_id=hit.id, ts=_NOW))
+        s.add(InfrastructureArtifactMentionTable(artifact_id=art.id, message_id=miss.id, ts=_NOW))
+        await s.commit()
+
+    # Only `hit` is a result node -> only that provenance edge is induced.
+    edges = await storage.artifact_mention_edges(artifact_ids=[art.id], message_ids=[hit.id])
+    assert edges == [(art.id, hit.id)]
+    # No artifact nodes, or no message nodes -> no edges.
+    assert await storage.artifact_mention_edges(artifact_ids=[], message_ids=[hit.id]) == []
+    assert await storage.artifact_mention_edges(artifact_ids=[art.id], message_ids=[]) == []
     await storage.close()

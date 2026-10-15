@@ -1959,6 +1959,15 @@ class BaseRepository(ABC):
         """Derived edges among search-result nodes (linkage/relation/infra/persona)."""
 
     @abstractmethod
+    async def artifact_mention_edges(
+        self,
+        *,
+        artifact_ids: Collection[UUID],
+        message_ids: Collection[UUID],
+    ) -> list[tuple[UUID, UUID]]:
+        """Provenance edges (artifact_id, message_id) for co-present result nodes."""
+
+    @abstractmethod
     async def thread_op_authors(
         self, thread_ids: Collection[UUID]
     ) -> dict[UUID, tuple[UUID, str, UUID | None]]:

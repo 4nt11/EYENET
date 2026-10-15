@@ -27,6 +27,7 @@ from eyenet.models import (
     ActorArtifactTable,
     ActorRelationTable,
     ActorTable,
+    InfrastructureArtifactMentionTable,
     LinkageTable,
     MessageTable,
     PersonaMembershipTable,
@@ -424,6 +425,36 @@ class SearchMixin:
                             }
                         )
         return edges
+
+    async def artifact_mention_edges(
+        self,
+        *,
+        artifact_ids: Collection[UUID],
+        message_ids: Collection[UUID],
+    ) -> list[tuple[UUID, UUID]]:
+        """Provenance edges (artifact_id, message_id) for co-present result nodes.
+
+        The artifact->message mention is where an artifact came from; without it
+        artifact nodes float free of the corpus. Scoped to result nodes like
+        ``induced_edges`` (edges AMONG hits): an artifact whose mentioning message
+        isn't also a hit stays unconnected here. ``actor_artifact`` (the rolled-up
+        uses_infra edge) is a separate, currently-unpopulated path.
+        """
+        a_ids = list(artifact_ids)
+        m_ids = list(message_ids)
+        if not a_ids or not m_ids:
+            return []
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            rows = await session.exec(
+                select(
+                    InfrastructureArtifactMentionTable.artifact_id,
+                    InfrastructureArtifactMentionTable.message_id,
+                ).where(
+                    col(InfrastructureArtifactMentionTable.artifact_id).in_(a_ids),
+                    col(InfrastructureArtifactMentionTable.message_id).in_(m_ids),
+                )
+            )
+            return [(r[0], r[1]) for r in rows]
 
     async def thread_op_authors(
         self, thread_ids: Collection[UUID]

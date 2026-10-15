@@ -122,6 +122,17 @@ async def search_graph(
                 src_id=content_id, dst_id=actor_id, kind="authored_by", provenance="derived"
             )
         )
+    # artifact -> message provenance: where the artifact was actually seen. Without
+    # this, artifact nodes float free of the corpus (actor_artifact, the rolled-up
+    # path, is unpopulated). Scoped to co-present message hits like induced_edges.
+    for artifact_id, message_id in await storage.artifact_mention_edges(
+        artifact_ids=by_type.get("artifact", []), message_ids=by_type.get("message", [])
+    ):
+        edges.append(
+            SearchGraphEdge(
+                src_id=artifact_id, dst_id=message_id, kind="mentioned_in", provenance="derived"
+            )
+        )
     # same_handle: actors sharing an EXACT handle across sources are probably one account
     # (e.g. "LaPampaLeaks" on telegram + a forum). Derived hint, dashed — the operator
     # promotes it to a persona when confirmed; we never auto-assert identity.
