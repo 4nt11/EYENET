@@ -3,7 +3,8 @@
   import { page } from '$app/stores';
   import { boardOf, prepare, onGuardedClick } from '$lib/linkguard.js';
   import { apiGet, apiPost } from '$lib/api.js';
-  import { incidentLabelName, incidentTone, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentTone, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentLabelName } from '$lib/labels.js';
   import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
   import Badge from '$lib/components/Badge.svelte';
   import CaseAddModal from '$lib/components/CaseAddModal.svelte';

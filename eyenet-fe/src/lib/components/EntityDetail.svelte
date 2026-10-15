@@ -2,6 +2,7 @@
   import Badge from './Badge.svelte';
   import RelabelEditor from './RelabelEditor.svelte';
   import { loadMessageIncident } from '$lib/incident.svelte.js';
+  import { capitalize, ENTITY_ROUTE_LABELS } from '$lib/labels.js';
 
   // Shared detail flyout for a selected search hit — used by BOTH the table rows
   // and the graph nodes so the two lenses inspect an entity identically. `entity`
@@ -11,8 +12,6 @@
   // label. `onClose` clears the parent's selection.
   let { entity, sourceName = (x) => x ?? '', fields = null, onClose } = $props();
 
-  const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
-
   // Best-effort deep-link map: not every entity_type has a detail screen.
   const ROUTE = {
     actor: (r) => `/actors?id=${r.id}`,
@@ -21,7 +20,6 @@
     group: (r) => `/monitored-groups?id=${r.id}`,
     thread: (r) => `/monitored-groups?id=${r.id}`
   };
-  const ROUTE_LABEL = { actor: 'Actors', persona: 'Personas', case: 'Cases', group: 'Monitored groups', thread: 'Monitored groups' };
   const HAS_HANDLE = new Set(['message', 'actor', 'thread', 'mention']);
 
   const fmtVal = (v) => (Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v));
@@ -41,7 +39,7 @@
 
 <div class="detail">
   <div class="detail-head">
-    <Badge tone="high">{cap(entity.entityType)}</Badge>
+    <Badge tone="high">{capitalize(entity.entityType)}</Badge>
     <button class="detail-close" onclick={onClose} aria-label="Close detail">×</button>
   </div>
   <div class="dtitle">{entity.title || '—'}</div>
@@ -74,7 +72,7 @@
   {/if}
 
   {#if ROUTE[entity.entityType]}
-    <a class="dopen" href={ROUTE[entity.entityType](entity)}>Open in {ROUTE_LABEL[entity.entityType]} →</a>
+    <a class="dopen" href={ROUTE[entity.entityType](entity)}>Open in {ENTITY_ROUTE_LABELS[entity.entityType]} →</a>
   {:else}
     <p class="dnote">No dedicated detail screen for this entity type.</p>
   {/if}

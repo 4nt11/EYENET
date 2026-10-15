@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import Button from './Button.svelte';
   import Dropdown from './Dropdown.svelte';
+  import { capitalize } from '$lib/labels.js';
 
   // Edge edit modal, two modes:
   //   mode="connect" — map a new asserted edge A→B. Pick a `kind` (preset or
@@ -56,8 +57,7 @@
     reasonEl?.focus();
   }
 
-  const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
-  const nodeLabel = (n) => (n ? `${cap(n.entityType)} · ${n.title || n.id}` : '—');
+  const nodeLabel = (n) => (n ? `${capitalize(n.entityType)} · ${n.title || n.id}` : '—');
 
   let resolvedKind = $derived(kindSel === 'other' ? kindOther.trim() : kindSel);
   let canSubmit = $derived(

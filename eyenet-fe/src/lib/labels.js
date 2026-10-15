@@ -46,3 +46,57 @@ export const RESOLUTION_STATE_LABELS = {
   NOT_APPLICABLE: 'N/A'
 };
 export const resolutionLabel = (r) => label(RESOLUTION_STATE_LABELS, r);
+
+// --- Incident taxonomy leaf names (the ordered list, group hierarchy and tones
+// stay in lib/data.js — those are taxonomy structure + color, not translation).
+// Names track development/incident-taxonomy-hierarchy.md. ---
+export const INCIDENT_LABEL_NAMES = {
+  defacement: 'Defacement',
+  ddos_attack: 'DDoS Attack',
+  intrusion: 'Intrusion',
+  breach_dump: 'Breach Dump',
+  credentials: 'Credentials',
+  stealer_logs: 'Stealer Logs',
+  iab_corporate: 'Initial Access Broker',
+  crimeware_tooling: 'Crimeware Tooling',
+  crime_aas: 'Crime-as-a-Service',
+  telecom_abuse: 'Telecom Abuse',
+  phishing_delivery: 'Phishing Delivery',
+  fraud_ops: 'Fraud Operations',
+  infra_resale: 'Infrastructure Resale',
+  recruiting: 'Recruiting',
+  alliance: 'Alliance',
+  crew_ops: 'Crew Operations'
+};
+export const incidentLabelName = (l) => label(INCIDENT_LABEL_NAMES, l);
+
+// --- Threat tier -> severity word ---
+export const THREAT_LABELS = {
+  critical: 'Severe',
+  high: 'Elevated',
+  medium: 'Moderate',
+  low: 'Guarded'
+};
+export const threatLabel = (t) => label(THREAT_LABELS, t);
+
+// --- Entity type -> nav section it opens in ---
+export const ENTITY_ROUTE_LABELS = {
+  actor: 'Actors',
+  persona: 'Personas',
+  case: 'Cases',
+  group: 'Monitored groups',
+  thread: 'Monitored groups'
+};
+
+// --- Group kind -> short display word (reader) ---
+export const GROUP_KIND_LABELS = {
+  forum_category: 'forum',
+  forum_thread: 'thread',
+  channel: 'channel',
+  chat: 'chat',
+  matrix_room: 'room'
+};
+export const groupKindLabel = (k) => label(GROUP_KIND_LABELS, k);
+
+/** Capitalize the first letter only (e.g. an entity type: actor -> Actor). */
+export const capitalize = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);

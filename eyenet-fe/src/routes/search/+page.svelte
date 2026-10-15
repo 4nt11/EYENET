@@ -20,9 +20,9 @@
     graphCtx, runGraph, assertEdge, retractEdge, graphSourceName,
     mergeActors, splitActorFromPersona, mergePersonas, addActorToCase, loadGraphCases, createCase
   } from '$lib/searchGraph.svelte.js';
+  import { capitalize } from '$lib/labels.js';
 
-  const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
-  const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'];
+  const ETYPES =['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'];
 
   // ── View toggle (Table | Graph), persisted per-viewer (localStorage guarded).
   const VIEW_KEY = 'eyenet_search_view';
@@ -128,7 +128,7 @@
       const row = {
         id: it.id,
         entityType: it.entityType,
-        type: cap(it.entityType),
+        type: capitalize(it.entityType),
         title: it.title || '—',
         sourceName: sourceName(it.sourceId),
         date: fmtDate(it.date),
@@ -269,7 +269,7 @@
     ctxMenu = null; // mutually exclusive with the facet menu
     const items = [{ label: 'Inspect', run: () => { closeGraphMenu(); selNode = node; } }];
     if (node.entityType === 'actor') items.push({ label: 'Add to case ▸', run: () => openCasePicker(pos, [node.id]) });
-    graphMenu = { x: pos.x, y: pos.y, title: cap(node.entityType), items };
+    graphMenu = { x: pos.x, y: pos.y, title: capitalize(node.entityType), items };
   }
 </script>
 
@@ -309,7 +309,7 @@
           <div class="facets">
             <button class="chip" class:active={!searchCtx.typeFilter} onclick={() => setTypeFilter(searchCtx.typeFilter)}>All types</button>
             {#each typeChips as [t, n]}
-              <button class="chip" class:active={searchCtx.typeFilter === t} onclick={() => setTypeFilter(t)}>{cap(t)} <span class="n">{n}</span></button>
+              <button class="chip" class:active={searchCtx.typeFilter === t} onclick={() => setTypeFilter(t)}>{capitalize(t)} <span class="n">{n}</span></button>
             {/each}
           </div>
         {/if}
@@ -456,7 +456,7 @@
                     <div class="ctxlabel">Type</div>
                     <button class="ctxitem" class:active={!searchCtx.typeFilter} onclick={() => pickType(searchCtx.typeFilter)}>All types</button>
                     {#each typeChips as [t, n]}
-                      <button class="ctxitem" class:active={searchCtx.typeFilter === t} onclick={() => pickType(t)}>{cap(t)} <span class="n">{n}</span></button>
+                      <button class="ctxitem" class:active={searchCtx.typeFilter === t} onclick={() => pickType(t)}>{capitalize(t)} <span class="n">{n}</span></button>
                     {/each}
                   </div>
                 {/if}

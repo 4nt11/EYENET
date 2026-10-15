@@ -3,7 +3,8 @@
   import { page } from '$app/stores';
   import { boardOf, prepare, onGuardedClick } from '$lib/linkguard.js';
   import { apiGet } from '$lib/api.js';
-  import { incidentLabelName, incidentTone } from '$lib/data.js';
+  import { incidentTone } from '$lib/data.js';
+  import { incidentLabelName } from '$lib/labels.js';
   import RelabelEditor from '$lib/components/RelabelEditor.svelte';
   import DossierLayout from '$lib/components/DossierLayout.svelte';
   import Badge from '$lib/components/Badge.svelte';

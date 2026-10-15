@@ -5,7 +5,8 @@
   import Badge from '$lib/components/Badge.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { incidentTone, incidentLabelName, INCIDENT_LABELS, INCIDENT_LABEL_GROUPS } from '$lib/data.js';
+  import { incidentTone, INCIDENT_LABELS, INCIDENT_LABEL_GROUPS } from '$lib/data.js';
+  import { incidentLabelName } from '$lib/labels.js';
   import {
     incidentCtx,
     incidentEdit,

@@ -5,7 +5,8 @@
   // Shared by the full reader and the category reader so it can't diverge; the
   // API call + submit state live in incident.svelte.js.
   import Badge from './Badge.svelte';
-  import { incidentLabelName, incidentTone, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentTone, INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentLabelName } from '$lib/labels.js';
   import { relabelIncident, incidentEdit } from '$lib/incident.svelte.js';
 
   let { message } = $props();

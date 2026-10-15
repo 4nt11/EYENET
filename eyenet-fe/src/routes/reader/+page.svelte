@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { apiGet } from '$lib/api.js';
+  import { GROUP_KIND_LABELS } from '$lib/labels.js';
 
   // General reader entry: every monitored conversation, any source. Forum
   // categories open to their thread list; chats/channels/rooms open straight to
@@ -32,14 +33,7 @@
     loaded = true;
   });
 
-  const KIND = {
-    forum_category: 'forum',
-    forum_thread: 'thread',
-    channel: 'channel',
-    chat: 'chat',
-    matrix_room: 'room'
-  };
-  const kindLabel = (k) => KIND[k] ?? k ?? '—';
+  const kindLabel = (k) => GROUP_KIND_LABELS[k] ?? k ?? '—';
   const href = (g) =>
     g.kind === 'forum_category' ? `/reader/category/${g.group_id}` : `/reader/group/${g.group_id}`;
 

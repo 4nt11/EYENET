@@ -144,7 +144,6 @@ export const COLLECTOR_COLUMNS = [
 // "namespace:name"), NeighborEdge, the four Linker simhash comparators, and the
 // Verifier (NCD = compression_distance, GI = general_impostors). Language is the
 // ISO 639-1 code carried in Observation.source (#es / #en), NOT a BCP-47 xx-YY.
-export const THREAT_LABEL = { critical: 'Severe', high: 'Elevated', medium: 'Moderate', low: 'Guarded' };
 
 export const ACTORS = [
   {
@@ -391,29 +390,9 @@ export const INCIDENT_LABELS = [
   'recruiting', 'alliance', 'crew_ops',
 ];
 
-// Human display names for the taxonomy leaves — the UI never shows raw slugs. Names track
-// development/incident-taxonomy-hierarchy.md (business-model leaf set).
-export const INCIDENT_LABEL_NAMES = {
-  defacement: 'Defacement',
-  ddos_attack: 'DDoS Attack',
-  intrusion: 'Intrusion',
-  breach_dump: 'Breach Dump',
-  credentials: 'Credentials',
-  stealer_logs: 'Stealer Logs',
-  iab_corporate: 'Initial Access Broker',
-  crimeware_tooling: 'Crimeware Tooling',
-  crime_aas: 'Crime-as-a-Service',
-  telecom_abuse: 'Telecom Abuse',
-  phishing_delivery: 'Phishing Delivery',
-  fraud_ops: 'Fraud Operations',
-  infra_resale: 'Infrastructure Resale',
-  recruiting: 'Recruiting',
-  alliance: 'Alliance',
-  crew_ops: 'Crew Operations'
-};
-// Fallback: title-case an unknown slug so a newly added leaf never renders blank or raw.
-export const incidentLabelName = (l) =>
-  INCIDENT_LABEL_NAMES[l] ?? (l ? l.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : l);
+// Leaf display names + the incidentLabelName() helper moved to lib/labels.js
+// (the single machine->human label dictionary). The ordered list above and the
+// group hierarchy + tones below stay here — taxonomy structure, not translation.
 
 // Parent business-model buckets — groups the label filter under readable headers
 // (development/incident-taxonomy-hierarchy.md). Leaf order mirrors INCIDENT_LABELS.
