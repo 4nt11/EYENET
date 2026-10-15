@@ -82,5 +82,6 @@ async def search_global(
         estimated_total=estimated_total,
         by_type=facets["by_type"],
         by_source=facets["by_source"],
+        by_kind=facets["by_kind"],
         source_labels=source_labels,
     )

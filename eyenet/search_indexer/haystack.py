@@ -227,6 +227,7 @@ def artifact_doc(a: InfrastructureArtifactTable) -> dict[str, Any]:
         "entity_id": a.id,
         "source_id": a.resolved_to_source_id,
         "status": None,
+        "kind": kind,  # InfrastructureKind — the first-class sub-type facet
         "title": a.value,
         "subtitle": kind,
         "haystack": clean(a.value, kind),

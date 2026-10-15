@@ -478,9 +478,10 @@ class SQLiteRepository(SQLModelRepository):
             r = self._coerce(dict(raw))
             r["id"] = new_uuid7()
             values.append(r)
-        # search_document is 10 columns; SQLite caps bind variables at 999
-        # (SQLITE_MAX_VARIABLE_NUMBER), so one multi-row INSERT is chunked to stay
-        # under it (90 * 10 = 900). All chunks commit in one transaction.
+        # search_document is 11 columns + id = 12 bound values/row; SQLite caps
+        # bind variables at 999 (SQLITE_MAX_VARIABLE_NUMBER), so one multi-row
+        # INSERT is chunked to stay under it (80 * 12 = 960). All chunks commit in
+        # one transaction.
         async with safe_session(self._session_factory) as session:
             for i in range(0, len(values), _SEARCH_BULK_CHUNK):
                 stmt = sqlite_insert(SearchDocumentTable).values(values[i : i + _SEARCH_BULK_CHUNK])
@@ -489,6 +490,7 @@ class SQLiteRepository(SQLModelRepository):
                     set_={
                         "source_id": stmt.excluded.source_id,
                         "status": stmt.excluded.status,
+                        "kind": stmt.excluded.kind,
                         "title": stmt.excluded.title,
                         "subtitle": stmt.excluded.subtitle,
                         "haystack": stmt.excluded.haystack,

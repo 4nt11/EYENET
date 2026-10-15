@@ -29,6 +29,10 @@ class SearchHit(ApiSchema):
         default=None,
         description="Lifecycle facet within a type (group: candidate/joined/monitored/known).",
     )
+    kind: str | None = Field(
+        default=None,
+        description="Sub-type facet within a type (artifact: wallet_btc/pgp_key/email/...).",
+    )
     title: str
     subtitle: str | None = None
     fields: dict[str, Any] = Field(
@@ -44,6 +48,7 @@ class SearchHit(ApiSchema):
             entity_id=doc.entity_id,
             source_id=doc.source_id,
             status=doc.status,
+            kind=doc.kind,
             title=doc.title,
             subtitle=doc.subtitle,
             fields=doc.fields or {},
@@ -60,6 +65,11 @@ class CursorPageSearchHit(CursorPage[SearchHit]):
     by_source: dict[str, int] = Field(
         default_factory=dict,
         description="Count of matches per source_id ('' = no single source).",
+    )
+    by_kind: dict[str, int] = Field(
+        default_factory=dict,
+        description="Count of matches per sub-type kind (artifact InfrastructureKind); "
+        "entities with no kind are omitted.",
     )
     source_labels: dict[str, str] = Field(
         default_factory=dict,

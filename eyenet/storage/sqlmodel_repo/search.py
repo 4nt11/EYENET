@@ -71,6 +71,7 @@ _COLUMNS = (
     "entity_id",
     "source_id",
     "status",
+    "kind",
     "title",
     "subtitle",
     "haystack",
@@ -101,7 +102,7 @@ class SearchMixin:
         the JSON ``fields.<key>`` path is a dialect seam — overridden per backend."""
         if target == "haystack":
             return col(SearchDocumentTable.haystack)
-        if target in ("title", "status", "handles", "subtitle"):
+        if target in ("title", "status", "kind", "handles", "subtitle"):
             return col(getattr(SearchDocumentTable, target))
         raise NotImplementedError(f"field target {target!r} needs a backend override")
 
@@ -254,7 +255,18 @@ class SearchMixin:
                 (str(k) if k is not None else ""): int(v)
                 for k, v in (await session.exec(s_stmt)).all()
             }
-        return {"by_type": by_type, "by_source": by_source}
+
+            # by_kind: apply types + status + source; a NULL kind (entities with
+            # no sub-kind) is dropped so the facet lists only real kinds.
+            k_stmt = (
+                select(col(SearchDocumentTable.kind), func.count())
+                .where(self._compile_query(q))
+                .where(col(SearchDocumentTable.kind).is_not(None))
+                .group_by(col(SearchDocumentTable.kind))
+            )
+            k_stmt = self._apply_filters(k_stmt, types=types, status=status, source_id=source_id)
+            by_kind = {str(k): int(v) for k, v in (await session.exec(k_stmt)).all()}
+        return {"by_type": by_type, "by_source": by_source, "by_kind": by_kind}
 
     # ---- writes (generic SELECT-then-add; backends override bulk) ----------
     @staticmethod

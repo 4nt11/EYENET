@@ -41,6 +41,11 @@ class SearchDocumentTable(SQLModel, table=True):
     # Lifecycle facet within a type (group: candidate/joined/monitored/known;
     # linkage/case status; ...). NULL when the type has no lifecycle.
     status: str | None = Field(default=None, index=True)
+    # Sub-type discriminator within a type, orthogonal to lifecycle: for an
+    # artifact this is the InfrastructureKind (wallet_btc/pgp_key/email/...), so
+    # the search API can facet + filter "which kind of artifact". NULL when the
+    # type has no sub-kind.
+    kind: str | None = Field(default=None, index=True)
     # Display label + secondary line for the result row.
     title: str = Field(default="")
     subtitle: str | None = None

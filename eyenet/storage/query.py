@@ -91,6 +91,7 @@ FIELD_REGISTRY: dict[str, FieldSpec] = {
     "forum.thread.author": FieldSpec("thread", "fields.thread_author", "exact"),
     "actor.handle": FieldSpec("actor", "handles", "exact"),
     "artifact.value": FieldSpec("artifact", "title", "text"),
+    "artifact.kind": FieldSpec("artifact", "kind", "exact"),
     "case.title": FieldSpec("case", "title", "text"),
     "document.text": FieldSpec("document", "haystack", "text"),
 }
