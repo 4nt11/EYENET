@@ -2794,6 +2794,28 @@ class BaseRepository(ABC):
         """Count mention edges for one artifact (for ``?include_total=1``)."""
 
     @abstractmethod
+    async def put_infrastructure_artifacts_bulk(
+        self,
+        rows: list[tuple[str, str, datetime, datetime]],
+    ) -> dict[str, UUID]:
+        """Bulk-upsert artifacts (the backfill fast path). Each row is
+        ``(kind, value, first_seen_at_ingest, last_seen_at_ingest)``. Dedupes by
+        value_hash, runs §2.25 Path-A resolution for the whole batch against a
+        single SourceDomain fetch, inserts only the new ones in one transaction,
+        and returns ``value_hash -> id`` for every input value (existing + new).
+        Existing artifacts keep their timestamps/resolution. Generic ORM — the
+        per-row :meth:`put_infrastructure_artifact` stays the live path."""
+
+    @abstractmethod
+    async def record_artifact_mentions_bulk(
+        self,
+        rows: list[tuple[UUID, UUID, int | None, datetime]],
+    ) -> int:
+        """Bulk-insert mention edges, skipping ``(artifact_id, message_id)`` pairs
+        that already exist (and duplicates within the batch). Each row is
+        ``(artifact_id, message_id, char_offset, ts)``. Returns the count inserted."""
+
+    @abstractmethod
     async def list_indicator_rules(
         self,
         *,

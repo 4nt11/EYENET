@@ -148,6 +148,36 @@ async def test_mentions_drilldown(storage: BaseRepository) -> None:
     assert await storage.count_artifact_mentions(x.id) == 2
 
 
+async def test_bulk_put_and_mentions(storage: BaseRepository) -> None:
+    from eyenet.storage.sqlmodel_repo.artifacts import _value_hash
+
+    await _seed(storage)
+    rows = [
+        ("domain", "evil.su", _NOW, _NOW),
+        ("domain", "evil.su", _NOW, _NOW),  # duplicate value -> one artifact
+        ("ipv4", "8.8.8.8", _NOW, _NOW),
+    ]
+    ids = await storage.put_infrastructure_artifacts_bulk(rows)
+    assert len(ids) == 2  # deduped by value_hash
+    assert await storage.put_infrastructure_artifacts_bulk(rows) == ids  # idempotent
+
+    ip = await storage.get_infrastructure_artifact(ids[_value_hash("8.8.8.8")])
+    assert ip is not None
+    assert ip.resolution_state is ResolutionState.NOT_APPLICABLE  # IPs don't bridge
+
+    dom_id = ids[_value_hash("evil.su")]
+    m1 = await _mid(storage, 1)
+    n = await storage.record_artifact_mentions_bulk(
+        [(dom_id, m1, None, _NOW), (dom_id, m1, None, _NOW)]  # dup within batch
+    )
+    assert n == 1
+    assert await storage.record_artifact_mentions_bulk([(dom_id, m1, None, _NOW)]) == 0  # exists
+
+    browsed = await storage.list_infrastructure_artifacts(q="evil", limit=10, offset=0)
+    _art, mentions, *_ = browsed[0]
+    assert mentions == 1
+
+
 async def test_resolution_state_filter(storage: BaseRepository) -> None:
     await _seed(storage)
     await _put(storage, "ipv4", "8.8.8.8")  # NOT_APPLICABLE (IPs don't bridge)

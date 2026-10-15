@@ -490,6 +490,76 @@ def discovery_backfill(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("artifact-backfill")
+def artifact_backfill(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    batch: int = typer.Option(1000, "--batch", help="messages per keyset page"),
+    max_messages: int | None = typer.Option(None, "--max-messages", help="stop after N messages"),
+) -> None:
+    """Fast backfill of infrastructure artifacts + mentions over the stored corpus.
+
+    Mines domains/onions/IPv4/IPv6 (url_extraction) and wallets/handles/email/etc
+    (the indicator ruleset) per page and BULK-writes them: one SELECT + one INSERT
+    per page instead of the per-match SELECT/INSERT/COMMIT the generic
+    discovery-backfill does. Idempotent (dedupes on value_hash + the mention edge),
+    so safe to re-run. Does NOT run the other discovery extractors (group
+    candidates) — use `discovery-backfill` for those."""
+    from eyenet.linker.indicators import extract as indicator_extract, load_ruleset  # noqa: PLC0415
+    from eyenet.sensor.discovery.url_extraction import _extract as url_extract  # noqa: PLC0415
+    from eyenet.storage.sqlmodel_repo.artifacts import _value_hash  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        ruleset = await load_ruleset(storage)
+        after_id: UUID | None = None
+        seen = 0
+        mentions_written = 0
+        try:
+            while True:
+                page = cast(
+                    "list[DiscoveryBackfillMessage]",
+                    await storage.messages_for_discovery_backfill(limit=batch, after_id=after_id),
+                )
+                if not page:
+                    break
+                art_rows: list[tuple[str, str, datetime, datetime]] = []
+                mention_src: list[tuple[str, UUID, int | None, datetime]] = []
+                for m in page:
+                    after_id = m.id
+                    seen += 1
+                    body = m.body or ""
+                    # One artifact per distinct value (value_hash dedupes on value
+                    # alone, matching put_infrastructure_artifact), so collect the
+                    # per-message mention by value, keeping the first char offset.
+                    found: dict[str, int | None] = {}
+                    for kind, value in url_extract(body):
+                        art_rows.append((str(kind), value, m.ingested_at, m.ingested_at))
+                        found.setdefault(value, None)
+                    for ind in indicator_extract(body, ruleset):
+                        art_rows.append((ind.kind, ind.value_norm, m.ingested_at, m.ingested_at))
+                        found.setdefault(ind.value_norm, ind.char_offset)
+                    for value, offset in found.items():
+                        mention_src.append((value, m.id, offset, m.sent_at_source))
+                    if max_messages is not None and seen >= max_messages:
+                        break
+                id_by_hash = await storage.put_infrastructure_artifacts_bulk(art_rows)
+                mention_rows = [
+                    (id_by_hash[_value_hash(v)], mid, off, ts)
+                    for v, mid, off, ts in mention_src
+                    if _value_hash(v) in id_by_hash
+                ]
+                mentions_written += await storage.record_artifact_mentions_bulk(mention_rows)
+                typer.echo(f"  scanned {seen} messages, {mentions_written} mentions written")
+                if max_messages is not None and seen >= max_messages:
+                    break
+        finally:
+            await storage.close()
+        typer.echo(f"done: {seen} messages scanned, {mentions_written} mentions written")
+
+    asyncio.run(_main())
+
+
 @app.command("incident-classifier")
 def incident_classifier_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),

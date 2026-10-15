@@ -128,6 +128,26 @@ async def _resolve_artifact_in_session(
     return ResolutionState.AMBIGUOUS, None
 
 
+def _resolve_against(
+    domains: list[SourceDomainTable],
+    kind: str,
+    value: str,
+) -> tuple[ResolutionState, UUID | None]:
+    """Pure §2.25 resolution against an already-fetched SourceDomain list — the
+    batch form of :func:`_resolve_artifact_in_session` (no per-artifact SELECT)."""
+    if kind not in BRIDGEABLE_KINDS:
+        return ResolutionState.NOT_APPLICABLE, None
+    host = artifact_value_to_host(kind, value)
+    if host is None:
+        return ResolutionState.UNRESOLVED, None
+    matches = [d for d in domains if pattern_matches_host(d.pattern, d.pattern_kind, host)]
+    if not matches:
+        return ResolutionState.UNRESOLVED, None
+    if len({d.source_id for d in matches}) == 1:
+        return ResolutionState.RESOLVED, matches[0].source_id
+    return ResolutionState.AMBIGUOUS, None
+
+
 class ArtifactsMixin:
     """Infrastructure + access artifact CRUD with inline bridge resolution."""
 
@@ -355,6 +375,95 @@ class ArtifactsMixin:
                 .where(col(InfrastructureArtifactMentionTable.artifact_id) == artifact_id)
             )
             return min(int((await session.exec(stmt)).one()), 10000)
+
+    async def put_infrastructure_artifacts_bulk(
+        self,
+        rows: list[tuple[str, str, datetime, datetime]],
+    ) -> dict[str, UUID]:
+        """Bulk-upsert artifacts: one SELECT for existing hashes, one SourceDomain
+        fetch for batch resolution, one INSERT for the new rows. Returns
+        value_hash -> id for every input value."""
+        if not rows:
+            return {}
+        # Dedupe by value_hash; first occurrence wins (times are backfill ingest).
+        by_hash: dict[str, tuple[str, str, datetime, datetime]] = {}
+        for kind, value, first_seen, last_seen in rows:
+            by_hash.setdefault(_value_hash(value), (kind, value, first_seen, last_seen))
+
+        ids: dict[str, UUID] = {}
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            hashes = list(by_hash)
+            existing = await session.exec(
+                select(InfrastructureArtifactTable).where(
+                    col(InfrastructureArtifactTable.value_hash).in_(hashes)
+                )
+            )
+            for art in existing:
+                ids[art.value_hash] = art.id
+
+            domains = list(
+                await session.exec(
+                    select(SourceDomainTable).where(col(SourceDomainTable.removed_at).is_(None))
+                )
+            )
+            fresh: list[tuple[str, UUID]] = []
+            for h, (kind, value, first_seen, last_seen) in by_hash.items():
+                if h in ids:
+                    continue
+                state, resolved_to = _resolve_against(domains, kind, value)
+                row = InfrastructureArtifactTable(
+                    kind=kind,
+                    value=value,
+                    value_hash=h,
+                    first_seen_at_ingest=first_seen,
+                    last_seen_at_ingest=last_seen,
+                    resolution_state=state,
+                    resolved_to_source_id=resolved_to,
+                )
+                session.add(row)
+                fresh.append((h, row.id))  # id is set at construct (uuid7 default)
+            await session.commit()
+        ids.update(fresh)
+        return ids
+
+    async def record_artifact_mentions_bulk(
+        self,
+        rows: list[tuple[UUID, UUID, int | None, datetime]],
+    ) -> int:
+        """Bulk-insert mention edges, skipping pairs already stored or duplicated
+        within the batch. One SELECT for existing pairs, one INSERT for the rest."""
+        if not rows:
+            return 0
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            artifact_ids = list({r[0] for r in rows})
+            existing_pairs: set[tuple[UUID, UUID]] = set()
+            result = await session.exec(
+                select(
+                    col(InfrastructureArtifactMentionTable.artifact_id),
+                    col(InfrastructureArtifactMentionTable.message_id),
+                ).where(col(InfrastructureArtifactMentionTable.artifact_id).in_(artifact_ids))
+            )
+            for aid, mid in result:
+                existing_pairs.add((aid, mid))
+
+            inserted = 0
+            batch_seen: set[tuple[UUID, UUID]] = set()
+            for artifact_id, message_id, char_offset, ts in rows:
+                key = (artifact_id, message_id)
+                if key in existing_pairs or key in batch_seen:
+                    continue
+                batch_seen.add(key)
+                session.add(
+                    InfrastructureArtifactMentionTable(
+                        artifact_id=artifact_id,
+                        message_id=message_id,
+                        char_offset=char_offset,
+                        ts=ts,
+                    )
+                )
+                inserted += 1
+            await session.commit()
+            return inserted
 
     async def add_group_access_artifact(
         self,
