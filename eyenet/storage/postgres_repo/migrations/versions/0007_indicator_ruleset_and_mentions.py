@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """add indicator_rule + infrastructure_artifact_mention, seed vendored rules — Postgres
 
-Revision ID: 0007_indicator_ruleset_and_mentions
+Revision ID: 0007_indicator_ruleset
 Revises: 0006_candidate_backfill_on_join
 Create Date: 2026-10-14
 
@@ -30,7 +30,7 @@ from eyenet.storage.sqlite_repo.database import (
     seed_indicator_rules,
 )
 
-revision = "0007_indicator_ruleset_and_mentions"
+revision = "0007_indicator_ruleset"
 down_revision = "0006_candidate_backfill_on_join"
 branch_labels = None
 depends_on = None

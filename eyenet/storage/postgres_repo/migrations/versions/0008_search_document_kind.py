@@ -2,7 +2,7 @@
 """add search_document.kind (sub-type facet, e.g. artifact InfrastructureKind) — Postgres
 
 Revision ID: 0008_search_document_kind
-Revises: 0007_indicator_ruleset_and_mentions
+Revises: 0007_indicator_ruleset
 Create Date: 2026-10-14
 
 ``search_document`` is rebuilt from the model on a fresh deploy (the search-doc
@@ -17,7 +17,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "0008_search_document_kind"
-down_revision = "0007_indicator_ruleset_and_mentions"
+down_revision = "0007_indicator_ruleset"
 branch_labels = None
 depends_on = None
 

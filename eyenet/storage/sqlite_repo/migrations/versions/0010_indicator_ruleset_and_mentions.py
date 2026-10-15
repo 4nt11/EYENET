@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """add indicator_rule + infrastructure_artifact_mention, seed vendored rules — SQLite
 
-Revision ID: 0010_indicator_ruleset_and_mentions
+Revision ID: 0010_indicator_ruleset
 Revises: 0009_candidate_dead_state
 Create Date: 2026-10-14
 
@@ -22,7 +22,7 @@ from eyenet.storage.sqlite_repo.database import (
     seed_indicator_rules,
 )
 
-revision = "0010_indicator_ruleset_and_mentions"
+revision = "0010_indicator_ruleset"
 down_revision = "0009_candidate_dead_state"
 branch_labels = None
 depends_on = None
