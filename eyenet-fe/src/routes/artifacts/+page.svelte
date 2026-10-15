@@ -16,6 +16,13 @@
     loadArtifactMentions,
     loadMoreMentions
   } from '$lib/artifact.svelte.js';
+  import {
+    ARTIFACT_KIND_LABELS,
+    ARTIFACT_KIND_ORDER,
+    kindLabel,
+    RESOLUTION_STATE_LABELS,
+    resolutionLabel
+  } from '$lib/labels.js';
 
   const SORT_OPTS = [
     { v: 'recent', l: 'Recent' },
@@ -25,26 +32,11 @@
   ];
   const KIND_OPTS = [
     { v: '', l: 'All kinds' },
-    { v: 'domain', l: 'domain' },
-    { v: 'onion', l: 'onion' },
-    { v: 'ipv4', l: 'ipv4' },
-    { v: 'ipv6', l: 'ipv6' },
-    { v: 'email', l: 'email' },
-    { v: 'wallet_btc', l: 'wallet_btc' },
-    { v: 'wallet_eth', l: 'wallet_eth' },
-    { v: 'wallet_xmr', l: 'wallet_xmr' },
-    { v: 'wallet_tron', l: 'wallet_tron' },
-    { v: 'handle_other_platform', l: 'handle' },
-    { v: 'session', l: 'session' },
-    { v: 'tox', l: 'tox' },
-    { v: 'pgp_key', l: 'pgp_key' }
+    ...ARTIFACT_KIND_ORDER.map((k) => ({ v: k, l: ARTIFACT_KIND_LABELS[k] }))
   ];
   const RES_OPTS = [
     { v: '', l: 'Any resolution' },
-    { v: 'RESOLVED', l: 'Resolved' },
-    { v: 'UNRESOLVED', l: 'Unresolved' },
-    { v: 'AMBIGUOUS', l: 'Ambiguous' },
-    { v: 'NOT_APPLICABLE', l: 'N/A' }
+    ...Object.keys(RESOLUTION_STATE_LABELS).map((k) => ({ v: k, l: RESOLUTION_STATE_LABELS[k] }))
   ];
   const RES_TONE = {
     RESOLVED: 'high',
@@ -72,7 +64,7 @@
 </script>
 
 <DossierLayout listLabel="Artifacts"
-  items={artifactCtx.list.map((x) => ({ id: x.id, primary: x.value, secondary: `${x.kind} · ${x.mentions}× · ${x.actors} actor${x.actors === 1 ? '' : 's'}` }))}
+  items={artifactCtx.list.map((x) => ({ id: x.id, primary: x.value, secondary: `${kindLabel(x.kind)} · ${x.mentions}× · ${x.actors} actor${x.actors === 1 ? '' : 's'}` }))}
   selectedId={selectedId} {onSelect}
   onLoadMore={loadMoreArtifacts} hasMore={!!artifactCtx.nextCursor}
   selected={!!d}>
@@ -80,7 +72,7 @@
   {#snippet title()}
     {#if d}
       <span class="val">{d.value}</span>
-      <span class="kind">{d.kind}</span>
+      <span class="kind">{kindLabel(d.kind)}</span>
     {:else}
       <span class="val muted">Artifacts</span>
     {/if}
@@ -97,7 +89,7 @@
 
   {#snippet head()}
     <div class="badges">
-      <Badge tone={RES_TONE[d.resolutionState] ?? 'neutral'}>{d.resolutionState.toLowerCase()}</Badge>
+      <Badge tone={RES_TONE[d.resolutionState] ?? 'neutral'}>{resolutionLabel(d.resolutionState)}</Badge>
       {#if d.resolvedToSourceId}<a class="pbtn small" href={`/sources?id=${d.resolvedToSourceId}`}>resolved source</a>{/if}
     </div>
   {/snippet}

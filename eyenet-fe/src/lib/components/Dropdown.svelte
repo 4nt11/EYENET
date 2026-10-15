@@ -37,8 +37,8 @@
   .ddlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ddcaret { color: var(--accent-text); font-size: 10px; flex: 0 0 auto; }
 
-  .ddmenu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); max-height: 280px; overflow: auto; }
-  .dditem { text-align: left; background: transparent; border: none; border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 8px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ddmenu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40; display: flex; flex-direction: column; gap: 1px; padding: 5px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); max-height: 320px; overflow: auto; }
+  .dditem { text-align: left; background: transparent; border: none; border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); line-height: 1.4; padding: 8px 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dditem:hover { background: var(--panel-2); }
   .dditem.on { background: var(--accent-fill); color: var(--text); }
 </style>
