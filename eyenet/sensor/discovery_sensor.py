@@ -27,7 +27,11 @@ import asyncio
 from eyenet.contracts.enums import GroupKind, SourceKind
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.search_indexer.events import publish_entity_changed
-from eyenet.sensor.discovery import DISCOVERY_EXTRACTORS, MessageContext
+from eyenet.sensor.discovery import (
+    DiscoveryExtractor,
+    MessageContext,
+    build_discovery_extractors,
+)
 from eyenet.service import ServiceBase
 from eyenet.telemetry.logging import get_logger
 from eyenet.telemetry.propagation import attach_from_headers
@@ -47,6 +51,17 @@ _DEFAULT_GROUP_KIND: dict[SourceKind, GroupKind] = {
 
 class DiscoverySensor(ServiceBase):
     """Per-message discovery extractor dispatcher (M9.E2)."""
+
+    _extractors_cache: tuple[DiscoveryExtractor, ...] | None = None
+
+    @property
+    def _extractors(self) -> tuple[DiscoveryExtractor, ...]:
+        # Built lazily WITH this service's publisher so artifact creation emits
+        # entity.artifact.changed for live search reindexing. Lazy (not in
+        # on_subscribe) so direct-call tests of _dispatch work without subscribing.
+        if self._extractors_cache is None:
+            self._extractors_cache = build_discovery_extractors(self.publisher)
+        return self._extractors_cache
 
     @property
     def name(self) -> str:
@@ -73,7 +88,7 @@ class DiscoverySensor(ServiceBase):
             ctx = await self._resolve(env)
             if ctx is None:
                 return
-            for extractor in DISCOVERY_EXTRACTORS:
+            for extractor in self._extractors:
                 await extractor.process(ctx, self._storage)
 
     async def _resolve(self, env: RawMessageEnvelope) -> MessageContext | None:

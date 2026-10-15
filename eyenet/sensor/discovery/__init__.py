@@ -16,17 +16,35 @@ against a constructed context.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ._base import DiscoveryExtractor, MessageContext
 from .channel_reference_extraction import ChannelReferenceExtractor
 from .indicator_extraction import IndicatorExtractor
 from .url_extraction import UrlExtractor
 
-# The extractor registry the DiscoverySensor (E2) iterates per raw message.
-DISCOVERY_EXTRACTORS: tuple[DiscoveryExtractor, ...] = (
-    UrlExtractor(),
-    ChannelReferenceExtractor(),
-    IndicatorExtractor(),
-)
+if TYPE_CHECKING:
+    from eyenet.bus.publisher import BusEnvelopePublisher
+
+
+def build_discovery_extractors(
+    publisher: BusEnvelopePublisher | None = None,
+) -> tuple[DiscoveryExtractor, ...]:
+    """The extractor registry the DiscoverySensor iterates per raw message.
+
+    ``publisher`` is threaded to the artifact-creating extractors so a new artifact
+    emits ``entity.artifact.changed`` for live search reindexing; omit it (the
+    module default) for the publisher-less registry used by direct-call tests.
+    """
+    return (
+        UrlExtractor(publisher),
+        ChannelReferenceExtractor(),
+        IndicatorExtractor(publisher),
+    )
+
+
+# Publisher-less default registry (direct-call tests + membership checks).
+DISCOVERY_EXTRACTORS: tuple[DiscoveryExtractor, ...] = build_discovery_extractors()
 
 __all__ = [
     "DISCOVERY_EXTRACTORS",
@@ -35,4 +53,5 @@ __all__ = [
     "IndicatorExtractor",
     "MessageContext",
     "UrlExtractor",
+    "build_discovery_extractors",
 ]

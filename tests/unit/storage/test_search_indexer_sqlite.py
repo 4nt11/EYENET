@@ -16,7 +16,7 @@ import pytest
 from eyenet.bus.memory import MemoryBus
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts._base import TraceContext
-from eyenet.contracts.enums import SourceKind
+from eyenet.contracts.enums import InfrastructureKind, SourceKind
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.contracts.search_events import SUBJECT_ACTOR_CHANGED, EntityChangedEnvelope
 from eyenet.search_indexer.service import SearchIndexerService
@@ -83,6 +83,26 @@ async def test_indexer_reindexes_actor_and_message(storage: BaseRepository) -> N
     msg_hits = await storage.search_global("zfoleaks", types=["message"], limit=5)
     assert len(msg_hits) == 1
 
+    await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_indexer_reindexes_artifact(storage: BaseRepository) -> None:
+    artifact = await storage.put_infrastructure_artifact(
+        kind=InfrastructureKind.WALLET_BTC,
+        value="scamx-btc-live",
+        first_seen_at_ingest=_NOW,
+        last_seen_at_ingest=_NOW,
+    )
+    svc = SearchIndexerService(bus=MemoryBus(), storage=storage)
+    env = EntityChangedEnvelope(
+        entity_type="artifact", entity_id=artifact.id, trace_context=_tc()
+    )
+    await svc._handle_entity(env.model_dump_json().encode())
+    hits = await storage.search_global("artifact.kind == wallet_btc", limit=5)
+    assert len(hits) == 1
+    assert hits[0].entity_id == artifact.id
+    assert hits[0].kind == "wallet_btc"
     await storage.close()
 
 

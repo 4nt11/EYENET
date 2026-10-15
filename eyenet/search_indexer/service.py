@@ -36,6 +36,7 @@ from eyenet.models import (
     DocumentTable,
     GroupCandidateTable,
     GroupTable,
+    InfrastructureArtifactTable,
     MessageTable,
     PersonaTable,
 )
@@ -104,6 +105,8 @@ class SearchIndexerService(ServiceBase):
             await self._reindex_group(env.entity_id)
         elif env.entity_type == "case":
             await self._reindex_case(env.entity_id)
+        elif env.entity_type == "artifact":
+            await self._reindex_artifact(env.entity_id)
         else:
             _log.warning("search_indexer.unknown_entity_type", entity_type=env.entity_type)
 
@@ -133,6 +136,13 @@ class SearchIndexerService(ServiceBase):
                 )
             )
         await self._storage.put_search_document(**haystack.actor_doc(actor, aliases))
+
+    async def _reindex_artifact(self, artifact_id: UUID) -> None:
+        async with self._storage.session() as s:
+            artifact = await s.get(InfrastructureArtifactTable, artifact_id)
+            if artifact is None:
+                return
+        await self._storage.put_search_document(**haystack.artifact_doc(artifact))
 
     async def _reindex_group(self, group_id: UUID) -> None:
         async with self._storage.session() as s:

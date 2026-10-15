@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 
+from eyenet.bus.memory import MemoryBus
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import GroupKind, InfrastructureKind, SourceKind
 from eyenet.sensor.discovery import DISCOVERY_EXTRACTORS, IndicatorExtractor, MessageContext
 from eyenet.storage.factory import get_repository
@@ -122,3 +125,21 @@ async def test_reprocess_is_idempotent(storage: BaseRepository) -> None:
     await ext.process(ctx, storage)
     await ext.process(ctx, storage)  # re-delivery
     assert _count(storage, "infrastructure_artifact_mention") == 1
+
+
+async def test_emits_artifact_changed_with_publisher(storage: BaseRepository) -> None:
+    ctx = await _persist_message(storage, "ping @wbpay_desk", 1)
+    bus = MemoryBus()
+    seen: list[str] = []
+
+    async def _cap(subject: str, _p: bytes, _h: dict[str, str]) -> None:
+        seen.append(subject)
+
+    await bus.subscribe("entity.>", _cap, queue_group="t")
+    await IndicatorExtractor(BusEnvelopePublisher(bus)).process(ctx, storage)
+    for _ in range(20):  # handlers deliver via the loop; drain it
+        await asyncio.sleep(0.01)
+        if seen:
+            break
+    assert "entity.artifact.changed" in seen
+    await storage.close()

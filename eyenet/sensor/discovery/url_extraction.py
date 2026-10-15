@@ -19,12 +19,14 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from eyenet.contracts.enums import InfrastructureKind
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.telemetry.logging import get_logger
 from eyenet.util.domain import normalize_host
 
 from ._base import DiscoveryExtractor
 
 if TYPE_CHECKING:
+    from eyenet.bus.publisher import BusEnvelopePublisher
     from eyenet.storage.repository import BaseRepository
 
     from ._base import MessageContext
@@ -79,6 +81,10 @@ class UrlExtractor(DiscoveryExtractor):
 
     name = "url_extraction"
 
+    def __init__(self, publisher: BusEnvelopePublisher | None = None) -> None:
+        # When set, publish entity.artifact.changed for live SearchIndexer reindex.
+        self._publisher = publisher
+
     async def process(self, ctx: MessageContext, storage: BaseRepository) -> int:
         artifacts = _extract(ctx.text)
         if not artifacts:
@@ -95,12 +101,19 @@ class UrlExtractor(DiscoveryExtractor):
                 last_seen_at_ingest=ctx.collected_at,
             )
             if message_id is not None:
-                await storage.record_artifact_mention(
+                inserted = await storage.record_artifact_mention(
                     artifact_id=artifact.id,
                     message_id=message_id,
                     char_offset=None,
                     ts=ctx.sent_at_source,
                 )
+                if inserted and self._publisher is not None:
+                    await publish_entity_changed(
+                        self._publisher,
+                        entity_type="artifact",
+                        entity_id=artifact.id,
+                        source_id=artifact.resolved_to_source_id,
+                    )
         return len(artifacts)
 
 
