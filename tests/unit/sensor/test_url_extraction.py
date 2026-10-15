@@ -156,6 +156,14 @@ def test_ipv6_keeps_loopback_drops_unspecified_rejects_macish() -> None:
 
 
 @pytest.mark.unit
+def test_malformed_url_does_not_crash() -> None:
+    # urlsplit() raises ValueError on an unbalanced-bracket URL; _extract must skip
+    # it, not propagate (one bad URL in a message once killed a whole backfill).
+    found = _extract("see http://[abc broken and real badplace.io here")
+    assert (InfrastructureKind.DOMAIN, "badplace.io") in found
+
+
+@pytest.mark.unit
 def test_bare_domain_psl_validated() -> None:
     found = _find_bare_domains("mirror on evil-shop.su today")
     assert found == {(InfrastructureKind.DOMAIN, "evil-shop.su")}

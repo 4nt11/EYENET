@@ -156,7 +156,12 @@ def _extract(text: str) -> set[tuple[InfrastructureKind, str]]:
     """Return the distinct ``(kind, normalized_value)`` artifacts in ``text``."""
     found: set[tuple[InfrastructureKind, str]] = set()
     for match in _URL_RE.finditer(text):
-        host = urlsplit(match.group(0)).hostname
+        try:
+            host = urlsplit(match.group(0)).hostname
+        except ValueError:
+            # Malformed URL (e.g. unbalanced IPv6 brackets: "http://[abc") — urlsplit
+            # raises. Not an extractable artifact; skip it, same as a bad host below.
+            continue
         if host:
             classified = _classify_and_normalize(host)
             if classified is not None:
