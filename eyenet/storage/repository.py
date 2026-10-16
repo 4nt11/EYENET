@@ -1732,6 +1732,10 @@ class BaseRepository(ABC):
     # =================================================================
 
     @abstractmethod
+    async def create_persona(self, *, label: str, now: datetime | None = None) -> UUID:
+        """Create a standalone (operator-analysis) persona with a label and no members."""
+
+    @abstractmethod
     async def persona_for_actor(self, actor_id: UUID) -> object | None: ...
 
     @abstractmethod

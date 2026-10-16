@@ -188,3 +188,12 @@ async def test_all_personas_empty_initially(store: BaseRepository) -> None:
 async def test_persona_for_actor_returns_none_initially(store: BaseRepository) -> None:
     result = await store.persona_for_actor(_A)
     assert result is None
+
+
+async def test_create_standalone_persona(storage: BaseRepository) -> None:
+    # Operator-analysis persona: labelled, no members, retrievable.
+    pid = await storage.create_persona(label="Scattered Spider")
+    got = await storage.get_persona(pid)
+    assert got is not None
+    assert got.label == "Scattered Spider"
+    assert await storage.persona_members(pid) == []

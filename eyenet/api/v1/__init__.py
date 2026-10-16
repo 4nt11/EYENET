@@ -138,8 +138,8 @@ from eyenet.api.v1.graph.api_assert_edge import router as graph_assert_edge_rout
 # === graph ===
 from eyenet.api.v1.graph.api_expand import router as graph_expand_router
 from eyenet.api.v1.graph.api_expand_counts import router as graph_expand_counts_router
-from eyenet.api.v1.graph.api_hydrate import router as graph_hydrate_router
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
+from eyenet.api.v1.graph.api_hydrate import router as graph_hydrate_router
 from eyenet.api.v1.graph.api_retract_edge import router as graph_retract_edge_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
 from eyenet.api.v1.graphs.api_create_graph import router as graphs_create_router
@@ -219,6 +219,7 @@ from eyenet.api.v1.notes.api_set_note import router as notes_set_router
 from eyenet.api.v1.panic.api_panic import router as control_panic_router
 
 # === personas ===
+from eyenet.api.v1.personas.api_create_persona import router as personas_create_router
 from eyenet.api.v1.personas.api_get_persona import router as personas_get_router
 from eyenet.api.v1.personas.api_list_members import router as personas_members_router
 from eyenet.api.v1.personas.api_list_personas import router as personas_list_router
@@ -320,6 +321,7 @@ v1_router.include_router(relations_rebuild_router)
 v1_router.include_router(personas_list_router)  # /personas (literal) before /personas/{id}
 v1_router.include_router(personas_get_router)
 v1_router.include_router(personas_members_router)
+v1_router.include_router(personas_create_router)  # POST /personas/standalone (literal) before /{id}
 v1_router.include_router(personas_merge_actors_router)
 v1_router.include_router(personas_merge_router)
 v1_router.include_router(personas_split_router)

@@ -71,6 +71,17 @@ def _add_member(
 
 
 class PersonasMixin:
+    async def create_persona(self, *, label: str, now: datetime | None = None) -> UUID:
+        """Create a standalone persona from operator analysis (not a merge): a labelled
+        persona with no members yet. Actors are attached later via merge/membership."""
+        at = now or datetime.now(tz=UTC)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = PersonaTable(label=label, member_actor_ids=[], created_at=at, updated_at=at)
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row.id
+
     async def persona_for_actor(self, actor_id: UUID) -> PersonaRow | None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             membership = await _get_membership(session, actor_id)

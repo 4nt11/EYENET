@@ -212,21 +212,31 @@ export const GROUP_KINDS = [
 // Hand-create an operator-asserted entity and drop it on the canvas. `type` is
 // one of actor/group/artifact; `payload` matches the POST body. The create returns
 // { id, entity_type }, so we synthesize the node (title from the operator input).
+const CREATE_PATH = {
+  actor: '/v1/actors',
+  group: '/v1/groups',
+  artifact: '/v1/artifacts',
+  crew: '/v1/crews',
+  persona: '/v1/personas/standalone'
+};
 export async function createOperatorEntity(type, payload) {
-  const path = type === 'actor' ? '/v1/actors' : type === 'group' ? '/v1/groups' : '/v1/artifacts';
+  const path = CREATE_PATH[type];
   explorer.busy = true;
   explorer.error = null;
   try {
     const res = await apiPost(path, payload, { auth: true });
+    const id = res.id ?? res.crew_id; // crews return { crew_id }, others { id, entity_type }
     const title =
       type === 'actor' ? (payload.handle || payload.display_name)
       : type === 'group' ? payload.title
+      : type === 'crew' ? payload.name
+      : type === 'persona' ? payload.label
       : payload.value;
     const fields =
       type === 'artifact'
         ? { kind: payload.kind, provenance: 'operator_asserted' }
         : { provenance: 'operator_asserted' };
-    addNode({ id: res.id, title: title || res.id, entityType: res.entity_type, status: null, sourceId: null, fields });
+    addNode({ id, title: title || id, entityType: res.entity_type ?? type, status: null, sourceId: null, fields });
     return res;
   } catch (e) {
     explorer.error = e.message ?? String(e);

@@ -50,6 +50,13 @@ class CreateOperatorArtifactRequest(ApiSchema):
     value: str = Field(min_length=1, max_length=2048)
 
 
+class CreatePersonaRequest(ApiSchema):
+    """Body of ``POST /v1/personas/standalone``: a persona from operator analysis
+    (not a merge), labelled, with no members yet."""
+
+    label: str = Field(min_length=1, max_length=512)
+
+
 class OperatorEntityCreated(ApiSchema):
     """201 body for every operator-entity create."""
 

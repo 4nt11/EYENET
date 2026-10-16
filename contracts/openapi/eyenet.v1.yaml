@@ -832,6 +832,26 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/personas/standalone:
+    post:
+      tags: [personas]
+      operationId: personas_create
+      summary: Create a persona from operator analysis (labelled, no members; not a merge).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePersonaRequest' }
+      responses:
+        "201":
+          description: The created persona.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorEntityCreated' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/personas/{persona_id}:
     get:
       tags: [personas]
@@ -6362,6 +6382,12 @@ components:
         kind: { $ref: '#/components/schemas/SourceKind' }
         display_name: { type: string, minLength: 1, maxLength: 512 }
         notes: { type: string, nullable: true, maxLength: 2048 }
+    CreatePersonaRequest:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 512 }
     CreateOperatorActorRequest:
       type: object
       additionalProperties: false

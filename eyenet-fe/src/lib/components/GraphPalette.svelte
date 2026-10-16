@@ -37,8 +37,8 @@
       title: 'Identity',
       items: [
         { label: 'Actor', desc: 'A handle/account seen in a source', icon: User, color: 'var(--etype-actor)', scope: { id: 'actor', types: 'actor' }, create: { kind: 'actor' } },
-        { label: 'Persona', desc: 'Confirmed same-person cluster of actors', icon: UsersThree, color: 'var(--etype-persona)', scope: { id: 'persona', types: 'persona' } },
-        { label: 'Crew', desc: 'A named group of collaborating actors', icon: ShareNetwork, color: 'var(--etype-crew)', scope: { id: 'crew', types: 'crew' } }
+        { label: 'Persona', desc: 'Confirmed same-person cluster of actors', icon: UsersThree, color: 'var(--etype-persona)', scope: { id: 'persona', types: 'persona' }, create: { kind: 'persona' } },
+        { label: 'Crew', desc: 'A named group of collaborating actors', icon: ShareNetwork, color: 'var(--etype-crew)', scope: { id: 'crew', types: 'crew' }, create: { kind: 'crew' } }
       ]
     },
     {
