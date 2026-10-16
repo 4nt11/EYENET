@@ -10,9 +10,13 @@ export const explorer = $state({
   edges: [], // GraphCanvas edge shape: { srcId, dstId, kind, provenance, weight, edgeId }
   busy: false,
   error: null,
-  // seed-search sub-state (the top-of-canvas box)
+  // seed-search sub-state (the palette box)
   seedResults: [],
   seedLoading: false,
+  // palette scope: null = all; { types } = an entity_type facet; { dsl, id } = a query-DSL
+  // predicate (e.g. artifact.kind:onion) so an artifact search doesn't return actors.
+  seedScope: null,
+  seedQ: '',
   // saved-graph identity (null = unsaved scratch canvas)
   graphId: null,
   graphName: ''
@@ -59,7 +63,20 @@ export function addSeed(hit) {
 let seedSeq = 0;
 export async function seedSearch(q) {
   const term = q.trim();
-  if (term === '') {
+  explorer.seedQ = q;
+  const sc = explorer.seedScope;
+  // Build the search query. A DSL scope (artifact.kind:onion) is a valid query on its
+  // own, so it can browse a kind with no term; an entity-type scope uses the facet and
+  // needs a term (the API's q is min-length 1).
+  let qParam = '';
+  let typesParam = '';
+  if (sc?.dsl) {
+    qParam = term ? `${sc.dsl} ${term}` : sc.dsl;
+  } else if (term) {
+    qParam = term;
+    if (sc?.types) typesParam = `&types=${encodeURIComponent(sc.types)}`;
+  }
+  if (!qParam) {
     explorer.seedResults = [];
     explorer.seedLoading = false;
     return;
@@ -67,7 +84,10 @@ export async function seedSearch(q) {
   const mine = ++seedSeq;
   explorer.seedLoading = true;
   try {
-    const page = await apiGet(`/v1/search?q=${encodeURIComponent(term)}&limit=20`, { auth: true });
+    const page = await apiGet(
+      `/v1/search?q=${encodeURIComponent(qParam)}&limit=25${typesParam}`,
+      { auth: true }
+    );
     if (mine !== seedSeq) return;
     explorer.seedResults = page.items ?? [];
   } catch (e) {
@@ -77,6 +97,13 @@ export async function seedSearch(q) {
   } finally {
     if (mine === seedSeq) explorer.seedLoading = false;
   }
+}
+
+// Palette click: scope the seed search (toggle off if the same scope). `scope` is
+// { id, types } for an entity type or { id, dsl } for a query-DSL predicate.
+export function setSeedScope(scope) {
+  explorer.seedScope = explorer.seedScope?.id === scope.id ? null : scope;
+  seedSearch(explorer.seedQ);
 }
 
 // Degree preview for the right-click menu. { enrichment_name: count | null }

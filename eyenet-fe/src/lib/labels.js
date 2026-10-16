@@ -79,6 +79,24 @@ export const THREAT_LABELS = {
 };
 export const threatLabel = (t) => label(THREAT_LABELS, t);
 
+// --- Entity type -> singular human label (badges, graph result rows) ---
+export const ENTITY_TYPE_LABELS = {
+  actor: 'Actor',
+  persona: 'Persona',
+  crew: 'Crew',
+  group: 'Group',
+  thread: 'Thread',
+  message: 'Message',
+  artifact: 'Artifact',
+  document: 'Document',
+  attachment: 'Attachment',
+  case: 'Case',
+  incident: 'Incident',
+  mention: 'Mention',
+  source: 'Source'
+};
+export const entityTypeLabel = (t) => label(ENTITY_TYPE_LABELS, t);
+
 // --- Entity type -> nav section it opens in ---
 export const ENTITY_ROUTE_LABELS = {
   actor: 'Actors',
