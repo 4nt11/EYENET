@@ -1,0 +1,513 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# BASE RULESET — EYENET classifier v1
+# Tiers: normal < restricted < classified
+# Rules only push the floor UP; the absence of any match yields 'normal'.
+# RE2 caveats: \b is byte-oriented (skip around accented/CJK/RTL); no lookarounds.
+# Rules marked "RE2-incompatible" use lookarounds and need PCRE-class engine.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── Classification banners — language-specific (lang is provenance only) ───
+
+[[rules]]
+name = "banner_en"
+pattern = '(?i)\b(?:TOP[ -]SECRET|SECRET//[A-Z/ ]+|\bNOFORN\b|CONFIDENTIAL|CLASSIFIED|FOR OFFICIAL USE ONLY|FOUO)\b'
+tier_floor = "classified"
+lang = "en"
+description = "English classification banners and handling caveats. CONFIDENTIAL is FP-prone (email footers); the top calibration target — do not try to suppress it here."
+
+[[rules]]
+name = "banner_es"
+pattern = '(?i)(?:ALTO SECRETO|SECRETO|CONFIDENCIAL|RESERVADO|DIFUSIÓN LIMITADA|USO OFICIAL)'
+tier_floor = "classified"
+lang = "es"
+description = "Spanish classification banners (Spanish-first calibration parity with banner_en). Accents intact; \\b omitted around accented terms because RE2 \\b is byte-oriented."
+
+[[rules]]
+name = "banner_pt"
+pattern = '(?i)(?:ULTRA[\s-]?SECRETO|ULTRASSECRETO|SECRETO|CONFIDENCIAL|RESERVADO)'
+tier_floor = "classified"
+lang = "pt"
+description = "Portuguese banners. BR (Lei 12.527/2011) uses ULTRASSECRETO single-word; PT uses ULTRA-SECRETO. RESERVADO/CONFIDENCIAL are FP-prone on commercial docs — top calibration target."
+
+[[rules]]
+name = "banner_fr"
+pattern = '(?i)(?:TRÈS\s+SECRET(?:[\s-]DÉFENSE)?|SECRET(?:[\s-]DÉFENSE)?|CONFIDENTIEL(?:[\s-]DÉFENSE)?|DIFFUSION\s+RESTREINTE)'
+tier_floor = "classified"
+lang = "fr"
+description = "French banners. Post-2021 reform dropped CONFIDENTIEL DÉFENSE — kept for archival coverage. DIFFUSION RESTREINTE is FP-prone on internal-circulation cover sheets."
+
+[[rules]]
+name = "banner_de"
+pattern = '(?i)(?:STRENG\s+GEHEIM|GEHEIM|VS[\s-]?VERTRAULICH|VS[\s-]?NUR\s+FÜR\s+DEN\s+DIENSTGEBRAUCH|VS[\s-]?NfD)'
+tier_floor = "classified"
+lang = "de"
+description = "German banners (SÜG/VSA). VS-NfD is the most common and most FP-prone. Bare GEHEIM is heavily FP-prone in everyday German; STRENG GEHEIM is the unambiguous top-tier anchor."
+
+[[rules]]
+name = "banner_it"
+pattern = '(?i)(?:SEGRETISSIMO|SEGRETO|RISERVATISSIMO|RISERVATO)'
+tier_floor = "classified"
+lang = "it"
+description = "Italian banners (DPCM 2 ottobre 2017). RISERVATO is heavily FP-prone (means 'reserved/private'); -ISSIMO superlatives are the cleaner anchors."
+
+[[rules]]
+name = "banner_nl"
+pattern = '(?i)(?:STG\.?\s*ZEER\s+GEHEIM|STG\.?\s*GEHEIM|STG\.?\s*CONFIDENTIEEL|DEPARTEMENTAAL\s+VERTROUWELIJK)'
+tier_floor = "classified"
+lang = "nl"
+description = "Dutch banners (VIR-BI). STG. = 'Staatsgeheim' prefix is the strong discriminator — bare 'geheim' alone is far too FP-prone in Dutch."
+
+[[rules]]
+name = "banner_pl"
+pattern = '(?i)(?:ŚCIŚLE\s+TAJNE|TAJNE|POUFNE|ZASTRZEŻONE)'
+tier_floor = "classified"
+lang = "pl"
+description = "Polish banners (Ustawa o ochronie informacji niejawnych 2010). Four-tier NATO-parallel system."
+
+[[rules]]
+name = "banner_ru"
+pattern = '(?:ОСОБОЙ\s+ВАЖНОСТИ|СОВЕРШЕННО\s+СЕКРЕТНО|СЕКРЕТНО|ДЛЯ\s+СЛУЖЕБНОГО\s+ПОЛЬЗОВАНИЯ|ДСП)'
+tier_floor = "classified"
+lang = "ru"
+description = "Russian banners (Закон РФ 5485-1). ОСОБОЙ ВАЖНОСТИ = top tier. ДСП is the standard abbreviation for the lowest tier. No (?i) — Cyrillic uppercase is the canonical stamp form."
+
+[[rules]]
+name = "banner_uk"
+pattern = '(?:ЦІЛКОМ\s+ТАЄМНО|ЦТ\b|ТАЄМНО|КОНФІДЕНЦІЙНО|ДЛЯ\s+СЛУЖБОВОГО\s+КОРИСТУВАННЯ|ДСК\b)'
+tier_floor = "classified"
+lang = "uk"
+description = "Ukrainian banners. Parallel structure to Russian but distinct vocabulary. Worth a separate rule from banner_ru for actor-environment provenance."
+
+[[rules]]
+name = "banner_zh"
+pattern = '(?:绝密|機密|机密|秘密|内部|內部)'
+tier_floor = "classified"
+lang = "zh"
+description = "Chinese banners (PRC GB/T 7156-2003 + ROC equivalents). Simplified + traditional pairs both included. 秘密 is heavily FP-prone — top calibration target. \\b inapplicable to CJK."
+
+[[rules]]
+name = "banner_ja"
+pattern = '(?:極秘|機密|取扱注意|部外秘|社外秘)'
+tier_floor = "classified"
+lang = "ja"
+description = "Japanese banners (特定秘密保護法 + corporate). Deliberately omitting bare 秘 — FP catastrophic without context. 社外秘 included for corporate-confidential overlap in leaked-doc corpora."
+
+[[rules]]
+name = "banner_ko"
+pattern = '(?:[ⅠⅡⅢ123]\s*급\s*비밀|대외비|극비|기밀|비밀)'
+tier_floor = "classified"
+lang = "ko"
+description = "Korean banners (보안업무규정). I급비밀 / II급비밀 / III급비밀 are formal tiers (Roman or Arabic numerals). 대외비 ≈ FOUO. Bare 비밀 is FP-prone."
+
+[[rules]]
+name = "banner_ar"
+pattern = '(?:سري\s+للغاية|سري\s+جدا|سري\s+جداً|سري|محظور\s+التداول|للاستخدام\s+الرسمي)'
+tier_floor = "classified"
+lang = "ar"
+description = "Arabic banners — varies across KSA/EG/JO/UAE/MA/DZ. سري للغاية / سري جداً = top secret. Bare سري is FP-prone in any Arabic text. RTL display-only; regex is byte-order."
+
+[[rules]]
+name = "banner_he"
+pattern = '(?:סודי\s+ביותר|סודי|שמור|מוגבל)'
+tier_floor = "classified"
+lang = "he"
+description = "Hebrew banners (IDF + government). סודי ביותר = top secret. שמור is FP-prone ('reserved')."
+
+[[rules]]
+name = "banner_tr"
+pattern = '(?i)(?:ÇOK\s+GİZLİ|GİZLİ|ÖZEL|HİZMETE\s+ÖZEL|TASNİF\s+DIŞI)'
+tier_floor = "classified"
+lang = "tr"
+description = "Turkish banners (TSK + MİT). ÇOK GİZLİ = top secret. HİZMETE ÖZEL is the FOUO-equivalent. Verify your RE2 build handles Turkish dotted/dotless İ under (?i)."
+
+
+# ── Alliance / supranational systems ────────────────────────────────────────
+
+[[rules]]
+name = "banner_nato"
+pattern = '(?i)\b(?:COSMIC\s+TOP\s+SECRET|CTS|NATO\s+SECRET|NATO\s+CONFIDENTIAL|NATO\s+RESTRICTED|NATO\s+UNCLASSIFIED|ATOMAL|BOHEMIA|BALK|FOCAL|SIOP-ESI)\b'
+tier_floor = "classified"
+lang = "mul"
+description = "NATO classifications (C-M(2002)49). ATOMAL = atomic information caveat. BOHEMIA/BALK/FOCAL are NATO compartments. Bare NS/NC/NR/NU omitted — catastrophic FP rate."
+
+[[rules]]
+name = "banner_eu"
+pattern = '(?i)(?:TRÈS\s+SECRET\s+UE|EU\s+TOP\s+SECRET|TS-UE/EU-TS|SECRET\s+UE|EU\s+SECRET|S-UE/EU-S|CONFIDENTIEL\s+UE|EU\s+CONFIDENTIAL|C-UE/EU-C|RESTREINT\s+UE|EU\s+RESTRICTED|R-UE/EU-R)'
+tier_floor = "classified"
+lang = "mul"
+description = "EU classifications (Council Decision 2013/488/EU). Bilingual EN/FR slashed stamps are canonical; either half alone is more common in body text."
+
+[[rules]]
+name = "banner_un"
+pattern = '(?i)\b(?:STRICTLY\s+CONFIDENTIAL|UN\s+CONFIDENTIAL|UN\s+RESTRICTED)\b'
+tier_floor = "classified"
+lang = "mul"
+description = "UN Secretariat classifications (ST/SGB/2007/6). STRICTLY CONFIDENTIAL is brutal — major calibration target (commercial NDA boilerplate)."
+
+
+# ── Handling caveats (orthogonal to tier; can stand alone or compound) ──────
+
+[[rules]]
+name = "caveats_us_en"
+pattern = '(?i)\b(?:NOFORN|NF|ORCON|OC|PROPIN|REL\s+TO\s+[A-Z]{3}(?:[,/\s]+[A-Z]{3})*|FVEY|ACGU|AUSCANNZUKUS|EYES\s+ONLY|LIMDIS|IMCON|NOCONTRACT|DSEN|FISA|RSEN|EXDIS|NODIS|STADIS|SBU|CUI(?://[A-Z-]+)?)\b'
+tier_floor = "classified"
+lang = "en"
+description = "US handling caveats — orthogonal to tier. REL TO matched as generic ISO-3166-shape three-letter codes; verify downstream. CUI// catches post-2018 unified marking with category suffixes."
+
+[[rules]]
+name = "compartments_sci_en"
+pattern = '(?i)\b(?:SI[-/](?:G|GAMMA|ECI)|TK|HCS(?:[-/][A-Z]{1,3})?|KLONDIKE|RUFF|UMBRA|MORAY|SPOKE|TALENT[\s-]KEYHOLE|ENDSEAL|ECI[-/][A-Z]+|BYEMAN)\b'
+tier_floor = "classified"
+lang = "en"
+description = "SCI compartment markings. SI/TK/HCS/KLONDIKE are current; UMBRA/MORAY/SPOKE retired 1999 but persist in archival material — keep for forensics. RESERVE omitted: FP-prone on banking text."
+
+[[rules]]
+name = "caveats_uk_en"
+pattern = '(?i)\b(?:OFFICIAL[\s-]SENSITIVE|UK\s+EYES\s+ONLY|UKEO|HMG\s+CONFIDENTIAL|STRAP[\s-]?[123]|DELICATE\s+SOURCE)\b'
+tier_floor = "classified"
+lang = "en"
+description = "UK Government Security Classifications (post-2014). OFFICIAL-SENSITIVE is the calibration nightmare — appears on routine HMG email. STRAP 1/2/3 are TS sub-caveats."
+
+[[rules]]
+name = "caveats_au_ca_en"
+pattern = '(?i)\b(?:PROTECTED|HIGHLY\s+PROTECTED|AUSTEO|CANADIAN\s+EYES\s+ONLY|FOR\s+CANADIAN\s+EYES\s+ONLY|CEO\s+CANADIAN)\b'
+tier_floor = "classified"
+lang = "en"
+description = "AU PSPF + CA PGS markings. PROTECTED is heavily FP-prone — common AU government routine traffic and unrelated adjective use."
+
+
+# ── Adjacent: export controls (co-occur with classified, distinct legal regime) ─
+
+[[rules]]
+name = "export_control_en"
+pattern = '(?i)\b(?:ITAR(?:[\s-]CONTROLLED)?|EAR99|EXPORT[\s-]CONTROLLED|NOT\s+FOR\s+EXPORT|TECHNICAL\s+DATA[\s-]ITAR|NLR|TSPA)\b'
+tier_floor = "restricted"
+lang = "en"
+description = "US export-control markings (ITAR/EAR). Not classifications strictly but routinely co-occur. Placed at 'restricted' floor — they don't assert classification, but mishandling is a federal crime. Treat banner+export_control compound at scoring layer as strong classified evidence."
+
+
+# ── Structural document features — banner-independent classified signal ────
+
+[[rules]]
+name = "struct_portion_marking"
+pattern = '\((?:TS|S|C|U|FOUO|CUI|TS//[A-Z/]{1,30}|S//[A-Z/]{1,30}|C//[A-Z/]{1,30}|U//[A-Z/]{1,30})\)\s+[A-ZÁÉÍÓÚÑ]'
+tier_floor = "classified"
+lang = "en"
+description = "Portion markings at paragraph-start: '(TS) Foo...', '(S//NF) Bar...'. Trailing capital-letter requirement filters random parentheticals. Survives banner OCR damage — one of the most resilient classified-doc signals."
+
+[[rules]]
+name = "struct_classification_authority_en"
+pattern = '(?i)(?:Classified\s+By\s*:|Derived\s+From\s*:|Declassify\s+On\s*:|Reason\s*:\s*1\.[1-9]\([a-z]\)|Original\s+Classification\s+Authority)'
+tier_floor = "classified"
+lang = "en"
+description = "Classification Authority Block field labels (ISOO 32 CFR 2001.22). Bureaucratic fingerprint of a real classified doc — multi-element CAB presence is highest-precision available."
+
+[[rules]]
+name = "struct_classification_authority_es"
+pattern = '(?i)(?:Clasificado\s+por\s*:|Derivado\s+de\s*:|Desclasificar\s+(?:en|el)\s*:|Autoridad\s+de\s+clasificación|Motivo\s+de\s+clasificación)'
+tier_floor = "classified"
+lang = "es"
+description = "Spanish equivalent of CAB labels. Common in Chilean/Mexican declassified-archive material."
+
+[[rules]]
+name = "struct_handling_block_en"
+pattern = '(?i)(?:HANDLE\s+VIA\s+[A-Z]+\s+(?:CHANNELS|CONTROL\s+SYSTEM)|WARNING\s+NOTICE\s*[:—-]\s*INTELLIGENCE\s+SOURCES\s+AND\s+METHODS|DISSEMINATION\s+CONTROL|REPRODUCTION\s+(?:PROHIBITED|REQUIRES))'
+tier_floor = "classified"
+lang = "en"
+description = "Formal handling-block boilerplate. 'WARNING NOTICE: INTELLIGENCE SOURCES AND METHODS INVOLVED' is the canonical IC dissemination caveat — appears verbatim across decades."
+
+[[rules]]
+name = "struct_copy_control"
+pattern = '(?i)\bCOPY\s+\d{1,4}\s+OF\s+\d{1,4}\b|\bSerial\s+Number\s*:\s*[A-Z0-9-]{4,}\b|\bControl\s+Number\s*:\s*[A-Z0-9-]{4,}\b'
+tier_floor = "restricted"
+lang = "en"
+description = "Numbered-copy and serialized-control patterns. Low standalone confidence (legal/numbered-edition docs use 'Copy N of M' too), so floored at 'restricted'. Compounds upward with banner/CAB at scoring layer."
+
+[[rules]]
+name = "struct_declass_date_en"
+pattern = '(?i)\bDeclassify\s+On\s*:\s*(?:\d{1,2}\s+[A-Z]{3,9}\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{4}|25X[1-9]|50X[1-9]|MR\b|OADR\b)'
+tier_floor = "classified"
+lang = "en"
+description = "Declass instruction with ISOO exemption codes (25X1-9, 50X1-HUM/-WMD, MR=Manual Review, OADR). Exemption codes are unambiguous gov-classification artifacts."
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RESTRICTED TIER — corporate, regulated, investigative, identifiers, secrets
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── Corporate confidentiality ───────────────────────────────────────────────
+
+[[rules]]
+name = "corp_confidential_en"
+pattern = '(?i)\b(?:COMPANY\s+CONFIDENTIAL|INTERNAL\s+USE\s+ONLY|INTERNAL\s+ONLY|PROPRIETARY\s+(?:AND\s+CONFIDENTIAL|INFORMATION)|TRADE\s+SECRET|ATTORNEY[\s-]CLIENT\s+PRIVILEGED?|ATTORNEY\s+WORK\s+PRODUCT|PRIVILEGED\s+(?:AND\s+CONFIDENTIAL|COMMUNICATION)|NDA\s+PROTECTED|UNDER\s+NDA|RESTRICTED\s+(?:DISTRIBUTION|DISSEMINATION))\b'
+tier_floor = "restricted"
+lang = "en"
+description = "English corporate confidentiality. Privilege markings (ATTORNEY-CLIENT, WORK PRODUCT) are highest-signal — imply legal-hold material. INTERNAL USE ONLY is brutally FP-prone (default template footer)."
+
+[[rules]]
+name = "corp_confidential_es"
+pattern = '(?i)(?:CONFIDENCIAL\s+EMPRESARIAL|USO\s+INTERNO|SÓLO\s+USO\s+INTERNO|SOLO\s+USO\s+INTERNO|INFORMACIÓN\s+PRIVILEGIADA|SECRETO\s+COMERCIAL|SECRETO\s+EMPRESARIAL|PROHIBIDA\s+SU\s+DIVULGACIÓN|COMUNICACIÓN\s+PRIVILEGIADA)'
+tier_floor = "restricted"
+lang = "es"
+description = "Spanish corporate confidentiality. SECRETO COMERCIAL is the clean trade-secret signal; USO INTERNO is the FP magnet."
+
+[[rules]]
+name = "corp_confidential_pt"
+pattern = '(?i)(?:CONFIDENCIAL\s+EMPRESARIAL|USO\s+INTERNO|SEGREDO\s+(?:COMERCIAL|DE\s+NEGÓCIO)|INFORMAÇÃO\s+PRIVILEGIADA|PROIBIDA\s+(?:A\s+)?DIVULGAÇÃO|COMUNICAÇÃO\s+PRIVILEGIADA)'
+tier_floor = "restricted"
+lang = "pt"
+description = "Portuguese (BR + PT) corporate markings. SEGREDO DE NEGÓCIO is the BR statutory trade-secret term."
+
+
+# ── Regulated data (health/finance/privacy/education) ──────────────────────
+
+[[rules]]
+name = "regulated_health_en"
+pattern = '(?i)\b(?:PHI\b|PROTECTED\s+HEALTH\s+INFORMATION|HIPAA[\s-](?:PROTECTED|RESTRICTED|COVERED)|HITECH|EPHI|PATIENT\s+HEALTH\s+INFORMATION)\b'
+tier_floor = "restricted"
+lang = "en"
+description = "HIPAA/HITECH health-data markings. Document carrying these isn't classified but has breach-notification consequences."
+
+[[rules]]
+name = "regulated_finance_en"
+pattern = '(?i)\b(?:MNPI|MATERIAL\s+NON[\s-]PUBLIC\s+INFORMATION|INSIDE\s+INFORMATION|REG\s+FD|SOX\s+RESTRICTED|PCI[\s-]DSS\s+(?:RESTRICTED|PROTECTED)|CARDHOLDER\s+DATA)\b'
+tier_floor = "restricted"
+lang = "en"
+description = "Securities + payments regulatory markings. MNPI is high-signal — insider-trading exposure. PCI markings often co-occur with actual card data (see pii_payment_card)."
+
+[[rules]]
+name = "regulated_privacy_mul"
+pattern = '(?i)\b(?:GDPR[\s-](?:RESTRICTED|PROTECTED|SUBJECT)|PERSONAL\s+DATA[\s-](?:RESTRICTED|GDPR)|DPA\s+RESTRICTED|CCPA[\s-]PROTECTED|SPECIAL\s+CATEGORY\s+DATA|ARTICLE\s+9\s+DATA|DATOS\s+PERSONALES\s+PROTEGIDOS|DADOS\s+PESSOAIS\s+SENSÍVEIS)\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "Privacy-regulation markings (GDPR Art. 9 special-category, CCPA, LGPD parallel). ES/PT terms in final alternations catch LOPDGDD and LGPD docs."
+
+[[rules]]
+name = "regulated_ferpa_en"
+pattern = '(?i)\b(?:FERPA[\s-](?:PROTECTED|RESTRICTED)|EDUCATION\s+RECORDS[\s-]FERPA|STUDENT\s+RECORD\s+CONFIDENTIAL)\b'
+tier_floor = "restricted"
+lang = "en"
+description = "US education-records regulatory markings. Narrow domain, unambiguous, low FP."
+
+
+# ── Law enforcement / investigative ────────────────────────────────────────
+
+[[rules]]
+name = "leo_en"
+pattern = '(?i)\b(?:LAW\s+ENFORCEMENT\s+SENSITIVE|LES\b|SENSITIVE\s+BUT\s+UNCLASSIFIED|TLP[:\s-](?:RED|AMBER|AMBER\+STRICT|GREEN)|FOR\s+OFFICIAL\s+USE\s+ONLY[\s-]LE|GRAND\s+JURY\s+MATERIAL|RULE\s+6\(?e\)?)\b'
+tier_floor = "restricted"
+lang = "en"
+description = "LEO/investigative markings. TLP:RED/AMBER is the CTI-sharing parallel — directly relevant to EYENET use case. Rule 6(e) grand jury material is a hard legal restriction. SBU intentionally overlaps caveats_us_en — keep both, dedupe at scoring."
+
+[[rules]]
+name = "leo_es"
+pattern = '(?i)(?:INFORMACIÓN\s+POLICIAL\s+RESERVADA|MATERIA\s+SUMARIAL|SECRETO\s+(?:DEL\s+)?SUMARIO|INVESTIGACIÓN\s+EN\s+CURSO|FISCALÍA\s+RESERVADO)'
+tier_floor = "restricted"
+lang = "es"
+description = "Spanish-speaking jurisdictions' investigative-secrecy markings. SECRETO DEL SUMARIO is the canonical CL/ES/AR/MX criminal-investigation seal (Código Procesal Penal art. 182 CL and analogues)."
+
+
+# ── Personal identifiers — SHIP WITH NEGATIVE CORPUS, all FP-prone ─────────
+
+[[rules]]
+name = "pii_us_ssn"
+pattern = '(?<![\d-])(?!000|666|9\d{2})([0-6]\d{2}|7[0-6]\d|77[0-2])[\s-]?(?!00)\d{2}[\s-]?(?!0000)\d{4}(?![\d-])'
+tier_floor = "restricted"
+lang = "en"
+description = "US Social Security Number with structural validation. RE2-incompatible (lookarounds) — needs PCRE/regex-crate. For pure RE2: match looser shape then verify in code. Calibrate against ITINs (9xx-7x/8x-xxxx) and phone numbers."
+
+[[rules]]
+name = "pii_cl_rut"
+pattern = '(?<![\d.])(?:\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK])(?![\d])'
+tier_floor = "restricted"
+lang = "es"
+description = "Chilean RUT. Dotted (12.345.678-9) + undotted (12345678-9); final digit 0-9 or K. RE2-incompatible (lookarounds). For Rutify corpus this will fire constantly — relevant for restricted-tier confirmation, not classified."
+
+[[rules]]
+name = "pii_br_cpf"
+pattern = '\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b'
+tier_floor = "restricted"
+lang = "pt"
+description = "Brazilian CPF. Shape-only; mod-11 check belongs in post-match verifier. FP risk on random 11-digit sequences (timestamps, IDs)."
+
+[[rules]]
+name = "pii_es_dni_nie"
+pattern = '(?i)\b\d{8}[A-Z]\b|\b[XYZ]\d{7}[A-Z]\b'
+tier_floor = "restricted"
+lang = "es"
+description = "Spanish DNI (8 digits + letter) and NIE (X/Y/Z + 7 + letter). Shape-only; final letter follows mod-23 table — verify downstream."
+
+[[rules]]
+name = "pii_mx_curp_rfc"
+pattern = '(?i)\b[A-Z][AEIOUX][A-Z]{2}\d{6}[HM][A-Z]{5}[A-Z\d]\d\b|\b[A-Z&Ñ]{3,4}\d{6}(?:[A-Z\d]{3})?\b'
+tier_floor = "restricted"
+lang = "es"
+description = "Mexican CURP (18 chars) + RFC (10/13 chars). RFC's optional homoclave makes the shorter form FP-prone."
+
+[[rules]]
+name = "pii_ar_dni_cuit"
+pattern = '\b\d{1,2}\.?\d{3}\.?\d{3}\b|\b\d{2}-\d{7,8}-\d\b'
+tier_floor = "restricted"
+lang = "es"
+description = "Argentine DNI (7-8 digits, dotted optional) and CUIT/CUIL (XX-XXXXXXXX-X). DNI shape is FP-catastrophic on its own — almost any 7-8 digit number — best used as compound with leo_es or doc-context signal."
+
+[[rules]]
+name = "pii_co_cedula"
+pattern = '\b\d{6,10}\b'
+tier_floor = "restricted"
+lang = "es"
+description = "Colombian cédula de ciudadanía. Pure 6-10 digit shape — extreme FP risk. Ship disabled by default and enable only for corpora where context guarantees the shape is a cédula reference. Listed for completeness."
+
+[[rules]]
+name = "pii_email"
+pattern = '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "Email address. Universal — every doc has them. Low standalone weight; useful as identifier-density signal. Don't try to validate RFC 5322 — madness lies that way."
+
+[[rules]]
+name = "pii_phone_intl"
+pattern = '(?:\+|00)\s?(?:[1-9]\d{0,2})[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{1,4}){1,4}'
+tier_floor = "restricted"
+lang = "mul"
+description = "International phone with + or 00 prefix. Massively FP-prone on any text with numbers. Primarily useful for identifier-density compound scoring."
+
+[[rules]]
+name = "pii_payment_card"
+pattern = '\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2})|3(?:0[0-5]|[68]\d)\d)[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b|\b3[47]\d{2}[\s-]?\d{6}[\s-]?\d{5}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "Payment card (Visa/MC/Amex/Discover/Diners/JCB). Shape-only; Luhn validation post-match. Adjacent CVV/expiry is the high-precision compound. PCI-DSS impact if matched — candidate for 'classified' promotion in v1.1."
+
+[[rules]]
+name = "pii_iban"
+pattern = '\b[A-Z]{2}\d{2}[\s]?(?:[A-Z0-9]{4}[\s]?){2,7}[A-Z0-9]{1,4}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "IBAN. Country prefix + check digits + BBAN. Validate mod-97 downstream. Common in EU corporate docs."
+
+
+# ── Credentials / secrets ───────────────────────────────────────────────────
+
+[[rules]]
+name = "secret_aws_key"
+pattern = '\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "AWS access key ID. Pair with a 40-char secret access key — proximity is high-precision compound. ASIA = STS temp credential. Promotion candidate to 'classified' for prod-scope keys."
+
+[[rules]]
+name = "secret_aws_secret"
+pattern = '(?i)\b(?:aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret)\b\s*[:=]\s*["\']?([A-Za-z0-9/+=]{40})["\']?'
+tier_floor = "restricted"
+lang = "mul"
+description = "AWS secret access key with labeled assignment. Label prefix is what makes this precise — bare 40-char base64 is noise."
+
+[[rules]]
+name = "secret_gcp_key"
+pattern = '"private_key_id"\s*:\s*"[a-f0-9]{40}"|"type"\s*:\s*"service_account"'
+tier_floor = "restricted"
+lang = "mul"
+description = "GCP service account JSON key fingerprint. 'type: service_account' is near-unique when paired with private_key_id."
+
+[[rules]]
+name = "secret_github_token"
+pattern = '\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,255}\b|\bgithub_pat_[A-Za-z0-9_]{82}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "GitHub PATs (classic + fine-grained). Format per GitHub's spec — very low FP."
+
+[[rules]]
+name = "secret_slack_token"
+pattern = '\bxox[abprs]-[A-Za-z0-9-]{10,72}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "Slack bot/user/app tokens. Self-describing prefix — near-zero FP."
+
+[[rules]]
+name = "secret_private_key_pem"
+pattern = '-----BEGIN\s+(?:RSA|DSA|EC|OPENSSH|PGP|ENCRYPTED)\s+PRIVATE\s+KEY-----'
+tier_floor = "restricted"
+lang = "mul"
+description = "PEM private key header. If this matches, the doc contains an actual private key. Almost zero FP, high-impact. Strong candidate for 'classified' promotion. Extraction pipelines should redact before any downstream processing."
+
+[[rules]]
+name = "secret_jwt"
+pattern = '\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "JWT three-segment base64url. 'eyJ' prefix is the literal '{\"' header — near-unique. A valid JWT may carry sensitive claims — decode at risk."
+
+[[rules]]
+name = "secret_generic_assignment"
+pattern = '(?i)\b(?:password|passwd|pwd|api[_-]?key|secret|token|access[_-]?key|client[_-]?secret)\s*[:=]\s*["\']([^"\'\s]{6,128})["\']'
+tier_floor = "restricted"
+lang = "mul"
+description = "Generic labeled-secret assignment. Heavy FP on docs, source comments, config templates with placeholders ('password: changeme'). Negative corpus of public READMEs essential."
+
+
+# ── Cyber indicators (CTI-relevant, threat-corpus-aware) ───────────────────
+
+[[rules]]
+name = "cyber_iocs_basic"
+pattern = '\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "MD5/SHA-1/SHA-256 hash shapes. FP-prone (any hex string of right length — UUIDs without dashes, git SHAs). Useful only with co-occurrence signals (filename, 'hash:' label, sample reference)."
+
+[[rules]]
+name = "cyber_defanged_iocs"
+pattern = '(?i)(?:\b[a-z0-9.-]+\[\.\][a-z]{2,24}\b|\bhxxp[s]?://|\b\d{1,3}\[\.\]\d{1,3}\[\.\]\d{1,3}\[\.\]\d{1,3}\b)'
+tier_floor = "restricted"
+lang = "mul"
+description = "Defanged IOCs — domain[.]tld, hxxp://, 1[.]2[.]3[.]4. These are CTI-community conventions for un-clickable IOC sharing. High-precision signal that the doc is a threat-intel artifact (which EYENET cares about). Low FP — defanging is deliberate."
+
+[[rules]]
+name = "cyber_yara_rule"
+pattern = '(?i)\brule\s+[A-Za-z_][A-Za-z0-9_]*\s*\{[\s\S]{0,4000}?strings\s*:|condition\s*:\s*(?:any\s+of\s+them|all\s+of\s+them|\$\w+)'
+tier_floor = "restricted"
+lang = "mul"
+description = "YARA rule signature. Strong indicator the doc is detection content. Low FP — the 'rule X { strings: ... condition:' shape is YARA-specific."
+
+[[rules]]
+name = "cyber_cve"
+pattern = '\bCVE-(?:19|20)\d{2}-\d{4,7}\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "CVE identifier. Low standalone tier impact but useful as a CTI-document signal. Year range constrains FP somewhat."
+
+[[rules]]
+name = "cyber_mitre_attack"
+pattern = '\b(?:T\d{4}(?:\.\d{3})?|G\d{4}|S\d{4}|M\d{4})\b'
+tier_floor = "restricted"
+lang = "mul"
+description = "MITRE ATT&CK technique/group/software/mitigation IDs (TXXXX[.XXX], GXXXX, SXXXX, MXXXX). FP risk on product codes with similar shape — best as compound signal with ATT&CK-vocabulary context."
+
+
+# ── Counter-signals / FP-suppression candidates ────────────────────────────
+
+[[rules]]
+name = "fp_template_placeholder"
+pattern = '(?i)\b(?:lorem\s+ipsum|placeholder\s+text|sample\s+document|example\s+text|john\s+doe|jane\s+doe|acme\s+corp(?:oration)?|example\.com|example\.org|test@test\.com|changeme|password123|s3cr3t)\b'
+tier_floor = "normal"
+lang = "mul"
+description = "Template/placeholder markers. Listed as a rule for visibility but with tier_floor='normal' — engine should treat hits here as NEGATIVE evidence (downscoring other matches), not as positive triggers. Implementation note: the scoring layer needs an explicit 'demote on co-occurrence' path; this rule doesn't push the floor up by itself."
+
+[[rules]]
+name = "fp_creative_works"
+pattern = '(?i)\b(?:top\s+secret\s+(?:recipe|sauce|formula|ingredients?)|secret\s+menu|family\s+secret|trade\s+secret\s+recipe|movie\s+title|episode\s+\d+|season\s+\d+|chapter\s+\d+)\b'
+tier_floor = "normal"
+lang = "mul"
+description = "Common false-positive contexts for 'TOP SECRET'/'SECRET' — recipes, entertainment metadata. Same demotion semantics as fp_template_placeholder."
+
+
+# ── Weapons / CBRN markings (threat-intel corpora WILL surface these) ──────
+
+[[rules]]
+name = "weapons_cbrn_en"
+pattern = '(?i)\b(?:CNWDI|CRITICAL\s+NUCLEAR\s+WEAPON\s+DESIGN\s+INFORMATION|RD[\s-]SIGMA[\s-]?\d{1,2}|FRD[\s-]SIGMA[\s-]?\d{1,2}|RESTRICTED\s+DATA|FORMERLY\s+RESTRICTED\s+DATA|TFNI|TRANSCLASSIFIED\s+FOREIGN\s+NUCLEAR\s+INFORMATION|UCNI|DOE\s+OUO)\b'
+tier_floor = "classified"
+lang = "en"
+description = "Atomic Energy Act markings — RD/FRD/TFNI/UCNI/CNWDI. Distinct legal regime from EO-13526 classification (AEA-derived). SIGMA categories are weapon-design subdivisions. If matched, document is in a heavily restricted handling regime regardless of other markings. UCNI is the lowest-impact one — DOE Unclassified Controlled Nuclear Information."

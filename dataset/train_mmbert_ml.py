@@ -51,19 +51,6 @@ GOLD_TEST_FRAC = 0.30   # fraction of HUMAN gold held out for honest eval (never
 SEED = 1337
 
 
-def _attmap() -> dict[str, list[str]]:
-    """{redacted body -> attachment filenames} from the corpus, to enrich gold rows that
-    lack an att_files field. Built once; empty if the corpus isn't present."""
-    src = HERE / "eyenet_messages.jsonl"
-    if not src.exists():
-        return {}
-    m: dict[str, list[str]] = {}
-    for r in load_jsonl(src):
-        if r.get("att_files"):
-            m[bd.redact(r["text"])] = r["att_files"]
-    return m
-
-
 def load_jsonl(p: Path) -> list[dict]:
     return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
 
@@ -99,12 +86,11 @@ def load_silver() -> dict[str, list[float]]:
 
 def load_gold() -> dict[str, list[float]]:
     """The assembled v2 gold (GOLD_FILE only, NOT old-taxonomy *.mllabels), keyed by
-    enriched text. Attachment filenames joined from the corpus (gold rows carry only body)."""
-    attmap = _attmap()
+    enriched text. att_files are baked INTO the gold rows (self-contained — no corpus
+    join), so the training set stands alone if eyenet_messages.jsonl is ever lost."""
     gold: dict[str, list[float]] = {}
     for r in load_jsonl(HERE / GOLD_FILE):
-        atts = attmap.get(bd.redact(r["text"]))
-        gold[enrich_text(bd.redact(r["text"]), atts)] = label_vec(r)
+        gold[enrich_text(bd.redact(r["text"]), r.get("att_files"))] = label_vec(r)
     return gold
 
 

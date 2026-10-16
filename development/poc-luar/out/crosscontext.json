@@ -1,0 +1,107 @@
+{
+  "n_persons": 60,
+  "min_msgs": 10,
+  "n_spanish": 0,
+  "same_context": {
+    "eyenet_char3_simhash": {
+      "r_at_1": 0.2,
+      "eer": 0.328,
+      "auc": 0.739,
+      "mean_same": 52.667,
+      "mean_diff": 47.237
+    },
+    "eyenet_fnword_simhash": {
+      "r_at_1": 0.183,
+      "eer": 0.333,
+      "auc": 0.737,
+      "mean_same": 53.25,
+      "mean_diff": 47.812
+    },
+    "full_char3_js": {
+      "r_at_1": 0.5,
+      "eer": 0.264,
+      "auc": 0.806,
+      "mean_same": -0.117,
+      "mean_diff": -0.217
+    },
+    "full_char4_jaccard": {
+      "r_at_1": 0.583,
+      "eer": 0.167,
+      "auc": 0.916,
+      "mean_same": -0.835,
+      "mean_diff": -0.948
+    },
+    "burrows_delta": {
+      "r_at_1": 0.367,
+      "eer": 0.352,
+      "auc": 0.718,
+      "mean_same": -0.493,
+      "mean_diff": -0.751
+    },
+    "distinctive_vocab": {
+      "r_at_1": 0.483,
+      "eer": 0.219,
+      "auc": 0.844,
+      "mean_same": -0.536,
+      "mean_diff": -0.863
+    },
+    "luar_centered": {
+      "r_at_1": 0.85,
+      "eer": 0.063,
+      "auc": 0.991,
+      "mean_same": 0.598,
+      "mean_diff": -0.013
+    }
+  },
+  "cross_context": {
+    "eyenet_char3_simhash": {
+      "r_at_1": 0.367,
+      "eer": 0.316,
+      "auc": 0.755,
+      "mean_same": 53.683,
+      "mean_diff": 47.331
+    },
+    "eyenet_fnword_simhash": {
+      "r_at_1": 0.25,
+      "eer": 0.27,
+      "auc": 0.776,
+      "mean_same": 54.5,
+      "mean_diff": 48.407
+    },
+    "full_char3_js": {
+      "r_at_1": 0.567,
+      "eer": 0.235,
+      "auc": 0.814,
+      "mean_same": -0.112,
+      "mean_diff": -0.211
+    },
+    "full_char4_jaccard": {
+      "r_at_1": 0.567,
+      "eer": 0.201,
+      "auc": 0.864,
+      "mean_same": -0.717,
+      "mean_diff": -0.944
+    },
+    "burrows_delta": {
+      "r_at_1": 0.433,
+      "eer": 0.304,
+      "auc": 0.756,
+      "mean_same": -0.47,
+      "mean_diff": -0.779
+    },
+    "distinctive_vocab": {
+      "r_at_1": 0.5,
+      "eer": 0.23,
+      "auc": 0.872,
+      "mean_same": -0.487,
+      "mean_diff": -0.855
+    },
+    "luar_centered": {
+      "r_at_1": 0.767,
+      "eer": 0.067,
+      "auc": 0.976,
+      "mean_same": 0.618,
+      "mean_diff": -0.013
+    }
+  }
+}

@@ -19,7 +19,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
+
+TzConfidence = Literal["none", "low", "medium", "high"]
 
 # Local sleep-center assumption: the midpoint of the quiet span sits ~03:30 local.
 _SLEEP_CENTER_LOCAL = 3.5
@@ -92,7 +95,7 @@ class InferredTz:
     offset_hours: int | None
     zone_best: str | None
     zone_candidates: list[str]
-    confidence: str  # "none" | "low" | "medium" | "high"
+    confidence: TzConfidence
     supporting_signals: list[str] = field(default_factory=list)
     local_active_window: tuple[int, int] | None = None  # [start, end) local hours
     quiet_window_utc: tuple[int, int] | None = None
@@ -193,6 +196,7 @@ def infer_timezone(
 
     # 3) Candidate list + confidence.
     candidates = country_zones or _OFFSET_SAMPLE_ZONES.get(offset, [])
+    confidence: TzConfidence
     if zone_best and _zone_offset_hours(zone_best, at) == offset and gated:
         confidence = "high"
     elif zone_best or gated:

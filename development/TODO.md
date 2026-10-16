@@ -328,3 +328,59 @@ extraction work itself:
   unchanged). One-off UPDATE: DOMAIN artifacts whose `value` parses as a non-
   unspecified `ipaddress.ip_address` → retag ipv4/ipv6, then `search-backfill`
   (do it after the fix above so new writes are already correct).
+
+## Incremental per-actor MFW stylometry profiles (2026-10-16)
+
+**Full spec:** `development/STYLOMETRY_MFW_PLAN.md` (schema, phasing, open
+decisions). This TODO is the pointer + the decisions already locked.
+
+**Vision:** a per-actor distribution of Most Frequent Words, maintained
+INCREMENTALLY on ingest (counts are additive, so ingest is `+=`, never a
+recompute) and compared on demand in the Verifier. Cheap, interpretable,
+language-agnostic authorship signal that complements LUAR (LUAR wins
+cross-context; MFW wins same-register). Runs in <8GB. See
+`[[project_luar_stylometry_poc]]`, CLAUDE.md §5 (locale-agnostic primitives).
+
+**Locked decisions:**
+- **Ship all THREE comparators** off the same stored counts, pick/ensemble by
+  data regime: raw **MFW-cosine** (relative-freq cosine, best at higher token
+  volume), classic **Burrows-Delta** (z-score + Manhattan, stronger on LITTLE
+  data), and **Cosine-Delta** (z-score + cosine). All three are near-free once
+  the counts exist, so there is no reason to pick one.
+- **Data-driven vocab, NO hand-built word lists.** The top-N emerges from a
+  per-locale global frequency table. Scales to every language for free.
+- **CJK + Thai are IN SCOPE** (ANTI's call; the backfill locale histogram will
+  prove the actors are there). Whitespace tokenization is therefore rejected.
+
+**Resolved 2026-10-16:**
+- Tokenizer: **ICU word-seg (primary) AND char-n-grams (reuse `_ngrams` from
+  `character_ngram_simhash.py`)**. Both ship; M5 grid weights them. ICU dep
+  approved (needs libicu in the Docker images, like libolm).
+- Exactly-once: **reuse the existing `corpus_cursor`** per-`(actor,
+  primitive_name)` watermark — the StylometricSensor already drives every window
+  primitive off it. MFW is just another primitive. NOT a `message` nullable
+  column (mutates evidence, MFW-specific sprawl), NOT a new table.
+- This GENERALIZES `function_word_distribution_top50.py` (EN/ES hardcoded,
+  Latin-only regex, lossy `simhash64`): keep the FULL per-locale data-driven
+  distribution, drop `simhash64` (the step `poc-luar` showed killed precision),
+  swap tokenizer for ICU, maintain incrementally. Reuse MIN_MESSAGES=30/
+  MIN_TOKENS=500 as the floor precedent.
+
+**Still open:** Delta N + comparator weights (seed from `poc-luar`, tune on M5);
+v1 scope (counts + backfill + comparator first, viz + calibration after).
+
+**Load-bearing constraints (not optional):**
+- **Token floor.** Gate every comparison on `total_tokens`; a distribution from
+  40 tokens is noise with confidence. Store the count.
+- **Snapshot the basis with every verdict.** The top-N and population stats drift
+  as the corpus grows, so persist the exact vocab + stats a linkage verdict used,
+  or the verdict is not reproducible (operator-grade-evidence requirement).
+- Incremental upsert (`ON CONFLICT DO UPDATE count = count + n`) is dialect SQL:
+  concrete-backend override, mixin declares + NotImplementedError (CLAUDE.md §2.3
+  Rule 1). Postgres-primary.
+
+**Shape:** three tables (`actor_mfw_count`, `actor_mfw_profile`,
+`locale_token_freq`), an event-driven ingest sensor, `eyenet mfw-backfill` +
+`eyenet mfw-prune` CLIs, a Verifier comparator (the three distances), and an
+analyst viz (per-actor MFW bar chart + inter-actor Delta heatmap). Calibrate
+thresholds per-locale on the M5 grid; inherit N + Delta config from `poc-luar`.

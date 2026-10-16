@@ -101,3 +101,6 @@ tests/fixtures/corpora/*.real.jsonl
 
 # Claude Code session + worktrees
 .claude/
+
+# CTI data
+investigations/

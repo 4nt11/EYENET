@@ -1,0 +1,52 @@
+{
+  "spanish": {
+    "tag": "spanish",
+    "n_authors": 6,
+    "burrows_delta": {
+      "n_authors": 6,
+      "r_at_1": 0.667,
+      "mean_same_dist": 0.7211,
+      "mean_diff_dist": 0.9774,
+      "eer": 0.333
+    },
+    "jaccard_char4": {
+      "n_authors": 6,
+      "r_at_1": 0.667,
+      "mean_same_dist": 0.8201,
+      "mean_diff_dist": 0.8931,
+      "eer": 0.333
+    },
+    "js_char3": {
+      "n_authors": 6,
+      "r_at_1": 0.833,
+      "mean_same_dist": 0.0773,
+      "mean_diff_dist": 0.108,
+      "eer": 0.167
+    }
+  },
+  "baseline": {
+    "tag": "baseline",
+    "n_authors": 300,
+    "burrows_delta": {
+      "n_authors": 300,
+      "r_at_1": 0.65,
+      "mean_same_dist": 0.0484,
+      "mean_diff_dist": 0.6084,
+      "eer": 0.053
+    },
+    "jaccard_char4": {
+      "n_authors": 300,
+      "r_at_1": 0.693,
+      "mean_same_dist": 0.126,
+      "mean_diff_dist": 0.9561,
+      "eer": 0.03
+    },
+    "js_char3": {
+      "n_authors": 300,
+      "r_at_1": 0.72,
+      "mean_same_dist": 0.019,
+      "mean_diff_dist": 0.4324,
+      "eer": 0.02
+    }
+  }
+}

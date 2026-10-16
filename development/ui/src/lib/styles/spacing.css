@@ -1,0 +1,25 @@
+/* EYENET spacing & radius · 4px base grid, 4px radius everywhere. Flat, no shadows. */
+:root{
+  --space-0:0;
+  --space-1:2px;
+  --space-2:4px;
+  --space-3:8px;
+  --space-4:12px;
+  --space-5:16px;
+  --space-6:20px;
+  --space-7:24px;
+  --space-8:32px;
+  --space-9:40px;
+  --space-10:48px;
+
+  --radius:4px;
+  --radius-sm:2px;
+  --radius-none:0;
+
+  /* Density: default row heights for dense tables/feeds */
+  --row-h:32px;
+  --row-h-compact:28px;
+
+  /* The only "shadow" allowed is a 1px hairline border. */
+  --elev-border:1px solid var(--border);
+}

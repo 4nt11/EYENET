@@ -27,6 +27,7 @@
     onNodeContext = () => {},
     onBackgroundContext = () => {},
     onCanvasTap = () => {},
+    onNodeDblClick = () => {},
     // Called once with an api handle so the parent can read live node positions
     // (for saving a graph): api.positions() -> [{ id, x, y }].
     onReady = () => {}
@@ -269,7 +270,8 @@
     sim.raf = requestAnimationFrame(simTick);
   }
   function startSim(node) {
-    if (cy.nodes().length > HEAVY_NODE_COUNT) return; // heavy graph: native drag only
+    // Off when the operator disabled animations, or on a heavy graph (would crash).
+    if (!animationsOn || cy.nodes().length > HEAVY_NODE_COUNT) return;
     const nodes = cy.nodes();
     const idx = new Map();
     nodes.forEach((n, i) => idx.set(n.id(), i));
@@ -301,6 +303,8 @@
 
   // Current render-budget mode; re-created when the graph crosses HEAVY_NODE_COUNT.
   let heavyMode = false;
+  // Operator toggle (view toolbar): off = no spring-mesh at all, just native drag.
+  let animationsOn = true;
   const releaseGrab = () => cy?.autoungrabify(false); // closes over the outer `cy`
 
   // Create (or re-create) the cytoscape instance + its handlers, with a render config
@@ -351,7 +355,21 @@
       added?.remove();
       onConnectReady(src.data('raw'), tgt.data('raw'));
     });
-    cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
+    // ponytail: cytoscape has no native dbltap; detect two taps on the same node <300ms apart.
+    let lastTapId = null;
+    let lastTapAt = 0;
+    cy.on('tap', 'node', (evt) => {
+      const id = evt.target.id();
+      const now = Date.now();
+      if (id === lastTapId && now - lastTapAt < 300) {
+        lastTapId = null;
+        onNodeDblClick(evt.target.data('raw'));
+        return;
+      }
+      lastTapId = id;
+      lastTapAt = now;
+      onNodeClick(evt.target.data('raw'));
+    });
     cy.on('cxttap', 'edge', (evt) => {
       evt.stopPropagation?.();
       onEdgeContext(evt.target.data('raw'), evt.renderedPosition);
@@ -366,8 +384,15 @@
 
   onMount(() => {
     buildCy();
-    // Live-position reader (saving the canvas); reads the outer cy, so it survives a rebuild.
-    onReady({ positions: () => cy.nodes().map((n) => ({ id: n.id(), x: n.position().x, y: n.position().y })) });
+    // View-control api for the parent toolbar (all read the outer cy, so they survive a
+    // rebuild): positions (save), fit, relayout, freeze (lock drag), animations toggle.
+    onReady({
+      positions: () => cy.nodes().map((n) => ({ id: n.id(), x: n.position().x, y: n.position().y })),
+      fit: () => cy?.fit(undefined, 32),
+      relayout: () => runLayout(),
+      setFrozen: (on) => cy?.autolock(!!on),
+      setAnimations: (on) => { animationsOn = !!on; if (!on) killSim(); }
+    });
 
     // Re-grab after any draw; these span cy rebuilds so they live on window/container.
     window.addEventListener('mouseup', releaseGrab);

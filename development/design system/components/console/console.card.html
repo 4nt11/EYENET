@@ -1,0 +1,31 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Console — Case, Feed & Audit" subtitle="Case card, live event feed, audit trail" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<style>body{margin:0;background:var(--black);padding:20px;font-family:var(--font-sans)}
+.grid{display:grid;grid-template-columns:1fr 1.2fr;gap:16px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.box{border:1px solid var(--border);border-radius:4px;overflow:hidden;background:var(--surface)}
+.cap{padding:6px 12px;font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-faint);border-bottom:1px solid var(--border);background:var(--panel)}</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script></head>
+<body><div id="root"></div>
+<script type="text/babel">
+const { CaseCard, EventFeedItem, AuditRow } = window.EYENETDesignSystem_6752a5;
+function Demo(){return(<div className="grid">
+<div className="stack">
+<CaseCard caseId="CASE-2026-0417" title="Loader campaign — EMEA finance" tier="critical" tierLabel="Critical" actor="UNC-3312" openCount={7} updated="12:04Z" active/>
+<CaseCard caseId="CASE-2026-0402" title="Credential harvest — supplier portal" tier="high" tierLabel="High" actor="UNC-2980" openCount={3} updated="09:51Z"/>
+</div>
+<div className="stack">
+<div className="box"><div className="cap">Live feed</div>
+<EventFeedItem time="12:04:51" kind="alert" label="Beacon" fresh message="Outbound C2 beacon detected" source="fin-ws-04 → 185.12.44.9"/>
+<EventFeedItem time="12:04:47" kind="observe" label="DNS" message="Resolution for known-bad domain" source="update.svc-cdn[.]net"/>
+<EventFeedItem time="12:04:40" kind="info" message="Analyst op.krieg joined case"/></div>
+<div className="box"><div className="cap">Audit trail</div>
+<AuditRow time="12:04:51Z" actor="op.krieg" verb="reclassified" target="ART-0091" detail="HIGH → CRITICAL"/>
+<AuditRow time="11:59:02Z" actor="svc.ingest" tamper verb="hash mismatch on" target="ART-0088"/></div>
+</div>
+</div>);}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script></body></html>

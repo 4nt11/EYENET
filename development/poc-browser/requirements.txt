@@ -1,0 +1,7 @@
+# poc-browser lab deps. Standalone venv — NOT eyenet's.
+playwright>=1.47        # Firefox-over-Tor driver (the onion-native stealth engine)
+curl-cffi>=0.7          # HTTP-fidelity / header-order comparison + future clearnet (JA3) targets
+# bézier + human-motion math is pure stdlib (human.py) — no numpy/scipy needed.
+# NOT included (wrong tool for an http onion — see README):
+#   undetected-chromedriver / selenium  (Chromium-over-Tor is anomalous)
+#   tls-client                          (no TLS surface on an http onion)

@@ -124,6 +124,22 @@
     if (node) expandNode(node, name);
   }
 
+  // Double-click a node → run its type's default enrichment (the mockup's one-shot expand).
+  const DEFAULT_ENRICH = {
+    actor: 'messages',
+    artifact: 'messages',
+    message: 'author',
+    thread: 'messages',
+    group: 'messages',
+    document: 'artifacts',
+    persona: 'actors'
+  };
+  function onNodeDblClick(node) {
+    menu = null;
+    const name = DEFAULT_ENRICH[node.entityType];
+    if (name) expandNode(node, name);
+  }
+
   const fieldRows = $derived(selNode ? Object.entries(selNode.fields ?? {}) : []);
   const fmtCount = (c) => (c == null ? '·' : Number(c).toLocaleString('en-US'));
   const edgeLabel = (k) => k.replace(/_/g, ' ');
@@ -210,6 +226,7 @@
       nodes={explorer.nodes}
       edges={explorer.edges}
       onNodeClick={(n) => { selNode = n; menu = null; }}
+      {onNodeDblClick}
       onNodeContext={onNodeContext}
       onConnectReady={onConnectReady}
       onCanvasTap={() => { menu = null; selNode = null; quickAdd = null; }}
