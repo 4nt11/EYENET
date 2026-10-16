@@ -49,6 +49,7 @@ from .operator_entities import OperatorEntitiesMixin
 from .personas import PersonasMixin
 from .profiles import ProfilesMixin
 from .relations import RelationsMixin
+from .saved_graphs import SavedGraphsMixin
 from .search import SearchMixin
 from .sources import SourcesMixin
 from .syslog import SyslogMixin
@@ -96,6 +97,7 @@ class SQLModelRepository(
     PersonasMixin,
     ProfilesMixin,
     RelationsMixin,
+    SavedGraphsMixin,
     SearchMixin,
     SourcesMixin,
     SyslogMixin,

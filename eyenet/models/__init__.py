@@ -63,6 +63,10 @@ from .infrastructure import (
     InfrastructureArtifactMentionTable,
     InfrastructureArtifactTable,
 )
+from .investigation_graph import (
+    InvestigationGraphNodeTable,
+    InvestigationGraphTable,
+)
 from .linkage import LinkageTable
 from .linkage_verifier_result import LinkageVerifierResultTable
 from .manual_crew import ManualCrewMemberTable, ManualCrewTable
@@ -130,6 +134,8 @@ __all__ = [
     "IndicatorRuleTable",
     "InfrastructureArtifactMentionTable",
     "InfrastructureArtifactTable",
+    "InvestigationGraphNodeTable",
+    "InvestigationGraphTable",
     "JwtDenylistTable",
     "LinkageEventLogTable",
     "LinkageTable",

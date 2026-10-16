@@ -578,6 +578,31 @@ def _drop_document_artifact_schema(conn: Any) -> None:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
 
+_SAVED_GRAPH_TABLES = frozenset({"investigation_graph", "investigation_graph_node"})
+
+
+def _apply_saved_graph_schema(conn: Any) -> None:
+    """Create ``investigation_graph`` + ``investigation_graph_node`` (pg-0012 /
+    sqlite-0012). Created from the model for index/constraint parity with the
+    no-drift test. Main DB only."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_SAVED_GRAPH_TABLES)
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_saved_graph_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_saved_graph_schema`."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_SAVED_GRAPH_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
 def seed_indicator_rules(conn: Any) -> int:
     """Insert the vendored default indicator rules not already present; return the
     count inserted.

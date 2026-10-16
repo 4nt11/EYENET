@@ -83,6 +83,10 @@ if TYPE_CHECKING:
     from eyenet.contracts.identity import IdentityRow
     from eyenet.contracts.indicator import IndicatorRuleRow
     from eyenet.contracts.infrastructure import InfrastructureArtifactRow
+    from eyenet.contracts.investigation_graph import (
+        InvestigationGraphNodeRow,
+        InvestigationGraphRow,
+    )
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
     from eyenet.contracts.mfa import MfaChallengeRow
@@ -1991,6 +1995,64 @@ class BaseRepository(ABC):
     @abstractmethod
     async def graph_expand_counts(self, *, src_type: str, src_id: UUID) -> dict[str, int]:
         """Per-enrichment neighbour totals for the degree preview."""
+
+    # =================================================================
+    # SAVED GRAPHS (investigation_graph + node placements; the picker)
+    # =================================================================
+
+    @abstractmethod
+    async def create_investigation_graph(
+        self,
+        *,
+        name: str,
+        description: str | None,
+        created_by_user_id: UUID,
+        now: datetime | None = None,
+    ) -> UUID:
+        """Create an empty saved graph; returns its id."""
+
+    @abstractmethod
+    async def get_investigation_graph(self, graph_id: UUID) -> InvestigationGraphRow | None:
+        """One saved graph by id, or None."""
+
+    @abstractmethod
+    async def list_investigation_graphs(
+        self, *, created_by_user_id: UUID, limit: int, offset: int = 0
+    ) -> list[InvestigationGraphRow]:
+        """The operator's saved graphs, most-recently-updated first."""
+
+    @abstractmethod
+    async def update_investigation_graph(
+        self,
+        graph_id: UUID,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Rename / re-describe a graph (only non-None fields). False if absent."""
+
+    @abstractmethod
+    async def delete_investigation_graph(self, graph_id: UUID) -> bool:
+        """Delete a graph and its node placements. False if absent."""
+
+    @abstractmethod
+    async def get_investigation_graph_nodes(
+        self, graph_id: UUID
+    ) -> list[InvestigationGraphNodeRow]:
+        """All node placements on a graph."""
+
+    @abstractmethod
+    async def replace_investigation_graph_nodes(
+        self,
+        graph_id: UUID,
+        nodes: list[tuple[str, UUID, float, float, bool, list[str]]],
+        *,
+        now: datetime | None = None,
+    ) -> int:
+        """Save-the-canvas: replace all placements in one transaction. Each node is
+        ``(entity_type, entity_id, x, y, pinned, enrichments_run)``. Returns the count
+        stored and bumps the graph's ``updated_at``."""
 
     @abstractmethod
     async def thread_op_authors(
