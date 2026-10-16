@@ -560,6 +560,52 @@ def artifact_backfill(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("document-artifact-backfill")
+def document_artifact_backfill(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    batch: int = typer.Option(500, "--batch", help="documents per page"),
+) -> None:
+    """Backfill document_artifact edges over the stored documents.
+
+    Runs the infra indicator ruleset over each document's extracted_text and links
+    the artifacts (document_artifact). Mirrors what the classifier now does live on
+    upload; use this for documents ingested BEFORE that wiring. Idempotent (dedupes
+    on value_hash + the (artifact_id, document_id) edge), safe to re-run."""
+    from eyenet.linker.indicators import extract as indicator_extract, load_ruleset  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        ruleset = await load_ruleset(storage)
+        offset = 0
+        seen = 0
+        edges_written = 0
+        try:
+            while True:
+                page = await storage.list_documents(limit=batch, offset=offset)
+                if not page:
+                    break
+                offset += len(page)
+                for doc in page:
+                    seen += 1
+                    text = doc.extracted_text or ""
+                    if not text:
+                        continue
+                    indicators = indicator_extract(text, ruleset)
+                    if indicators:
+                        edges_written += await storage.record_document_artifacts(
+                            document_id=doc.id,
+                            indicators=[(i.kind, i.value_norm, i.char_offset) for i in indicators],
+                            now=doc.ingested_at,
+                        )
+                typer.echo(f"  scanned {seen} documents, {edges_written} edges written")
+        finally:
+            await storage.close()
+        typer.echo(f"done: {seen} documents scanned, {edges_written} edges written")
+
+    asyncio.run(_main())
+
+
 @app.command("artifact-checksum-sweep")
 def artifact_checksum_sweep(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),

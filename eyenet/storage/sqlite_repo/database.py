@@ -554,6 +554,30 @@ def _drop_indicator_schema(conn: Any) -> None:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
 
+_DOCUMENT_ARTIFACT_TABLES = frozenset({"document_artifact"})
+
+
+def _apply_document_artifact_schema(conn: Any) -> None:
+    """Create ``document_artifact`` (pg-0011 / sqlite-0011). Plain table, created
+    from the model for index/constraint parity with the no-drift test. Main DB only."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_DOCUMENT_ARTIFACT_TABLES)
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_document_artifact_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_document_artifact_schema`."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_DOCUMENT_ARTIFACT_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
 def seed_indicator_rules(conn: Any) -> int:
     """Insert the vendored default indicator rules not already present; return the
     count inserted.

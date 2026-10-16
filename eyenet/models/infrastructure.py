@@ -89,8 +89,34 @@ class InfrastructureArtifactMentionTable(SQLModel, table=True):
     ts: datetime
 
 
+class DocumentArtifactTable(SQLModel, table=True):
+    """`document_artifact` — provenance edge: artifact extracted from a document's text.
+
+    The document analogue of ``InfrastructureArtifactMentionTable`` (documents are
+    not messages, so they can't ride the message mention table). One row per
+    ``(artifact_id, document_id)``; the deduped artifact lives once in
+    ``infrastructure_artifact``. Populated by the classifier after it settles a
+    document's ``extracted_text`` (runs the same indicator ruleset the DiscoverySensor
+    uses on messages).
+    """
+
+    __tablename__ = "document_artifact"
+    __table_args__ = (
+        UniqueConstraint("artifact_id", "document_id", name="uq_document_artifact_edge"),
+    )
+
+    id: UUID = Field(default_factory=new_uuid7, primary_key=True)
+    artifact_id: UUID = Field(foreign_key="infrastructure_artifact.id", index=True)
+    document_id: UUID = Field(foreign_key="document.id", index=True)
+    # Char offset of the match in the document's extracted text, when known.
+    char_offset: int | None = None
+    # When the artifact was extracted (the document's ingest time).
+    ts: datetime
+
+
 __all__ = [
     "ActorArtifactTable",
+    "DocumentArtifactTable",
     "InfrastructureArtifactMentionTable",
     "InfrastructureArtifactTable",
 ]

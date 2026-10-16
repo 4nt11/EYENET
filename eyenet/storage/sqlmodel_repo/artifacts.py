@@ -34,6 +34,7 @@ from eyenet.models.actor import ActorTable
 from eyenet.models.group import GroupTable
 from eyenet.models.infrastructure import (
     ActorArtifactTable,
+    DocumentArtifactTable,
     InfrastructureArtifactMentionTable,
     InfrastructureArtifactTable,
 )
@@ -555,6 +556,68 @@ class ArtifactsMixin:
                 inserted += 1
             await session.commit()
             return inserted
+
+    async def record_document_artifacts_bulk(
+        self,
+        rows: list[tuple[UUID, UUID, int | None, datetime]],
+    ) -> int:
+        """Bulk-insert document_artifact edges (artifact_id, document_id, char_offset,
+        ts), skipping pairs already stored or duplicated within the batch. The
+        document analogue of :meth:`record_artifact_mentions_bulk`."""
+        if not rows:
+            return 0
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            artifact_ids = list({r[0] for r in rows})
+            existing_pairs: set[tuple[UUID, UUID]] = set()
+            result = await session.exec(
+                select(
+                    col(DocumentArtifactTable.artifact_id),
+                    col(DocumentArtifactTable.document_id),
+                ).where(col(DocumentArtifactTable.artifact_id).in_(artifact_ids))
+            )
+            for aid, did in result:
+                existing_pairs.add((aid, did))
+
+            inserted = 0
+            batch_seen: set[tuple[UUID, UUID]] = set()
+            for artifact_id, document_id, char_offset, ts in rows:
+                key = (artifact_id, document_id)
+                if key in existing_pairs or key in batch_seen:
+                    continue
+                batch_seen.add(key)
+                session.add(
+                    DocumentArtifactTable(
+                        artifact_id=artifact_id,
+                        document_id=document_id,
+                        char_offset=char_offset,
+                        ts=ts,
+                    )
+                )
+                inserted += 1
+            await session.commit()
+            return inserted
+
+    async def record_document_artifacts(
+        self,
+        *,
+        document_id: UUID,
+        indicators: list[tuple[str, str, int | None]],
+        now: datetime,
+    ) -> int:
+        """Upsert the artifacts extracted from a document's text and link each to the
+        document. ``indicators`` = ``(kind, value, char_offset)``. Returns the number
+        of NEW edges. Mirrors the message extraction path (bulk artifact upsert +
+        bulk edge insert); used by the classifier (live) and the backfill CLI."""
+        if not indicators:
+            return 0
+        hash_to_id = await self.put_infrastructure_artifacts_bulk(
+            [(kind, value, now, now) for kind, value, _off in indicators]
+        )
+        edges = [
+            (hash_to_id[_value_hash(value)], document_id, off, now)
+            for _kind, value, off in indicators
+        ]
+        return await self.record_document_artifacts_bulk(edges)
 
     async def add_group_access_artifact(
         self,

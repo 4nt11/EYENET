@@ -59,6 +59,7 @@ from .incident_rule import IncidentRuleTable
 from .indicator_rule import IndicatorRuleTable
 from .infrastructure import (
     ActorArtifactTable,
+    DocumentArtifactTable,
     InfrastructureArtifactMentionTable,
     InfrastructureArtifactTable,
 )
@@ -98,6 +99,7 @@ __all__ = [
     "CollectorTable",
     "ContentTemplateTable",
     "CorpusCursorTable",
+    "DocumentArtifactTable",
     "DocumentTable",
     "EngagementAuthorizationTable",
     "FeedbackGroundTruth",

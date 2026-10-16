@@ -47,6 +47,10 @@ from eyenet.classifier.sandbox import ExtractResult
 from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.document import DocumentRow
 from eyenet.contracts.enums import SensitivityTier
+from eyenet.linker.indicators import (
+    extract as extract_indicators,
+    load_ruleset as load_indicator_ruleset,
+)
 from eyenet.storage.documents import store_document
 
 if TYPE_CHECKING:
@@ -325,6 +329,19 @@ async def settle_document(
         review_required=bool(verdict.review_flags),
         ingested_at=at,
     )
+    # Extract infrastructure artifacts from the document's text and link them
+    # (document_artifact edge). Same ruleset the DiscoverySensor runs on message
+    # bodies; extract() is string-pure so there is no message coupling. Idempotent
+    # on bus re-delivery: the edge insert dedupes on (artifact_id, document_id).
+    text = classified.text or ""
+    if text:
+        indicators = extract_indicators(text, await load_indicator_ruleset(storage))
+        if indicators:
+            await storage.record_document_artifacts(
+                document_id=document_id,
+                indicators=[(i.kind, i.value_norm, i.char_offset) for i in indicators],
+                now=at,
+            )
     _log.info(
         "classify.document_settled",
         document_id=str(document_id),

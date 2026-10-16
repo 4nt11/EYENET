@@ -25,6 +25,7 @@ from sqlmodel import col, select
 
 from eyenet.models import (
     ActorRelationTable,
+    DocumentArtifactTable,
     InfrastructureArtifactMentionTable,
     LinkageTable,
     MessageTable,
@@ -60,6 +61,9 @@ GRAPH_ENRICHMENTS: dict[str, dict[str, str]] = {
     "group": {
         "messages": "in_group",
         "participants": "active_in",
+    },
+    "document": {
+        "artifacts": "contains_artifact",
     },
 }
 
@@ -144,12 +148,24 @@ def _container_select(src_id: UUID, enrichment: str) -> tuple[Any, Any] | None:
     return None
 
 
+def _document_select(src_id: UUID, enrichment: str) -> tuple[Any, Any] | None:
+    if enrichment == "artifacts":
+        return (
+            select(DocumentArtifactTable.artifact_id).where(
+                DocumentArtifactTable.document_id == src_id
+            ),
+            col(DocumentArtifactTable.artifact_id),
+        )
+    return None
+
+
 _SELECTORS = {
     "actor": _actor_select,
     "artifact": _artifact_select,
     "message": _message_select,
     "thread": _container_select,
     "group": _container_select,
+    "document": _document_select,
 }
 
 

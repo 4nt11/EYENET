@@ -2929,6 +2929,26 @@ class BaseRepository(ABC):
         ``(artifact_id, message_id, char_offset, ts)``. Returns the count inserted."""
 
     @abstractmethod
+    async def record_document_artifacts_bulk(
+        self,
+        rows: list[tuple[UUID, UUID, int | None, datetime]],
+    ) -> int:
+        """Bulk-insert document_artifact edges, skipping ``(artifact_id, document_id)``
+        pairs that already exist (and duplicates within the batch). Each row is
+        ``(artifact_id, document_id, char_offset, ts)``. Returns the count inserted."""
+
+    @abstractmethod
+    async def record_document_artifacts(
+        self,
+        *,
+        document_id: UUID,
+        indicators: list[tuple[str, str, int | None]],
+        now: datetime,
+    ) -> int:
+        """Upsert artifacts extracted from a document's text and link each to the
+        document. ``indicators`` = ``(kind, value, char_offset)``. Returns new edges."""
+
+    @abstractmethod
     async def list_indicator_rules(
         self,
         *,
