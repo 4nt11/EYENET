@@ -19,6 +19,7 @@ from eyenet.api.v1.actor_groups.api_list_actor_groups import router as actor_gro
 from eyenet.api.v1.actor_groups.api_open_crew_case import router as actor_groups_case_router
 from eyenet.api.v1.actor_groups.api_sweep_crew_cases import router as actor_groups_sweep_router
 from eyenet.api.v1.actors.api_actor_stats import router as actors_stats_router
+from eyenet.api.v1.actors.api_create_actor import router as actors_create_router
 
 # === actors ===
 from eyenet.api.v1.actors.api_get_actor import router as actors_get_router
@@ -30,6 +31,7 @@ from eyenet.api.v1.actors.api_list_observations import router as actors_observat
 from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessment_router
 
 # === artifacts ===
+from eyenet.api.v1.artifacts.api_create_artifact import router as artifacts_create_router
 from eyenet.api.v1.artifacts.api_list_artifact_mentions import router as artifacts_mentions_router
 from eyenet.api.v1.artifacts.api_list_artifacts import router as artifacts_list_router
 
@@ -140,6 +142,7 @@ from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_retract_edge import router as graph_retract_edge_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
 from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
+from eyenet.api.v1.groups.api_create_group import router as groups_create_router
 
 # === groups (monitored-groups: see + join at will) ===
 from eyenet.api.v1.groups.api_join_group import router as groups_join_router
@@ -288,10 +291,12 @@ v1_router.include_router(actor_groups_case_router)
 v1_router.include_router(actor_groups_sweep_router)
 v1_router.include_router(crews_router)  # /crews (literal) before /crews/{id}
 v1_router.include_router(linker_run_router)
+v1_router.include_router(actors_create_router)  # POST /actors (operator entity)
 v1_router.include_router(actors_list_router)  # /actors (literal) before /actors/{id}
 v1_router.include_router(actors_stats_router)  # /actors/stats before /actors/{id}
 v1_router.include_router(actors_get_router)
 v1_router.include_router(actors_set_assessment_router)
+v1_router.include_router(artifacts_create_router)  # POST /artifacts (operator entity)
 v1_router.include_router(artifacts_list_router)  # /artifacts (literal) before the detail route
 v1_router.include_router(artifacts_mentions_router)
 v1_router.include_router(calibration_get_router)
@@ -425,6 +430,7 @@ v1_router.include_router(candidates_park_router)
 v1_router.include_router(candidates_retry_router)
 
 # groups (monitored-groups: see + join at will)
+v1_router.include_router(groups_create_router)  # POST /groups (operator entity)
 v1_router.include_router(groups_list_router)
 v1_router.include_router(groups_threads_router)
 v1_router.include_router(groups_messages_router)

@@ -609,6 +609,24 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [actors]
+      operationId: actors_create
+      summary: Create an operator-asserted actor (exploration canvas).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOperatorActorRequest' }
+      responses:
+        "201":
+          description: The created actor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorEntityCreated' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
 
   /v1/actors/stats:
     get:
@@ -968,6 +986,24 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [artifacts]
+      operationId: artifacts_create
+      summary: Create an operator-asserted artifact (deduped by value hash).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOperatorArtifactRequest' }
+      responses:
+        "201":
+          description: The created (or existing, deduped) artifact.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorEntityCreated' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
 
   /v1/artifacts/{artifact_id}/mentions:
     get:
@@ -3484,6 +3520,24 @@ paths:
               schema: { $ref: '#/components/schemas/CursorPageGroupSummary' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [groups]
+      operationId: groups_create
+      summary: Create an operator-asserted group (exploration canvas).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOperatorGroupRequest' }
+      responses:
+        "201":
+          description: The created group.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperatorEntityCreated' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
 
   /v1/groups/{category_id}/threads:
     get:
@@ -6120,6 +6174,34 @@ components:
         kind: { $ref: '#/components/schemas/SourceKind' }
         display_name: { type: string, minLength: 1, maxLength: 512 }
         notes: { type: string, nullable: true, maxLength: 2048 }
+    CreateOperatorActorRequest:
+      type: object
+      additionalProperties: false
+      description: Operator-asserted actor. At least one of handle/display_name is required.
+      properties:
+        handle: { type: string, nullable: true, minLength: 1, maxLength: 512 }
+        display_name: { type: string, nullable: true, minLength: 1, maxLength: 512 }
+    CreateOperatorGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        title: { type: string, nullable: true, minLength: 1, maxLength: 512 }
+        kind: { $ref: '#/components/schemas/GroupKind' }
+    CreateOperatorArtifactRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, value]
+      properties:
+        kind: { type: string, pattern: '^[a-z][a-z0-9_]{1,63}$' }
+        value: { type: string, minLength: 1, maxLength: 2048 }
+    OperatorEntityCreated:
+      type: object
+      additionalProperties: false
+      required: [id, entity_type]
+      properties:
+        id: { type: string, format: uuid }
+        entity_type: { type: string }
     UpdateSourceRequest:
       type: object
       additionalProperties: false

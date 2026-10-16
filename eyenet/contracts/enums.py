@@ -20,6 +20,9 @@ class SourceKind(StrEnum):
     FORUM = "forum"
     RSS = "rss"
     XMPP = "xmpp"
+    # Synthetic source owning operator-asserted actors/groups (Maltego-style
+    # operator entities). Not a collector; see provenance column on actor/group.
+    OPERATOR = "operator"
 
 
 class GroupKind(StrEnum):

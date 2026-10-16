@@ -45,6 +45,7 @@ class ActorRow(DbRowBase):
     is_bot_self_declared: bool = False
     notes: str | None = None
     operator_assessment: str | None = None
+    provenance: str = "collected"
 
 
 class ActorAliasHistoryRow(DbRowBase):

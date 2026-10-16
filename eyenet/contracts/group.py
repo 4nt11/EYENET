@@ -24,6 +24,7 @@ class GroupRow(DbRowBase):
     member_count: int | None = None
     first_seen_at_ingest: datetime
     last_observed_at_ingest: datetime
+    provenance: str = "collected"
 
 
 class GroupSnapshotRow(DbRowBase):

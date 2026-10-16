@@ -45,6 +45,7 @@ from .manual_crews import ManualCrewsMixin
 from .memberships import MembershipsMixin
 from .messages import MessagesMixin
 from .observations import ObservationsMixin
+from .operator_entities import OperatorEntitiesMixin
 from .personas import PersonasMixin
 from .profiles import ProfilesMixin
 from .relations import RelationsMixin
@@ -91,6 +92,7 @@ class SQLModelRepository(
     MembershipsMixin,
     MessagesMixin,
     ObservationsMixin,
+    OperatorEntitiesMixin,
     PersonasMixin,
     ProfilesMixin,
     RelationsMixin,

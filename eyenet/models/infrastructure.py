@@ -50,6 +50,9 @@ class InfrastructureArtifactTable(SQLModel, table=True):
     # by Path B on SourceDomain insert.
     resolved_to_source_id: UUID | None = Field(default=None, foreign_key="source.id")
     resolution_state: ResolutionState = Field(default=ResolutionState.UNRESOLVED)
+    # "collected" (default; extracted by a sensor) vs "operator_asserted" (hand-
+    # added on the canvas). Open varchar, no DB enum.
+    provenance: str = Field(default="collected", index=True)
 
 
 class ActorArtifactTable(SQLModel, table=True):

@@ -30,6 +30,9 @@ class ActorTable(SQLModel, table=True):
     # Operator free-text assessment (write:actors). Analyst-authored dossier
     # note; distinct from `notes` (system/collector provenance).
     operator_assessment: str | None = None
+    # "collected" (default; from a collector) vs "operator_asserted" (hand-created
+    # on the exploration canvas). Open varchar, no DB enum. See OperatorEntitiesMixin.
+    provenance: str = Field(default="collected", index=True)
 
 
 class ActorAliasHistoryTable(SQLModel, table=True):

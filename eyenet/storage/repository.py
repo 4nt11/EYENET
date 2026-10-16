@@ -2878,6 +2878,34 @@ class BaseRepository(ABC):
     async def count_artifact_mentions(self, artifact_id: UUID) -> int:
         """Count mention edges for one artifact (for ``?include_total=1``)."""
 
+    # =================================================================
+    # OPERATOR-ASSERTED ENTITIES (exploration canvas; provenance column)
+    # =================================================================
+
+    @abstractmethod
+    async def get_or_create_operator_source(self, *, now: datetime | None = None) -> UUID:
+        """The single synthetic ``SourceKind.OPERATOR`` source that owns
+        operator-asserted actors/groups. Idempotent."""
+
+    @abstractmethod
+    async def create_operator_actor(
+        self, *, handle: str | None, display_name: str | None, now: datetime | None = None
+    ) -> UUID:
+        """Hand-create an actor with ``provenance="operator_asserted"`` (canvas)."""
+
+    @abstractmethod
+    async def create_operator_group(
+        self, *, title: str | None, kind: GroupKind, now: datetime | None = None
+    ) -> UUID:
+        """Hand-create a group with ``provenance="operator_asserted"`` (canvas)."""
+
+    @abstractmethod
+    async def create_operator_artifact(
+        self, *, kind: str, value: str, now: datetime | None = None
+    ) -> UUID:
+        """Hand-create an artifact with ``provenance="operator_asserted"``, or return
+        the existing row if ``value`` is already present (dedup by value_hash)."""
+
     @abstractmethod
     async def put_infrastructure_artifacts_bulk(
         self,

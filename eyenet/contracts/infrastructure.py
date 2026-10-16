@@ -30,6 +30,7 @@ class InfrastructureArtifactRow(DbRowBase):
     last_seen_at_ingest: datetime
     resolved_to_source_id: UUID | None = None
     resolution_state: ResolutionState = ResolutionState.UNRESOLVED
+    provenance: str = "collected"
 
 
 class ActorArtifactRow(DbRowBase):

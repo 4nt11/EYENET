@@ -47,6 +47,7 @@ def _row_to_actor(row: ActorTable) -> ActorRow:
         is_bot_self_declared=row.is_bot_self_declared,
         notes=row.notes,
         operator_assessment=row.operator_assessment,
+        provenance=row.provenance,
     )
 
 

@@ -25,6 +25,8 @@ class GroupTable(SQLModel, table=True):
     member_count: int | None = None
     first_seen_at_ingest: datetime
     last_observed_at_ingest: datetime
+    # "collected" (default) vs "operator_asserted". Open varchar, no DB enum.
+    provenance: str = Field(default="collected", index=True)
 
 
 class GroupSnapshotTable(SQLModel, table=True):
