@@ -99,6 +99,26 @@ export async function seedSearch(q) {
   }
 }
 
+// One-shot scoped entity search (the drop-to-add popover); returns results without
+// touching the palette's own seed state. `scope` is { types } or { dsl }.
+export async function searchEntities(scope, q) {
+  const term = (q ?? '').trim();
+  let qp = '';
+  let tp = '';
+  if (scope?.dsl) qp = term ? `${scope.dsl} ${term}` : scope.dsl;
+  else if (term) {
+    qp = term;
+    if (scope?.types) tp = `&types=${encodeURIComponent(scope.types)}`;
+  }
+  if (!qp) return [];
+  try {
+    const p = await apiGet(`/v1/search?q=${encodeURIComponent(qp)}&limit=12${tp}`, { auth: true });
+    return p.items ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // Palette click: scope the seed search (toggle off if the same scope). `scope` is
 // { id, types } for an entity type or { id, dsl } for a query-DSL predicate.
 export function setSeedScope(scope) {

@@ -9,7 +9,7 @@
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
     EDGE_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
-    saveGraph, loadGraph
+    saveGraph, loadGraph, searchEntities
   } from '$lib/explorer.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -41,15 +41,57 @@
     return () => { ui.navCollapsed = prior; };
   });
 
-  // Palette drag -> drop on canvas -> open the create modal preset to that type.
+  // Palette drag -> drop on canvas -> quick-add popover at the drop point: type a
+  // name, arrow-pick an existing match, Enter to add it (or create a new one).
   const DRAG_MIME = 'application/x-eyenet-entity';
+  const TYPE_WORD = (s) => (s.kind === 'artifact' ? s.artifactKind : s.kind);
+  function dropScope(spec) {
+    return spec.kind === 'artifact'
+      ? { dsl: `artifact.kind:${spec.artifactKind}` }
+      : { types: spec.kind };
+  }
+  let quickAdd = $state(null); // { x, y, spec, q, results, sel } | null
+  let qaTimer;
   function onCanvasDrop(e) {
     e.preventDefault();
     const raw = e.dataTransfer?.getData(DRAG_MIME);
     if (!raw) return;
     let spec;
     try { spec = JSON.parse(raw); } catch { return; }
-    openNew(spec.kind, spec.artifactKind);
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu = null; selNode = null;
+    quickAdd = { x: e.clientX - rect.left, y: e.clientY - rect.top, spec, q: '', results: [], sel: 0 };
+  }
+  function qaInput() {
+    clearTimeout(qaTimer);
+    const qa = quickAdd;
+    qaTimer = setTimeout(async () => {
+      if (!quickAdd || quickAdd !== qa) return;
+      const results = await searchEntities(dropScope(qa.spec), qa.q);
+      if (quickAdd === qa) quickAdd = { ...quickAdd, results, sel: 0 };
+    }, 180);
+  }
+  async function qaCreate(q) {
+    const s = quickAdd.spec;
+    quickAdd = null;
+    const payload =
+      s.kind === 'actor' ? { handle: q.trim() || null, display_name: null }
+      : s.kind === 'group' ? { title: q.trim(), kind: 'chat' }
+      : { kind: s.artifactKind, value: q.trim() };
+    try { await createOperatorEntity(s.kind, payload); } catch { /* explorer.error */ }
+  }
+  function focusEl(node) { node.focus(); }
+  function qaKey(e) {
+    if (!quickAdd) return;
+    const n = quickAdd.results.length; // index n == the "create new" row
+    if (e.key === 'ArrowDown') { e.preventDefault(); quickAdd = { ...quickAdd, sel: Math.min(quickAdd.sel + 1, n) }; }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); quickAdd = { ...quickAdd, sel: Math.max(quickAdd.sel - 1, 0) }; }
+    else if (e.key === 'Escape') { quickAdd = null; }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (quickAdd.sel < n) { addSeed(quickAdd.results[quickAdd.sel]); quickAdd = null; }
+      else if (quickAdd.q.trim()) qaCreate(quickAdd.q);
+    }
   }
 
   // ── Left-click a node → inspector flyout (the raw mapped node).
@@ -163,9 +205,31 @@
       onNodeClick={(n) => { selNode = n; menu = null; }}
       onNodeContext={onNodeContext}
       onConnectReady={onConnectReady}
-      onCanvasTap={() => { menu = null; selNode = null; }}
+      onCanvasTap={() => { menu = null; selNode = null; quickAdd = null; }}
       onReady={(api) => (canvasApi = api)}
     />
+
+    {#if quickAdd}
+      <div class="qa" style="left:{quickAdd.x}px; top:{quickAdd.y}px">
+        <input class="qa-input" bind:value={quickAdd.q} oninput={qaInput} onkeydown={qaKey}
+          use:focusEl placeholder="{TYPE_WORD(quickAdd.spec)} name…" spellcheck="false" />
+        <div class="qa-list">
+          {#each quickAdd.results as r, i (r.entity_id)}
+            <button class="qa-row" class:sel={quickAdd.sel === i}
+              onmouseenter={() => (quickAdd = { ...quickAdd, sel: i })}
+              onclick={() => { addSeed(r); quickAdd = null; }}>
+              <span class="dot" style="background:var(--etype-{r.entity_type}, var(--etype-default))"></span>
+              <span class="qa-t">{r.title || r.entity_id}</span>
+            </button>
+          {/each}
+          <button class="qa-row qa-new" class:sel={quickAdd.sel === quickAdd.results.length}
+            onmouseenter={() => (quickAdd = { ...quickAdd, sel: quickAdd.results.length })}
+            onclick={() => quickAdd.q.trim() && qaCreate(quickAdd.q)}>
+            + Create {TYPE_WORD(quickAdd.spec)}{quickAdd.q.trim() ? ` “${quickAdd.q.trim()}”` : ''}
+          </button>
+        </div>
+      </div>
+    {/if}
 
     <!-- view toolbar -->
     <div class="viewbar">
@@ -299,6 +363,17 @@
   .back:hover { color: var(--accent-text); }
 
   .ctx-empty { padding: 10px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }
+  .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
+
+  /* drop-to-add quick popover */
+  .qa { position: absolute; z-index: 32; width: 240px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.5); overflow: hidden; }
+  .qa-input { width: 100%; height: 30px; padding: 0 10px; background: var(--surface); border: 0; border-bottom: 1px solid var(--border); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); }
+  .qa-input:focus { outline: none; }
+  .qa-list { max-height: 260px; overflow-y: auto; }
+  .qa-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; background: none; border: 0; cursor: pointer; text-align: left; }
+  .qa-row.sel { background: var(--surface); }
+  .qa-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-body); }
+  .qa-new { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); border-top: 1px solid var(--border); }
 
   .stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
   .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); }
