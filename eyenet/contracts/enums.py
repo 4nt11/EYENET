@@ -293,13 +293,13 @@ class InfrastructureKind(StrEnum):
     WALLET_TRON = "wallet_tron"  # TRON base58 (USDT-TRC20 scam rail)
     PGP_KEY = "pgp_key"
     DOMAIN = "domain"
+    URL = "url"  # full URL (scheme+host+path+query); host may be a domain or an IP
     ONION = "onion"
     IPV4 = "ipv4"  # coded extractor: regex candidate + ipaddress validation (unspecified dropped)
     IPV6 = "ipv6"  # distinct kind from ipv4 — different address space, stored compressed
     EMAIL = "email"
     PHONE = "phone"
     HANDLE_OTHER_PLATFORM = "handle_other_platform"
-    PASTE_URL = "paste_url"
     SESSION = "session"  # Session messenger ID (05 + 64 hex)
     TOX = "tox"  # Tox ID (76 hex)
 

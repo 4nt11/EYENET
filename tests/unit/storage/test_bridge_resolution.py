@@ -86,12 +86,12 @@ async def test_path_a_artifact_insert_resolves_to_existing_source(
 
 
 @pytest.mark.unit
-async def test_path_a_paste_url_extracts_host(storage: BaseRepository) -> None:
+async def test_path_a_url_extracts_host(storage: BaseRepository) -> None:
     src = await _make_source(storage, "alpha")
     await _add_domain(storage, src, "pastebin.example.com")
 
     art = await storage.put_infrastructure_artifact(
-        kind=InfrastructureKind.PASTE_URL,
+        kind=InfrastructureKind.URL,
         value="https://pastebin.example.com/raw/aBcD1234",
         first_seen_at_ingest=_NOW,
         last_seen_at_ingest=_NOW,
@@ -269,7 +269,7 @@ async def test_path_a_concurrent_artifact_inserts_resolve(
             last_seen_at_ingest=_NOW,
         ),
         storage.put_infrastructure_artifact(
-            kind=InfrastructureKind.PASTE_URL,
+            kind=InfrastructureKind.URL,
             value="https://concurrent.example.com/paste/x",
             first_seen_at_ingest=_NOW,
             last_seen_at_ingest=_NOW,

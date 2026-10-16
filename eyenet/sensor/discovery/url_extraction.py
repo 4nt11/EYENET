@@ -27,7 +27,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import tldextract
 
@@ -75,6 +75,24 @@ _ONION_SUFFIX = ".onion"
 # curl/wget block; deterministic in the collector env) and no disk cache writes
 # (cache_dir=None — safe in a locked-down container fs). One instance, module-wide.
 _tld = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
+
+
+def _is_ip_host(host: str) -> bool:
+    """True if ``host`` is a valid IP literal (urlsplit already unbrackets IPv6)."""
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return True
+
+
+def _normalize_url(url: str) -> str:
+    """Canonical full URL for a ``url`` artifact: scheme + host lowercased, path and
+    query kept (path/query can be case-significant - t.me/JoinChat), fragment dropped
+    (client-side, not infrastructure intel). Keeps the URL in its entirety otherwise,
+    so a bare host artifact is not the only thing recorded."""
+    s = urlsplit(url)
+    return urlunsplit((s.scheme.lower(), s.netloc.lower(), s.path, s.query, ""))
 
 
 def _classify_and_normalize(host: str) -> tuple[InfrastructureKind, str] | None:
@@ -156,8 +174,9 @@ def _extract(text: str) -> set[tuple[InfrastructureKind, str]]:
     """Return the distinct ``(kind, normalized_value)`` artifacts in ``text``."""
     found: set[tuple[InfrastructureKind, str]] = set()
     for match in _URL_RE.finditer(text):
+        raw = match.group(0).rstrip(".,;:!?")  # trailing sentence punctuation isn't the URL
         try:
-            host = urlsplit(match.group(0)).hostname
+            host = urlsplit(raw).hostname
         except ValueError:
             # Malformed URL (e.g. unbalanced IPv6 brackets: "http://[abc") — urlsplit
             # raises. Not an extractable artifact; skip it, same as a bad host below.
@@ -165,7 +184,12 @@ def _extract(text: str) -> set[tuple[InfrastructureKind, str]]:
         if host:
             classified = _classify_and_normalize(host)
             if classified is not None:
-                found.add(classified)
+                found.add(classified)  # the host as a domain/onion artifact
+            # Emit the full URL when the host is a real domain/onion OR an IP literal
+            # (the host IP itself is caught by _find_ips over the whole text). So a
+            # bare "t.me" isn't the only trace of "https://t.me/joinchat/abc".
+            if classified is not None or _is_ip_host(host):
+                found.add((InfrastructureKind.URL, _normalize_url(raw)))
     for match in _ONION_RE.finditer(text):
         classified = _classify_and_normalize(match.group(0))
         if classified is not None:

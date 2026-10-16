@@ -58,7 +58,8 @@ async def test_punycode_and_unicode_collapse(storage: BaseRepository) -> None:
     # Both forms of the same host must reduce to ONE artifact.
     text = "see https://münchen.de/a and http://xn--mnchen-3ya.de/b"
     written = await UrlExtractor().process(_ctx(text), storage)
-    assert written == 1
+    # the host collapses to ONE domain; the two distinct full URLs are their own artifacts
+    assert written == 3
 
 
 @pytest.mark.unit
@@ -75,11 +76,12 @@ async def test_resolved_and_unresolved_branches(storage: BaseRepository) -> None
     )
     text = "mirror at https://known.example/x or https://unknown.test/y"
     written = await UrlExtractor().process(_ctx(text), storage)
-    assert written == 2
+    assert written == 4  # 2 domains + 2 full-URL artifacts
 
-    # known.example resolved to the source (Path A ran inline)
+    # known.example AND its full URL both resolve to the source (URL is bridgeable:
+    # Path A resolves on the URL's host too).
     resolved = await storage.list_artifacts_for_source(src)
-    assert {a.value for a in resolved} == {"known.example"}
+    assert {a.value for a in resolved} == {"known.example", "https://known.example/x"}
     assert all(a.resolution_state is ResolutionState.RESOLVED for a in resolved)
 
     # unknown.test stayed UNRESOLVED — read it back via the idempotent upsert
@@ -116,7 +118,8 @@ async def test_no_urls_writes_nothing(storage: BaseRepository) -> None:
 @pytest.mark.unit
 async def test_duplicate_host_across_urls_collapses(storage: BaseRepository) -> None:
     text = "https://dup.example/a https://dup.example/b https://DUP.example/c"
-    assert await UrlExtractor().process(_ctx(text), storage) == 1
+    # the host collapses to ONE domain; /a /b /c are three distinct full URLs
+    assert await UrlExtractor().process(_ctx(text), storage) == 4
 
 
 # --- coded extractors: IPs (regex + ipaddress) and bare domains (tldextract) ---
@@ -200,3 +203,22 @@ async def test_ip_artifacts_persisted_with_open_kind(storage: BaseRepository) ->
         last_seen_at_ingest=_NOW,
     )
     assert again.kind == "ipv4"
+
+
+def test_url_artifact_emitted_with_domain_host() -> None:
+    got = _extract("join https://t.me/joinChat/AbC123?x=1#frag now")
+    # full URL kept (path case preserved, fragment dropped) AND the bare host
+    assert (InfrastructureKind.URL, "https://t.me/joinChat/AbC123?x=1") in got
+    assert (InfrastructureKind.DOMAIN, "t.me") in got
+
+
+def test_url_artifact_emitted_for_ip_host() -> None:
+    got = _extract("panel at http://185.220.101.5:8080/login")
+    assert (InfrastructureKind.URL, "http://185.220.101.5:8080/login") in got
+    assert (InfrastructureKind.IPV4, "185.220.101.5") in got
+
+
+def test_url_artifact_skipped_for_garbage_host() -> None:
+    # bogus TLD -> not a domain, not an IP -> no URL artifact
+    got = _extract("see http://notarealtld.zzzzz/x")
+    assert not any(k == InfrastructureKind.URL for k, _ in got)

@@ -30,7 +30,7 @@ BRIDGEABLE_KINDS: frozenset[InfrastructureKind] = frozenset(
     {
         InfrastructureKind.DOMAIN,
         InfrastructureKind.ONION,
-        InfrastructureKind.PASTE_URL,
+        InfrastructureKind.URL,
     },
 )
 
@@ -185,7 +185,7 @@ def artifact_value_to_host(kind: str, value: str) -> str | None:
     Behavior by kind:
 
     * ``DOMAIN`` / ``ONION`` — the value IS the host; normalize directly.
-    * ``PASTE_URL`` — parse the URL, extract ``netloc``, normalize.
+    * ``URL`` — parse the URL, extract ``netloc``, normalize.
     * Anything else — return ``None`` (wallets, PGP keys, emails, phones,
       cross-platform handles all carry no resolvable host).
 
@@ -196,7 +196,7 @@ def artifact_value_to_host(kind: str, value: str) -> str | None:
     if kind not in BRIDGEABLE_KINDS:
         return None
     # == not is: kind may now be a plain str (open kinds), not the enum singleton.
-    if kind == InfrastructureKind.PASTE_URL:
+    if kind == InfrastructureKind.URL:
         parsed = urlparse(value)
         host = parsed.hostname or ""
         if not host:
