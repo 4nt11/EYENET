@@ -560,6 +560,45 @@ def artifact_backfill(  # pragma: no cover
     asyncio.run(_main())
 
 
+@app.command("artifact-checksum-sweep")
+def artifact_checksum_sweep(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    apply: bool = typer.Option(False, "--apply", help="actually delete (default: dry-run)"),
+    batch: int = typer.Option(500, "--batch", help="artifacts per page"),
+) -> None:
+    """Purge crypto-address artifacts that fail the checksum gate.
+
+    Re-validates every stored wallet-kind artifact (BTC/TRON/ETH/XMR) with the
+    coded checksum validator and removes the ones that no longer pass — the hex
+    hashes the old shape-only regex mis-stored as wallets. Deletes the artifact,
+    its mention edges, the actor rollup, the derived graph edges, and the
+    search_document. Dry-run by default; pass --apply to delete. Idempotent — a
+    clean corpus deletes nothing, so it is safe to re-run."""
+    from eyenet.linker.artifact_sweep import sweep_invalid_crypto_artifacts  # noqa: PLC0415
+
+    async def _main() -> None:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        try:
+            report = await sweep_invalid_crypto_artifacts(storage, apply=apply, batch=batch)
+        finally:
+            await storage.close()
+        for kind, value in report.invalid_samples:
+            typer.echo(f"  invalid {kind}: {value}")
+        if apply:
+            typer.echo(
+                f"done: checked {report.checked}, deleted {report.deleted} of "
+                f"{report.invalid} invalid"
+            )
+        else:
+            typer.echo(
+                f"done: checked {report.checked}, {report.invalid} would be deleted "
+                f"(dry-run; pass --apply to delete)"
+            )
+
+    asyncio.run(_main())
+
+
 @app.command("forum-reparse-bodies")
 def forum_reparse_bodies(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
@@ -584,9 +623,7 @@ def forum_reparse_bodies(  # pragma: no cover
         repaired = 0
         try:
             while True:
-                page = await storage.forum_messages_for_body_repair(
-                    limit=batch, after_id=after_id
-                )
+                page = await storage.forum_messages_for_body_repair(limit=batch, after_id=after_id)
                 if not page:
                     break
                 updates: list[tuple[UUID, str, int, int]] = []
