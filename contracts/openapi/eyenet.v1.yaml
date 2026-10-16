@@ -4355,7 +4355,7 @@ components:
     GraphExpandCounts:
       type: object
       properties:
-        counts: { type: object, additionalProperties: { type: integer } }
+        counts: { type: object, additionalProperties: { type: integer, nullable: true } }
     ArtifactSummary:
       type: object
       required: [id, kind, value, resolution_state, first_seen_at_ingest, last_seen_at_ingest, mention_count, distinct_actors, distinct_groups]

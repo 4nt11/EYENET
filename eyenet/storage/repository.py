@@ -1994,8 +1994,11 @@ class BaseRepository(ABC):
         rows: ``(nodes, edges, total, has_more)``. ValueError on unknown enrichment."""
 
     @abstractmethod
-    async def graph_expand_counts(self, *, src_type: str, src_id: UUID) -> dict[str, int]:
-        """Per-enrichment neighbour totals for the degree preview."""
+    async def graph_expand_counts(
+        self, *, src_type: str, src_id: UUID
+    ) -> dict[str, int | None]:
+        """Per-enrichment neighbour totals for the degree preview (``None`` for a
+        remote enrichment with no cheap count)."""
 
     # =================================================================
     # SAVED GRAPHS (investigation_graph + node placements; the picker)

@@ -146,9 +146,10 @@ class GraphExpandResult(ApiSchema):
 
 
 class GraphExpandCounts(ApiSchema):
-    """Per-enrichment neighbour totals for a node (the degree preview)."""
+    """Per-enrichment neighbour totals for a node (the degree preview). A value is
+    ``None`` when the enrichment is available but has no cheap count (remote)."""
 
-    counts: dict[str, int] = Field(default_factory=dict)
+    counts: dict[str, int | None] = Field(default_factory=dict)
 
 
 __all__ = [

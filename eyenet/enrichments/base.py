@@ -109,6 +109,10 @@ class Enrichment(ABC):
     edge_kind: str
     single: bool = False
     tier_gated: bool = False
+    # Whether a cheap degree count exists. Local SQL enrichments count via COUNT();
+    # a remote enrichment has no cheap count (counting == fetching), so the degree
+    # preview shows it as "available, count unknown" (None) instead of a bogus 0.
+    countable: bool = True
 
     async def applicable(self, ctx: ExpandContext, src_id: UUID) -> bool:  # noqa: ARG002
         """Whether this enrichment applies to this specific source (the counts
@@ -175,6 +179,8 @@ class RemoteEnrichment(Enrichment):
     the nodes. No concrete remote enrichment ships in Phase A; the mempool BTC
     plugin (Phase B) is the first."""
 
+    countable = False
+
     @abstractmethod
     async def resolve_src_value(self, ctx: ExpandContext, src_id: UUID) -> str:
         """The source entity's external key (e.g. the artifact's value), via
@@ -182,16 +188,25 @@ class RemoteEnrichment(Enrichment):
 
     @abstractmethod
     async def fetch(
-        self, ctx: ExpandContext, src_value: str, *, limit: int, offset: int, want_total: bool
+        self,
+        ctx: ExpandContext,
+        src_id: UUID,
+        src_value: str,
+        *,
+        limit: int,
+        offset: int,
+        want_total: bool,
     ) -> ExpandResult:
-        """Call the external service and build the neighbour nodes + edges."""
+        """Call the external service and build the neighbour nodes + edges. ``src_id``
+        is the source node id the edges point from; ``src_value`` is its resolved
+        external key (e.g. the wallet address)."""
 
     async def neighbors(
         self, ctx: ExpandContext, src_id: UUID, *, limit: int, offset: int, want_total: bool
     ) -> ExpandResult:
         src_value = await self.resolve_src_value(ctx, src_id)
         return await self.fetch(
-            ctx, src_value, limit=limit, offset=offset, want_total=want_total
+            ctx, src_id, src_value, limit=limit, offset=offset, want_total=want_total
         )
 
     async def count(self, ctx: ExpandContext, src_id: UUID) -> int:  # noqa: ARG002

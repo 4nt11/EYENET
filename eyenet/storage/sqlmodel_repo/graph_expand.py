@@ -52,16 +52,19 @@ class GraphExpandMixin:
             )
             return result.nodes, result.edges, result.total, result.has_more
 
-    async def graph_expand_counts(self, *, src_type: str, src_id: UUID) -> dict[str, int]:
-        """Per-enrichment neighbour totals for the degree preview. Unknown
-        ``src_type`` raises ``ValueError``."""
+    async def graph_expand_counts(
+        self, *, src_type: str, src_id: UUID
+    ) -> dict[str, int | None]:
+        """Per-enrichment neighbour totals for the degree preview. A remote
+        enrichment has no cheap count, so its value is ``None`` (available, count
+        unknown). Unknown ``src_type`` raises ``ValueError``."""
         enrichments = enrichments_for_src_type(src_type)
         if not enrichments:
             raise ValueError(f"unknown entity type {src_type!r}")
-        out: dict[str, int] = {}
+        out: dict[str, int | None] = {}
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             ctx = ExpandContext(session=session, repo=self)
             for enr in enrichments:
                 if await enr.applicable(ctx, src_id):
-                    out[enr.name] = await enr.count(ctx, src_id)
+                    out[enr.name] = await enr.count(ctx, src_id) if enr.countable else None
         return out
