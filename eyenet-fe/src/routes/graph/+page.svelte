@@ -2,7 +2,8 @@
   import GraphCanvas from '$lib/components/GraphCanvas.svelte';
   import {
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
-    EDGE_KINDS, assertEdge, loadNote, saveNote
+    EDGE_KINDS, assertEdge, loadNote, saveNote,
+    GROUP_KINDS, createOperatorEntity
   } from '$lib/explorer.svelte.js';
 
   // ── Seed search (top bar): debounced global search; a result drops onto canvas.
@@ -82,6 +83,29 @@
     catch (e) { noteStatus = e.message ?? 'error'; }
     finally { noteSaving = false; }
   }
+
+  // ── Operator-entity creation modal.
+  let newEnt = $state(null); // { type, handle, display_name, title, kind, akind, value } | null
+  function openNew() {
+    menu = null;
+    newEnt = { type: 'artifact', handle: '', display_name: '', title: '', kind: 'chat', akind: '', value: '' };
+  }
+  const newValid = $derived(
+    !newEnt ? false
+    : newEnt.type === 'actor' ? !!(newEnt.handle.trim() || newEnt.display_name.trim())
+    : newEnt.type === 'group' ? !!newEnt.title.trim()
+    : /^[a-z][a-z0-9_]{1,63}$/.test(newEnt.akind.trim()) && !!newEnt.value.trim()
+  );
+  async function doCreate() {
+    if (!newEnt || !newValid) return;
+    const e = newEnt;
+    const payload =
+      e.type === 'actor' ? { handle: e.handle.trim() || null, display_name: e.display_name.trim() || null }
+      : e.type === 'group' ? { title: e.title.trim(), kind: e.kind }
+      : { kind: e.akind.trim(), value: e.value.trim() };
+    newEnt = null;
+    try { await createOperatorEntity(e.type, payload); } catch { /* surfaced via explorer.error */ }
+  }
 </script>
 
 <main>
@@ -112,6 +136,7 @@
           </div>
         {/if}
       </div>
+      <button class="btn" onclick={openNew}>+ New</button>
       <button class="btn" onclick={clearGraph} disabled={!explorer.nodes.length}>Clear</button>
     </div>
   </div>
@@ -203,6 +228,35 @@
         <input class="search ep-reason" bind:value={edgePicker.reason} placeholder="reason" spellcheck="false" />
       </div>
     {/if}
+
+    <!-- operator-entity creation -->
+    {#if newEnt}
+      <div class="edge-pick-scrim" role="presentation" onclick={() => (newEnt = null)}></div>
+      <div class="edge-pick nm">
+        <div class="ep-head">New operator entity</div>
+        <div class="ep-kinds">
+          {#each ['actor', 'group', 'artifact'] as t}
+            <button class="ep-kind" class:on={newEnt.type === t} onclick={() => (newEnt.type = t)}>{t}</button>
+          {/each}
+        </div>
+        {#if newEnt.type === 'actor'}
+          <input class="search ep-reason" bind:value={newEnt.handle} placeholder="handle" spellcheck="false" />
+          <input class="search ep-reason" bind:value={newEnt.display_name} placeholder="display name" spellcheck="false" />
+        {:else if newEnt.type === 'group'}
+          <input class="search ep-reason" bind:value={newEnt.title} placeholder="title" spellcheck="false" />
+          <select class="search ep-reason" bind:value={newEnt.kind}>
+            {#each GROUP_KINDS as k}<option value={k}>{k}</option>{/each}
+          </select>
+        {:else}
+          <input class="search ep-reason" bind:value={newEnt.akind} placeholder="kind (e.g. wallet_btc, onion, domain)" spellcheck="false" />
+          <input class="search ep-reason" bind:value={newEnt.value} placeholder="value" spellcheck="false" />
+        {/if}
+        <div class="note-bar">
+          <button class="btn" onclick={doCreate} disabled={!newValid}>Create</button>
+          <button class="btn" onclick={() => (newEnt = null)}>Cancel</button>
+        </div>
+      </div>
+    {/if}
   </div>
 </main>
 
@@ -272,5 +326,7 @@
   .ep-kind:hover { border-color: var(--accent); color: var(--accent-text); }
   .ep-custom { display: flex; gap: 6px; margin-bottom: 8px; }
   .ep-custom .search { flex: 1; width: auto; max-width: none; }
-  .ep-reason { width: 100%; max-width: none; }
+  .ep-reason { display: block; width: 100%; max-width: none; margin-bottom: 8px; }
+  .ep-kind.on { border-color: var(--accent); color: var(--accent-text); }
+  .nm select.search { height: 30px; }
 </style>

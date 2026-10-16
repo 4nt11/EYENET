@@ -144,6 +144,38 @@ export async function assertEdge(src, dst, kind, reason) {
   }
 }
 
+// GroupKind values an operator may pick when hand-creating a group.
+export const GROUP_KINDS = [
+  'chat', 'channel', 'dm', 'forum_category', 'forum_thread', 'irc_channel', 'matrix_room'
+];
+
+// Hand-create an operator-asserted entity and drop it on the canvas. `type` is
+// one of actor/group/artifact; `payload` matches the POST body. The create returns
+// { id, entity_type }, so we synthesize the node (title from the operator input).
+export async function createOperatorEntity(type, payload) {
+  const path = type === 'actor' ? '/v1/actors' : type === 'group' ? '/v1/groups' : '/v1/artifacts';
+  explorer.busy = true;
+  explorer.error = null;
+  try {
+    const res = await apiPost(path, payload, { auth: true });
+    const title =
+      type === 'actor' ? (payload.handle || payload.display_name)
+      : type === 'group' ? payload.title
+      : payload.value;
+    const fields =
+      type === 'artifact'
+        ? { kind: payload.kind, provenance: 'operator_asserted' }
+        : { provenance: 'operator_asserted' };
+    addNode({ id: res.id, title: title || res.id, entityType: res.entity_type, status: null, sourceId: null, fields });
+    return res;
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    throw e;
+  } finally {
+    explorer.busy = false;
+  }
+}
+
 // Per-entity note (the inspector Notes field). loadNote returns the body string
 // ('' when none); saveNote upserts; deleteNote removes.
 export async function loadNote(node) {
