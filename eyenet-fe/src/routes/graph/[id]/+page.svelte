@@ -366,7 +366,7 @@
   .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
 
   /* drop-to-add quick popover */
-  .qa { position: absolute; z-index: 32; width: 240px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.5); overflow: hidden; }
+  .qa { position: absolute; z-index: 32; width: 240px; transform: translate(-50%, -50%); background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.5); overflow: hidden; }
   .qa-input { width: 100%; height: 30px; padding: 0 10px; background: var(--surface); border: 0; border-bottom: 1px solid var(--border); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); }
   .qa-input:focus { outline: none; }
   .qa-list { max-height: 260px; overflow-y: auto; }
