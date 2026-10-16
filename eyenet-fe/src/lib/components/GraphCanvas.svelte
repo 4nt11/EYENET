@@ -299,7 +299,17 @@
     sim = null;
   }
 
-  onMount(() => {
+  // Current render-budget mode; re-created when the graph crosses HEAVY_NODE_COUNT.
+  let heavyMode = false;
+  const releaseGrab = () => cy?.autoungrabify(false); // closes over the outer `cy`
+
+  // Create (or re-create) the cytoscape instance + its handlers, with a render config
+  // chosen by graph size. Small graphs render crisp (2x supersample, no viewport
+  // texture, edges always drawn); heavy graphs trade that for speed (1x, textured pan,
+  // edges hidden while moving). Cytoscape bakes these at construction, so crossing the
+  // threshold tears down and rebuilds here.
+  function buildCy() {
+    heavyMode = nodes.length > HEAVY_NODE_COUNT;
     colorMap = buildColorMap();
     cy = cytoscape({
       container,
@@ -307,28 +317,16 @@
       style: cyStyle(),
       minZoom: 0.15,
       maxZoom: 3,
-      wheelSensitivity: 1.5, // snappy zoom (0.2 was sluggish, 0.6 still slow)
+      wheelSensitivity: 1.5,
       boxSelectionEnabled: false,
-      // Crisp labels when zoomed out: supersample the canvas (>=2x) and never swap in
-      // the low-res viewport texture during pan/zoom — otherwise small text pixelates.
-      // Supersampling (>=2x) is crisp but costly; drop to 1x + viewport texture on a
-      // heavy initial graph (e.g. a loaded 300-node canvas) so pan/zoom stays alive.
-      pixelRatio: nodes.length > HEAVY_NODE_COUNT
-        ? 1
-        : Math.max(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1),
-      textureOnViewport: nodes.length > HEAVY_NODE_COUNT,
+      pixelRatio: heavyMode ? 1 : Math.max(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1),
+      textureOnViewport: heavyMode,
+      hideEdgesOnViewport: heavyMode,
       motionBlur: false
     });
     lastNodeSig = nodeSig();
     runLayout();
 
-    // Hand the parent a live-position reader for saving the canvas.
-    onReady({ positions: () => cy.nodes().map((n) => ({ id: n.id(), x: n.position().x, y: n.position().y })) });
-
-    // ── Shift+drag from a node draws an edge (cytoscape-edgehandles, manual start —
-    // no always-on handle). Nodes are un-grabbed ONLY for the duration of a draw and
-    // re-grabbed on ehstop/mouseup/blur, so a plain left-drag is NEVER left stuck off
-    // (the old keydown/keyup toggle stuck whenever a Shift keyup was missed).
     eh = cy.edgehandles({
       canConnect: (s, t) => !s.same(t),
       edgeParams: () => ({ data: { _ghost: true } }),
@@ -338,31 +336,22 @@
       noEdgeEventsInDraw: true,
       disableBrowserGestures: true
     });
-    eh.disableDrawMode?.(); // only our shift+mousedown eh.start() draws; plain clicks drag
+    eh.disableDrawMode?.();
 
-    const releaseGrab = () => cy?.autoungrabify(false);
     cy.on('mousedown', 'node', (evt) => {
       if (evt.originalEvent?.shiftKey) {
-        cy.autoungrabify(true); // suppress node-drag for THIS draw only
+        cy.autoungrabify(true);
         eh.start(evt.target);
       }
     });
     cy.on('ehstop', releaseGrab);
-    window.addEventListener('mouseup', releaseGrab);
-    window.addEventListener('blur', releaseGrab);
-
-    // Spring mesh: dragging a node propagates force through the whole connected web.
     cy.on('grab', 'node', (evt) => startSim(evt.target));
     cy.on('free', 'node', releaseSim);
-
     cy.on('ehcomplete', (_evt, src, tgt, added) => {
-      added?.remove(); // drop the ghost; the real asserted edge comes back via the API + modal
+      added?.remove();
       onConnectReady(src.data('raw'), tgt.data('raw'));
     });
-
     cy.on('tap', 'node', (evt) => onNodeClick(evt.target.data('raw')));
-
-    // Right-click an edge/node → context menu (retract/merge/split/add-to-case/…).
     cy.on('cxttap', 'edge', (evt) => {
       evt.stopPropagation?.();
       onEdgeContext(evt.target.data('raw'), evt.renderedPosition);
@@ -371,14 +360,20 @@
       evt.stopPropagation?.();
       onNodeContext(evt.target.data('raw'), evt.renderedPosition);
     });
-
-    // Background: plain tap closes any open menu; right-click opens the facet menu at
-    // the pointer (container-relative renderedPosition).
     cy.on('tap', (evt) => { if (evt.target === cy) onCanvasTap(); });
     cy.on('cxttap', (evt) => { if (evt.target === cy) onBackgroundContext(evt.renderedPosition); });
-    const noCtx = (e) => e.preventDefault(); // suppress the browser menu over the canvas
-    container.addEventListener('contextmenu', noCtx);
+  }
 
+  onMount(() => {
+    buildCy();
+    // Live-position reader (saving the canvas); reads the outer cy, so it survives a rebuild.
+    onReady({ positions: () => cy.nodes().map((n) => ({ id: n.id(), x: n.position().x, y: n.position().y })) });
+
+    // Re-grab after any draw; these span cy rebuilds so they live on window/container.
+    window.addEventListener('mouseup', releaseGrab);
+    window.addEventListener('blur', releaseGrab);
+    const noCtx = (e) => e.preventDefault();
+    container.addEventListener('contextmenu', noCtx);
     const ro = new ResizeObserver(() => cy && cy.resize());
     ro.observe(container);
 
@@ -401,6 +396,13 @@
     if (!cy || sig === lastNodeSig) return;
     lastNodeSig = sig;
     killSim(); // a running follow would reference now-removed nodes
+    // Crossed the render-budget threshold -> rebuild the instance with the right config.
+    if (nodes.length > HEAVY_NODE_COUNT !== heavyMode) {
+      eh = null;
+      cy.destroy();
+      buildCy();
+      return;
+    }
     colorMap = buildColorMap();
     cy.elements().remove();
     cy.add([...nodes.map(nodeEl), ...presentEdges().map(edgeEl)]);
