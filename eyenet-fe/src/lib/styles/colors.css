@@ -58,25 +58,26 @@
   --tier-medium:var(--text-muted);
   --tier-low:var(--text-faint);
 
-  /* Entity-type palette · muted hues tuned to sit calmly on black. Used by the
-     search graph (node fill) and anything that colors by entity_type. Purple
-     stays the brand accent; the rest are desaturated so the canvas never turns
-     garish. Any type without a token falls back to --etype-default. */
-  --etype-actor:#a259c4;       /* purple · the brand-adjacent primary subject */
-  --etype-persona:#7e8cd6;     /* indigo */
-  --etype-crew:#c27f8f;        /* dusty rose */
-  --etype-case:#d9b45c;        /* amber */
-  --etype-group:#5fa5b0;       /* teal */
-  --etype-thread:#6fb08a;      /* green */
-  --etype-message:#8a9bb0;     /* slate blue */
-  --etype-mention:#b0957f;     /* tan */
-  --etype-incident:#e07b76;    /* signal red (incidents only) */
-  --etype-document:#9b8fc2;    /* lavender */
-  --etype-attachment:#8f9aa6;  /* cool grey */
-  --etype-artifact:#b0a55f;    /* olive */
-  --etype-default:#7a7d8c;     /* fallback · faint */
+  /* Entity-type palette · vivid, well-separated hues for the exploration canvas
+     (node fill) and anything coloring by entity_type. Saturated enough to read
+     at a glance on black and tell neighbours apart; actor keeps the brand violet,
+     artifacts pop (they are the CTI objects). Any type without a token falls back
+     to --etype-default. */
+  --etype-actor:#b26bff;       /* violet · the brand-adjacent primary subject */
+  --etype-persona:#6d8bff;     /* indigo */
+  --etype-crew:#ff6f9d;        /* pink */
+  --etype-case:#ffb43d;        /* amber */
+  --etype-group:#2fd1c4;       /* teal */
+  --etype-thread:#53d97a;      /* green */
+  --etype-message:#45a6ff;     /* sky blue */
+  --etype-mention:#ff8a3d;     /* orange */
+  --etype-incident:#ff5a5f;    /* signal red (incidents only) */
+  --etype-document:#c07bff;    /* magenta-violet */
+  --etype-attachment:#9aa7b4;  /* steel · intentionally quieter (secondary) */
+  --etype-artifact:#ffd23f;    /* bright gold · infra artifacts stand out */
+  --etype-default:#8a8fa0;     /* fallback */
 
   /* Graph edge tints */
-  --edge-derived:#4a4d57;      /* muted · read-only, machine-derived */
-  --edge-asserted:#a259c4;     /* accent · operator-mapped, durable */
+  --edge-derived:#6b7080;      /* grey · read-only, machine-derived (now visible) */
+  --edge-asserted:#b26bff;     /* violet · operator-mapped, durable */
 }
