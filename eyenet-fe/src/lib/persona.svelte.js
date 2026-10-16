@@ -28,6 +28,14 @@ export async function loadPersonas() {
   }
 }
 
+// Create a standalone persona (operator analysis, not a merge) and refresh the list.
+// Returns the new persona id.
+export async function createPersona(label) {
+  const res = await apiPost('/v1/personas/standalone', { label }, { auth: true });
+  await loadPersonas();
+  return res.id;
+}
+
 export const personaView = $state({
   id: null,
   label: null,

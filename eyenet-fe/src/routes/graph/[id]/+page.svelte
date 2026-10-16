@@ -256,7 +256,7 @@
         {#if menu.loading}
           <div class="ctx-empty">Counting…</div>
         {:else if menu.error}
-          <div class="ctx-empty">{menu.error}</div>
+          <div class="ctx-empty">No enrichments available</div>
         {:else if menu.items.length}
           {#each menu.items as [name, count]}
             <button class="ctx-row" onclick={() => runEnrichment(name)}>

@@ -7,7 +7,14 @@
   import Button from '$lib/components/Button.svelte';
   import MergePersonaDialog from '$lib/components/MergePersonaDialog.svelte';
   import SplitPersonaDialog from '$lib/components/SplitPersonaDialog.svelte';
-  import { personaCtx, personaView, loadPersonas, loadPersonaDetail, mergePersona, splitPersona } from '$lib/persona.svelte.js';
+  import { personaCtx, personaView, loadPersonas, loadPersonaDetail, mergePersona, splitPersona, createPersona } from '$lib/persona.svelte.js';
+
+  async function doCreatePersona() {
+    const label = window.prompt('New persona label', '');
+    if (!label?.trim()) return;
+    try { selectedId = await createPersona(label.trim()); }
+    catch (e) { personaCtx.error = e.message ?? String(e); }
+  }
 
   let selectedId = $state(null);
   let p = $derived(personaCtx.list.find((x) => x.id === selectedId) ?? personaCtx.list[0] ?? null);
@@ -46,6 +53,7 @@
           <span class="pid">{p.id}</span>
         </div>
         <div class="head-actions">
+          <Button variant="ghost" size="sm" onclick={doCreatePersona}>+ New</Button>
           <Button variant="primary" size="sm" disabled={personaView.submitting} onclick={() => (mergeOpen = true)}>Merge</Button>
           <Button variant="ghost" size="sm" disabled={personaView.submitting || !personaView.members.length} onclick={() => (splitOpen = true)}>Split</Button>
         </div>
@@ -85,9 +93,14 @@
     <MergePersonaDialog bind:open={mergeOpen} persona={p} onconfirm={onMerge} />
     <SplitPersonaDialog bind:open={splitOpen} persona={p} members={personaView.members} onconfirm={onSplit} />
   {:else}
-    <p class="pnote">
-      {#if !personaCtx.loaded}Loading…{:else if personaCtx.error}Could not load personas: {personaCtx.error}{:else}No personas yet.{/if}
-    </p>
+    <div class="pnote">
+      {#if !personaCtx.loaded}Loading…
+      {:else if personaCtx.error}Could not load personas: {personaCtx.error}
+      {:else}
+        <p>No personas yet.</p>
+        <Button variant="primary" size="sm" onclick={doCreatePersona}>+ Create persona</Button>
+      {/if}
+    </div>
   {/if}
 </main>
 

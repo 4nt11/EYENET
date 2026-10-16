@@ -38,6 +38,11 @@ _EXPECTED: dict[tuple[str, str], tuple[str, str, bool, bool]] = {
     ("group", "messages"): ("message", "in_group", False, False),
     ("group", "participants"): ("actor", "active_in", False, False),
     ("document", "artifacts"): ("artifact", "contains_artifact", False, True),
+    ("persona", "actors"): ("actor", "member", False, False),
+    ("persona", "messages"): ("message", "authored", False, False),
+    ("persona", "artifacts"): ("artifact", "uses_infra", False, False),
+    ("persona", "wallets"): ("artifact", "uses_infra", False, False),
+    ("persona", "groups"): ("group", "active_in", False, False),
 }
 
 
@@ -51,12 +56,12 @@ def test_builtins_register_with_correct_metadata() -> None:
         assert enr.tier_gated is tier_gated, (src, name)
 
 
-def test_exactly_sixteen_builtins() -> None:
+def test_builtin_count_matches_expected() -> None:
     discover()
     builtin = [
         e for e in REGISTRY.values() if type(e).__module__.startswith("eyenet.enrichments.builtins")
     ]
-    assert len(builtin) == len(_EXPECTED) == 16
+    assert len(builtin) == len(_EXPECTED) == 21
 
 
 def test_for_src_type_groups_by_source() -> None:

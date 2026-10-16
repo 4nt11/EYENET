@@ -118,6 +118,44 @@ async def test_counts_and_unknown_guard(storage: BaseRepository) -> None:
         await storage.graph_expand(
             src_type="actor", src_id=actor, enrichment="nope", limit=1, offset=0, want_total=False
         )
-    with pytest.raises(ValueError, match="unknown entity type"):
-        await storage.graph_expand_counts(src_type="nope", src_id=actor)
+    # a type with no enrichments -> empty preview, not an error
+    assert await storage.graph_expand_counts(src_type="nope", src_id=actor) == {}
+    await storage.close()
+
+
+async def test_persona_actors_and_counts(storage: BaseRepository) -> None:
+    src = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=_NOW)
+    a1, _ = await storage.upsert_actor(
+        source_id=src,
+        actor_key="p1",
+        platform_userid="1",
+        handle="h1",
+        display_name="h1",
+        seen_at=_NOW,
+    )
+    a2, _ = await storage.upsert_actor(
+        source_id=src,
+        actor_key="p2",
+        platform_userid="2",
+        handle="h2",
+        display_name="h2",
+        seen_at=_NOW,
+    )
+    persona = await storage.merge_actors_into_persona(a1, a2)
+    await storage.put_search_document(entity_type="actor", entity_id=a1, title="h1")
+    await storage.put_search_document(entity_type="actor", entity_id=a2, title="h2")
+    nodes, edges, total, _ = await storage.graph_expand(
+        src_type="persona",
+        src_id=persona.id,
+        enrichment="actors",
+        limit=10,
+        offset=0,
+        want_total=True,
+    )
+    assert {n.entity_id for n in nodes} == {a1, a2}
+    assert edges[0]["kind"] == "member"
+    assert total == 2
+    counts = await storage.graph_expand_counts(src_type="persona", src_id=persona.id)
+    assert set(counts) == {"actors", "messages", "artifacts", "wallets", "groups"}
+    assert counts["actors"] == 2
     await storage.close()
