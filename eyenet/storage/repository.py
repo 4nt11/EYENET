@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.clearance import SystemUserClearanceGrantRow
     from eyenet.contracts.collector import CollectorFleetHealth, CollectorRow
     from eyenet.contracts.document import DocumentRow
+    from eyenet.contracts.entity_note import EntityNoteRow
     from eyenet.contracts.enums import (
         ArtifactSubjectKind,
         ArtifactValidationState,
@@ -2053,6 +2054,33 @@ class BaseRepository(ABC):
         """Save-the-canvas: replace all placements in one transaction. Each node is
         ``(entity_type, entity_id, x, y, pinned, enrichments_run)``. Returns the count
         stored and bumps the graph's ``updated_at``."""
+
+    # =================================================================
+    # PER-ENTITY NOTES (one operator note per graph entity; the Notes tab)
+    # =================================================================
+
+    @abstractmethod
+    async def set_entity_note(
+        self,
+        *,
+        entity_type: str,
+        entity_id: UUID,
+        body: str,
+        created_by_user_id: UUID,
+        now: datetime | None = None,
+    ) -> UUID:
+        """Upsert the note for ``(entity_type, entity_id)``; returns the note id.
+        On update, body + ``updated_at`` change, author + ``created_at`` persist."""
+
+    @abstractmethod
+    async def get_entity_note(
+        self, *, entity_type: str, entity_id: UUID
+    ) -> EntityNoteRow | None:
+        """The note for an entity, or None."""
+
+    @abstractmethod
+    async def delete_entity_note(self, *, entity_type: str, entity_id: UUID) -> bool:
+        """Delete an entity's note. False if there was none."""
 
     @abstractmethod
     async def thread_op_authors(

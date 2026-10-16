@@ -603,6 +603,30 @@ def _drop_saved_graph_schema(conn: Any) -> None:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
 
+_ENTITY_NOTE_TABLES = frozenset({"entity_note"})
+
+
+def _apply_entity_note_schema(conn: Any) -> None:
+    """Create ``entity_note`` (pg-0013 / sqlite-0013). Created from the model for
+    index/constraint parity with the no-drift test. Main DB only."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_ENTITY_NOTE_TABLES)
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_entity_note_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_entity_note_schema`."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_ENTITY_NOTE_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
 def seed_indicator_rules(conn: Any) -> int:
     """Insert the vendored default indicator rules not already present; return the
     count inserted.

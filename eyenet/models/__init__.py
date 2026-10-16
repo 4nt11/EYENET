@@ -28,6 +28,7 @@ from .clearance import SystemUserClearanceGrantTable
 from .collector import CollectorTable
 from .corpus import CorpusCursorTable
 from .document import DocumentTable
+from .entity_note import EntityNoteTable
 from .event_logs import (
     IdentityEventLogTable,
     LinkageEventLogTable,
@@ -106,6 +107,7 @@ __all__ = [
     "DocumentArtifactTable",
     "DocumentTable",
     "EngagementAuthorizationTable",
+    "EntityNoteTable",
     "FeedbackGroundTruth",
     "FeedbackPairTable",
     "FileAccessAcknowledgmentTable",

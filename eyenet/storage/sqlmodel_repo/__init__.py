@@ -29,6 +29,7 @@ from .collectors import CollectorsMixin
 from .corpus import CorpusMixin
 from .cursors import CursorsMixin
 from .documents import DocumentsMixin
+from .entity_notes import EntityNotesMixin
 from .event_logs import EventLogsMixin
 from .feedback import FeedbackMixin
 from .file_access import FileAccessMixin
@@ -77,6 +78,7 @@ class SQLModelRepository(
     CorpusMixin,
     CursorsMixin,
     DocumentsMixin,
+    EntityNotesMixin,
     EventLogsMixin,
     FeedbackMixin,
     FileAccessMixin,
