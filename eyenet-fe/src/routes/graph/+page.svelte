@@ -90,7 +90,7 @@
       edges={explorer.edges}
       onNodeClick={(n) => { selNode = n; menu = null; }}
       onNodeContext={onNodeContext}
-      onCanvasTap={() => { menu = null; }}
+      onCanvasTap={() => { menu = null; selNode = null; }}
     />
 
     {#if explorer.busy}<div class="busy">Enriching…</div>{/if}
