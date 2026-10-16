@@ -59,8 +59,13 @@
     let spec;
     try { spec = JSON.parse(raw); } catch { return; }
     const rect = e.currentTarget.getBoundingClientRect();
+    // Centered on the cursor (translate -50%), but clamped inside the stage so it never
+    // spills over the palette on the left or off the edges.
+    const halfW = 124;
+    const x = Math.max(halfW, Math.min(e.clientX - rect.left, rect.width - halfW));
+    const y = Math.max(90, Math.min(e.clientY - rect.top, rect.height - 90));
     menu = null; selNode = null;
-    quickAdd = { x: e.clientX - rect.left, y: e.clientY - rect.top, spec, q: '', results: [], sel: 0 };
+    quickAdd = { x, y, spec, q: '', results: [], sel: 0 };
   }
   function qaInput() {
     clearTimeout(qaTimer);
