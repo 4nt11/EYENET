@@ -85,7 +85,7 @@ async def test_registered_in_pipeline() -> None:
 
 
 async def test_extracts_persists_and_records_mentions(storage: BaseRepository) -> None:
-    body = "pay @wbpay_desk via 0xAbCdef0123456789abcdef0123456789ABCDEF01"
+    body = "pay @wbpay_desk via 0xabcdef0123456789abcdef0123456789abcdef01"
     ctx = await _persist_message(storage, body, 1)
 
     written = await IndicatorExtractor().process(ctx, storage)
@@ -107,7 +107,7 @@ async def test_extracts_persists_and_records_mentions(storage: BaseRepository) -
 async def test_dedup_artifact_across_messages_keeps_distinct_mentions(
     storage: BaseRepository,
 ) -> None:
-    wallet = "0xAbCdef0123456789abcdef0123456789ABCDEF01"
+    wallet = "0xabcdef0123456789abcdef0123456789abcdef01"
     ctx1 = await _persist_message(storage, f"deposit {wallet}", 1)
     ctx2 = await _persist_message(storage, f"same wallet {wallet} again", 2)
 

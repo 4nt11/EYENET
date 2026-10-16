@@ -1304,9 +1304,7 @@ class BaseRepository(ABC):
         ``body_html`` recovers URLs MyBB truncated in the anchor display text."""
 
     @abstractmethod
-    async def update_message_bodies_bulk(
-        self, rows: list[tuple[UUID, str, int, int]]
-    ) -> int:
+    async def update_message_bodies_bulk(self, rows: list[tuple[UUID, str, int, int]]) -> int:
         """Rewrite ``body`` + ``length_chars``/``length_words`` for each
         ``(id, body, length_chars, length_words)``; returns the count updated."""
 
@@ -2745,6 +2743,42 @@ class BaseRepository(ABC):
         artifact_id: UUID,
     ) -> InfrastructureArtifactRow | None:
         """Return one InfrastructureArtifactRow by id, or ``None``."""
+
+    @abstractmethod
+    async def delete_infrastructure_artifact(self, artifact_id: UUID) -> bool:
+        """Delete one artifact and its dependent rows (mention edges +
+        actor_artifact rollup), returning True if the artifact existed.
+
+        No ON DELETE CASCADE in the schema, so the dependents are removed first,
+        then the artifact, in one transaction. Graph edges are derived from
+        mentions (so they go too); the ``search_document`` is cleaned separately
+        via :meth:`delete_search_document`. Idempotent — a missing id returns
+        False. Used by the crypto-address checksum sweep to purge indicators that
+        the coded gate now rejects (hex hashes mis-stored as wallets)."""
+
+    @abstractmethod
+    async def artifacts_for_revalidation(
+        self,
+        *,
+        kinds: Sequence[str],
+        limit: int,
+        after_id: UUID | None,
+    ) -> list[tuple[UUID, str, str]]:
+        """Keyset page of ``(id, kind, value)`` for artifacts whose kind is in
+        ``kinds``, ordered by id with ``id > after_id``.
+
+        The lean full-corpus scan for the checksum sweep: NO mention join, NO
+        aggregates, keyset not OFFSET. ``list_infrastructure_artifacts`` runs a
+        read-time GROUP BY and OFFSET paging that make a whole-corpus walk
+        O(n^2) (the same cost that forced the discovery backfill onto keyset +
+        bulk). uuid7 ids are monotonic, so id order is insert order."""
+
+    @abstractmethod
+    async def delete_infrastructure_artifacts_bulk(self, artifact_ids: Sequence[UUID]) -> int:
+        """Bulk-delete artifacts + dependents (mention edges + actor rollup) in
+        one transaction; returns the number of artifact rows removed. Empty input
+        is a no-op. ``search_document`` is cleaned separately. The sweep's delete
+        fast path — one DELETE per table per chunk instead of per-artifact."""
 
     @abstractmethod
     async def list_artifacts_for_source(

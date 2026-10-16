@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Select, distinct, func
+from sqlalchemy import Select, delete, distinct, func
 from sqlmodel import col, select
 
 from eyenet.contracts.access_artifact import GroupAccessArtifactRow
@@ -33,6 +33,7 @@ from eyenet.models.access_artifact import GroupAccessArtifactTable
 from eyenet.models.actor import ActorTable
 from eyenet.models.group import GroupTable
 from eyenet.models.infrastructure import (
+    ActorArtifactTable,
     InfrastructureArtifactMentionTable,
     InfrastructureArtifactTable,
 )
@@ -47,6 +48,8 @@ from eyenet.util.domain import (
 from ._helpers import safe_session
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from sqlmodel.ext.asyncio.session import AsyncSession
 
 
@@ -206,6 +209,94 @@ class ArtifactsMixin:
             await session.commit()
             await session.refresh(row)
             return _artifact_row(row)
+
+    async def delete_infrastructure_artifact(self, artifact_id: UUID) -> bool:
+        """Delete one artifact and its dependent rows; True if it existed.
+
+        The schema has no ON DELETE CASCADE, so the dependent FKs are removed
+        first (mention edges, then actor_artifact rollup), then the artifact
+        row, in one transaction. Graph edges are derived from mentions, so they
+        go with them; the ``search_document`` is derived too and is cleaned by
+        the caller via :meth:`delete_search_document`. Idempotent: a re-run on a
+        missing id deletes nothing and returns False.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = (
+                await session.exec(
+                    select(InfrastructureArtifactTable).where(
+                        col(InfrastructureArtifactTable.id) == artifact_id
+                    )
+                )
+            ).one_or_none()
+            if row is None:
+                return False
+            await session.exec(
+                delete(InfrastructureArtifactMentionTable).where(
+                    col(InfrastructureArtifactMentionTable.artifact_id) == artifact_id
+                )
+            )
+            await session.exec(
+                delete(ActorArtifactTable).where(col(ActorArtifactTable.artifact_id) == artifact_id)
+            )
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    async def artifacts_for_revalidation(
+        self,
+        *,
+        kinds: Sequence[str],
+        limit: int,
+        after_id: UUID | None,
+    ) -> list[tuple[UUID, str, str]]:
+        """Keyset page of ``(id, kind, value)`` — the lean checksum-sweep scan.
+
+        Aggregate-free (no mention join) and keyset by id (uuid7 is monotonic),
+        so a whole-corpus walk is O(n), unlike list_infrastructure_artifacts'
+        GROUP BY + OFFSET. Generic ORM; stays in the shared mixin.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(
+                    col(InfrastructureArtifactTable.id),
+                    col(InfrastructureArtifactTable.kind),
+                    col(InfrastructureArtifactTable.value),
+                )
+                .where(col(InfrastructureArtifactTable.kind).in_(list(kinds)))
+                .order_by(col(InfrastructureArtifactTable.id).asc())
+                .limit(limit)
+            )
+            if after_id is not None:
+                stmt = stmt.where(col(InfrastructureArtifactTable.id) > after_id)
+            result = await session.exec(stmt)
+            return [(aid, kind, value) for aid, kind, value in result]
+
+    async def delete_infrastructure_artifacts_bulk(self, artifact_ids: Sequence[UUID]) -> int:
+        """Bulk-delete artifacts + dependents in one transaction; rows removed.
+
+        One DELETE per dependent table (mention edges, actor rollup) then the
+        artifacts, all keyed by ``id IN (...)``. Empty input is a no-op. The
+        caller chunks the id list to keep the IN set bounded.
+        """
+        ids = list(artifact_ids)
+        if not ids:
+            return 0
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            await session.exec(
+                delete(InfrastructureArtifactMentionTable).where(
+                    col(InfrastructureArtifactMentionTable.artifact_id).in_(ids)
+                )
+            )
+            await session.exec(
+                delete(ActorArtifactTable).where(col(ActorArtifactTable.artifact_id).in_(ids))
+            )
+            result = await session.exec(
+                delete(InfrastructureArtifactTable).where(
+                    col(InfrastructureArtifactTable.id).in_(ids)
+                )
+            )
+            await session.commit()
+            return int(result.rowcount or 0)
 
     async def get_infrastructure_artifact(
         self,

@@ -24,7 +24,7 @@ D = UUID("00000000-0000-0000-0000-0000000000d4")
 def test_extract_indicators_kinds_and_normalization() -> None:
     text = (
         "Contact @WBpay_MM1888 — pay TRX "
-        "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t or 0xAbCdef0123456789abcdef0123456789ABCDEF01"
+        "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t or 0xabcdef0123456789abcdef0123456789abcdef01"
     )
     got = extract_indicators(text)
     assert "handle_other_platform:wbpay_mm1888" in got  # case-folded

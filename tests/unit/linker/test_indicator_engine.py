@@ -42,9 +42,14 @@ def test_btc_legacy_and_bech32() -> None:
 
 
 def test_xmr_and_base58_case_preserved() -> None:
-    xmr = "4" + "A" + "B" * 93  # [48][0-9AB] + 93 base58 = 95 chars
+    # Real getmonero donation address (95 chars). Must be a genuine address: the
+    # checksum gate (keccak-256) now rejects shape-only fakes.
+    xmr = (
+        "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3"
+        "XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A"
+    )
     got = _norms(f"monero {xmr}")
-    assert f"wallet_xmr:{xmr}" in got  # upper-case preserved (fold_case off)
+    assert f"wallet_xmr:{xmr}" in got  # mixed-case preserved (fold_case off)
 
 
 def test_session_and_tox_distinct_by_length() -> None:

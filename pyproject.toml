@@ -111,6 +111,10 @@ dependencies = [
   "google-re2>=1.1",
   "phonenumbers>=9.0.31",
   "pycountry>=26.2.16",
+  # linker — crypto-address checksum gate (eyenet/linker/_address_checksum.py).
+  # keccak-256 for Ethereum EIP-55 + Monero checksums (NOT hashlib's NIST SHA-3).
+  # Already transitive; declared direct because eyenet imports it (mirrors psutil).
+  "pycryptodome>=3.23",
 ]
 
 [project.optional-dependencies]
