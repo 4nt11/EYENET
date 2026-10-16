@@ -14,13 +14,38 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
+from eyenet.api.deps import (
+    CurrentUser,
+    RequireScope,
+    ResourceNotFound,
+    UnprocessableError,
+    get_storage,
+)
 from eyenet.api.deps_paging import CursorParams, cursor_params, encode_cursor
+from eyenet.api.v1._clearance import enforce_tier_clearance
 from eyenet.api.v1.schemas.enums import EntityType
 from eyenet.api.v1.schemas.search import GraphExpandResult, SearchGraphEdge, SearchGraphNode
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["graph"])
+
+
+async def _enforce_document_src_clearance(
+    storage: BaseRepository, current_user: CurrentUser, node_type: str, node_id: UUID
+) -> None:
+    """Documents are the one graph source that carries a sensitivity tier, and they
+    are NOT search-indexed, so expanding a document is the only place its derived
+    data surfaces. Gate it on the document's effective tier (classifier tier or the
+    operator override, whichever is set) exactly like the document manifest: an
+    uncleared caller gets 403, never the artifacts. 404 if the document is unknown."""
+    if node_type != "document":
+        return
+    document = await storage.get_document(node_id)
+    if document is None:
+        raise ResourceNotFound("document")
+    enforce_tier_clearance(
+        current_user, document.operator_tier_override or document.classifier_tier
+    )
 
 
 @router.get(
@@ -30,7 +55,7 @@ router = APIRouter(tags=["graph"])
     status_code=200,
 )
 async def graph_expand(
-    _: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
+    current_user: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     node_type: Annotated[
         str, Query(alias="type", min_length=1, max_length=32, description="source entity_type")
@@ -39,6 +64,7 @@ async def graph_expand(
     enrichment: Annotated[str, Query(min_length=1, max_length=48)],
     page: Annotated[CursorParams, Depends(cursor_params)],
 ) -> GraphExpandResult:
+    await _enforce_document_src_clearance(storage, current_user, node_type, node_id)
     try:
         rows, edges, total, has_more = await storage.graph_expand(
             src_type=node_type,

@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
+from eyenet.api.v1.graph.api_expand import _enforce_document_src_clearance
 from eyenet.api.v1.schemas.search import GraphExpandCounts
 from eyenet.storage.repository import BaseRepository
 
@@ -26,13 +27,14 @@ router = APIRouter(tags=["graph"])
     status_code=200,
 )
 async def graph_expand_counts(
-    _: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
+    current_user: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     node_type: Annotated[
         str, Query(alias="type", min_length=1, max_length=32, description="source entity_type")
     ],
     node_id: Annotated[UUID, Query(alias="id", description="source entity_id")],
 ) -> GraphExpandCounts:
+    await _enforce_document_src_clearance(storage, current_user, node_type, node_id)
     try:
         counts = await storage.graph_expand_counts(src_type=node_type, src_id=node_id)
     except ValueError as exc:
