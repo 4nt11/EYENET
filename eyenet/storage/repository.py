@@ -1968,6 +1968,24 @@ class BaseRepository(ABC):
         """Provenance edges (artifact_id, message_id) for co-present result nodes."""
 
     @abstractmethod
+    async def graph_expand(
+        self,
+        *,
+        src_type: str,
+        src_id: UUID,
+        enrichment: str,
+        limit: int,
+        offset: int,
+        want_total: bool,
+    ) -> tuple[list[Any], list[dict[str, Any]], int | None, bool]:
+        """Neighbours of one node along one enrichment, hydrated as search_document
+        rows: ``(nodes, edges, total, has_more)``. ValueError on unknown enrichment."""
+
+    @abstractmethod
+    async def graph_expand_counts(self, *, src_type: str, src_id: UUID) -> dict[str, int]:
+        """Per-enrichment neighbour totals for the degree preview."""
+
+    @abstractmethod
     async def thread_op_authors(
         self, thread_ids: Collection[UUID]
     ) -> dict[UUID, tuple[UUID, str, UUID | None]]:

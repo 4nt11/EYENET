@@ -945,6 +945,52 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/artifacts:
+    get:
+      tags: [artifacts]
+      operationId: artifacts_list
+      summary: Browse deduped infrastructure artifacts with mention aggregates.
+      parameters:
+        - { name: kind, in: query, required: false, schema: { type: string } }
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 256 } }
+        - { name: resolution_state, in: query, required: false, schema: { type: string, enum: [unresolved, resolved, ambiguous, not_applicable] } }
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [recent, mentions, value, first_seen], default: recent } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of artifact rows with read-time aggregates.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageArtifactSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/artifacts/{artifact_id}/mentions:
+    get:
+      tags: [artifacts]
+      operationId: artifacts_list_mentions
+      summary: The 'mentioned by' drill-down for one artifact (who / where / when).
+      parameters:
+        - { name: artifact_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Cursor page of mention sightings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageArtifactMention' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/graph/stats:
     get:
       tags: [graph]
@@ -1046,6 +1092,48 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SearchGraph' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/graph/expand:
+    get:
+      tags: [graph]
+      operationId: graph_expand
+      summary: Neighbours of one node along one enrichment (exploration canvas).
+      parameters:
+        - { name: type, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 32 } }
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: enrichment, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 48 } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Neighbour nodes + derived edges for the enrichment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphExpandResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/graph/expand/counts:
+    get:
+      tags: [graph]
+      operationId: graph_expand_counts
+      summary: Per-enrichment neighbour totals for a node (degree preview).
+      parameters:
+        - { name: type, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 32 } }
+        - { name: id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Map of enrichment name to neighbour count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphExpandCounts' }
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
@@ -4041,6 +4129,60 @@ components:
         nodes: { type: array, items: { $ref: '#/components/schemas/SearchGraphNode' } }
         edges: { type: array, items: { $ref: '#/components/schemas/SearchGraphEdge' } }
         source_labels: { type: object, additionalProperties: { type: string } }
+    GraphExpandResult:
+      type: object
+      required: [enrichment]
+      properties:
+        enrichment: { type: string }
+        nodes: { type: array, items: { $ref: '#/components/schemas/SearchGraphNode' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/SearchGraphEdge' } }
+        next_cursor: { type: string, nullable: true }
+        estimated_total: { type: integer, nullable: true }
+    GraphExpandCounts:
+      type: object
+      properties:
+        counts: { type: object, additionalProperties: { type: integer } }
+    ArtifactSummary:
+      type: object
+      required: [id, kind, value, resolution_state, first_seen_at_ingest, last_seen_at_ingest, mention_count, distinct_actors, distinct_groups]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        value: { type: string }
+        resolution_state: { type: string, enum: [unresolved, resolved, ambiguous, not_applicable] }
+        resolved_to_source_id: { type: string, format: uuid, nullable: true }
+        first_seen_at_ingest: { type: string, format: date-time }
+        last_seen_at_ingest: { type: string, format: date-time }
+        mention_count: { type: integer, minimum: 0 }
+        distinct_actors: { type: integer, minimum: 0 }
+        distinct_groups: { type: integer, minimum: 0 }
+        first_mention_at: { type: string, format: date-time, nullable: true }
+        last_mention_at: { type: string, format: date-time, nullable: true }
+    ArtifactMention:
+      type: object
+      required: [message_id, actor_id, group_id, source_id, ts]
+      properties:
+        message_id: { type: string, format: uuid }
+        actor_id: { type: string, format: uuid }
+        actor_handle: { type: string, nullable: true }
+        actor_display_name: { type: string, nullable: true }
+        group_id: { type: string, format: uuid }
+        group_title: { type: string, nullable: true }
+        source_id: { type: string, format: uuid }
+        ts: { type: string, format: date-time }
+        char_offset: { type: integer, nullable: true }
+    CursorPageArtifactSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ArtifactSummary' } }
+    CursorPageArtifactMention:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ArtifactMention' } }
     AssertEdgeRequest:
       type: object
       required: [src_type, src_id, dst_type, dst_id, kind, reason]

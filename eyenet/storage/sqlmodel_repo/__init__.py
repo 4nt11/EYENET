@@ -34,6 +34,7 @@ from .feedback import FeedbackMixin
 from .file_access import FileAccessMixin
 from .forum import ForumMixin
 from .graph import GraphMixin
+from .graph_expand import GraphExpandMixin
 from .health import HealthMixin
 from .idempotency import IdempotencyMixin
 from .identities import IdentitiesMixin
@@ -79,6 +80,7 @@ class SQLModelRepository(
     FileAccessMixin,
     ForumMixin,
     GraphMixin,
+    GraphExpandMixin,
     HealthMixin,
     IdempotencyMixin,
     IdentitiesMixin,

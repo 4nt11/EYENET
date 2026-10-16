@@ -133,10 +133,30 @@ class AssertEdgeResult(ApiSchema):
     kind: str
 
 
+class GraphExpandResult(ApiSchema):
+    """One hop of the exploration canvas: the source node's neighbours along one
+    enrichment, plus the derived edges connecting them. The source node is not
+    repeated (the caller already has it); nodes reuse the search-graph shape."""
+
+    enrichment: str
+    nodes: list[SearchGraphNode] = Field(default_factory=list)
+    edges: list[SearchGraphEdge] = Field(default_factory=list)
+    next_cursor: str | None = None
+    estimated_total: int | None = None
+
+
+class GraphExpandCounts(ApiSchema):
+    """Per-enrichment neighbour totals for a node (the degree preview)."""
+
+    counts: dict[str, int] = Field(default_factory=dict)
+
+
 __all__ = [
     "AssertEdgeRequest",
     "AssertEdgeResult",
     "CursorPageSearchHit",
+    "GraphExpandCounts",
+    "GraphExpandResult",
     "SearchGraph",
     "SearchGraphEdge",
     "SearchGraphNode",
