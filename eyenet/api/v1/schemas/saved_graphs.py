@@ -71,8 +71,18 @@ class GraphNode(ApiSchema):
         )
 
 
+class GraphEdge(ApiSchema):
+    """One canvas edge, saved with the graph (derived or asserted)."""
+
+    src_id: UUID
+    dst_id: UUID
+    kind: str
+    provenance: str | None = None
+    edge_id: UUID | None = None
+
+
 class GraphDetail(ApiSchema):
-    """Full saved graph: summary fields plus its node placements."""
+    """Full saved graph: summary fields plus its node placements and edges."""
 
     id: UUID
     name: str
@@ -80,6 +90,7 @@ class GraphDetail(ApiSchema):
     created_at: datetime
     updated_at: datetime
     nodes: list[GraphNode]
+    edges: list[GraphEdge] = Field(default_factory=list)
 
     @classmethod
     def from_domain(
@@ -92,6 +103,7 @@ class GraphDetail(ApiSchema):
             created_at=row.created_at,
             updated_at=row.updated_at,
             nodes=[GraphNode.from_domain(n) for n in nodes],
+            edges=[GraphEdge.model_validate(e) for e in (row.edges or [])],
         )
 
 
@@ -124,6 +136,7 @@ class ReplaceGraphNodesRequest(ApiSchema):
     """Body of ``PUT /v1/graphs/{graph_id}/nodes`` (save-the-canvas)."""
 
     nodes: list[NodePlacementIn]
+    edges: list[GraphEdge] = Field(default_factory=list)
 
 
 class CursorPageGraphSummary(CursorPage[GraphSummary]):

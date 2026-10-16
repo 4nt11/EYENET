@@ -6805,6 +6805,16 @@ components:
         pinned: { type: boolean }
         enrichments_run: { type: array, items: { type: string } }
         added_at: { type: string, format: date-time }
+    GraphEdge:
+      type: object
+      additionalProperties: false
+      required: [src_id, dst_id, kind]
+      properties:
+        src_id: { type: string, format: uuid }
+        dst_id: { type: string, format: uuid }
+        kind: { type: string }
+        provenance: { type: string, nullable: true }
+        edge_id: { type: string, format: uuid, nullable: true }
     GraphDetail:
       type: object
       additionalProperties: false
@@ -6818,6 +6828,9 @@ components:
         nodes:
           type: array
           items: { $ref: '#/components/schemas/GraphNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/GraphEdge' }
     NodePlacementIn:
       type: object
       additionalProperties: false
@@ -6851,6 +6864,10 @@ components:
         nodes:
           type: array
           items: { $ref: '#/components/schemas/NodePlacementIn' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/GraphEdge' }
+          default: []
     CursorPageGraphSummary:
       allOf:
         - { $ref: '#/components/schemas/CursorPageBase' }

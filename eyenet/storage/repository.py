@@ -2057,11 +2057,12 @@ class BaseRepository(ABC):
         graph_id: UUID,
         nodes: list[tuple[str, UUID, float, float, bool, list[str]]],
         *,
+        edges: list[dict[str, Any]] | None = None,
         now: datetime | None = None,
     ) -> int:
-        """Save-the-canvas: replace all placements in one transaction. Each node is
-        ``(entity_type, entity_id, x, y, pinned, enrichments_run)``. Returns the count
-        stored and bumps the graph's ``updated_at``."""
+        """Save-the-canvas: replace all placements (and the edge list, when given) in
+        one transaction. Each node is ``(entity_type, entity_id, x, y, pinned,
+        enrichments_run)``. Returns the count stored and bumps ``updated_at``."""
 
     # =================================================================
     # PER-ENTITY NOTES (one operator note per graph entity; the Notes tab)

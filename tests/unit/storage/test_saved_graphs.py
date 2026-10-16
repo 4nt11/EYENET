@@ -71,9 +71,16 @@ async def test_replace_nodes_and_delete(storage: BaseRepository) -> None:
             ("actor", a, 10.0, 20.0, True, ["actor.messages"]),
             ("artifact", b, 30.0, 40.0, False, []),
         ],
+        edges=[{"src_id": str(a), "dst_id": str(b), "kind": "uses", "provenance": "derived"}],
         now=_NOW,
     )
     assert n == 2
+    # edges persist on the graph row and come back on get
+    saved = await storage.get_investigation_graph(gid)
+    assert saved is not None
+    assert saved.edges == [
+        {"src_id": str(a), "dst_id": str(b), "kind": "uses", "provenance": "derived"}
+    ]
     nodes = await storage.get_investigation_graph_nodes(gid)
     assert {node.entity_id for node in nodes} == {a, b}
     placed = {node.entity_id: node for node in nodes}

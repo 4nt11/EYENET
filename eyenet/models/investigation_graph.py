@@ -10,6 +10,7 @@ the canvas, where (x/y), whether pinned, and which enrichments have been run on 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Column, UniqueConstraint
@@ -27,6 +28,10 @@ class InvestigationGraphTable(SQLModel, table=True):
     created_by_user_id: UUID = Field(index=True)
     created_at: datetime
     updated_at: datetime
+    # The canvas edge list, saved verbatim with the graph (nodes alone can't carry a
+    # graph's relationships: derived edges are ephemeral from expand, asserted edges
+    # live in the global store). Each: {src_id, dst_id, kind, provenance, edge_id?}.
+    edges: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
 
 
 class InvestigationGraphNodeTable(SQLModel, table=True):

@@ -33,6 +33,7 @@ async def graphs_replace_nodes(
     await storage.replace_investigation_graph_nodes(
         graph_id,
         [(n.entity_type, n.entity_id, n.x, n.y, n.pinned, n.enrichments_run) for n in body.nodes],
+        edges=[e.model_dump(mode="json") for e in body.edges],
         now=datetime.now(tz=UTC),
     )
     row = await storage.get_investigation_graph(graph_id)

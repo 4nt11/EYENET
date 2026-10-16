@@ -7,6 +7,7 @@ Surface: db. See eyenet/models/investigation_graph.py.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import Field
@@ -15,13 +16,14 @@ from ._base import DbRowBase
 
 
 class InvestigationGraphRow(DbRowBase):
-    """Persisted saved-graph row (name + ownership + timestamps)."""
+    """Persisted saved-graph row (name + ownership + timestamps + canvas edges)."""
 
     name: str
     description: str | None = None
     created_by_user_id: UUID
     created_at: datetime
     updated_at: datetime
+    edges: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class InvestigationGraphNodeRow(DbRowBase):

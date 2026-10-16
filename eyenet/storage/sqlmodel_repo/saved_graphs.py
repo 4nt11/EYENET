@@ -12,6 +12,7 @@ Generic SQLModel ORM only (no dialect leak — [[feedback_no_dialect_leak_in_mix
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlmodel import col, delete, select
@@ -134,11 +135,12 @@ class SavedGraphsMixin:
         graph_id: UUID,
         nodes: list[NodePlacement],
         *,
+        edges: list[dict[str, Any]] | None = None,
         now: datetime | None = None,
     ) -> int:
-        """Save-the-canvas: replace the graph's node placements with ``nodes`` in one
-        transaction. Returns the number of placements stored. Also bumps the graph's
-        ``updated_at``."""
+        """Save-the-canvas: replace the graph's node placements with ``nodes`` and its
+        edge list with ``edges`` (when given) in one transaction. Returns the number
+        of placements stored. Also bumps the graph's ``updated_at``."""
         at = now or datetime.now(tz=UTC)
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             await session.exec(
@@ -161,6 +163,8 @@ class SavedGraphsMixin:
                 )
             graph = await session.get(InvestigationGraphTable, graph_id)
             if graph is not None:
+                if edges is not None:
+                    graph.edges = edges
                 graph.updated_at = at
                 session.add(graph)
             await session.commit()

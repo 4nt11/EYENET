@@ -232,7 +232,14 @@ export async function saveGraph(name, positions) {
       pinned: false,
       enrichments_run: []
     }));
-    await apiPut(`/v1/graphs/${gid}/nodes`, { nodes }, { auth: true });
+    const edges = explorer.edges.map((e) => ({
+      src_id: e.srcId,
+      dst_id: e.dstId,
+      kind: e.kind,
+      provenance: e.provenance ?? 'derived',
+      edge_id: e.edgeId ?? null
+    }));
+    await apiPut(`/v1/graphs/${gid}/nodes`, { nodes, edges }, { auth: true });
     return gid;
   } catch (e) {
     explorer.error = e.message ?? String(e);
@@ -274,7 +281,14 @@ export async function loadGraph(id) {
       } catch { /* leave id-labelled on hydrate failure */ }
     }
     explorer.nodes = nodes;
-    explorer.edges = [];
+    explorer.edges = (g.edges ?? []).map((e) => ({
+      srcId: e.src_id,
+      dstId: e.dst_id,
+      kind: e.kind,
+      provenance: e.provenance ?? 'derived',
+      weight: null,
+      edgeId: e.edge_id ?? null
+    }));
     explorer.seedResults = [];
   } catch (e) {
     explorer.error = e.message ?? String(e);
