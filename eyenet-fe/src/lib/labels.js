@@ -21,6 +21,7 @@ export function label(map, key) {
 // --- Infrastructure artifact kinds (eyenet/contracts/enums.py InfrastructureKind + coded) ---
 export const ARTIFACT_KIND_LABELS = {
   domain: 'Domain',
+  url: 'URL',
   onion: 'Onion',
   ipv4: 'IPv4',
   ipv6: 'IPv6',
@@ -32,8 +33,7 @@ export const ARTIFACT_KIND_LABELS = {
   handle_other_platform: 'Handle',
   session: 'Session',
   tox: 'Tox',
-  pgp_key: 'GPG Key',
-  paste_url: 'Paste URL'
+  pgp_key: 'GPG Key'
 };
 export const ARTIFACT_KIND_ORDER = Object.keys(ARTIFACT_KIND_LABELS);
 export const kindLabel = (k) => label(ARTIFACT_KIND_LABELS, k);

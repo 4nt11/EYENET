@@ -18,9 +18,9 @@ export const INDICATOR_KINDS = [
   'session',
   'tox',
   'domain',
+  'url',
   'onion',
-  'phone',
-  'paste_url'
+  'phone'
 ];
 
 export const indicatorRuleCtx = $state({
