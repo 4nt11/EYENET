@@ -49,7 +49,7 @@ def _mock_http(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def _seed(storage: BaseRepository) -> tuple[Any, Any]:
     ids = await storage.put_infrastructure_artifacts_bulk(
-        [("btc_wallet", _A, _NOW, _NOW), ("btc_wallet", _C, _NOW, _NOW)]
+        [("wallet_btc", _A, _NOW, _NOW), ("wallet_btc", _C, _NOW, _NOW)]
     )
     return ids[_value_hash(_A)], ids[_value_hash(_C)]
 
@@ -99,7 +99,7 @@ async def test_expand_non_btc_is_rejected(storage: BaseRepository) -> None:
     onion = (await storage.put_infrastructure_artifacts_bulk([("onion", "y.onion", _NOW, _NOW)]))[
         _value_hash("y.onion")
     ]
-    with pytest.raises(ValueError, match="not a btc_wallet"):
+    with pytest.raises(ValueError, match="not a wallet_btc"):
         await storage.graph_expand(
             src_type="artifact",
             src_id=onion,

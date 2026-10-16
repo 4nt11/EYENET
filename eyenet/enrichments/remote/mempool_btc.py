@@ -2,7 +2,7 @@
 """Remote enrichment: BTC wallet -> connected wallets via a mempool REST API.
 
 On-demand only (one fetch per operator expand, never a background poll). Given a
-``btc_wallet`` artifact, pulls the address's recent transactions from a mempool.space
+``wallet_btc`` artifact, pulls the address's recent transactions from a mempool.space
 style REST API and returns the counterparty addresses as artifact nodes, with
 DIRECTIONAL edges:
 * ``sent_to``      - our address was a tx input, theirs an output (we paid them)
@@ -41,8 +41,8 @@ from eyenet.models import InfrastructureArtifactTable
 MEMPOOL_API_BASE = os.environ.get("EYENET_MEMPOOL_API_BASE", "https://mempool.space/api")
 _TIMEOUT = float(os.environ.get("EYENET_MEMPOOL_TIMEOUT", "10"))
 _CACHE_TTL = float(os.environ.get("EYENET_MEMPOOL_CACHE_TTL", "60"))
-_BTC_KIND = "btc_wallet"
-_NS = uuid5(NAMESPACE_URL, "eyenet:btc_wallet")
+_BTC_KIND = "wallet_btc"
+_NS = uuid5(NAMESPACE_URL, "eyenet:wallet_btc")
 
 SENT_TO = "sent_to"
 RECEIVED_FROM = "received_from"
@@ -112,7 +112,7 @@ def _counterparties(address: str, txs: list[dict[str, Any]]) -> dict[str, set[st
 
 
 class MempoolConnectedWallets(RemoteEnrichment):
-    """``btc_wallet -> connected wallets`` (sent_to / received_from) via mempool."""
+    """``wallet_btc -> connected wallets`` (sent_to / received_from) via mempool."""
 
     src_type = "artifact"
     name = "connected_wallets"
