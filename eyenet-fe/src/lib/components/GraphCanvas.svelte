@@ -26,7 +26,10 @@
     onEdgeContext = () => {},
     onNodeContext = () => {},
     onBackgroundContext = () => {},
-    onCanvasTap = () => {}
+    onCanvasTap = () => {},
+    // Called once with an api handle so the parent can read live node positions
+    // (for saving a graph): api.positions() -> [{ id, x, y }].
+    onReady = () => {}
   } = $props();
 
   let container;
@@ -50,7 +53,7 @@
   const edgeKey = (e) => e.edgeId ?? `d:${e.srcId}:${e.dstId}:${e.kind}`;
 
   function nodeEl(n) {
-    return {
+    const el = {
       group: 'nodes',
       data: {
         id: n.id,
@@ -60,6 +63,9 @@
         raw: n
       }
     };
+    // A saved graph supplies x/y; carry them so runLayout can place via preset.
+    if (n.x != null && n.y != null) el.position = { x: n.x, y: n.y };
+    return el;
   }
   function edgeEl(e) {
     // weight (when present) → line thickness, clamped to stay legible.
@@ -153,6 +159,12 @@
 
   function runLayout() {
     if (!cy) return;
+    // A loaded saved graph supplies positions for every node -> honor them (preset)
+    // instead of re-tiling, so the operator's arrangement is restored.
+    if (nodes.length && nodes.every((n) => n.x != null && n.y != null)) {
+      cy.layout({ name: 'preset', fit: true, padding: 32 }).run();
+      return;
+    }
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
@@ -297,6 +309,9 @@
     });
     lastNodeSig = nodeSig();
     runLayout();
+
+    // Hand the parent a live-position reader for saving the canvas.
+    onReady({ positions: () => cy.nodes().map((n) => ({ id: n.id(), x: n.position().x, y: n.position().y })) });
 
     // ── Shift+drag from a node draws an edge (cytoscape-edgehandles, manual start —
     // no always-on handle). Nodes are un-grabbed ONLY for the duration of a draw and

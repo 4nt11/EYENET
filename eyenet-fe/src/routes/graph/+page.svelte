@@ -3,8 +3,35 @@
   import {
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
     EDGE_KINDS, assertEdge, loadNote, saveNote,
-    GROUP_KINDS, createOperatorEntity
+    GROUP_KINDS, createOperatorEntity,
+    listGraphs, saveGraph, loadGraph, deleteGraph
   } from '$lib/explorer.svelte.js';
+
+  // Canvas api handle (live node positions, for saving).
+  let canvasApi = null;
+
+  // ── Saved graphs.
+  let openList = $state(null); // array of GraphSummary | null (dropdown)
+  async function doSave() {
+    let name = explorer.graphName;
+    if (!explorer.graphId) {
+      name = window.prompt('Save graph as', 'investigation');
+      if (!name) return;
+    }
+    try { await saveGraph(name, canvasApi?.positions?.() ?? []); } catch { /* explorer.error */ }
+  }
+  async function toggleOpen() {
+    if (openList) { openList = null; return; }
+    try { openList = await listGraphs(); } catch { openList = []; }
+  }
+  async function doOpen(id) {
+    openList = null; selNode = null; menu = null;
+    try { await loadGraph(id); } catch { /* explorer.error */ }
+  }
+  async function doDelete(id, ev) {
+    ev.stopPropagation();
+    try { await deleteGraph(id); openList = await listGraphs(); } catch { /* explorer.error */ }
+  }
 
   // ── Seed search (top bar): debounced global search; a result drops onto canvas.
   let q = $state('');
@@ -136,6 +163,25 @@
           </div>
         {/if}
       </div>
+      {#if explorer.graphName}<span class="gname">{explorer.graphName}</span>{/if}
+      <button class="btn" onclick={doSave} disabled={!explorer.nodes.length}>Save</button>
+      <div class="seed">
+        <button class="btn" onclick={toggleOpen}>Open</button>
+        {#if openList}
+          <div class="drop">
+            {#if !openList.length}
+              <div class="drop-empty">No saved graphs</div>
+            {:else}
+              {#each openList as g (g.id)}
+                <div class="open-row">
+                  <button class="open-open" onclick={() => doOpen(g.id)}>{g.name}</button>
+                  <button class="g-del" onclick={(e) => doDelete(g.id, e)} aria-label="delete">×</button>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+      </div>
       <button class="btn" onclick={openNew}>+ New</button>
       <button class="btn" onclick={clearGraph} disabled={!explorer.nodes.length}>Clear</button>
     </div>
@@ -154,6 +200,7 @@
       onNodeContext={onNodeContext}
       onConnectReady={onConnectReady}
       onCanvasTap={() => { menu = null; selNode = null; }}
+      onReady={(api) => (canvasApi = api)}
     />
 
     {#if explorer.busy}<div class="busy">Enriching…</div>{/if}
@@ -276,6 +323,12 @@
   .search:focus { outline: none; border-color: var(--accent); }
   .btn { height: 30px; padding: 0 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
   .btn:disabled { opacity: 0.45; cursor: default; }
+  .gname { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .open-row { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+  .open-open { flex: 1; min-width: 0; padding: 7px 10px; background: none; border: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-body); }
+  .open-open:hover { background: var(--surface); color: var(--accent-text); }
+  .g-del { padding: 7px 10px; background: none; border: 0; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; }
+  .g-del:hover { color: var(--red-text, #e07b76); }
 
   .drop { position: absolute; top: 34px; right: 0; width: 100%; max-height: 320px; overflow-y: auto; z-index: 20; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.5); }
   .drop-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; background: none; border: 0; border-bottom: 1px solid var(--border); cursor: pointer; text-align: left; }

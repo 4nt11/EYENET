@@ -12,7 +12,10 @@ export const explorer = $state({
   error: null,
   // seed-search sub-state (the top-of-canvas box)
   seedResults: [],
-  seedLoading: false
+  seedLoading: false,
+  // saved-graph identity (null = unsaved scratch canvas)
+  graphId: null,
+  graphName: ''
 });
 
 // SearchGraphNode / SearchHit -> GraphCanvas node. Both carry entity_type /
@@ -194,9 +197,85 @@ export async function deleteNote(node) {
   await apiDelete(`/v1/notes/${node.entityType}/${node.id}`, { auth: true });
 }
 
+// ── Saved graphs (the picker). A saved graph persists the node SET + placements
+// (x/y). NOTE for a later pass: titles are not stored (loaded nodes label by id
+// until a batch-hydrate endpoint exists) and edges are not persisted per-graph
+// (operator re-enriches; asserted edges live in the global store).
+export async function listGraphs() {
+  const page = await apiGet('/v1/graphs?limit=100', { auth: true });
+  return page.items ?? [];
+}
+
+export async function saveGraph(name, positions) {
+  explorer.busy = true;
+  explorer.error = null;
+  try {
+    let gid = explorer.graphId;
+    if (!gid) {
+      const g = await apiPost('/v1/graphs', { name }, { auth: true });
+      gid = g.id;
+      explorer.graphId = gid;
+      explorer.graphName = g.name ?? name;
+    }
+    const posById = Object.fromEntries((positions ?? []).map((p) => [p.id, p]));
+    const nodes = explorer.nodes.map((n) => ({
+      entity_type: n.entityType,
+      entity_id: n.id,
+      x: posById[n.id]?.x ?? 0,
+      y: posById[n.id]?.y ?? 0,
+      pinned: false,
+      enrichments_run: []
+    }));
+    await apiPut(`/v1/graphs/${gid}/nodes`, { nodes }, { auth: true });
+    return gid;
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    throw e;
+  } finally {
+    explorer.busy = false;
+  }
+}
+
+export async function loadGraph(id) {
+  explorer.busy = true;
+  explorer.error = null;
+  try {
+    const g = await apiGet(`/v1/graphs/${id}`, { auth: true });
+    explorer.graphId = g.id;
+    explorer.graphName = g.name;
+    explorer.nodes = (g.nodes ?? []).map((n) => ({
+      id: n.entity_id,
+      entityType: n.entity_type,
+      title: n.entity_id, // titles aren't persisted; shown as id until hydrated
+      x: n.x,
+      y: n.y,
+      status: null,
+      sourceId: null,
+      fields: {}
+    }));
+    explorer.edges = [];
+    explorer.seedResults = [];
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    throw e;
+  } finally {
+    explorer.busy = false;
+  }
+}
+
+export async function deleteGraph(id) {
+  await apiDelete(`/v1/graphs/${id}`, { auth: true });
+  if (explorer.graphId === id) {
+    explorer.graphId = null;
+    explorer.graphName = '';
+  }
+}
+
 export function clearGraph() {
   explorer.nodes = [];
   explorer.edges = [];
   explorer.seedResults = [];
   explorer.error = null;
+  explorer.graphId = null;
+  explorer.graphName = '';
 }
