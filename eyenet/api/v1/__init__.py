@@ -141,6 +141,12 @@ from eyenet.api.v1.graph.api_expand_counts import router as graph_expand_counts_
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_retract_edge import router as graph_retract_edge_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
+from eyenet.api.v1.graphs.api_create_graph import router as graphs_create_router
+from eyenet.api.v1.graphs.api_delete_graph import router as graphs_delete_router
+from eyenet.api.v1.graphs.api_get_graph import router as graphs_get_router
+from eyenet.api.v1.graphs.api_list_graphs import router as graphs_list_router
+from eyenet.api.v1.graphs.api_replace_graph_nodes import router as graphs_replace_nodes_router
+from eyenet.api.v1.graphs.api_update_graph import router as graphs_update_router
 from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
 from eyenet.api.v1.groups.api_create_group import router as groups_create_router
 
@@ -204,6 +210,9 @@ from eyenet.api.v1.linker.api_run import router as linker_run_router
 # === meta (gated OpenAPI schema, §12.5) ===
 from eyenet.api.v1.meta.api_openapi import router as meta_openapi_router
 from eyenet.api.v1.metrics.api_metrics import router as health_metrics_router
+from eyenet.api.v1.notes.api_delete_note import router as notes_delete_router
+from eyenet.api.v1.notes.api_get_note import router as notes_get_router
+from eyenet.api.v1.notes.api_set_note import router as notes_set_router
 
 # === panic ===
 from eyenet.api.v1.panic.api_panic import router as control_panic_router
@@ -348,6 +357,19 @@ v1_router.include_router(search_global_router)
 v1_router.include_router(search_graph_router)
 v1_router.include_router(graph_assert_edge_router)
 v1_router.include_router(graph_retract_edge_router)
+
+# saved graphs (the picker) — literal /graphs before /graphs/{id}
+v1_router.include_router(graphs_create_router)
+v1_router.include_router(graphs_list_router)
+v1_router.include_router(graphs_replace_nodes_router)
+v1_router.include_router(graphs_get_router)
+v1_router.include_router(graphs_update_router)
+v1_router.include_router(graphs_delete_router)
+
+# per-entity notes
+v1_router.include_router(notes_set_router)
+v1_router.include_router(notes_get_router)
+v1_router.include_router(notes_delete_router)
 
 # audit
 v1_router.include_router(audit_list_router)

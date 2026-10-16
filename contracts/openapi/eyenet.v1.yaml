@@ -3810,6 +3810,165 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /v1/graphs:
+    post:
+      tags: [graphs]
+      operationId: graphs_create
+      summary: Create an empty saved exploration graph (write:graph).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGraphRequest' }
+      responses:
+        "201":
+          description: The created graph.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+    get:
+      tags: [graphs]
+      operationId: graphs_list
+      summary: The current operator's saved graphs, newest-updated first (read:graph).
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/IncludeTotal' }
+      responses:
+        "200":
+          description: Page of saved-graph summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CursorPageGraphSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+
+  /v1/graphs/{graph_id}:
+    get:
+      tags: [graphs]
+      operationId: graphs_get
+      summary: A saved graph with its node placements (read:graph).
+      parameters:
+        - { name: graph_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The saved graph and its nodes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [graphs]
+      operationId: graphs_update
+      summary: Rename or re-describe a saved graph (write:graph).
+      parameters:
+        - { name: graph_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateGraphRequest' }
+      responses:
+        "200":
+          description: The updated graph.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+    delete:
+      tags: [graphs]
+      operationId: graphs_delete
+      summary: Delete a saved graph and its node placements (write:graph).
+      parameters:
+        - { name: graph_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Graph deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
+  /v1/graphs/{graph_id}/nodes:
+    put:
+      tags: [graphs]
+      operationId: graphs_replace_nodes
+      summary: Save the canvas, replacing all node placements (write:graph).
+      parameters:
+        - { name: graph_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceGraphNodesRequest' }
+      responses:
+        "200":
+          description: The graph with its new node placements.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/notes/{entity_type}/{entity_id}:
+    put:
+      tags: [notes]
+      operationId: notes_set
+      summary: Upsert the operator note for an entity (write:graph).
+      parameters:
+        - { name: entity_type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 32 } }
+        - { name: entity_id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetNoteRequest' }
+      responses:
+        "200":
+          description: The stored note.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoteResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+    get:
+      tags: [notes]
+      operationId: notes_get
+      summary: The operator note for an entity (read:graph).
+      parameters:
+        - { name: entity_type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 32 } }
+        - { name: entity_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The note.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoteResponse' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [notes]
+      operationId: notes_delete
+      summary: Remove an entity's operator note (write:graph).
+      parameters:
+        - { name: entity_type, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 32 } }
+        - { name: entity_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Note deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -6594,3 +6753,98 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/AttachmentSummary' }
+    GraphSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    GraphNode:
+      type: object
+      additionalProperties: false
+      required: [id, entity_type, entity_id, x, y, pinned, enrichments_run, added_at]
+      properties:
+        id: { type: string, format: uuid }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        x: { type: number }
+        y: { type: number }
+        pinned: { type: boolean }
+        enrichments_run: { type: array, items: { type: string } }
+        added_at: { type: string, format: date-time }
+    GraphDetail:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, updated_at, nodes]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/GraphNode' }
+    NodePlacementIn:
+      type: object
+      additionalProperties: false
+      required: [entity_type, entity_id, x, y]
+      properties:
+        entity_type: { type: string, minLength: 1, maxLength: 32 }
+        entity_id: { type: string, format: uuid }
+        x: { type: number }
+        y: { type: number }
+        pinned: { type: boolean, default: false }
+        enrichments_run: { type: array, items: { type: string }, default: [] }
+    CreateGraphRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 256 }
+        description: { type: string, nullable: true, maxLength: 8192 }
+    UpdateGraphRequest:
+      type: object
+      additionalProperties: false
+      description: All optional; only present fields are applied.
+      properties:
+        name: { type: string, nullable: true, minLength: 1, maxLength: 256 }
+        description: { type: string, nullable: true, maxLength: 8192 }
+    ReplaceGraphNodesRequest:
+      type: object
+      additionalProperties: false
+      required: [nodes]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/NodePlacementIn' }
+    CursorPageGraphSummary:
+      allOf:
+        - { $ref: '#/components/schemas/CursorPageBase' }
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/GraphSummary' }
+    NoteResponse:
+      type: object
+      additionalProperties: false
+      required: [id, entity_type, entity_id, body, created_by_user_id, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        body: { type: string }
+        created_by_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SetNoteRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 16384 }

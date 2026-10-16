@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from eyenet.api.deps import ScopeForbidden
+from eyenet.api.deps import ResourceNotFound, ScopeForbidden
 from eyenet.contracts.enums import ClearanceScope, SensitivityTier
 
 if TYPE_CHECKING:
@@ -57,6 +57,33 @@ def enforce_tier_clearance(current_user: CurrentUser, effective_tier: Sensitivit
     needed = _TIER_SCOPE[effective_tier]
     if needed is not None and needed.value not in current_user.effective_scopes:
         raise ScopeForbidden(needed.value)
+
+
+async def enforce_entity_tier_clearance(
+    storage: BaseRepository,
+    current_user: CurrentUser,
+    entity_type: str,
+    entity_id: UUID,
+) -> None:
+    """Gate a graph/notes surface that references an entity by ``(type, id)`` on that
+    entity's effective sensitivity tier.
+
+    Only ``document`` carries a tier in these surfaces: documents are not search-
+    indexed, so expanding one (or reading its note) is the only place its derived
+    data surfaces, and attachments gate on their own manifest/access path. Other
+    entity types pass through untouched (they have no tier). Raises
+    :class:`ScopeForbidden` (403) if the caller is not cleared for the document's
+    effective tier, and :class:`ResourceNotFound` (404) if the document is unknown,
+    mirroring the document manifest gate.
+    """
+    if entity_type != "document":
+        return
+    document = await storage.get_document(entity_id)
+    if document is None:
+        raise ResourceNotFound("document")
+    enforce_tier_clearance(
+        current_user, document.operator_tier_override or document.classifier_tier
+    )
 
 
 async def resolve_tier_grant(
@@ -115,6 +142,7 @@ async def resolve_scope_grant(
 
 
 __all__ = [
+    "enforce_entity_tier_clearance",
     "enforce_tier_clearance",
     "required_clearance_scope",
     "resolve_scope_grant",
