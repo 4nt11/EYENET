@@ -206,6 +206,12 @@ export async function listGraphs() {
   return page.items ?? [];
 }
 
+// Create a new empty saved graph (the picker's "New graph"); returns its id.
+export async function createGraph(name) {
+  const g = await apiPost('/v1/graphs', { name }, { auth: true });
+  return g.id;
+}
+
 export async function saveGraph(name, positions) {
   explorer.busy = true;
   explorer.error = null;
@@ -243,16 +249,31 @@ export async function loadGraph(id) {
     const g = await apiGet(`/v1/graphs/${id}`, { auth: true });
     explorer.graphId = g.id;
     explorer.graphName = g.name;
-    explorer.nodes = (g.nodes ?? []).map((n) => ({
+    let nodes = (g.nodes ?? []).map((n) => ({
       id: n.entity_id,
       entityType: n.entity_type,
-      title: n.entity_id, // titles aren't persisted; shown as id until hydrated
+      title: n.entity_id, // placeholder until hydrated below
       x: n.x,
       y: n.y,
       status: null,
       sourceId: null,
       fields: {}
     }));
+    // Restore labels/fields from search_document (titles aren't persisted per-graph).
+    const ids = nodes.map((n) => n.id);
+    if (ids.length) {
+      try {
+        const h = await apiPost('/v1/graph/hydrate', { ids }, { auth: true });
+        const byId = Object.fromEntries((h.nodes ?? []).map((x) => [x.entity_id, x]));
+        nodes = nodes.map((n) => {
+          const hit = byId[n.id];
+          return hit
+            ? { ...n, title: hit.title ?? n.title, status: hit.status ?? null, sourceId: hit.source_id ?? null, fields: hit.fields ?? {} }
+            : n;
+        });
+      } catch { /* leave id-labelled on hydrate failure */ }
+    }
+    explorer.nodes = nodes;
     explorer.edges = [];
     explorer.seedResults = [];
   } catch (e) {
