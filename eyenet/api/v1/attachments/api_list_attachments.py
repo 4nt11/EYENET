@@ -9,6 +9,7 @@ no bytes. The raw blob stays behind the clearance-gated manifest + signed
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
@@ -31,9 +32,16 @@ async def attachments_list(
     storage: Annotated[BaseRepository, Depends(get_storage)],
     page: Annotated[CursorParams, Depends(cursor_params)],
     mime: Annotated[str | None, Query()] = None,
+    message_id: Annotated[UUID | None, Query(description="scope to one message")] = None,
 ) -> CursorPageAttachmentSummary:
-    rows = await storage.list_attachments(mime=mime, limit=page.fetch_limit, offset=page.offset)
-    estimated_total = await storage.count_attachments(mime=mime) if page.include_total else None
+    rows = await storage.list_attachments(
+        mime=mime, message_id=message_id, limit=page.fetch_limit, offset=page.offset
+    )
+    estimated_total = (
+        await storage.count_attachments(mime=mime, message_id=message_id)
+        if page.include_total
+        else None
+    )
     return CursorPageAttachmentSummary(
         items=[AttachmentSummary.from_domain(r) for r in rows[: page.limit]],
         next_cursor=page.next_cursor(fetched=len(rows)),

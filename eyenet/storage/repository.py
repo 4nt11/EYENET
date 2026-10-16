@@ -938,14 +938,17 @@ class BaseRepository(ABC):
         self,
         *,
         mime: str | None = None,
+        message_id: UUID | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[AttachmentRow]:
         """Attachments newest-first (``id DESC``; uuid7 is time-ordered) for the
-        M10 viewer table."""
+        M10 viewer table; ``message_id`` scopes to one message's attachments."""
 
     @abstractmethod
-    async def count_attachments(self, *, mime: str | None = None) -> int:
+    async def count_attachments(
+        self, *, mime: str | None = None, message_id: UUID | None = None
+    ) -> int:
         """Count attachments matching the same filter as :meth:`list_attachments`."""
 
     @abstractmethod
@@ -1008,6 +1011,12 @@ class BaseRepository(ABC):
 
     @abstractmethod
     async def get_document(self, document_id: UUID) -> DocumentRow | None: ...
+
+    @abstractmethod
+    async def document_by_sha256(self, sha256: str) -> DocumentRow | None:
+        """Newest document matching a content hash (the attachment->document
+        bridge; both tables index ``sha256``). ``None`` if that content was never
+        uploaded as a document."""
 
     @abstractmethod
     async def list_documents(

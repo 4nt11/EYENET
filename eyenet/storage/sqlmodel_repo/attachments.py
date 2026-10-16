@@ -41,26 +41,32 @@ class AttachmentsMixin:
                 return None
             return AttachmentRow.model_validate(table.model_dump())
 
-    def _attachments_filtered_stmt(self, *, mime: str | None) -> SelectOfScalar[AttachmentTable]:
+    def _attachments_filtered_stmt(
+        self, *, mime: str | None, message_id: UUID | None = None
+    ) -> SelectOfScalar[AttachmentTable]:
         stmt = select(AttachmentTable)
         if mime is not None:
             stmt = stmt.where(AttachmentTable.mime == mime)
+        if message_id is not None:
+            stmt = stmt.where(AttachmentTable.message_id == message_id)
         return stmt
 
     async def list_attachments(
         self,
         *,
         mime: str | None = None,
+        message_id: UUID | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[AttachmentRow]:
-        """Attachments newest-first for the M10 viewer table. Attachments carry
-        no own timestamp (the parent message does), and ``id`` is uuid7 =
+        """Attachments newest-first for the M10 viewer table (and, with
+        ``message_id``, the explorer's per-message Attachments tab). Attachments
+        carry no own timestamp (the parent message does), and ``id`` is uuid7 =
         time-ordered, so ``id DESC`` is the newest-first sort. Generic ORM
         SELECT — no dialect leak ([[feedback_no_dialect_leak_in_mixins]])."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
-                self._attachments_filtered_stmt(mime=mime)
+                self._attachments_filtered_stmt(mime=mime, message_id=message_id)
                 .order_by(col(AttachmentTable.id).desc())
                 .offset(offset)
                 .limit(limit)
@@ -68,10 +74,12 @@ class AttachmentsMixin:
             result = await session.exec(stmt)
             return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
 
-    async def count_attachments(self, *, mime: str | None = None) -> int:
+    async def count_attachments(
+        self, *, mime: str | None = None, message_id: UUID | None = None
+    ) -> int:
         """Count attachments matching the same filter as :meth:`list_attachments`."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            inner = self._attachments_filtered_stmt(mime=mime).subquery()
+            inner = self._attachments_filtered_stmt(mime=mime, message_id=message_id).subquery()
             result = await session.exec(select(func.count()).select_from(inner))
             return int(result.one())
 

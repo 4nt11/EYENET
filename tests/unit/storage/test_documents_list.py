@@ -86,3 +86,16 @@ async def test_limit_offset_paginate(storage: BaseRepository) -> None:
     page2 = await storage.list_documents(limit=2, offset=2)
     assert len(page1) == 2
     assert len(page2) == 1
+
+
+async def test_document_by_sha256(storage: BaseRepository) -> None:
+    sha = _hex64()
+    assert await storage.document_by_sha256(sha) is None
+    # same bytes uploaded twice -> newest wins (the attachment->document bridge)
+    await storage.put_document(_row(sha256=sha, uploaded_at=_NOW, filename="old.pdf"))
+    await storage.put_document(
+        _row(sha256=sha, uploaded_at=_NOW + timedelta(hours=1), filename="new.pdf")
+    )
+    hit = await storage.document_by_sha256(sha)
+    assert hit is not None
+    assert hit.filename == "new.pdf"

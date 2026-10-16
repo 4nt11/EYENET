@@ -2087,6 +2087,7 @@ paths:
         blob stays behind the clearance-gated manifest + signed /access flow.
       parameters:
         - { name: mime, in: query, required: false, schema: { type: string, nullable: true } }
+        - { name: message_id, in: query, required: false, schema: { type: string, format: uuid, nullable: true } }
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Limit' }
         - { $ref: '#/components/parameters/IncludeTotal' }

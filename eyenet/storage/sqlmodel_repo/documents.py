@@ -46,6 +46,24 @@ class DocumentsMixin:
                 return None
             return DocumentRow.model_validate(table.model_dump())
 
+    async def document_by_sha256(self, sha256: str) -> DocumentRow | None:
+        """Newest document whose raw bytes hash to ``sha256`` (the attachment ->
+        document bridge; both tables index ``sha256``). ``None`` if that content
+        was never uploaded as a document. sha256 is not unique (the same bytes can
+        be uploaded more than once), so pick newest (``uploaded_at DESC, id DESC``).
+        Generic ORM SELECT — no dialect leak ([[feedback_no_dialect_leak_in_mixins]])."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(DocumentTable)
+                .where(DocumentTable.sha256 == sha256)
+                .order_by(col(DocumentTable.uploaded_at).desc(), col(DocumentTable.id).desc())
+                .limit(1)
+            )
+            table = (await session.exec(stmt)).first()
+            if table is None:
+                return None
+            return DocumentRow.model_validate(table.model_dump())
+
     def _documents_filtered_stmt(
         self,
         *,

@@ -24,10 +24,12 @@ def _hex64() -> str:
     return uuid4().hex + uuid4().hex
 
 
-async def _put(storage: BaseRepository, *, mime: str = "application/octet-stream"):
+async def _put(
+    storage: BaseRepository, *, mime: str = "application/octet-stream", message_id=None
+):
     return await storage.put_attachment(
         AttachmentRow(
-            message_id=uuid4(),
+            message_id=message_id or uuid4(),
             kind=AttachmentKind.DOCUMENT,
             mime=mime,
             size_bytes=11,
@@ -66,3 +68,12 @@ async def test_limit_offset_paginate(storage: BaseRepository) -> None:
         await _put(storage)
     assert len(await storage.list_attachments(limit=2, offset=0)) == 2
     assert len(await storage.list_attachments(limit=2, offset=2)) == 1
+
+
+async def test_filter_message_id(storage: BaseRepository) -> None:
+    mid = uuid4()
+    mine = await _put(storage, message_id=mid)
+    await _put(storage)  # a different message
+    rows = await storage.list_attachments(message_id=mid, limit=10)
+    assert [r.id for r in rows] == [mine]
+    assert await storage.count_attachments(message_id=mid) == 1
