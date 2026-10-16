@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import re2
 import structlog
 
+from eyenet.linker._address_checksum import validate_address
 from eyenet.linker.indicator_rules import VENDORED_INDICATOR_RULES
 
 _log = structlog.get_logger()
@@ -135,6 +136,12 @@ def extract(text: str | None, compiled: Sequence[CompiledRule]) -> list[Extracte
                 continue
             norm = raw.lower() if rule.fold_case else raw
             if rule.kind == _HANDLE_KIND and norm in _HANDLE_STOPLIST:
+                continue
+            # Coded checksum gate for crypto-address kinds (base58check / bech32 /
+            # EIP-55 / Monero): the RE2 shape match alone lets hex hashes collide
+            # with the base58 patterns. Validate the SURFACE form (raw) — base58
+            # and EIP-55 are case-significant; non-crypto kinds always pass.
+            if not validate_address(rule.kind, raw):
                 continue
             # Offset points at the stored value: the captured group when there is
             # one (the handle after '@'), else the whole match.
