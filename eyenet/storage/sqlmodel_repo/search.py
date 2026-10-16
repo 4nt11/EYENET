@@ -97,6 +97,18 @@ class SearchMixin:
             func.lower(func.coalesce(col(SearchDocumentTable.handles), "")).like(pattern),
         )
 
+    async def hydrate_search_documents(self, ids: Sequence[UUID]) -> list[SearchDocumentTable]:
+        """search_document rows for ``ids`` (restoring a saved graph's node labels).
+        Ids with no indexed row (e.g. documents, which are not search-indexed) are
+        simply absent, so this never surfaces an unindexed entity's content."""
+        if not ids:
+            return []
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(SearchDocumentTable).where(col(SearchDocumentTable.entity_id).in_(list(ids)))
+            )
+            return list(result)
+
     # ---- query DSL compiler (GLOBAL_SEARCH.md §9) -------------------------
     def _target_expr(self, target: str) -> Any:
         """Column element for a field's value source. Real columns are ANSI (here);

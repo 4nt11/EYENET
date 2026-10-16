@@ -138,6 +138,7 @@ from eyenet.api.v1.graph.api_assert_edge import router as graph_assert_edge_rout
 # === graph ===
 from eyenet.api.v1.graph.api_expand import router as graph_expand_router
 from eyenet.api.v1.graph.api_expand_counts import router as graph_expand_counts_router
+from eyenet.api.v1.graph.api_hydrate import router as graph_hydrate_router
 from eyenet.api.v1.graph.api_get_stats import router as graph_stats_router
 from eyenet.api.v1.graph.api_retract_edge import router as graph_retract_edge_router
 from eyenet.api.v1.graph.api_search import router as graph_search_router
@@ -353,6 +354,7 @@ v1_router.include_router(graph_stats_router)
 v1_router.include_router(graph_search_router)
 v1_router.include_router(graph_expand_router)
 v1_router.include_router(graph_expand_counts_router)
+v1_router.include_router(graph_hydrate_router)
 v1_router.include_router(search_global_router)
 v1_router.include_router(search_graph_router)
 v1_router.include_router(graph_assert_edge_router)

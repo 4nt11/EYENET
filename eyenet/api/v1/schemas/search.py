@@ -152,6 +152,20 @@ class GraphExpandCounts(ApiSchema):
     counts: dict[str, int | None] = Field(default_factory=dict)
 
 
+class GraphHydrateRequest(ApiSchema):
+    """Body of ``POST /v1/graph/hydrate``: entity ids to look up (e.g. a saved
+    graph's node refs, to restore labels/fields on load)."""
+
+    ids: list[UUID] = Field(default_factory=list, max_length=500)
+
+
+class GraphHydrateResult(ApiSchema):
+    """Hydrated nodes for the requested ids. Unindexed ids (e.g. documents) are
+    simply absent from ``nodes``."""
+
+    nodes: list[SearchGraphNode] = Field(default_factory=list)
+
+
 __all__ = [
     "AssertEdgeRequest",
     "AssertEdgeResult",

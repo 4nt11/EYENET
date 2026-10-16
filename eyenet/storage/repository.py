@@ -2000,6 +2000,11 @@ class BaseRepository(ABC):
         """Per-enrichment neighbour totals for the degree preview (``None`` for a
         remote enrichment with no cheap count)."""
 
+    @abstractmethod
+    async def hydrate_search_documents(self, ids: Sequence[UUID]) -> list[Any]:
+        """search_document rows for ``ids`` (restoring saved-graph node labels);
+        unindexed ids are absent. Returns ``list[SearchDocumentTable]``."""
+
     # =================================================================
     # SAVED GRAPHS (investigation_graph + node placements; the picker)
     # =================================================================

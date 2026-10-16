@@ -1175,6 +1175,26 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/graph/hydrate:
+    post:
+      tags: [graph]
+      operationId: graph_hydrate
+      summary: Batch-resolve entity ids to graph nodes (restore saved-graph labels).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GraphHydrateRequest' }
+      responses:
+        "200":
+          description: Hydrated nodes (unindexed ids absent).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphHydrateResult' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "422": { $ref: '#/components/responses/Validation' }
+
   /v1/graph/edges:
     post:
       tags: [graph]
@@ -4356,6 +4376,15 @@ components:
       type: object
       properties:
         counts: { type: object, additionalProperties: { type: integer, nullable: true } }
+    GraphHydrateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        ids: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+    GraphHydrateResult:
+      type: object
+      properties:
+        nodes: { type: array, items: { $ref: '#/components/schemas/SearchGraphNode' } }
     ArtifactSummary:
       type: object
       required: [id, kind, value, resolution_state, first_seen_at_ingest, last_seen_at_ingest, mention_count, distinct_actors, distinct_groups]
