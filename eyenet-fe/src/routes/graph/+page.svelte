@@ -1,6 +1,9 @@
 <script>
   import GraphCanvas from '$lib/components/GraphCanvas.svelte';
-  import { explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph } from '$lib/explorer.svelte.js';
+  import {
+    explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
+    EDGE_KINDS, assertEdge, loadNote, saveNote
+  } from '$lib/explorer.svelte.js';
 
   // ── Seed search (top bar): debounced global search; a result drops onto canvas.
   let q = $state('');
@@ -45,6 +48,40 @@
 
   const fieldRows = $derived(selNode ? Object.entries(selNode.fields ?? {}) : []);
   const fmtCount = (c) => (c == null ? '·' : Number(c).toLocaleString('en-US'));
+  const edgeLabel = (k) => k.replace(/_/g, ' ');
+
+  // ── Shift-drag between two nodes → edge-kind picker → assert.
+  let edgePicker = $state(null); // { src, dst, custom, reason } | null
+  function onConnectReady(src, dst) {
+    edgePicker = { src, dst, custom: '', reason: 'linked in explorer' };
+  }
+  async function doAssert(kind) {
+    const k = (kind ?? edgePicker.custom).trim();
+    if (!k || !edgePicker) return;
+    const { src, dst, reason } = edgePicker;
+    edgePicker = null;
+    try { await assertEdge(src, dst, k, reason); } catch { /* surfaced via explorer.error */ }
+  }
+
+  // ── Inspector notes: load on selection, save on demand.
+  let noteBody = $state('');
+  let noteSaving = $state(false);
+  let noteStatus = $state('');
+  let noteSeq = 0;
+  $effect(() => {
+    const n = selNode;
+    noteStatus = '';
+    if (!n) { noteBody = ''; return; }
+    const mine = ++noteSeq;
+    loadNote(n).then((b) => { if (mine === noteSeq) noteBody = b; }).catch(() => {});
+  });
+  async function doSaveNote() {
+    if (!selNode) return;
+    noteSaving = true; noteStatus = '';
+    try { await saveNote(selNode, noteBody); noteStatus = 'saved'; }
+    catch (e) { noteStatus = e.message ?? 'error'; }
+    finally { noteSaving = false; }
+  }
 </script>
 
 <main>
@@ -90,6 +127,7 @@
       edges={explorer.edges}
       onNodeClick={(n) => { selNode = n; menu = null; }}
       onNodeContext={onNodeContext}
+      onConnectReady={onConnectReady}
       onCanvasTap={() => { menu = null; selNode = null; }}
     />
 
@@ -135,7 +173,35 @@
             </tbody>
           </table>
         {/if}
+
+        <div class="ins-notes">
+          <div class="ins-label">Notes</div>
+          <textarea class="note" bind:value={noteBody} placeholder="Operator note for this entity…" rows="5"></textarea>
+          <div class="note-bar">
+            <button class="btn" onclick={doSaveNote} disabled={noteSaving}>{noteSaving ? 'Saving…' : 'Save'}</button>
+            {#if noteStatus}<span class="note-status">{noteStatus}</span>{/if}
+          </div>
+        </div>
       </aside>
+    {/if}
+
+    <!-- edge-kind picker (shift-drag between two nodes) -->
+    {#if edgePicker}
+      <div class="edge-pick-scrim" role="presentation" onclick={() => (edgePicker = null)}></div>
+      <div class="edge-pick">
+        <div class="ep-head">Link <b>{edgePicker.src.title || edgePicker.src.entityType}</b> → <b>{edgePicker.dst.title || edgePicker.dst.entityType}</b></div>
+        <div class="ep-kinds">
+          {#each EDGE_KINDS as k}
+            <button class="ep-kind" onclick={() => doAssert(k)}>{edgeLabel(k)}</button>
+          {/each}
+        </div>
+        <div class="ep-custom">
+          <input class="search" bind:value={edgePicker.custom} placeholder="custom kind…" spellcheck="false"
+            onkeydown={(e) => { if (e.key === 'Enter') doAssert(); }} />
+          <button class="btn" onclick={() => doAssert()} disabled={!edgePicker.custom.trim()}>Add</button>
+        </div>
+        <input class="search ep-reason" bind:value={edgePicker.reason} placeholder="reason" spellcheck="false" />
+      </div>
     {/if}
   </div>
 </main>
@@ -189,4 +255,22 @@
   .ins-fields th { width: 38%; padding: 4px 8px 4px 0; text-align: left; vertical-align: top; font-family: var(--font-mono); font-size: var(--fs-11); font-weight: var(--fw-normal); color: var(--text-faint); }
   .ins-fields td { padding: 4px 0; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-body); word-break: break-word; }
   .ins-fields tr { border-bottom: 1px solid var(--border); }
+
+  .ins-notes { margin-top: 16px; }
+  .ins-label { margin-bottom: 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .note { width: 100%; resize: vertical; padding: 8px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); line-height: var(--lh-normal); }
+  .note:focus { outline: none; border-color: var(--accent); }
+  .note-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .note-status { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
+
+  .edge-pick-scrim { position: absolute; inset: 0; z-index: 40; background: rgba(0,0,0,.35); }
+  .edge-pick { position: absolute; z-index: 41; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 320px; padding: 14px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  .ep-head { margin-bottom: 10px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }
+  .ep-head b { color: var(--text-body); }
+  .ep-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .ep-kind { padding: 5px 9px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
+  .ep-kind:hover { border-color: var(--accent); color: var(--accent-text); }
+  .ep-custom { display: flex; gap: 6px; margin-bottom: 8px; }
+  .ep-custom .search { flex: 1; width: auto; max-width: none; }
+  .ep-reason { width: 100%; max-width: none; }
 </style>

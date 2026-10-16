@@ -3,7 +3,7 @@
 // Seed a node from global search, then right-click -> enrichment -> expand pulls
 // neighbours via GET /v1/graph/expand and merges them in. Svelte 5 runes module;
 // node/edge shapes match what GraphCanvas.svelte consumes (see searchGraph.svelte.js).
-import { apiGet } from './api.js';
+import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
 
 export const explorer = $state({
   nodes: [], // GraphCanvas node shape: { id, title, entityType, status, sourceId, fields }
@@ -103,6 +103,63 @@ export async function expandNode(node, enrichment) {
   } finally {
     explorer.busy = false;
   }
+}
+
+// Predefined operator edge kinds (asserted_edge.kind is open varchar, so custom
+// free-text is allowed too). Locked set from GRAPH_EXPLORER.md §8.
+export const EDGE_KINDS = [
+  'same_as',
+  'associate_of',
+  'controls',
+  'member_of',
+  'uses',
+  'communicates_with',
+  'related_to'
+];
+
+// Shift-drag between two nodes -> persist an operator-asserted edge, reflect it
+// on the canvas (solid/asserted). `src`/`dst` are the mapped node rows.
+export async function assertEdge(src, dst, kind, reason) {
+  explorer.busy = true;
+  explorer.error = null;
+  try {
+    const res = await apiPost(
+      '/v1/graph/edges',
+      { src_type: src.entityType, src_id: src.id, dst_type: dst.entityType, dst_id: dst.id, kind, reason },
+      { auth: true }
+    );
+    addEdge({
+      srcId: res.src_id ?? src.id,
+      dstId: res.dst_id ?? dst.id,
+      kind: res.kind ?? kind,
+      provenance: 'asserted',
+      weight: null,
+      edgeId: res.edge_id ?? null
+    });
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    throw e;
+  } finally {
+    explorer.busy = false;
+  }
+}
+
+// Per-entity note (the inspector Notes field). loadNote returns the body string
+// ('' when none); saveNote upserts; deleteNote removes.
+export async function loadNote(node) {
+  try {
+    const r = await apiGet(`/v1/notes/${node.entityType}/${node.id}`, { auth: true });
+    return r.body ?? '';
+  } catch (e) {
+    if (e.status === 404) return '';
+    throw e;
+  }
+}
+export async function saveNote(node, body) {
+  await apiPut(`/v1/notes/${node.entityType}/${node.id}`, { body }, { auth: true });
+}
+export async function deleteNote(node) {
+  await apiDelete(`/v1/notes/${node.entityType}/${node.id}`, { auth: true });
 }
 
 export function clearGraph() {
