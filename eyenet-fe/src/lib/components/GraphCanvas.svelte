@@ -169,10 +169,13 @@
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
     const hasEdges = cy.edges(':not(.eh-ghost-edge)').length > 0;
+    // 'proof' fcose is O(expensive) and locks the thread on a big graph; drop to the
+    // fast heuristic layout past the heavy threshold.
+    const heavy = cy.nodes().length > HEAVY_NODE_COUNT;
     cy.layout({
       name: 'fcose',
       animate: false,
-      quality: 'proof',
+      quality: heavy ? 'default' : 'proof',
       randomize: true,
       nodeDimensionsIncludeLabels: true,
       packComponents: true,
@@ -196,6 +199,10 @@
   // the cursor while held and stays where dropped after release (no snap-back); the mesh
   // deforms/settles around it. O(edges) per frame — cheap even on big graphs.
   let sim = null;
+  // Above this node count the spring-mesh sim (O(n^2) anti-overlap per frame) is
+  // disabled: it would pin the main thread and crash the tab on a big graph (300+
+  // authors). Cytoscape's native per-node drag still works, just without the mesh.
+  const HEAVY_NODE_COUNT = 150;
   const SPRING_K = 0.035; // softer → edges visibly STRETCH during a pull then retract (rubber-band)
   const SPRING_DAMP = 0.9; // retain more velocity so the stretch/retract actually swings
   const MIN_SEP = 52; // anti-overlap floor: nodes never crowd closer than this (readability)
@@ -262,6 +269,7 @@
     sim.raf = requestAnimationFrame(simTick);
   }
   function startSim(node) {
+    if (cy.nodes().length > HEAVY_NODE_COUNT) return; // heavy graph: native drag only
     const nodes = cy.nodes();
     const idx = new Map();
     nodes.forEach((n, i) => idx.set(n.id(), i));
@@ -303,8 +311,12 @@
       boxSelectionEnabled: false,
       // Crisp labels when zoomed out: supersample the canvas (>=2x) and never swap in
       // the low-res viewport texture during pan/zoom — otherwise small text pixelates.
-      pixelRatio: Math.max(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1),
-      textureOnViewport: false,
+      // Supersampling (>=2x) is crisp but costly; drop to 1x + viewport texture on a
+      // heavy initial graph (e.g. a loaded 300-node canvas) so pan/zoom stays alive.
+      pixelRatio: nodes.length > HEAVY_NODE_COUNT
+        ? 1
+        : Math.max(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1),
+      textureOnViewport: nodes.length > HEAVY_NODE_COUNT,
       motionBlur: false
     });
     lastNodeSig = nodeSig();

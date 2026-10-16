@@ -89,18 +89,28 @@ export async function fetchCounts(node) {
   return r.counts ?? {};
 }
 
-// One enrichment hop: fetch neighbours + edges and merge them into the canvas.
+// One enrichment hop: pull ALL neighbours (follow the cursor to the end) and merge
+// them into the canvas. The operator wants the whole set, not a first page; the
+// canvas survives big sets because GraphCanvas disables its per-frame sim past a
+// node threshold. A high safety ceiling guards against a pathological fan-out.
+const EXPAND_MAX_NODES = 5000;
 export async function expandNode(node, enrichment) {
   explorer.busy = true;
   explorer.error = null;
   try {
-    const r = await apiGet(
-      `/v1/graph/expand?type=${node.entityType}&id=${node.id}` +
-        `&enrichment=${encodeURIComponent(enrichment)}&limit=50`,
-      { auth: true }
-    );
-    for (const n of r.nodes ?? []) addNode(mapNode(n));
-    for (const e of r.edges ?? []) addEdge(mapEdge(e));
+    let cursor = null;
+    let added = 0;
+    do {
+      const qs =
+        `type=${node.entityType}&id=${node.id}` +
+        `&enrichment=${encodeURIComponent(enrichment)}&limit=200` +
+        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+      const r = await apiGet(`/v1/graph/expand?${qs}`, { auth: true });
+      for (const n of r.nodes ?? []) addNode(mapNode(n));
+      for (const e of r.edges ?? []) addEdge(mapEdge(e));
+      added += (r.nodes ?? []).length;
+      cursor = r.next_cursor ?? null;
+    } while (cursor && added < EXPAND_MAX_NODES);
   } catch (e) {
     explorer.error = e.message ?? String(e);
   } finally {
