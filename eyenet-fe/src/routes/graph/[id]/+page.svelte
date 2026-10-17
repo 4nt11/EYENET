@@ -18,7 +18,7 @@
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
     EDGE_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
-    saveGraph, loadGraph, searchEntities
+    saveGraph, loadGraph, searchEntities, removeNodes
   } from '$lib/explorer.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -127,7 +127,11 @@
   let menu = $state(null);
   async function onNodeContext(node, pos) {
     selNode = null;
-    menu = { x: pos.x, y: pos.y, node, loading: true, items: [] };
+    // If the right-clicked node is part of a multi-selection, the menu acts on the whole
+    // selection; otherwise just this node.
+    const sel = canvasApi?.selectedIds?.() ?? [];
+    const selCount = sel.includes(node.id) && sel.length > 1 ? sel.length : 0;
+    menu = { x: pos.x, y: pos.y, node, loading: true, items: [], selCount };
     try {
       const counts = await fetchCounts(node);
       // keep menu only if still the same node (no newer right-click)
@@ -140,6 +144,26 @@
     const node = menu?.node;
     menu = null;
     if (node) expandNode(node, name);
+  }
+  // Remove from the graph VIEW (cascading orphan-sweep; never touches the DB). Acts on the
+  // multi-selection if the node is part of one, else just the node.
+  function removeFromGraph(node) {
+    const sel = canvasApi?.selectedIds?.() ?? [];
+    const ids = sel.includes(node.id) && sel.length > 1 ? sel : [node.id];
+    removeNodes(ids);
+    canvasApi?.clearSelection?.();
+    menu = null;
+    selNode = null;
+  }
+  // Delete / Backspace removes the current selection (or the inspected node), unless the
+  // operator is typing in a field.
+  function onKeydown(e) {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const sel = canvasApi?.selectedIds?.() ?? [];
+    if (sel.length) { e.preventDefault(); removeNodes(sel); canvasApi?.clearSelection?.(); selNode = null; }
+    else if (selNode) { e.preventDefault(); removeNodes([selNode.id]); selNode = null; }
   }
 
   // Double-click a node → run its type's default enrichment (the mockup's one-shot expand).
@@ -218,6 +242,8 @@
     try { await createOperatorEntity(e.type, payload); } catch { /* surfaced via explorer.error */ }
   }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <main>
   <div class="head">
@@ -307,6 +333,10 @@
         {:else}
           <div class="ctx-empty">No enrichments</div>
         {/if}
+        <div class="ctx-div"></div>
+        <button class="ctx-row danger" onclick={() => removeFromGraph(menu.node)}>
+          {menu.selCount ? `Remove ${menu.selCount} selected` : 'Remove from graph'}
+        </button>
       </div>
     {/if}
 
@@ -440,6 +470,9 @@
   .ctx-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 7px 10px; background: none; border: 0; cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-body); }
   .ctx-row:hover { background: var(--surface); color: var(--accent-text); }
   .ctx-count { color: var(--text-faint); }
+  .ctx-div { height: 1px; margin: 2px 0; background: var(--border); }
+  .ctx-row.danger { color: var(--danger, #f87171); }
+  .ctx-row.danger:hover { background: color-mix(in srgb, var(--danger, #f87171) 16%, transparent); color: var(--danger, #f87171); }
 
   .inspector { position: absolute; top: 0; right: 0; bottom: 0; width: 320px; z-index: 15; overflow-y: auto; padding: 14px; background: var(--panel-2, var(--surface)); border-left: 1px solid var(--border-strong); }
   .ins-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }

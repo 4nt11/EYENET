@@ -123,6 +123,13 @@
       }
     },
     {
+      selector: 'node:selected',
+      style: {
+        'border-width': 3,
+        'border-color': getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#a855f7'
+      }
+    },
+    {
       selector: 'edge',
       style: {
         width: 'data(w)',
@@ -403,6 +410,15 @@
     let lastTapId = null;
     let lastTapAt = 0;
     cy.on('tap', 'node', (evt) => {
+      // Shift+tap = toggle multi-select (shift+DRAG is edge-draw; a tap never draws an
+      // edge, so the two coexist). No inspector, no dbltap while multi-selecting.
+      if (evt.originalEvent?.shiftKey) {
+        const n = evt.target;
+        if (n.selected()) n.unselect(); else n.select();
+        return;
+      }
+      // Plain tap clears any multi-selection and inspects the one node.
+      cy.$('node:selected').unselect();
       const id = evt.target.id();
       const now = Date.now();
       if (id === lastTapId && now - lastTapAt < 300) {
@@ -440,7 +456,9 @@
         cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
       },
       setFrozen: (on) => cy?.autolock(!!on),
-      setAnimations: (on) => { animationsOn = !!on; if (!on) killSim(); }
+      setAnimations: (on) => { animationsOn = !!on; if (!on) killSim(); },
+      selectedIds: () => (cy ? cy.$('node:selected').map((n) => n.id()) : []),
+      clearSelection: () => cy?.$('node:selected').unselect()
     });
 
     // Re-grab after any draw; these span cy rebuilds so they live on window/container.

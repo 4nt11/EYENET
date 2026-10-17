@@ -373,6 +373,32 @@ export async function deleteGraph(id) {
   }
 }
 
+// Remove nodes from the GRAPH VIEW (not the DB - evidence is never deleted) with an
+// orphan-sweep cascade: drop the given nodes + their edges, then iteratively sweep any
+// node that HAD an edge but is now fully dangling. Shared children (still linked to a
+// surviving node) stay; standalone seeds (never had an edge) stay.
+// ponytail: O(nodes*edges) per sweep pass, fine at explorer scale (hundreds). If a graph
+// ever holds thousands, index edges by node id first.
+export function removeNodes(ids) {
+  const remove = new Set(ids);
+  const touches = (e, id) => e.srcId === id || e.dstId === id;
+  const hadEdge = (id) => explorer.edges.some((e) => touches(e, id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const live = explorer.edges.filter((e) => !remove.has(e.srcId) && !remove.has(e.dstId));
+    for (const n of explorer.nodes) {
+      if (remove.has(n.id)) continue;
+      if (hadEdge(n.id) && !live.some((e) => touches(e, n.id))) {
+        remove.add(n.id);
+        changed = true;
+      }
+    }
+  }
+  explorer.nodes = explorer.nodes.filter((n) => !remove.has(n.id));
+  explorer.edges = explorer.edges.filter((e) => !remove.has(e.srcId) && !remove.has(e.dstId));
+}
+
 export function clearGraph() {
   explorer.nodes = [];
   explorer.edges = [];
