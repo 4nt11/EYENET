@@ -2,9 +2,11 @@
   import { onMount } from 'svelte';
   import cytoscape from 'cytoscape';
   import fcose from 'cytoscape-fcose';
+  import dagre from 'cytoscape-dagre';
   import edgehandles from 'cytoscape-edgehandles';
 
   cytoscape.use(fcose);
+  cytoscape.use(dagre);
   cytoscape.use(edgehandles);
 
   // Cytoscape render surface for the search-as-graph view. Nodes are colored by
@@ -163,13 +165,11 @@
   let layoutName = 'fcose';
 
   function layoutOpts() {
-    if (layoutName === 'breadthfirst')
-      // directed: follow the arrows for depth; grid: wrap a fat level into a block
-      // instead of one mile-wide row; spacingFactor<1: compress the whole thing.
-      // NOTE: no `maximal` - it crashes cytoscape on any non-DAG (our linked/related
-      // edges make cycles). Deep-sinking artifacts under messages is an enrichment-edge
-      // decision, not a layout one.
-      return { name: 'breadthfirst', animate: false, directed: true, grid: true, spacingFactor: 0.6, padding: 32, nodeDimensionsIncludeLabels: true };
+    if (layoutName === 'dagre')
+      // Proper layered hierarchy (cytoscape built-in breadthfirst flattens a star into
+      // one row). dagre ranks by edge direction, so actor -> message -> artifact stacks
+      // top-down, and it tolerates cycles. rankSep/nodeSep keep it compact.
+      return { name: 'dagre', animate: false, rankDir: 'TB', rankSep: 55, nodeSep: 22, edgeSep: 8, padding: 32, nodeDimensionsIncludeLabels: true };
     if (layoutName === 'concentric')
       return { name: 'concentric', animate: false, padding: 32, minNodeSpacing: 24, nodeDimensionsIncludeLabels: true };
     if (layoutName === 'grid')

@@ -21,6 +21,7 @@
     "@lucide/svelte": "^1.47.0",
     "bits-ui": "^2.19.2",
     "cytoscape": "^3.34.3",
+    "cytoscape-dagre": "^4.0.1",
     "cytoscape-edgehandles": "^4.0.1",
     "cytoscape-fcose": "^2.2.0",
     "dompurify": "^3.4.16",

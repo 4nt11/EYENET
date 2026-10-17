@@ -30,7 +30,7 @@
   let activeLayout = $state('fcose');
   const LAYOUTS = [
     { id: 'fcose', icon: Graph, title: 'Force layout' },
-    { id: 'breadthfirst', icon: TreeStructure, title: 'Tree layout' },
+    { id: 'dagre', icon: TreeStructure, title: 'Tree layout' },
     { id: 'concentric', icon: Target, title: 'Concentric layout' },
     { id: 'grid', icon: SquaresFour, title: 'Grid layout' }
   ];

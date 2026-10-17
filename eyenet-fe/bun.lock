@@ -8,6 +8,7 @@
         "@lucide/svelte": "^1.47.0",
         "bits-ui": "^2.19.2",
         "cytoscape": "^3.34.3",
+        "cytoscape-dagre": "^4.0.1",
         "cytoscape-edgehandles": "^4.0.1",
         "cytoscape-fcose": "^2.2.0",
         "dompurify": "^3.4.16",
@@ -193,6 +194,8 @@
     "cose-base": ["cose-base@2.2.0", "", { "dependencies": { "layout-base": "^2.0.0" } }, "sha512-AzlgcsCbUMymkADOJtQm3wO9S3ltPfYOFD5033keQn9NJzIbtnZj+UdBJe7DYml/8TdbtHJW3j58SOnKhWY/5g=="],
 
     "cytoscape": ["cytoscape@3.34.3", "", {}, "sha512-yfYGhRcGAntq6YBD583j4n0Eg3jIxvWmZtz/5uz9UYkeIStSlMxuUja+ec5j3iBD8nv1rwaOAYMW09tBdkSeaQ=="],
+
+    "cytoscape-dagre": ["cytoscape-dagre@4.0.1", "", { "peerDependencies": { "cytoscape": "^3.2.22" } }, "sha512-hyNdh8Vp1nwzBcjHnM4c71G81bFhPmQYLXD2HM9AZIvl+8TrMzWEOPW45hF/XOBQiEguPcDQzi6VrXR1XBcXOA=="],
 
     "cytoscape-edgehandles": ["cytoscape-edgehandles@4.0.1", "", { "dependencies": { "lodash.memoize": "^4.1.2", "lodash.throttle": "^4.1.1" }, "peerDependencies": { "cytoscape": "^3.2.0" } }, "sha512-uSYshkqRZ4luCxK295bEVTg46q4ZW+fwJhcIzMrtfNR7zeAnJ38Z48kUGeu5ibtXkgLbcZAg0YE4ED2dRuaePg=="],
 
