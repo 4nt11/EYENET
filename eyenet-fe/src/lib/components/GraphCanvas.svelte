@@ -164,11 +164,15 @@
 
   function layoutOpts() {
     if (layoutName === 'breadthfirst')
-      return { name: 'breadthfirst', animate: false, directed: false, spacingFactor: 1.1, padding: 32, nodeDimensionsIncludeLabels: true };
+      // directed: follow the arrows for depth; maximal: sink each node to its DEEPEST
+      // level so an artifact linked to both an actor and a message lands under the
+      // message (a real hierarchy), not beside it; grid: wrap a fat level into a block
+      // instead of one mile-wide row; spacingFactor<1: compress the whole thing.
+      return { name: 'breadthfirst', animate: false, directed: true, grid: true, maximal: true, spacingFactor: 0.6, padding: 32, nodeDimensionsIncludeLabels: true };
     if (layoutName === 'concentric')
-      return { name: 'concentric', animate: false, padding: 32, minNodeSpacing: 40, nodeDimensionsIncludeLabels: true };
+      return { name: 'concentric', animate: false, padding: 32, minNodeSpacing: 24, nodeDimensionsIncludeLabels: true };
     if (layoutName === 'grid')
-      return { name: 'grid', animate: false, padding: 32, avoidOverlap: true, nodeDimensionsIncludeLabels: true };
+      return { name: 'grid', animate: false, padding: 32, avoidOverlap: true, spacingFactor: 0.7, nodeDimensionsIncludeLabels: true };
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
@@ -183,11 +187,11 @@
       randomize: true,
       nodeDimensionsIncludeLabels: true,
       packComponents: true,
-      nodeSeparation: hasEdges ? 90 : 150,
-      idealEdgeLength: 120,
-      nodeRepulsion: 9000,
-      gravity: 0.25,
-      gravityRange: 3.0,
+      nodeSeparation: hasEdges ? 60 : 100,
+      idealEdgeLength: 75,
+      nodeRepulsion: 5000,
+      gravity: 0.5,
+      gravityRange: 2.6,
       tilingPaddingVertical: 24,
       tilingPaddingHorizontal: 24,
       padding: 32
