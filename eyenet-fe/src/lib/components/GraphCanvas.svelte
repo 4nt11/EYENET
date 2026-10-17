@@ -190,7 +190,7 @@
         padding: 32,
         concentric: (node) => RANK[node.data('etype')] ?? 1,
         levelWidth: () => 1,
-        minNodeSpacing: 14,
+        minNodeSpacing: 50,
         nodeDimensionsIncludeLabels: false
       };
     }
