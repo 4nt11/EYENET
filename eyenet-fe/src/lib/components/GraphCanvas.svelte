@@ -195,7 +195,9 @@
       };
     }
     if (layoutName === 'grid')
-      return { name: 'grid', animate: false, padding: 32, avoidOverlap: true, spacingFactor: 0.7, nodeDimensionsIncludeLabels: true };
+      // nodeDimensionsIncludeLabels:false -> cells sized to the 22px circle, not the
+      // 100px label box, so columns pack tight (labels hang below, ellipsis clips).
+      return { name: 'grid', animate: false, padding: 32, avoidOverlap: true, avoidOverlapPadding: 30, spacingFactor: 0.75, nodeDimensionsIncludeLabels: false };
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
