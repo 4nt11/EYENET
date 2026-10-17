@@ -68,9 +68,10 @@
   --etype-crew:#ff6f9d;        /* pink */
   --etype-case:#ffb43d;        /* amber */
   --etype-group:#2fd1c4;       /* teal */
-  --etype-monitored_group:#2fd1c4;  /* teal · a group we're in and scraping */
-  --etype-candidate_group:#6f9c98;  /* muted teal · known but not joined */
-  --etype-forum_category:#d99a3d;   /* amber · a forum board/section */
+  --etype-monitored_group:#2fd1c4;   /* teal · a TG group/channel we monitor */
+  --etype-monitored_category:#d99a3d;/* amber · a forum board/section */
+  --etype-post:#ff4d6d;              /* RED · PROVISIONAL: forum posts need the backend
+                                        container_kind field; recolor once wired+verified */
   --etype-thread:#53d97a;      /* green */
   --etype-message:#45a6ff;     /* sky blue */
   --etype-mention:#ff8a3d;     /* orange */

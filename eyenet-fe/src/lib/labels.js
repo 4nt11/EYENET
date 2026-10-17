@@ -94,28 +94,30 @@ export const ENTITY_TYPE_LABELS = {
   incident: 'Incident',
   mention: 'Mention',
   source: 'Source',
-  // Graph display sub-types of the overloaded `group` entity (same backend entity_type,
-  // distinguished by GroupKind + lifecycle status). See groupDisplayType().
-  forum_category: 'Forum Category',
-  monitored_group: 'Monitored Group',
-  candidate_group: 'Candidate Group'
+  // Graph display taxonomy (same frozen backend model; the real entityType is kept for
+  // enrichment calls, these are DISPLAY-only). See computeDisplayType().
+  monitored_group: 'Monitored Group', // TG group/channel/chat we monitor
+  monitored_category: 'Monitored Category', // a forum board/section
+  post: 'Post' // a forum post (a MessageTable row inside a forum thread)
 };
 export const entityTypeLabel = (t) => label(ENTITY_TYPE_LABELS, t);
 
-// The `group` entity is overloaded (TG chats/channels AND forum categories AND threads,
-// at candidate/joined/monitored/known lifecycle). For the graph we show a derived display
-// sub-type - the real entityType stays "group" for enrichment calls (type=group).
-export function groupDisplayType(fields = {}, status = null) {
-  if (fields?.kind === 'forum_category') return 'forum_category';
-  if (status === 'candidate') return 'candidate_group';
-  if (status === 'monitored' || status === 'joined') return 'monitored_group';
-  return 'group';
+// Graph display type: the overloaded `group`/`message` entities map to the clean taxonomy
+// ANTI set - monitored group (TG) vs monitored category (forum); message (TG) vs post
+// (forum). The real entityType is untouched (enrichment calls still use it).
+//
+// NOTE: message -> post needs `fields.container_kind` ('forum_thread') which message_doc
+// does NOT carry yet - a backend add + reindex. Until then every message shows as
+// 'message'; once wired, forum posts render RED (--etype-post) as a "verify me" marker.
+export function computeDisplayType(entityType, fields = {}, _status = null) {
+  if (entityType === 'group')
+    return fields?.kind === 'forum_category' ? 'monitored_category' : 'monitored_group';
+  if (entityType === 'message')
+    return fields?.container_kind === 'forum_thread' ? 'post' : 'message';
+  return entityType;
 }
-
-// Display type for ANY node: group nodes get the derived sub-type, everything else is its
-// own entityType. Used for color + label so the real entityType is untouched.
 export const nodeDisplayType = (n) =>
-  n?.entityType === 'group' ? groupDisplayType(n.fields, n.status) : n?.entityType;
+  n ? computeDisplayType(n.entityType, n.fields, n.status) : undefined;
 export const nodeTypeLabel = (n) => entityTypeLabel(nodeDisplayType(n));
 
 // --- Entity type -> nav section it opens in ---

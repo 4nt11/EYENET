@@ -4,7 +4,7 @@
 // neighbours via GET /v1/graph/expand and merges them in. Svelte 5 runes module;
 // node/edge shapes match what GraphCanvas.svelte consumes (see searchGraph.svelte.js).
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
-import { groupDisplayType } from './labels.js';
+import { computeDisplayType } from './labels.js';
 
 export const explorer = $state({
   nodes: [], // GraphCanvas node shape: { id, title, entityType, status, sourceId, fields }
@@ -36,7 +36,7 @@ function mapNode(n) {
     status,
     sourceId: n.source_id ?? null,
     fields,
-    displayType: entityType === 'group' ? groupDisplayType(fields, status) : entityType
+    displayType: computeDisplayType(entityType, fields, status)
   };
 }
 
@@ -174,6 +174,7 @@ export async function expandNode(node, enrichment) {
 // free-text is allowed too). Locked set from GRAPH_EXPLORER.md §8.
 export const EDGE_KINDS = [
   'is', // actor IS this persona/crew -> real membership (confirmed in the UI)
+  'participates_in', // e.g. actor -> channel (plain edge, NOT membership)
   'same_as',
   'associate_of',
   'controls',
@@ -337,8 +338,10 @@ export async function createOperatorEntity(type, payload) {
       : type === 'crew' ? payload.name
       : type === 'persona' ? payload.label
       : payload.value;
+    // Carry the kind (artifact kind OR GroupKind) into fields so the display taxonomy
+    // (monitored group vs category) renders an operator-created group correctly.
     const fields =
-      type === 'artifact'
+      type === 'artifact' || type === 'group'
         ? { kind: payload.kind, provenance: 'operator_asserted' }
         : { provenance: 'operator_asserted' };
     const et = res.entity_type ?? type;
@@ -349,7 +352,7 @@ export async function createOperatorEntity(type, payload) {
       status: null,
       sourceId: null,
       fields,
-      displayType: et === 'group' ? groupDisplayType(fields, null) : et
+      displayType: computeDisplayType(et, fields, null)
     });
     return res;
   } catch (e) {
@@ -514,7 +517,7 @@ export async function loadGraph(id) {
     }
     explorer.nodes = nodes.map((n) => ({
       ...n,
-      displayType: n.entityType === 'group' ? groupDisplayType(n.fields, n.status) : n.entityType
+      displayType: computeDisplayType(n.entityType, n.fields, n.status)
     }));
     explorer.edges = (g.edges ?? []).map((e) => ({
       srcId: e.src_id,

@@ -126,7 +126,7 @@
     quickAdd = null;
     const payload =
       s.kind === 'actor' ? { handle: q.trim() || null, display_name: null }
-      : s.kind === 'group' ? { title: q.trim(), kind: 'chat' }
+      : s.kind === 'group' ? { title: q.trim(), kind: s.groupKind ?? 'chat' }
       : s.kind === 'crew' ? { name: q.trim(), members: [] }
       : s.kind === 'persona' ? { label: q.trim() }
       : { kind: s.artifactKind, value: q.trim() };

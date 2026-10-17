@@ -6,6 +6,8 @@
   import UsersThree from 'phosphor-svelte/lib/UsersThree';
   import ShareNetwork from 'phosphor-svelte/lib/ShareNetwork';
   import Hash from 'phosphor-svelte/lib/Hash';
+  import Megaphone from 'phosphor-svelte/lib/Megaphone';
+  import FolderOpen from 'phosphor-svelte/lib/FolderOpen';
   import ChatCircle from 'phosphor-svelte/lib/ChatCircle';
   import ChatsCircle from 'phosphor-svelte/lib/ChatsCircle';
   import CircleDashed from 'phosphor-svelte/lib/CircleDashed';
@@ -47,9 +49,12 @@
     {
       title: 'Content',
       items: [
-        { label: 'Group', desc: 'A forum board or channel', icon: Hash, color: 'var(--etype-group)', scope: { id: 'group', types: 'group' }, create: { kind: 'group' } },
-        { label: 'Thread', desc: 'A forum thread / conversation', icon: ChatsCircle, color: 'var(--etype-thread)', scope: { id: 'thread', types: 'thread' } },
-        { label: 'Message', desc: 'A single post or message', icon: ChatCircle, color: 'var(--etype-message)', scope: { id: 'message', types: 'message' } }
+        { label: 'Monitored Group', desc: 'A TG group/channel/chat we monitor', icon: Hash, color: 'var(--etype-monitored_group)', scope: { id: 'group', types: 'group' }, create: { kind: 'group', groupKind: 'chat' } },
+        { label: 'Channel', desc: 'A broadcast channel — assert it, then link actors (participates_in)', icon: Megaphone, color: 'var(--etype-monitored_group)', scope: { id: 'channel', types: 'group' }, create: { kind: 'group', groupKind: 'channel' } },
+        { label: 'Monitored Category', desc: 'A forum board / section', icon: FolderOpen, color: 'var(--etype-monitored_category)', scope: { id: 'category', types: 'group' }, create: { kind: 'group', groupKind: 'forum_category' } },
+        { label: 'Thread', desc: 'A forum thread (holds posts)', icon: ChatsCircle, color: 'var(--etype-thread)', scope: { id: 'thread', types: 'thread' } },
+        { label: 'Message', desc: 'A message from a monitored group/channel', icon: ChatCircle, color: 'var(--etype-message)', scope: { id: 'message', types: 'message' } },
+        { label: 'Post', desc: 'A forum post (from a thread) — RED: backend wiring pending', icon: ChatCircle, color: 'var(--etype-post)', scope: { id: 'post', types: 'message' } }
       ]
     },
     {
