@@ -4,6 +4,15 @@
   import { page } from '$app/stores';
   import GraphCanvas from '$lib/components/GraphCanvas.svelte';
   import GraphPalette from '$lib/components/GraphPalette.svelte';
+  import Graph from 'phosphor-svelte/lib/Graph';
+  import TreeStructure from 'phosphor-svelte/lib/TreeStructure';
+  import Target from 'phosphor-svelte/lib/Target';
+  import SquaresFour from 'phosphor-svelte/lib/SquaresFour';
+  import CornersOut from 'phosphor-svelte/lib/CornersOut';
+  import MagnifyingGlassPlus from 'phosphor-svelte/lib/MagnifyingGlassPlus';
+  import MagnifyingGlassMinus from 'phosphor-svelte/lib/MagnifyingGlassMinus';
+  import Snowflake from 'phosphor-svelte/lib/Snowflake';
+  import Sparkle from 'phosphor-svelte/lib/Sparkle';
   import { ui } from '$lib/ui.svelte.js';
   import {
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
@@ -18,8 +27,17 @@
   // ── View toolbar state.
   let frozen = $state(false);
   let animOn = $state(true);
+  let activeLayout = $state('fcose');
+  const LAYOUTS = [
+    { id: 'fcose', icon: Graph, title: 'Force layout' },
+    { id: 'breadthfirst', icon: TreeStructure, title: 'Tree layout' },
+    { id: 'concentric', icon: Target, title: 'Concentric layout' },
+    { id: 'grid', icon: SquaresFour, title: 'Grid layout' }
+  ];
   function fitView() { canvasApi?.fit?.(); }
-  function relayout() { canvasApi?.relayout?.(); }
+  function setLayout(id) { activeLayout = id; canvasApi?.setLayout?.(id); }
+  function zoomIn() { canvasApi?.zoom?.(1.2); }
+  function zoomOut() { canvasApi?.zoom?.(1 / 1.2); }
   function toggleFreeze() { frozen = !frozen; canvasApi?.setFrozen?.(frozen); }
   function toggleAnim() { animOn = !animOn; canvasApi?.setAnimations?.(animOn); }
 
@@ -257,10 +275,17 @@
 
     <!-- view toolbar -->
     <div class="viewbar">
-      <button class="vb" onclick={fitView} title="Fit to view">Fit</button>
-      <button class="vb" onclick={relayout} title="Re-run layout">Layout</button>
-      <button class="vb" class:on={frozen} onclick={toggleFreeze} title="Freeze node positions">{frozen ? 'Frozen' : 'Freeze'}</button>
-      <button class="vb" class:on={!animOn} onclick={toggleAnim} title="Toggle spring animation">{animOn ? 'Anim: on' : 'Anim: off'}</button>
+      <div class="vb-sec">Lay</div>
+      {#each LAYOUTS as l}
+        {@const Icon = l.icon}
+        <button class="vb" class:on={activeLayout === l.id} onclick={() => setLayout(l.id)} title={l.title}><Icon size={18} weight="bold" /></button>
+      {/each}
+      <div class="vb-sec">View</div>
+      <button class="vb" onclick={fitView} title="Fit to view"><CornersOut size={18} weight="bold" /></button>
+      <button class="vb" onclick={zoomIn} title="Zoom in"><MagnifyingGlassPlus size={18} weight="bold" /></button>
+      <button class="vb" onclick={zoomOut} title="Zoom out"><MagnifyingGlassMinus size={18} weight="bold" /></button>
+      <button class="vb" class:on={frozen} onclick={toggleFreeze} title={frozen ? 'Frozen (click to unlock)' : 'Freeze node positions'}><Snowflake size={18} weight={frozen ? 'fill' : 'bold'} /></button>
+      <button class="vb" class:on={animOn} onclick={toggleAnim} title={animOn ? 'Spring animation on' : 'Spring animation off'}><Sparkle size={18} weight={animOn ? 'fill' : 'bold'} /></button>
     </div>
 
     {#if explorer.busy}<div class="busy">Enriching…</div>{/if}
@@ -400,8 +425,10 @@
   .qa-new { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); border-top: 1px solid var(--border); }
 
   .stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
-  .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); }
-  .vb { padding: 4px 9px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm, 3px); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
+  .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); }
+  .vb-sec { align-self: stretch; padding: 2px 2px 0; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .vb-sec:first-child { padding-top: 0; }
+  .vb { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; background: none; border: 1px solid transparent; border-radius: var(--radius-sm, 3px); color: var(--text-body); cursor: pointer; }
   .vb:hover { border-color: var(--border-strong); color: var(--accent-text); }
   .vb.on { background: var(--accent-fill, var(--panel-2)); border-color: var(--accent); color: var(--accent-text); }
   .hint { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: 560px; padding: 10px 14px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }

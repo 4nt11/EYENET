@@ -158,14 +158,17 @@
     { selector: '.eh-source, .eh-target', style: { 'border-width': 3, 'border-color': getComputedStyle(document.documentElement).getPropertyValue('--edge-asserted').trim() || '#a259c4' } }
   ];
 
-  function runLayout() {
-    if (!cy) return;
-    // A loaded saved graph supplies positions for every node -> honor them (preset)
-    // instead of re-tiling, so the operator's arrangement is restored.
-    if (nodes.length && nodes.every((n) => n.x != null && n.y != null)) {
-      cy.layout({ name: 'preset', fit: true, padding: 32 }).run();
-      return;
-    }
+  // Operator-chosen layout (view toolbar LAY section). fcose is the default force tiling;
+  // the rest are cytoscape built-ins.
+  let layoutName = 'fcose';
+
+  function layoutOpts() {
+    if (layoutName === 'breadthfirst')
+      return { name: 'breadthfirst', animate: false, directed: false, spacingFactor: 1.1, padding: 32, nodeDimensionsIncludeLabels: true };
+    if (layoutName === 'concentric')
+      return { name: 'concentric', animate: false, padding: 32, minNodeSpacing: 40, nodeDimensionsIncludeLabels: true };
+    if (layoutName === 'grid')
+      return { name: 'grid', animate: false, padding: 32, avoidOverlap: true, nodeDimensionsIncludeLabels: true };
     // With few/no edges every node is its own component; fcose tiles them. Sizing
     // tiles to their LABEL box (nodeDimensionsIncludeLabels) is what stops the
     // label pile-up, and wider separation keeps the tiling from looking cramped.
@@ -173,7 +176,7 @@
     // 'proof' fcose is O(expensive) and locks the thread on a big graph; drop to the
     // fast heuristic layout past the heavy threshold.
     const heavy = cy.nodes().length > HEAVY_NODE_COUNT;
-    cy.layout({
+    return {
       name: 'fcose',
       animate: false,
       quality: heavy ? 'default' : 'proof',
@@ -188,7 +191,19 @@
       tilingPaddingVertical: 24,
       tilingPaddingHorizontal: 24,
       padding: 32
-    }).run();
+    };
+  }
+
+  function runLayout(force = false) {
+    if (!cy) return;
+    // A loaded saved graph supplies positions for every node -> honor them (preset)
+    // instead of re-tiling, so the operator's arrangement is restored. An explicit
+    // LAY click forces the chosen layout even over a restored arrangement.
+    if (!force && nodes.length && nodes.every((n) => n.x != null && n.y != null)) {
+      cy.layout({ name: 'preset', fit: true, padding: 32 }).run();
+      return;
+    }
+    cy.layout(layoutOpts()).run();
     cy.fit(undefined, 32);
   }
 
@@ -390,6 +405,11 @@
       positions: () => cy.nodes().map((n) => ({ id: n.id(), x: n.position().x, y: n.position().y })),
       fit: () => cy?.fit(undefined, 32),
       relayout: () => runLayout(),
+      setLayout: (name) => { layoutName = name; runLayout(true); },
+      zoom: (factor) => {
+        if (!cy) return;
+        cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+      },
       setFrozen: (on) => cy?.autolock(!!on),
       setAnimations: (on) => { animationsOn = !!on; if (!on) killSim(); }
     });

@@ -3,24 +3,35 @@
 // persisted per-browser. localStorage throws in some privacy modes, so every
 // access is guarded.
 const NAV_KEY = 'eyenet_nav_collapsed';
+const PAL_KEY = 'eyenet_palette_collapsed';
 
-function loadNavCollapsed() {
+function loadFlag(key) {
   try {
-    return localStorage.getItem(NAV_KEY) === '1';
+    return localStorage.getItem(key) === '1';
   } catch {
     return false;
   }
 }
 
+function saveFlag(key, on) {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    // best-effort persistence only; the in-memory toggle still works
+  }
+}
+
 export const ui = $state({
-  navCollapsed: loadNavCollapsed()
+  navCollapsed: loadFlag(NAV_KEY),
+  paletteCollapsed: loadFlag(PAL_KEY)
 });
 
 export function toggleNav() {
   ui.navCollapsed = !ui.navCollapsed;
-  try {
-    localStorage.setItem(NAV_KEY, ui.navCollapsed ? '1' : '0');
-  } catch {
-    // best-effort persistence only; the in-memory toggle still works
-  }
+  saveFlag(NAV_KEY, ui.navCollapsed);
+}
+
+export function togglePalette() {
+  ui.paletteCollapsed = !ui.paletteCollapsed;
+  saveFlag(PAL_KEY, ui.paletteCollapsed);
 }

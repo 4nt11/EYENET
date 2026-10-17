@@ -384,3 +384,39 @@ v1 scope (counts + backfill + comparator first, viz + calibration after).
 `eyenet mfw-prune` CLIs, a Verifier comparator (the three distances), and an
 analyst viz (per-actor MFW bar chart + inter-actor Delta heatmap). Calibrate
 thresholds per-locale on the M5 grid; inherit N + Delta config from `poc-luar`.
+
+## Promote graph to case (graph -> case "transliteration")
+
+**Deferred until the Graph Explorer FE is finished.** Raised 2026-10-17.
+
+**Vision:** one button on the graph map toolbar turns a saved investigation
+graph (actors, groups, artifacts, personas, edges, notes) into a real EYENET
+case. A crime board you cannot testify from is useless.
+
+**Shape:** PROMOTION, not a live mirror. One-shot snapshot graph -> new case,
+with a back-reference (`case.source_graph_id`) so the graph re-opens, but NO
+bidirectional sync (conflict resolution is a tar pit). Mapping:
+- node -> case entity association (LINK the existing row, never copy it)
+- edge (kind + reason) -> documented case linkage
+- inspector notes -> case annotations
+- the saved graph -> attached as the visual exhibit
+- the promote action -> an audit-chain entry (seeded from graph X by Y at T)
+
+Modal asks the operator for: title, primary subject (dropdown of canvas
+actors/personas), summary/hypothesis (freetext), which nodes to include
+(default all), tier confirmation. Submit -> create case, associate entities,
+document edges, copy notes, attach exhibit, write audit, "Open case." Re-promote
+= new case by default; warn via the back-reference to avoid dupes.
+
+**Three integrity rules (non-negotiable):**
+1. A graph has NO narrative. Do the mechanical 80%, then STOP and ask the
+   operator for title/subject/summary. Never auto-generate a case narrative
+   from topology (manufacturing a conclusion the operator did not write).
+2. Preserve provenance. OPERATOR-created nodes are hypotheses, not observed
+   evidence; they must stay flagged as operator-asserted in the case.
+3. No clearance laundering. Refuse nodes above the operator's clearance, or
+   stamp the case at the highest tier present. Never silently downgrade tier.
+
+**Before building:** read the case<->entity association model and the linkage
+model (`create_case`, `transition_linkage`) first. Reuse the existing case
+entity-association surface; do NOT invent a parallel "case subject" table.

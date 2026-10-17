@@ -18,7 +18,10 @@
   import CurrencyBtc from 'phosphor-svelte/lib/CurrencyBtc';
   import CurrencyCircleDollar from 'phosphor-svelte/lib/CurrencyCircleDollar';
   import Coins from 'phosphor-svelte/lib/Coins';
+  import CaretLeft from 'phosphor-svelte/lib/CaretLeft';
+  import CaretRight from 'phosphor-svelte/lib/CaretRight';
   import { explorer, seedSearch, addSeed, setSeedScope } from '$lib/explorer.svelte.js';
+  import { ui, togglePalette } from '$lib/ui.svelte.js';
   import { kindLabel, entityTypeLabel } from '$lib/labels.js';
 
   // Human label for a search hit: the artifact KIND (Onion/URL/...) is more useful
@@ -83,8 +86,20 @@
   const isActive = (it) => explorer.seedScope?.id === it.scope.id;
 </script>
 
+{#if ui.paletteCollapsed}
+  <aside class="palette collapsed">
+    <button class="p-toggle" onclick={togglePalette} title="Expand palette" aria-label="Expand palette">
+      <CaretRight size={16} weight="bold" />
+    </button>
+  </aside>
+{:else}
 <aside class="palette">
-  <div class="p-head">Entity Palette</div>
+  <div class="p-head">
+    <span>Entity Palette</span>
+    <button class="p-toggle" onclick={togglePalette} title="Collapse palette" aria-label="Collapse palette">
+      <CaretLeft size={16} weight="bold" />
+    </button>
+  </div>
 
   <input class="p-search" type="search" bind:value={q} placeholder="Seed from corpus…" spellcheck="false" />
 
@@ -126,9 +141,14 @@
     {/each}
   </div>
 </aside>
+{/if}
 
 <style>
   .palette { width: 240px; flex: 0 0 240px; height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--panel-2, var(--surface)); border-right: 1px solid var(--border-strong); }
+  .palette.collapsed { width: 32px; flex: 0 0 32px; align-items: center; padding-top: 8px; }
+  .p-head { display: flex; align-items: center; justify-content: space-between; }
+  .p-toggle { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; background: none; border: 1px solid transparent; border-radius: var(--radius-sm, 3px); color: var(--text-faint); cursor: pointer; }
+  .p-toggle:hover { border-color: var(--border-strong); color: var(--accent-text); }
   .p-head { flex: 0 0 auto; padding: 12px 14px 8px; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .p-search { margin: 0 12px 8px; height: 30px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); }
   .p-search:focus { outline: none; border-color: var(--accent); }
