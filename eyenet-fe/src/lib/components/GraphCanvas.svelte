@@ -179,8 +179,21 @@
       // 100px label box, so the tree is compact (labels hang below and may clip, which
       // the ellipsis already handles). rankSep keeps the tiers readable.
       return { name: 'dagre', animate: false, rankDir: 'TB', rankSep: 48, nodeSep: 30, edgeSep: 8, padding: 32, nodeDimensionsIncludeLabels: false };
-    if (layoutName === 'concentric')
-      return { name: 'concentric', animate: false, padding: 32, minNodeSpacing: 24, nodeDimensionsIncludeLabels: true };
+    if (layoutName === 'concentric') {
+      // Orbital hierarchy: rank by entity type (default ranks by DEGREE, which dumps
+      // every leaf onto one giant ring). Higher rank = closer to center, one ring per
+      // rank -> persona/actor core, message/group mid-ring, artifact outer ring.
+      const RANK = { persona: 5, actor: 4, crew: 4, group: 3, thread: 3, message: 2, document: 2, artifact: 1 };
+      return {
+        name: 'concentric',
+        animate: false,
+        padding: 32,
+        concentric: (node) => RANK[node.data('etype')] ?? 1,
+        levelWidth: () => 1,
+        minNodeSpacing: 14,
+        nodeDimensionsIncludeLabels: false
+      };
+    }
     if (layoutName === 'grid')
       return { name: 'grid', animate: false, padding: 32, avoidOverlap: true, spacingFactor: 0.7, nodeDimensionsIncludeLabels: true };
     // With few/no edges every node is its own component; fcose tiles them. Sizing
