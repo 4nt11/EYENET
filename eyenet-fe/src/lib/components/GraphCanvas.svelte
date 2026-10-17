@@ -40,7 +40,7 @@
   let eh = null;
 
   // Resolve the entity-type palette from CSS tokens once (dark-theme values).
-  const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact', 'source'];
+  const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact', 'source', 'monitored_group', 'candidate_group', 'forum_category'];
   function buildColorMap() {
     const cs = getComputedStyle(document.documentElement);
     const map = {};
@@ -67,8 +67,10 @@
       data: {
         id: n.id,
         label: cleanLabel(n.title || n.id),
-        etype: n.entityType,
-        color: colorMap[n.entityType] ?? colorMap._default,
+        // displayType colors group sub-types (monitored/candidate/forum_category) distinctly;
+        // the real entityType stays on raw for enrichment calls.
+        etype: n.displayType ?? n.entityType,
+        color: colorMap[n.displayType ?? n.entityType] ?? colorMap._default,
         raw: n
       }
     };

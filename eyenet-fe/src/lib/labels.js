@@ -93,9 +93,30 @@ export const ENTITY_TYPE_LABELS = {
   case: 'Case',
   incident: 'Incident',
   mention: 'Mention',
-  source: 'Source'
+  source: 'Source',
+  // Graph display sub-types of the overloaded `group` entity (same backend entity_type,
+  // distinguished by GroupKind + lifecycle status). See groupDisplayType().
+  forum_category: 'Forum Category',
+  monitored_group: 'Monitored Group',
+  candidate_group: 'Candidate Group'
 };
 export const entityTypeLabel = (t) => label(ENTITY_TYPE_LABELS, t);
+
+// The `group` entity is overloaded (TG chats/channels AND forum categories AND threads,
+// at candidate/joined/monitored/known lifecycle). For the graph we show a derived display
+// sub-type - the real entityType stays "group" for enrichment calls (type=group).
+export function groupDisplayType(fields = {}, status = null) {
+  if (fields?.kind === 'forum_category') return 'forum_category';
+  if (status === 'candidate') return 'candidate_group';
+  if (status === 'monitored' || status === 'joined') return 'monitored_group';
+  return 'group';
+}
+
+// Display type for ANY node: group nodes get the derived sub-type, everything else is its
+// own entityType. Used for color + label so the real entityType is untouched.
+export const nodeDisplayType = (n) =>
+  n?.entityType === 'group' ? groupDisplayType(n.fields, n.status) : n?.entityType;
+export const nodeTypeLabel = (n) => entityTypeLabel(nodeDisplayType(n));
 
 // --- Entity type -> nav section it opens in ---
 export const ENTITY_ROUTE_LABELS = {

@@ -4,6 +4,7 @@
 // neighbours via GET /v1/graph/expand and merges them in. Svelte 5 runes module;
 // node/edge shapes match what GraphCanvas.svelte consumes (see searchGraph.svelte.js).
 import { apiGet, apiPost, apiPut, apiDelete } from './api.js';
+import { groupDisplayType } from './labels.js';
 
 export const explorer = $state({
   nodes: [], // GraphCanvas node shape: { id, title, entityType, status, sourceId, fields }
@@ -25,13 +26,17 @@ export const explorer = $state({
 // SearchGraphNode / SearchHit -> GraphCanvas node. Both carry entity_type /
 // entity_id / title / fields, so one mapper serves seed hits and expand neighbours.
 function mapNode(n) {
+  const entityType = n.entity_type;
+  const status = n.status ?? null;
+  const fields = n.fields ?? {};
   return {
     id: n.entity_id,
     title: n.title ?? n.entity_id,
-    entityType: n.entity_type,
-    status: n.status ?? null,
+    entityType,
+    status,
     sourceId: n.source_id ?? null,
-    fields: n.fields ?? {}
+    fields,
+    displayType: entityType === 'group' ? groupDisplayType(fields, status) : entityType
   };
 }
 
@@ -336,7 +341,16 @@ export async function createOperatorEntity(type, payload) {
       type === 'artifact'
         ? { kind: payload.kind, provenance: 'operator_asserted' }
         : { provenance: 'operator_asserted' };
-    addNode({ id, title: title || id, entityType: res.entity_type ?? type, status: null, sourceId: null, fields });
+    const et = res.entity_type ?? type;
+    addNode({
+      id,
+      title: title || id,
+      entityType: et,
+      status: null,
+      sourceId: null,
+      fields,
+      displayType: et === 'group' ? groupDisplayType(fields, null) : et
+    });
     return res;
   } catch (e) {
     explorer.error = e.message ?? String(e);
@@ -498,7 +512,10 @@ export async function loadGraph(id) {
         });
       } catch { /* leave id-labelled on hydrate failure */ }
     }
-    explorer.nodes = nodes;
+    explorer.nodes = nodes.map((n) => ({
+      ...n,
+      displayType: n.entityType === 'group' ? groupDisplayType(n.fields, n.status) : n.entityType
+    }));
     explorer.edges = (g.edges ?? []).map((e) => ({
       srcId: e.src_id,
       dstId: e.dst_id,

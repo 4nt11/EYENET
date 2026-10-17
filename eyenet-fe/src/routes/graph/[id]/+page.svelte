@@ -21,6 +21,7 @@
     saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion,
     deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft
   } from '$lib/explorer.svelte.js';
+  import { nodeTypeLabel, nodeDisplayType } from '$lib/labels.js';
 
   // Canvas api handle (positions + view controls).
   let canvasApi = null;
@@ -229,7 +230,10 @@
 
   // Double-click a node → run its type's default enrichment (the mockup's one-shot expand).
   const DEFAULT_ENRICH = {
-    actor: 'messages',
+    // Double-click an actor -> their CONTAINERS (groups/threads), not raw messages: the
+    // container is the right first hop (a thread holds the posts), and it avoids dumping
+    // an actor's entire message history onto the canvas at once.
+    actor: 'groups',
     artifact: 'messages',
     message: 'author',
     thread: 'messages',
@@ -407,7 +411,7 @@
     <!-- right-click enrichment menu -->
     {#if menu}
       <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px">
-        <div class="ctx-head">{menu.node.entityType} · enrich</div>
+        <div class="ctx-head">{nodeTypeLabel(menu.node)} · enrich</div>
         {#if menu.loading}
           <div class="ctx-empty">Counting…</div>
         {:else if menu.error}
@@ -443,8 +447,8 @@
     {#if selNode}
       <aside class="inspector">
         <div class="ins-head">
-          <span class="dot" style="background:var(--etype-{selNode.entityType}, var(--etype-default))"></span>
-          <span class="ins-type">{selNode.entityType}</span>
+          <span class="dot" style="background:var(--etype-{nodeDisplayType(selNode)}, var(--etype-default))"></span>
+          <span class="ins-type">{nodeTypeLabel(selNode)}</span>
           <button class="x" onclick={() => (selNode = null)} aria-label="close">×</button>
         </div>
         <div class="ins-title">{selNode.title || selNode.id}</div>
