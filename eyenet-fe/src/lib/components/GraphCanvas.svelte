@@ -373,7 +373,8 @@
       minZoom: 0.15,
       maxZoom: 3,
       wheelSensitivity: 1.5,
-      boxSelectionEnabled: false,
+      boxSelectionEnabled: true, // shift+drag on empty canvas = rubber-band select
+
       pixelRatio: heavyMode ? 1 : Math.max(2, (typeof window !== "undefined" && window.devicePixelRatio) || 1),
       textureOnViewport: heavyMode,
       hideEdgesOnViewport: heavyMode,
