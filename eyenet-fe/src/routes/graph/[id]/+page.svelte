@@ -275,12 +275,11 @@
 
     <!-- view toolbar -->
     <div class="viewbar">
-      <div class="vb-sec">Lay</div>
       {#each LAYOUTS as l}
         {@const Icon = l.icon}
         <button class="vb" class:on={activeLayout === l.id} onclick={() => setLayout(l.id)} title={l.title}><Icon size={18} weight="bold" /></button>
       {/each}
-      <div class="vb-sec">View</div>
+      <div class="vb-div"></div>
       <button class="vb" onclick={fitView} title="Fit to view"><CornersOut size={18} weight="bold" /></button>
       <button class="vb" onclick={zoomIn} title="Zoom in"><MagnifyingGlassPlus size={18} weight="bold" /></button>
       <button class="vb" onclick={zoomOut} title="Zoom out"><MagnifyingGlassMinus size={18} weight="bold" /></button>
@@ -426,8 +425,7 @@
 
   .stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
   .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; background: none; border: 0; }
-  .vb-sec { padding: 6px 0 2px; text-align: center; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
-  .vb-sec:first-child { padding-top: 0; }
+  .vb-div { width: 18px; height: 1px; margin: 4px 0; background: var(--border-strong); }
   .vb { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; background: none; border: 1px solid transparent; border-radius: 7px; color: var(--text-muted); cursor: pointer; transition: color .1s, background .1s, border-color .1s; }
   .vb:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .vb.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
