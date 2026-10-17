@@ -55,12 +55,18 @@
 
   const edgeKey = (e) => e.edgeId ?? `d:${e.srcId}:${e.dstId}:${e.kind}`;
 
+  // Canvas-rendered label: collapse the raw \n / runs of whitespace that message-body
+  // previews carry (cytoscape honors \n and would draw blank leading lines). Display
+  // only - the full title/content lives on raw. No HTML sanitizer: this paints to
+  // <canvas>, never innerHTML, so there is no markup to escape.
+  const cleanLabel = (s) => String(s).replace(/\s+/g, ' ').trim();
+
   function nodeEl(n) {
     const el = {
       group: 'nodes',
       data: {
         id: n.id,
-        label: n.title || n.id,
+        label: cleanLabel(n.title || n.id),
         etype: n.entityType,
         color: colorMap[n.entityType] ?? colorMap._default,
         raw: n
@@ -169,7 +175,10 @@
       // Proper layered hierarchy (cytoscape built-in breadthfirst flattens a star into
       // one row). dagre ranks by edge direction, so actor -> message -> artifact stacks
       // top-down, and it tolerates cycles. rankSep/nodeSep keep it compact.
-      return { name: 'dagre', animate: false, rankDir: 'TB', rankSep: 55, nodeSep: 22, edgeSep: 8, padding: 32, nodeDimensionsIncludeLabels: true };
+      // nodeDimensionsIncludeLabels:false -> pack siblings by the 22px circle, not the
+      // 100px label box, so the tree is compact (labels hang below and may clip, which
+      // the ellipsis already handles). rankSep keeps the tiers readable.
+      return { name: 'dagre', animate: false, rankDir: 'TB', rankSep: 48, nodeSep: 30, edgeSep: 8, padding: 32, nodeDimensionsIncludeLabels: false };
     if (layoutName === 'concentric')
       return { name: 'concentric', animate: false, padding: 32, minNodeSpacing: 24, nodeDimensionsIncludeLabels: true };
     if (layoutName === 'grid')
