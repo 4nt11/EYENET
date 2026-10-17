@@ -140,10 +140,19 @@
       if (menu && menu.node === node) menu = { ...menu, loading: false, error: e.message ?? String(e) };
     }
   }
+  // Enriching a hub (e.g. the t.me domain, shared by every Telegram link) can dump
+  // thousands of nodes and wedge the canvas. Warn past this count before expanding.
+  const BIG_ENRICH = 250;
+  function guardedExpand(node, name, count) {
+    if (count != null && count > BIG_ENRICH &&
+        !confirm(`"${name}" adds ${Number(count).toLocaleString('en-US')} nodes and may bog the canvas. Continue?`)) return;
+    expandNode(node, name);
+  }
   function runEnrichment(name) {
     const node = menu?.node;
+    const count = menu?.items?.find(([n]) => n === name)?.[1] ?? null;
     menu = null;
-    if (node) expandNode(node, name);
+    if (node) guardedExpand(node, name, count);
   }
   // Remove from the graph VIEW (cascading orphan-sweep; never touches the DB). Acts on the
   // multi-selection if the node is part of one, else just the node.
@@ -176,10 +185,14 @@
     document: 'artifacts',
     persona: 'actors'
   };
-  function onNodeDblClick(node) {
+  async function onNodeDblClick(node) {
     menu = null;
     const name = DEFAULT_ENRICH[node.entityType];
-    if (name) expandNode(node, name);
+    if (!name) return;
+    // No count in hand on a dblclick; fetch it so the same big-expand guard applies.
+    let count = null;
+    try { count = (await fetchCounts(node))[name] ?? null; } catch { /* guard best-effort */ }
+    guardedExpand(node, name, count);
   }
 
   const fieldRows = $derived(selNode ? Object.entries(selNode.fields ?? {}) : []);
