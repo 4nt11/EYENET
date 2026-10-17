@@ -148,6 +148,9 @@ class EntityType(StrEnum):
     DOCUMENT = "document"
     ATTACHMENT = "attachment"
     INCIDENT = "incident"
+    # Collector origin (Telegram, Pwnforums, ...). Not search-indexed; appears in the graph
+    # only as the single neighbour of an actor/message/group 'source' enrichment.
+    SOURCE = "source"
 
 
 class CaseRoleOnCase(StrEnum):

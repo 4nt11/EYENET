@@ -75,6 +75,7 @@
   --etype-document:#c07bff;    /* magenta-violet */
   --etype-attachment:#9aa7b4;  /* steel · intentionally quieter (secondary) */
   --etype-artifact:#ffd23f;    /* bright gold · infra artifacts stand out */
+  --etype-source:#e6ebf5;      /* platinum · the collector origin, brightest root node */
   --etype-default:#8a8fa0;     /* fallback */
 
   /* Graph edge tints */

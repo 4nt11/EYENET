@@ -98,6 +98,20 @@ async def test_artifact_bridges_to_message_and_actor(storage: BaseRepository) ->
     await storage.close()
 
 
+async def test_actor_source_is_single(storage: BaseRepository) -> None:
+    src, _gid, actor, _mid, _art = await _seed(storage)
+    nodes, edges, total, more = await storage.graph_expand(
+        src_type="actor", src_id=actor, enrichment="source", limit=10, offset=0, want_total=True
+    )
+    assert [n.entity_id for n in nodes] == [src]
+    assert nodes[0].entity_type == "source"
+    assert nodes[0].title == "f"  # the seed source display_name
+    assert edges[0]["kind"] == "from_source"
+    assert total == 1
+    assert more is False
+    await storage.close()
+
+
 async def test_message_author_is_single(storage: BaseRepository) -> None:
     _src, _gid, actor, mid, _art = await _seed(storage)
     nodes, edges, total, more = await storage.graph_expand(
@@ -113,7 +127,14 @@ async def test_message_author_is_single(storage: BaseRepository) -> None:
 async def test_counts_and_unknown_guard(storage: BaseRepository) -> None:
     _src, _gid, actor, _mid, _art = await _seed(storage)
     counts = await storage.graph_expand_counts(src_type="actor", src_id=actor)
-    assert counts == {"messages": 1, "artifacts": 1, "groups": 1, "linked": 0, "related": 0}
+    assert counts == {
+        "messages": 1,
+        "artifacts": 1,
+        "groups": 1,
+        "linked": 0,
+        "related": 0,
+        "source": 1,
+    }
     with pytest.raises(ValueError, match="unknown enrichment"):
         await storage.graph_expand(
             src_type="actor", src_id=actor, enrichment="nope", limit=1, offset=0, want_total=False

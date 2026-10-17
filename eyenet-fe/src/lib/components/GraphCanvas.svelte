@@ -40,7 +40,7 @@
   let eh = null;
 
   // Resolve the entity-type palette from CSS tokens once (dark-theme values).
-  const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact'];
+  const ETYPES = ['actor', 'persona', 'crew', 'case', 'group', 'thread', 'message', 'mention', 'incident', 'document', 'attachment', 'artifact', 'source'];
   function buildColorMap() {
     const cs = getComputedStyle(document.documentElement);
     const map = {};
