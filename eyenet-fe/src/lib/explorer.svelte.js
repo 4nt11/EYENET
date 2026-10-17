@@ -263,7 +263,9 @@ export async function deleteEdge(edge, srcNode, dstNode) {
       await _tryDelete(`/v1/personas/${pair.containerId}/members/${pair.actorId}`);
     else if (pair?.container === 'crew')
       await _tryDelete(`/v1/crews/${pair.containerId}/members/${pair.actorId}`);
-    if (edge?.edgeId) await _tryDelete(`/v1/graph/edges/${edge.edgeId}`);
+    // Retract requires a reason (soft-delete is audited, evidence retained).
+    if (edge?.edgeId)
+      await _tryDelete(`/v1/graph/edges/${edge.edgeId}?reason=${encodeURIComponent('removed in graph explorer')}`);
     removeEdge(edge);
   } catch (e) {
     explorer.error = e.message ?? String(e);
