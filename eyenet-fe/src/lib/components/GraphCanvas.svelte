@@ -411,13 +411,16 @@
     let lastTapId = null;
     let lastTapAt = 0;
     cy.on('tap', 'node', (evt) => {
-      // Shift+tap = toggle multi-select (shift+DRAG is edge-draw; a tap never draws an
-      // edge, so the two coexist). No inspector, no dbltap while multi-selecting.
-      if (evt.originalEvent?.shiftKey) {
+      const oe = evt.originalEvent;
+      // Ctrl/Cmd+tap = toggle one node in/out of the selection (shift is taken by
+      // edge-draw and box-select). No inspector, no dbltap while multi-selecting.
+      if (oe?.ctrlKey || oe?.metaKey) {
         const n = evt.target;
         if (n.selected()) n.unselect(); else n.select();
         return;
       }
+      // A shift gesture on a node is edge-draw; don't inspect on it.
+      if (oe?.shiftKey) return;
       // Plain tap clears any multi-selection and inspects the one node.
       cy.$('node:selected').unselect();
       const id = evt.target.id();
