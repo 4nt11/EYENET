@@ -16,7 +16,7 @@
   import { ui } from '$lib/ui.svelte.js';
   import {
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
-    EDGE_KINDS, assertEdge, loadNote, saveNote,
+    EDGE_KINDS, MEMBERSHIP_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
     saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion
   } from '$lib/explorer.svelte.js';
@@ -222,9 +222,23 @@
   function onConnectReady(src, dst) {
     edgePicker = { src, dst, custom: '', reason: 'linked in explorer' };
   }
-  async function doAssert(kind) {
-    const k = (kind ?? edgePicker.custom).trim();
+  // Does kind k between the picker's endpoints mean real actor->persona/crew membership?
+  function membershipContainer(k) {
+    if (!edgePicker || !MEMBERSHIP_KINDS.has(k)) return null;
+    const { src, dst } = edgePicker;
+    const t = { [src.entityType]: src, [dst.entityType]: dst };
+    if (t.actor && t.persona) return 'persona';
+    if (t.actor && t.crew) return 'crew';
+    return null;
+  }
+  async function doAssert(kind, confirmed = false) {
+    const k = (kind ?? edgePicker?.custom ?? '').trim();
     if (!k || !edgePicker) return;
+    // A membership-kind edge to a persona/crew is a real linkage: confirm before writing it.
+    if (!confirmed && membershipContainer(k)) {
+      edgePicker = { ...edgePicker, pendingKind: k };
+      return;
+    }
     const { src, dst, reason } = edgePicker;
     edgePicker = null;
     try { await assertEdge(src, dst, k, reason); } catch { /* surfaced via explorer.error */ }
@@ -416,17 +430,25 @@
       <div class="edge-pick-scrim" role="presentation" onclick={() => (edgePicker = null)}></div>
       <div class="edge-pick">
         <div class="ep-head">Link <b>{edgePicker.src.title || edgePicker.src.entityType}</b> → <b>{edgePicker.dst.title || edgePicker.dst.entityType}</b></div>
-        <div class="ep-kinds">
-          {#each EDGE_KINDS as k}
-            <button class="ep-kind" onclick={() => doAssert(k)}>{edgeLabel(k)}</button>
-          {/each}
-        </div>
-        <div class="ep-custom">
-          <input class="search" bind:value={edgePicker.custom} placeholder="custom kind…" spellcheck="false"
-            onkeydown={(e) => { if (e.key === 'Enter') doAssert(); }} />
-          <button class="btn" onclick={() => doAssert()} disabled={!edgePicker.custom.trim()}>Add</button>
-        </div>
-        <input class="search ep-reason" bind:value={edgePicker.reason} placeholder="reason" spellcheck="false" />
+        {#if edgePicker.pendingKind}
+          <p class="ep-warn">This will LINK the actor to the {membershipContainer(edgePicker.pendingKind)} (real membership), not just draw an edge.</p>
+          <div class="ep-custom">
+            <button class="btn" onclick={() => doAssert(edgePicker.pendingKind, true)}>Confirm link</button>
+            <button class="ep-kind" onclick={() => (edgePicker = { ...edgePicker, pendingKind: null })}>Cancel</button>
+          </div>
+        {:else}
+          <div class="ep-kinds">
+            {#each EDGE_KINDS as k}
+              <button class="ep-kind" onclick={() => doAssert(k)}>{edgeLabel(k)}</button>
+            {/each}
+          </div>
+          <div class="ep-custom">
+            <input class="search" bind:value={edgePicker.custom} placeholder="custom kind…" spellcheck="false"
+              onkeydown={(e) => { if (e.key === 'Enter') doAssert(); }} />
+            <button class="btn" onclick={() => doAssert()} disabled={!edgePicker.custom.trim()}>Add</button>
+          </div>
+          <input class="search ep-reason" bind:value={edgePicker.reason} placeholder="reason" spellcheck="false" />
+        {/if}
       </div>
     {/if}
 
@@ -537,6 +559,7 @@
   .edge-pick { position: absolute; z-index: 41; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 320px; padding: 14px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.55); }
   .ep-head { margin-bottom: 10px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }
   .ep-head b { color: var(--text-body); }
+  .ep-warn { margin: 0 0 10px; font-family: var(--font-sans); font-size: var(--fs-12); line-height: 1.4; color: var(--accent, #a855f7); }
   .ep-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .ep-kind { padding: 5px 9px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
   .ep-kind:hover { border-color: var(--accent); color: var(--accent-text); }

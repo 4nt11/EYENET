@@ -168,6 +168,7 @@ export async function expandNode(node, enrichment) {
 // Predefined operator edge kinds (asserted_edge.kind is open varchar, so custom
 // free-text is allowed too). Locked set from GRAPH_EXPLORER.md §8.
 export const EDGE_KINDS = [
+  'is', // actor IS this persona/crew -> real membership (confirmed in the UI)
   'same_as',
   'associate_of',
   'controls',
@@ -176,6 +177,12 @@ export const EDGE_KINDS = [
   'communicates_with',
   'related_to'
 ];
+
+// Edge kinds that mean actor-belongs-to-container membership (persona/crew). 'is' is the
+// operator's explicit pick; 'member'/'active_in' come from the enrichment-derived edges.
+// Only these turn an actor<->container edge into a real domain membership (create + delete);
+// any other kind is just a plain edge, so e.g. persona<->persona "friends irl" is safe.
+export const MEMBERSHIP_KINDS = new Set(['is', 'member', 'member_of', 'active_in']);
 
 // If these two nodes are an actor + a membership container (persona or crew), return
 // { container, containerId, actorId }; else null. Drives both member-edge CREATE
@@ -188,7 +195,6 @@ function memberContainerPair(a, b) {
   if (t.actor && t.crew) return { container: 'crew', containerId: t.crew.id, actorId: t.actor.id };
   return null;
 }
-const MEMBER_KINDS = new Set(['member_of', 'member', 'active_in']);
 
 // Shift-drag between two nodes -> persist an operator-asserted edge, reflect it
 // on the canvas (solid/asserted). `src`/`dst` are the mapped node rows.
@@ -196,10 +202,11 @@ export async function assertEdge(src, dst, kind, reason) {
   explorer.busy = true;
   explorer.error = null;
   try {
-    // A member edge from an actor to a persona/crew is real membership, not just a visual
-    // edge: persist it so the personas/crews pages reflect it.
+    // An actor<->persona/crew edge becomes real membership ONLY for a membership kind
+    // (the operator's explicit 'is', or a derived member edge). Other kinds stay plain
+    // edges, so other relationships - and persona<->persona links - aren't clobbered.
     const pair = memberContainerPair(src, dst);
-    if (pair && MEMBER_KINDS.has(kind)) {
+    if (pair && MEMBERSHIP_KINDS.has(kind)) {
       const base = pair.container === 'persona' ? '/v1/personas' : '/v1/crews';
       await apiPost(`${base}/${pair.containerId}/members`, { actor_id: pair.actorId }, { auth: true });
     }
@@ -237,8 +244,9 @@ export function removeEdge(edge) {
 // derived (view prune). Returns { label } for the menu.
 export function classifyEdgeDeletion(edge, srcNode, dstNode) {
   const pair = srcNode && dstNode ? memberContainerPair(srcNode, dstNode) : null;
-  if (pair?.container === 'persona') return { label: 'Unlink actor from persona' };
-  if (pair?.container === 'crew') return { label: 'Remove actor from crew' };
+  const isMembership = pair && MEMBERSHIP_KINDS.has(edge?.kind);
+  if (isMembership && pair.container === 'persona') return { label: 'Unlink actor from persona' };
+  if (isMembership && pair.container === 'crew') return { label: 'Remove actor from crew' };
   if (edge?.provenance === 'asserted' || edge?.edgeId) return { label: 'Retract asserted edge' };
   return { label: 'Remove edge' };
 }
@@ -259,9 +267,10 @@ export async function deleteEdge(edge, srcNode, dstNode) {
   explorer.error = null;
   try {
     const pair = srcNode && dstNode ? memberContainerPair(srcNode, dstNode) : null;
-    if (pair?.container === 'persona')
+    const isMembership = pair && MEMBERSHIP_KINDS.has(edge?.kind);
+    if (isMembership && pair.container === 'persona')
       await _tryDelete(`/v1/personas/${pair.containerId}/members/${pair.actorId}`);
-    else if (pair?.container === 'crew')
+    else if (isMembership && pair.container === 'crew')
       await _tryDelete(`/v1/crews/${pair.containerId}/members/${pair.actorId}`);
     // Retract requires a reason (soft-delete is audited, evidence retained).
     if (edge?.edgeId)
