@@ -177,12 +177,28 @@ export const EDGE_KINDS = [
   'related_to'
 ];
 
+// If these two nodes are a persona + actor (either direction), return { personaId,
+// actorId }; else null. Used to turn a member_of edge into real persona membership.
+function personaActorPair(a, b) {
+  const byType = {};
+  byType[a.entityType] = a;
+  byType[b.entityType] = b;
+  if (byType.persona && byType.actor) return { personaId: byType.persona.id, actorId: byType.actor.id };
+  return null;
+}
+
 // Shift-drag between two nodes -> persist an operator-asserted edge, reflect it
 // on the canvas (solid/asserted). `src`/`dst` are the mapped node rows.
 export async function assertEdge(src, dst, kind, reason) {
   explorer.busy = true;
   explorer.error = null;
   try {
+    // A member_of edge between an actor and a persona is real membership, not just a
+    // visual edge: persist it so the personas page reflects it.
+    const pair = personaActorPair(src, dst);
+    if (pair && (kind === 'member_of' || kind === 'member')) {
+      await apiPost(`/v1/personas/${pair.personaId}/members`, { actor_id: pair.actorId }, { auth: true });
+    }
     const res = await apiPost(
       '/v1/graph/edges',
       { src_type: src.entityType, src_id: src.id, dst_type: dst.entityType, dst_id: dst.id, kind, reason },
@@ -196,6 +212,29 @@ export async function assertEdge(src, dst, kind, reason) {
       weight: null,
       edgeId: res.edge_id ?? null
     });
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    throw e;
+  } finally {
+    explorer.busy = false;
+  }
+}
+
+// Drop a visual edge from the canvas store (by endpoints + kind).
+export function removeEdge(edge) {
+  explorer.edges = explorer.edges.filter(
+    (e) => !(e.srcId === edge.srcId && e.dstId === edge.dstId && e.kind === edge.kind)
+  );
+}
+
+// Unlink an actor from a persona (DELETE membership) and drop the member edge from the
+// canvas. Mirrors addActorToPersona on the create side.
+export async function unlinkFromPersona(personaId, actorId, edge) {
+  explorer.busy = true;
+  explorer.error = null;
+  try {
+    await apiDelete(`/v1/personas/${personaId}/members/${actorId}`, { auth: true });
+    if (edge) removeEdge(edge);
   } catch (e) {
     explorer.error = e.message ?? String(e);
     throw e;

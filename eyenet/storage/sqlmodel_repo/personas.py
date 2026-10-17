@@ -90,6 +90,29 @@ class PersonasMixin:
             persona = await session.get(PersonaTable, membership.persona_id)
             return _row_to_persona(persona) if persona is not None else None
 
+    async def add_actor_to_persona(self, persona_id: UUID, actor_id: UUID) -> PersonaRow:
+        """Attach one actor to an existing persona (operator 'add to persona' from the
+        graph canvas). Direct synchronous write (mirrors :meth:`create_persona`), so the
+        personas browse surface reflects it immediately. Idempotent if the actor is
+        already in this persona; raises ``PersonaIntegrityError`` if it already belongs to
+        a DIFFERENT persona (``actor_id`` is unique - one persona per actor)."""
+        now = datetime.now(tz=UTC)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            persona = await session.get(PersonaTable, persona_id)
+            if persona is None:
+                raise PersonaIntegrityError(f"persona {persona_id} not found")
+            existing = await _get_membership(session, actor_id)
+            if existing is not None:
+                if existing.persona_id == persona_id:
+                    return _row_to_persona(persona)  # already a member -> no-op
+                raise PersonaIntegrityError(
+                    f"actor {actor_id} already belongs to persona {existing.persona_id}"
+                )
+            _add_member(session, persona, actor_id, None, now)
+            await session.commit()
+            await session.refresh(persona)
+            return _row_to_persona(persona)
+
     async def merge_actors_into_persona(
         self,
         actor_a: UUID,

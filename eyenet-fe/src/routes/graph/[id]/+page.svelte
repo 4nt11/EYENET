@@ -18,7 +18,7 @@
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
     EDGE_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
-    saveGraph, loadGraph, searchEntities, removeNodes
+    saveGraph, loadGraph, searchEntities, removeNodes, unlinkFromPersona
   } from '$lib/explorer.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -175,6 +175,26 @@
     else if (selNode) { e.preventDefault(); removeNodes([selNode.id]); selNode = null; }
   }
 
+  // Right-click a member edge between a persona and an actor → offer to unlink the actor.
+  let edgeMenu = $state(null); // { x, y, personaId, actorId, edge } | null
+  function onEdgeContext(edge, pos) {
+    menu = null; selNode = null;
+    const byId = Object.fromEntries(explorer.nodes.map((n) => [n.id, n]));
+    const s = byId[edge.srcId];
+    const d = byId[edge.dstId];
+    const isMember = edge.kind === 'member_of' || edge.kind === 'member';
+    if (!s || !d || !isMember) { edgeMenu = null; return; }
+    const byType = { [s.entityType]: s, [d.entityType]: d };
+    if (!byType.persona || !byType.actor) { edgeMenu = null; return; }
+    edgeMenu = { x: pos.x, y: pos.y, personaId: byType.persona.id, actorId: byType.actor.id, edge };
+  }
+  function doUnlink() {
+    if (!edgeMenu) return;
+    const { personaId, actorId, edge } = edgeMenu;
+    edgeMenu = null;
+    unlinkFromPersona(personaId, actorId, edge);
+  }
+
   // Double-click a node → run its type's default enrichment (the mockup's one-shot expand).
   const DEFAULT_ENRICH = {
     actor: 'messages',
@@ -285,8 +305,9 @@
       onNodeClick={(n) => { selNode = n; menu = null; }}
       {onNodeDblClick}
       onNodeContext={onNodeContext}
+      onEdgeContext={onEdgeContext}
       onConnectReady={onConnectReady}
-      onCanvasTap={() => { menu = null; selNode = null; quickAdd = null; }}
+      onCanvasTap={() => { menu = null; edgeMenu = null; selNode = null; quickAdd = null; }}
       onReady={(api) => (canvasApi = api)}
     />
 
@@ -350,6 +371,14 @@
         <button class="ctx-row danger" onclick={() => removeFromGraph(menu.node)}>
           {menu.selCount ? `Remove ${menu.selCount} selected` : 'Remove from graph'}
         </button>
+      </div>
+    {/if}
+
+    <!-- right-click a persona↔actor member edge -->
+    {#if edgeMenu}
+      <div class="ctxmenu" style="left:{edgeMenu.x}px; top:{edgeMenu.y}px">
+        <div class="ctx-head">persona membership</div>
+        <button class="ctx-row danger" onclick={doUnlink}>Unlink actor from persona</button>
       </div>
     {/if}
 

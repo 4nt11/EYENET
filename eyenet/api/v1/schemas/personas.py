@@ -38,6 +38,13 @@ class PersonaSplitRequest(ApiSchema):
     case_refs: list[str] = Field(default_factory=list, max_length=64)
 
 
+class PersonaAddMemberRequest(ApiSchema):
+    """Body for `POST /v1/personas/{id}/members` — operator attaches one actor to an
+    existing persona directly from the graph canvas."""
+
+    actor_id: UUID
+
+
 class PersonaMergeActorsRequest(ApiSchema):
     """Body for `POST /v1/personas` — operator declares two actors the same person
     (from the search graph). Graph union-finds them into a persona."""

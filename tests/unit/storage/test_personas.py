@@ -197,3 +197,50 @@ async def test_create_standalone_persona(storage: BaseRepository) -> None:
     assert got is not None
     assert got.label == "Scattered Spider"
     assert await storage.persona_members(pid) == []
+
+
+# --- add_actor_to_persona (operator "add to persona" from the graph) ---
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_add_actor_to_standalone_persona(store: BaseRepository) -> None:
+    pid = await store.create_persona(label="op")
+    persona = await store.add_actor_to_persona(pid, _A)
+    assert isinstance(persona, PersonaRow)
+    assert persona.member_actor_ids == [_A]
+    pa = await store.persona_for_actor(_A)
+    assert pa is not None and pa.id == pid
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_add_actor_is_idempotent(store: BaseRepository) -> None:
+    pid = await store.create_persona(label="op")
+    await store.add_actor_to_persona(pid, _A)
+    persona = await store.add_actor_to_persona(pid, _A)  # again -> no dup
+    assert persona.member_actor_ids == [_A]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_add_actor_already_in_other_persona_raises(store: BaseRepository) -> None:
+    from eyenet.storage.sqlmodel_repo.personas import PersonaIntegrityError
+
+    p1 = await store.create_persona(label="one")
+    p2 = await store.create_persona(label="two")
+    await store.add_actor_to_persona(p1, _A)
+    with pytest.raises(PersonaIntegrityError):
+        await store.add_actor_to_persona(p2, _A)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unlink_actor_via_split(store: BaseRepository) -> None:
+    pid = await store.create_persona(label="op")
+    await store.add_actor_to_persona(pid, _A)
+    await store.add_actor_to_persona(pid, _B)
+    await store.split_actor_from_persona(_A)
+    assert await store.persona_for_actor(_A) is None
+    got = await store.get_persona(pid)
+    assert got is not None and set(got.member_actor_ids) == {_B}

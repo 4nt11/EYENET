@@ -1783,6 +1783,12 @@ class BaseRepository(ABC):
         """Paginated persona list, newest-first; PersonaTable rows type-erased.
         Pairs with :meth:`count_personas` for the browse surface."""
 
+    @abstractmethod
+    async def add_actor_to_persona(self, persona_id: UUID, actor_id: UUID) -> object:
+        """Attach one actor to an existing persona (operator 'add to persona' from the
+        graph). Idempotent if already a member; raises if the actor already belongs to a
+        DIFFERENT persona (actor_id is unique). Returns the persona row (type-erased)."""
+
     # =================================================================
     # FEEDBACK (M8 verifier)
     # =================================================================
