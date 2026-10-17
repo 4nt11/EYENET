@@ -102,6 +102,7 @@ async def backfill_search(
         a.id: (a.current_handle or a.current_display_name or str(a.id)[:8]) for a in actors
     }
     group_title: dict[UUID, str] = {g.id: (g.current_title or "") for g in groups}
+    group_kind: dict[UUID, str] = {g.id: g.kind.value for g in groups}
     aliases_by_actor: dict[UUID, list[str]] = defaultdict(list)
     for al in aliases:
         aliases_by_actor[al.actor_id].append(al.value)
@@ -154,7 +155,9 @@ async def backfill_search(
     )
     counts["crew"] = len(crews)
 
-    counts["message"] = await _backfill_messages(storage, group_title, actor_handle, batch, full)
+    counts["message"] = await _backfill_messages(
+        storage, group_title, group_kind, actor_handle, batch, full
+    )
     return counts
 
 
@@ -234,6 +237,7 @@ async def _backfill_threads(storage: BaseRepository, threads: Sequence[Any]) -> 
 async def _backfill_messages(
     storage: BaseRepository,
     group_title: dict[UUID, str],
+    group_kind: dict[UUID, str],
     actor_handle: dict[UUID, str],
     batch: int,
     full: bool,
@@ -269,6 +273,7 @@ async def _backfill_messages(
                 haystack.message_doc(
                     m,
                     group_title=group_title.get(m.group_id),
+                    container_kind=group_kind.get(m.group_id),
                     author_handle=actor_handle.get(m.actor_id),
                 )
                 for m in msgs

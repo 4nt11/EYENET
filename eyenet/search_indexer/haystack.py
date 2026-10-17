@@ -122,7 +122,11 @@ _BODY_MAX = 16000
 
 
 def message_doc(
-    m: MessageTable, *, group_title: str | None, author_handle: str | None
+    m: MessageTable,
+    *,
+    group_title: str | None,
+    author_handle: str | None,
+    container_kind: str | None = None,
 ) -> dict[str, Any]:
     body = m.body or ""
     return {
@@ -137,6 +141,9 @@ def message_doc(
         "fields": {
             "author": author_handle,
             "group": group_title,
+            # The GroupKind of the message's container, so the graph can split a forum POST
+            # (container_kind == 'forum_thread') from a TG MESSAGE. None if the group is gone.
+            "container_kind": container_kind,
             "sent_at": _iso(m.sent_at_source),
             "platform_msgid": m.platform_msgid,
             "body": body[:_BODY_MAX] + ("…" if len(body) > _BODY_MAX else ""),

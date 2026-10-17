@@ -210,6 +210,7 @@ class SearchIndexerService(ServiceBase):
             **haystack.message_doc(
                 message,
                 group_title=group.current_title if group else None,
+                container_kind=group.kind.value if group else None,
                 author_handle=(actor.current_handle or actor.current_display_name)
                 if actor
                 else None,
