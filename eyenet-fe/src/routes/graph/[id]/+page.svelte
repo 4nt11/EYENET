@@ -19,7 +19,7 @@
     EDGE_KINDS, MEMBERSHIP_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
     saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion,
-    deleteEntity
+    deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft
   } from '$lib/explorer.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -42,15 +42,40 @@
   function toggleFreeze() { frozen = !frozen; canvasApi?.setFrozen?.(frozen); }
   function toggleAnim() { animOn = !animOn; canvasApi?.setAnimations?.(animOn); }
 
-  // Load the graph named in the route (and reload if the route id changes).
+  // Load the graph named in the route (and reload if the route id changes), then offer to
+  // restore any unsaved local draft for it (survives a reload / 401 bounce to login).
+  let draftOffer = $state(null); // { count, at, draft } | null
   $effect(() => {
     const id = $page.params.id;
-    if (id) loadGraph(id);
+    if (id) loadGraph(id).then(() => maybeOfferDraft());
+  });
+  function maybeOfferDraft() {
+    const d = loadDraft();
+    if (!d?.nodes?.length) return;
+    // Same graph (or both unsaved) AND the draft holds work the server load is missing.
+    const sameGraph = (d.graphId ?? null) === (explorer.graphId ?? null);
+    if (sameGraph && d.nodes.length > explorer.nodes.length)
+      draftOffer = { count: d.nodes.length, at: d.savedAt, draft: d };
+  }
+  function doRestoreDraft() {
+    if (draftOffer) restoreDraft(draftOffer.draft);
+    draftOffer = null;
+  }
+
+  // Mirror the live graph to localStorage (debounced) whenever the node/edge set changes.
+  let draftTimer;
+  $effect(() => {
+    const sig = explorer.nodes.length + ':' + explorer.edges.length; // reactive trigger
+    void sig;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => saveDraft(canvasApi?.positions?.()), 800);
   });
 
   async function doSave() {
-    try { await saveGraph(explorer.graphName || 'untitled', canvasApi?.positions?.() ?? []); }
-    catch { /* explorer.error */ }
+    try {
+      await saveGraph(explorer.graphName || 'untitled', canvasApi?.positions?.() ?? []);
+      draftOffer = null;
+    } catch { /* explorer.error */ }
   }
 
   // Auto-hide the global nav rail while in the map (fullscreen workspace); restore on leave.
@@ -368,6 +393,14 @@
       <button class="vb" class:on={animOn} onclick={toggleAnim} title={animOn ? 'Spring animation on' : 'Spring animation off'}><Sparkle size={18} weight={animOn ? 'fill' : 'bold'} /></button>
     </div>
 
+    {#if draftOffer}
+      <div class="draft-bar">
+        <span>Unsaved changes found ({draftOffer.count} nodes). Restore?</span>
+        <button class="btn" onclick={doRestoreDraft}>Restore</button>
+        <button class="vb-dismiss" onclick={() => { draftOffer = null; clearDraft(); }}>Dismiss</button>
+      </div>
+    {/if}
+
     {#if explorer.busy}<div class="busy">Enriching…</div>{/if}
     {#if explorer.error}<div class="err">{explorer.error}</div>{/if}
 
@@ -530,6 +563,9 @@
   .stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
   .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; background: none; border: 0; }
   .vb-div { width: 18px; height: 1px; margin: 4px 0; background: var(--border-strong); }
+  .draft-bar { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel-2, var(--surface)); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.5); font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-body); }
+  .vb-dismiss { background: none; border: 0; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
+  .vb-dismiss:hover { color: var(--text-body); }
   .vb { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; background: none; border: 1px solid transparent; border-radius: 7px; color: var(--text-muted); cursor: pointer; transition: color .1s, background .1s, border-color .1s; }
   .vb:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .vb.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }

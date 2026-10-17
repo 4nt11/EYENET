@@ -379,6 +379,56 @@ export async function createGraph(name) {
   return g.id;
 }
 
+// ── Local draft: mirror the working graph to localStorage so unsaved work survives a
+// reload or a 401 bounce to login. Per-viewer convenience only; the server save is the
+// real one. Single slot (one graph at a time); every access is try/caught (localStorage
+// throws in private mode / when blocked).
+const DRAFT_KEY = 'eyenet_graph_draft';
+
+export function saveDraft(positions) {
+  try {
+    const posById = Object.fromEntries((positions ?? []).map((p) => [p.id, p]));
+    const draft = {
+      graphId: explorer.graphId ?? null,
+      name: explorer.graphName ?? '',
+      savedAt: Date.now(),
+      nodes: explorer.nodes.map((n) => ({
+        ...n,
+        x: posById[n.id]?.x ?? n.x ?? null,
+        y: posById[n.id]?.y ?? n.y ?? null
+      })),
+      edges: explorer.edges
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // best-effort; the in-memory graph still works
+  }
+}
+
+export function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // noop
+  }
+}
+
+export function restoreDraft(draft) {
+  explorer.graphId = draft.graphId ?? null;
+  explorer.graphName = draft.name ?? '';
+  explorer.nodes = draft.nodes ?? [];
+  explorer.edges = draft.edges ?? [];
+}
+
 export async function saveGraph(name, positions) {
   explorer.busy = true;
   explorer.error = null;
@@ -407,6 +457,7 @@ export async function saveGraph(name, positions) {
       edge_id: e.edgeId ?? null
     }));
     await apiPut(`/v1/graphs/${gid}/nodes`, { nodes, edges }, { auth: true });
+    clearDraft(); // server is now the source of truth
     return gid;
   } catch (e) {
     explorer.error = e.message ?? String(e);
@@ -506,4 +557,5 @@ export function clearGraph() {
   explorer.error = null;
   explorer.graphId = null;
   explorer.graphName = '';
+  clearDraft();
 }
