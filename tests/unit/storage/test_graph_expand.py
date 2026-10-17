@@ -112,6 +112,28 @@ async def test_actor_source_is_single(storage: BaseRepository) -> None:
     await storage.close()
 
 
+async def test_url_artifact_to_domain(storage: BaseRepository) -> None:
+    import hashlib
+
+    def _h(v: str) -> str:
+        return hashlib.sha256(v.encode("utf-8")).hexdigest()
+
+    ids = await storage.put_infrastructure_artifacts_bulk(
+        [("domain", "t.me", _NOW, _NOW), ("url", "https://t.me/zfoleaks", _NOW, _NOW)]
+    )
+    dom = ids[_h("t.me")]
+    url = ids[_h("https://t.me/zfoleaks")]
+    nodes, edges, total, more = await storage.graph_expand(
+        src_type="artifact", src_id=url, enrichment="domain", limit=10, offset=0, want_total=True
+    )
+    assert [n.entity_id for n in nodes] == [dom]
+    assert nodes[0].fields["value"] == "t.me"
+    assert edges[0]["kind"] == "on_domain"
+    assert total == 1
+    assert more is False
+    await storage.close()
+
+
 async def test_message_author_is_single(storage: BaseRepository) -> None:
     _src, _gid, actor, mid, _art = await _seed(storage)
     nodes, edges, total, more = await storage.graph_expand(
