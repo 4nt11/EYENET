@@ -559,7 +559,7 @@
   .edge-pick { position: absolute; z-index: 41; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 320px; padding: 14px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.55); }
   .ep-head { margin-bottom: 10px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }
   .ep-head b { color: var(--text-body); }
-  .ep-warn { margin: 0 0 10px; font-family: var(--font-sans); font-size: var(--fs-12); line-height: 1.4; color: var(--accent, #a855f7); }
+  .ep-warn { margin: 0 0 10px; font-family: var(--font-sans); font-size: var(--fs-12); line-height: 1.4; color: var(--text-body); }
   .ep-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .ep-kind { padding: 5px 9px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
   .ep-kind:hover { border-color: var(--accent); color: var(--accent-text); }

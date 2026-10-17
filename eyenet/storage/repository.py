@@ -1789,6 +1789,12 @@ class BaseRepository(ABC):
         graph). Idempotent if already a member; raises if the actor already belongs to a
         DIFFERENT persona (actor_id is unique). Returns the persona row (type-erased)."""
 
+    @abstractmethod
+    async def remove_actor_from_persona(self, persona_id: UUID, actor_id: UUID) -> object | None:
+        """Detach one actor from a persona WITHOUT deleting an emptied persona (operator
+        'unlink from persona' on the graph). Returns the persona row, or None if the actor
+        is not a member of this persona."""
+
     # =================================================================
     # FEEDBACK (M8 verifier)
     # =================================================================

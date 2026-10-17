@@ -236,11 +236,29 @@ async def test_add_actor_already_in_other_persona_raises(store: BaseRepository) 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_unlink_actor_via_split(store: BaseRepository) -> None:
+async def test_remove_actor_keeps_other_members(store: BaseRepository) -> None:
     pid = await store.create_persona(label="op")
     await store.add_actor_to_persona(pid, _A)
     await store.add_actor_to_persona(pid, _B)
-    await store.split_actor_from_persona(_A)
+    await store.remove_actor_from_persona(pid, _A)
     assert await store.persona_for_actor(_A) is None
     got = await store.get_persona(pid)
     assert got is not None and set(got.member_actor_ids) == {_B}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_remove_last_actor_keeps_the_persona(store: BaseRepository) -> None:
+    # Unlinking the last actor must NOT delete the persona (it is a deliberate entity).
+    pid = await store.create_persona(label="op")
+    await store.add_actor_to_persona(pid, _A)
+    await store.remove_actor_from_persona(pid, _A)
+    got = await store.get_persona(pid)
+    assert got is not None and got.member_actor_ids == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_remove_actor_not_a_member_returns_none(store: BaseRepository) -> None:
+    pid = await store.create_persona(label="op")
+    assert await store.remove_actor_from_persona(pid, _A) is None

@@ -113,6 +113,31 @@ class PersonasMixin:
             await session.refresh(persona)
             return _row_to_persona(persona)
 
+    async def remove_actor_from_persona(
+        self, persona_id: UUID, actor_id: UUID
+    ) -> PersonaRow | None:
+        """Detach one actor from a persona WITHOUT deleting the persona when it empties
+        (operator 'unlink from persona' on the graph canvas). A persona is a deliberate,
+        labelled entity - emptying it is not deleting it; deletion is a separate explicit
+        action. Contrast :meth:`split_actor_from_persona`, which DOES delete an emptied
+        persona (the merge/split union-find semantics). Returns the persona row, or None if
+        the actor is not a member of this persona."""
+        now = datetime.now(tz=UTC)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            membership = await _get_membership(session, actor_id)
+            if membership is None or membership.persona_id != persona_id:
+                return None
+            persona = await session.get(PersonaTable, persona_id)
+            if persona is None:
+                return None
+            persona.member_actor_ids = [m for m in persona.member_actor_ids if m != str(actor_id)]
+            persona.updated_at = now
+            session.add(persona)
+            await session.delete(membership)
+            await session.commit()
+            await session.refresh(persona)
+            return _row_to_persona(persona)
+
     async def merge_actors_into_persona(
         self,
         actor_a: UUID,

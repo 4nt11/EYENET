@@ -14,8 +14,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_storage
+from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_publisher, get_storage
+from eyenet.api.v1.personas._emit import emit_persona_updated
 from eyenet.api.v1.schemas.operator_entities import CreatePersonaRequest, OperatorEntityCreated
+from eyenet.bus.publisher import BusEnvelopePublisher
+from eyenet.contracts.attribution import PersonaChangeKind
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -33,6 +36,7 @@ async def personas_create(
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:persona_decision"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
 ) -> OperatorEntityCreated:
     persona_id = await storage.create_persona(label=body.label, now=datetime.now(tz=UTC))
     await audit.emit(
@@ -41,5 +45,9 @@ async def personas_create(
         subject_id=persona_id,
         system_user_id=current_user.user_id,
         payload={"label": body.label, "origin": "operator_analysis"},
+    )
+    # Drives search_indexer to index the new persona (else it never hydrates/searches).
+    await emit_persona_updated(
+        publisher, persona_id=persona_id, member_actor_ids=[], change_kind=PersonaChangeKind.CREATED
     )
     return OperatorEntityCreated(id=persona_id, entity_type="persona")
