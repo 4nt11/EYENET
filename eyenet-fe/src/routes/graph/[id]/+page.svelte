@@ -425,12 +425,12 @@
   .qa-new { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--accent-text); border-top: 1px solid var(--border); }
 
   .stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
-  .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); }
-  .vb-sec { align-self: stretch; padding: 2px 2px 0; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .viewbar { position: absolute; top: 12px; left: 12px; z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; background: none; border: 0; }
+  .vb-sec { padding: 6px 0 2px; text-align: center; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .vb-sec:first-child { padding-top: 0; }
-  .vb { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; background: none; border: 1px solid transparent; border-radius: var(--radius-sm, 3px); color: var(--text-body); cursor: pointer; }
-  .vb:hover { border-color: var(--border-strong); color: var(--accent-text); }
-  .vb.on { background: var(--accent-fill, var(--panel-2)); border-color: var(--accent); color: var(--accent-text); }
+  .vb { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; background: none; border: 1px solid transparent; border-radius: 7px; color: var(--text-muted); cursor: pointer; transition: color .1s, background .1s, border-color .1s; }
+  .vb:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .vb.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
   .hint { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: 560px; padding: 10px 14px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }
   .hint b { color: var(--text-body); }
   .busy, .err { position: absolute; bottom: 14px; left: 14px; z-index: 6; padding: 6px 10px; border-radius: var(--radius); font-family: var(--font-mono); font-size: var(--fs-11); }
