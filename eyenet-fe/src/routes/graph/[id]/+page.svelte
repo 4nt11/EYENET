@@ -18,7 +18,7 @@
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
     EDGE_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
-    saveGraph, loadGraph, searchEntities, removeNodes, unlinkFromPersona
+    saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion
   } from '$lib/explorer.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -175,24 +175,22 @@
     else if (selNode) { e.preventDefault(); removeNodes([selNode.id]); selNode = null; }
   }
 
-  // Right-click a member edge between a persona and an actor → offer to unlink the actor.
-  let edgeMenu = $state(null); // { x, y, personaId, actorId, edge } | null
+  // Right-click ANY edge → a menu to delete it. The label/behaviour depends on what the
+  // edge means (unlink persona, remove from crew, retract asserted, or just prune).
+  let edgeMenu = $state(null); // { x, y, edge, s, d, label } | null
   function onEdgeContext(edge, pos) {
     menu = null; selNode = null;
     const byId = Object.fromEntries(explorer.nodes.map((n) => [n.id, n]));
     const s = byId[edge.srcId];
     const d = byId[edge.dstId];
-    const isMember = edge.kind === 'member_of' || edge.kind === 'member';
-    if (!s || !d || !isMember) { edgeMenu = null; return; }
-    const byType = { [s.entityType]: s, [d.entityType]: d };
-    if (!byType.persona || !byType.actor) { edgeMenu = null; return; }
-    edgeMenu = { x: pos.x, y: pos.y, personaId: byType.persona.id, actorId: byType.actor.id, edge };
+    const { label } = classifyEdgeDeletion(edge, s, d);
+    edgeMenu = { x: pos.x, y: pos.y, edge, s, d, label };
   }
-  function doUnlink() {
+  function doDeleteEdge() {
     if (!edgeMenu) return;
-    const { personaId, actorId, edge } = edgeMenu;
+    const { edge, s, d } = edgeMenu;
     edgeMenu = null;
-    unlinkFromPersona(personaId, actorId, edge);
+    deleteEdge(edge, s, d);
   }
 
   // Double-click a node → run its type's default enrichment (the mockup's one-shot expand).
@@ -374,11 +372,11 @@
       </div>
     {/if}
 
-    <!-- right-click a persona↔actor member edge -->
+    <!-- right-click any edge → delete it (semantics depend on edge type) -->
     {#if edgeMenu}
       <div class="ctxmenu" style="left:{edgeMenu.x}px; top:{edgeMenu.y}px">
-        <div class="ctx-head">persona membership</div>
-        <button class="ctx-row danger" onclick={doUnlink}>Unlink actor from persona</button>
+        <div class="ctx-head">{edgeMenu.edge.kind?.replace(/_/g, ' ') || 'edge'}</div>
+        <button class="ctx-row danger" onclick={doDeleteEdge}>{edgeMenu.label}</button>
       </div>
     {/if}
 

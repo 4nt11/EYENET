@@ -177,15 +177,18 @@ export const EDGE_KINDS = [
   'related_to'
 ];
 
-// If these two nodes are a persona + actor (either direction), return { personaId,
-// actorId }; else null. Used to turn a member_of edge into real persona membership.
-function personaActorPair(a, b) {
-  const byType = {};
-  byType[a.entityType] = a;
-  byType[b.entityType] = b;
-  if (byType.persona && byType.actor) return { personaId: byType.persona.id, actorId: byType.actor.id };
+// If these two nodes are an actor + a membership container (persona or crew), return
+// { container, containerId, actorId }; else null. Drives both member-edge CREATE
+// (write real membership) and DELETE (remove it from the domain table).
+function memberContainerPair(a, b) {
+  const t = {};
+  t[a.entityType] = a;
+  t[b.entityType] = b;
+  if (t.actor && t.persona) return { container: 'persona', containerId: t.persona.id, actorId: t.actor.id };
+  if (t.actor && t.crew) return { container: 'crew', containerId: t.crew.id, actorId: t.actor.id };
   return null;
 }
+const MEMBER_KINDS = new Set(['member_of', 'member', 'active_in']);
 
 // Shift-drag between two nodes -> persist an operator-asserted edge, reflect it
 // on the canvas (solid/asserted). `src`/`dst` are the mapped node rows.
@@ -193,11 +196,12 @@ export async function assertEdge(src, dst, kind, reason) {
   explorer.busy = true;
   explorer.error = null;
   try {
-    // A member_of edge between an actor and a persona is real membership, not just a
-    // visual edge: persist it so the personas page reflects it.
-    const pair = personaActorPair(src, dst);
-    if (pair && (kind === 'member_of' || kind === 'member')) {
-      await apiPost(`/v1/personas/${pair.personaId}/members`, { actor_id: pair.actorId }, { auth: true });
+    // A member edge from an actor to a persona/crew is real membership, not just a visual
+    // edge: persist it so the personas/crews pages reflect it.
+    const pair = memberContainerPair(src, dst);
+    if (pair && MEMBER_KINDS.has(kind)) {
+      const base = pair.container === 'persona' ? '/v1/personas' : '/v1/crews';
+      await apiPost(`${base}/${pair.containerId}/members`, { actor_id: pair.actorId }, { auth: true });
     }
     const res = await apiPost(
       '/v1/graph/edges',
@@ -227,14 +231,40 @@ export function removeEdge(edge) {
   );
 }
 
-// Unlink an actor from a persona (DELETE membership) and drop the member edge from the
-// canvas. Mirrors addActorToPersona on the create side.
-export async function unlinkFromPersona(personaId, actorId, edge) {
+// What deleting an edge MEANS, decided by endpoint type (kind-agnostic). The only
+// actor<->persona / actor<->crew relationship is membership, so those map to the domain
+// table; everything else is a graph edge (asserted row, retracted below) or purely
+// derived (view prune). Returns { label } for the menu.
+export function classifyEdgeDeletion(edge, srcNode, dstNode) {
+  const pair = srcNode && dstNode ? memberContainerPair(srcNode, dstNode) : null;
+  if (pair?.container === 'persona') return { label: 'Unlink actor from persona' };
+  if (pair?.container === 'crew') return { label: 'Remove actor from crew' };
+  if (edge?.provenance === 'asserted' || edge?.edgeId) return { label: 'Retract asserted edge' };
+  return { label: 'Remove edge' };
+}
+
+const _tryDelete = async (path) => {
+  try {
+    await apiDelete(path, { auth: true });
+  } catch (e) {
+    if (e.status !== 404) throw e; // already gone is fine
+  }
+};
+
+// Delete an edge, dispatched on endpoint type. Removes the domain membership (persona/crew)
+// when applicable, retracts the backing asserted_edge row if there is one, and drops the
+// edge from the canvas. A purely derived edge is just view-pruned (no domain write).
+export async function deleteEdge(edge, srcNode, dstNode) {
   explorer.busy = true;
   explorer.error = null;
   try {
-    await apiDelete(`/v1/personas/${personaId}/members/${actorId}`, { auth: true });
-    if (edge) removeEdge(edge);
+    const pair = srcNode && dstNode ? memberContainerPair(srcNode, dstNode) : null;
+    if (pair?.container === 'persona')
+      await _tryDelete(`/v1/personas/${pair.containerId}/members/${pair.actorId}`);
+    else if (pair?.container === 'crew')
+      await _tryDelete(`/v1/crews/${pair.containerId}/members/${pair.actorId}`);
+    if (edge?.edgeId) await _tryDelete(`/v1/graph/edges/${edge.edgeId}`);
+    removeEdge(edge);
   } catch (e) {
     explorer.error = e.message ?? String(e);
     throw e;
