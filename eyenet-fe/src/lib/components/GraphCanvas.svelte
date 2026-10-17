@@ -394,7 +394,16 @@
     });
     eh.disableDrawMode?.();
 
+    // Snapshot selection BEFORE cytoscape's native tap-select mutates it, so the tap
+    // handler can restore it and apply our own ctrl/cmd toggle (cytoscape hardwires SHIFT
+    // as its additive modifier; we don't want shift doing selection on a click).
+    let selSnapshot = [];
+    const restoreSnapshot = () => {
+      cy.$('node:selected').unselect();
+      selSnapshot.forEach((id) => cy.getElementById(id).select());
+    };
     cy.on('mousedown', 'node', (evt) => {
+      selSnapshot = cy.$('node:selected').map((n) => n.id());
       if (evt.originalEvent?.shiftKey) {
         cy.autoungrabify(true);
         eh.start(evt.target);
@@ -412,15 +421,19 @@
     let lastTapAt = 0;
     cy.on('tap', 'node', (evt) => {
       const oe = evt.originalEvent;
-      // Ctrl/Cmd+tap = toggle one node in/out of the selection (shift is taken by
-      // edge-draw and box-select). No inspector, no dbltap while multi-selecting.
+      // Ctrl/Cmd+tap = toggle one node in/out of the selection, keeping the rest. Cytoscape
+      // already single-selected the tapped node on this tap, so restore the pre-tap set
+      // first, then flip the tapped node.
       if (oe?.ctrlKey || oe?.metaKey) {
         const n = evt.target;
-        if (n.selected()) n.unselect(); else n.select();
+        const was = selSnapshot.includes(n.id());
+        restoreSnapshot();
+        if (was) n.unselect(); else n.select();
         return;
       }
-      // A shift gesture on a node is edge-draw; don't inspect on it.
-      if (oe?.shiftKey) return;
+      // Shift on a node is edge-draw/box-select, never click-select: undo cytoscape's
+      // native shift-additive toggle and bail.
+      if (oe?.shiftKey) { restoreSnapshot(); return; }
       // Plain tap clears any multi-selection and inspects the one node.
       cy.$('node:selected').unselect();
       const id = evt.target.id();
