@@ -1795,6 +1795,11 @@ class BaseRepository(ABC):
         'unlink from persona' on the graph). Returns the persona row, or None if the actor
         is not a member of this persona."""
 
+    @abstractmethod
+    async def delete_persona(self, persona_id: UUID) -> bool:
+        """Delete a persona and all its membership rows (operator explicit delete). Returns
+        False if the persona does not exist."""
+
     # =================================================================
     # FEEDBACK (M8 verifier)
     # =================================================================

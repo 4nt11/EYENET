@@ -138,6 +138,25 @@ class PersonasMixin:
             await session.refresh(persona)
             return _row_to_persona(persona)
 
+    async def delete_persona(self, persona_id: UUID) -> bool:
+        """Delete a persona and all its membership rows (operator explicit delete from the
+        graph). Returns False if the persona does not exist. The caller drops the persona's
+        search_document separately."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            persona = await session.get(PersonaTable, persona_id)
+            if persona is None:
+                return False
+            memberships = await session.exec(
+                select(PersonaMembershipTable).where(
+                    col(PersonaMembershipTable.persona_id) == persona_id
+                )
+            )
+            for m in list(memberships):
+                await session.delete(m)
+            await session.delete(persona)
+            await session.commit()
+            return True
+
     async def merge_actors_into_persona(
         self,
         actor_a: UUID,

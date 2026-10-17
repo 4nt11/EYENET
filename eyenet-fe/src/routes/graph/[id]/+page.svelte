@@ -18,7 +18,8 @@
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
     EDGE_KINDS, MEMBERSHIP_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
-    saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion
+    saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion,
+    deleteEntity
   } from '$lib/explorer.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -154,6 +155,14 @@
     menu = null;
     if (node) guardedExpand(node, name, count);
   }
+  // Permanently delete a persona/crew from the DB (not just the canvas). Confirmed, because
+  // it is irreversible and removes memberships too.
+  function doDeleteEntity(node) {
+    menu = null;
+    if (confirm(`Permanently delete this ${node.entityType}? This removes it and its memberships from the database.`))
+      deleteEntity(node);
+  }
+
   // Remove from the graph VIEW (cascading orphan-sweep; never touches the DB). Acts on the
   // multi-selection if the node is part of one, else just the node.
   function removeFromGraph(node) {
@@ -383,6 +392,9 @@
         <button class="ctx-row danger" onclick={() => removeFromGraph(menu.node)}>
           {menu.selCount ? `Remove ${menu.selCount} selected` : 'Remove from graph'}
         </button>
+        {#if menu.node.entityType === 'persona' || menu.node.entityType === 'crew'}
+          <button class="ctx-row danger" onclick={() => doDeleteEntity(menu.node)}>Delete {menu.node.entityType} permanently</button>
+        {/if}
       </div>
     {/if}
 

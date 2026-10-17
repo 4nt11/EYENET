@@ -284,6 +284,26 @@ export async function deleteEdge(edge, srcNode, dstNode) {
   }
 }
 
+// Permanently delete a persona or crew from the DB (operator explicit delete), then drop
+// it from the canvas. Only personas/crews are deletable this way; other entities are
+// collected evidence, not operator constructs.
+export async function deleteEntity(node) {
+  const base =
+    node.entityType === 'persona' ? '/v1/personas' : node.entityType === 'crew' ? '/v1/crews' : null;
+  if (!base) return;
+  explorer.busy = true;
+  explorer.error = null;
+  try {
+    await apiDelete(`${base}/${node.id}`, { auth: true });
+    removeNodes([node.id]);
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    throw e;
+  } finally {
+    explorer.busy = false;
+  }
+}
+
 // GroupKind values an operator may pick when hand-creating a group.
 export const GROUP_KINDS = [
   'chat', 'channel', 'dm', 'forum_category', 'forum_thread', 'irc_channel', 'matrix_room'

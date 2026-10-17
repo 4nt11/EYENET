@@ -8,10 +8,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
+from eyenet.api.deps import (
+    CurrentUser,
+    RequireScope,
+    ResourceNotFound,
+    get_audit,
+    get_storage,
+)
 from eyenet.api.v1.schemas.personas import PersonaDetail
 from eyenet.contracts.attribution import PersonaRow
 from eyenet.storage.repository import BaseRepository
+from eyenet.telemetry.audit import AuditEmitter
 
 router = APIRouter(tags=["personas"])
 
@@ -39,4 +46,29 @@ async def personas_get(
         member_count=len(persona.member_actor_ids),
         created_at=persona.created_at,
         updated_at=persona.updated_at,
+    )
+
+
+@router.delete(
+    "/personas/{persona_id}",
+    operation_id="personas_delete",
+    status_code=204,
+)
+async def personas_delete(
+    persona_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(RequireScope("write:persona_decision"))],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
+    audit: Annotated[AuditEmitter, Depends(get_audit)],
+) -> None:
+    """Delete a persona outright (operator explicit delete from the graph). Removes its
+    memberships and its search index entry. 404 if absent."""
+    if not await storage.delete_persona(persona_id):
+        raise ResourceNotFound("persona")
+    await storage.delete_search_document("persona", persona_id)
+    await audit.emit(
+        event="eyenet.audit.persona.deleted",
+        subject_kind="persona",
+        subject_id=persona_id,
+        system_user_id=current_user.user_id,
+        payload={},
     )

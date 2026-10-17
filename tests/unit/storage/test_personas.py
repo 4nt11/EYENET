@@ -262,3 +262,19 @@ async def test_remove_last_actor_keeps_the_persona(store: BaseRepository) -> Non
 async def test_remove_actor_not_a_member_returns_none(store: BaseRepository) -> None:
     pid = await store.create_persona(label="op")
     assert await store.remove_actor_from_persona(pid, _A) is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_delete_persona_removes_it_and_memberships(store: BaseRepository) -> None:
+    pid = await store.create_persona(label="op")
+    await store.add_actor_to_persona(pid, _A)
+    assert await store.delete_persona(pid) is True
+    assert await store.get_persona(pid) is None
+    assert await store.persona_for_actor(_A) is None  # membership gone too
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_delete_absent_persona_returns_false(store: BaseRepository) -> None:
+    assert await store.delete_persona(_LID) is False
