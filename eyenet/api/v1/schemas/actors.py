@@ -211,9 +211,17 @@ class BelongsToPersonaEdge(ApiSchema):
     def from_domain(cls, edge: GraphEdgeTable) -> BelongsToPersonaEdge:
         if edge.edge_type is not GraphEdgeType.BELONGS_TO_PERSONA:
             raise ValueError(f"expected BELONGS_TO_PERSONA, got {edge.edge_type}")
+        # The applier historically wrote the timestamp as `joined_at`; it now writes
+        # `since`. Accept either (so legacy edges resolve) and ignore any extra keys,
+        # instead of a strict model_validate that 500s on the mismatch.
+        raw = dict(edge.attrs or {})
+        normalized = {
+            "since": raw.get("since") or raw.get("joined_at"),
+            "via_linkage_id": raw.get("via_linkage_id"),
+        }
         return cls(
             target_id=edge.dst_id,
-            attrs=BelongsToPersonaAttrs.model_validate(edge.attrs),
+            attrs=BelongsToPersonaAttrs.model_validate(normalized),
         )
 
 

@@ -281,7 +281,7 @@ class Graph(ServiceBase):
                     GraphEdgeType.BELONGS_TO_PERSONA,
                     actor_id,
                     persona_id,
-                    {"joined_at": now.isoformat()},
+                    {"since": now.isoformat()},
                 )
 
         # Emit PersonaUpdated
@@ -381,7 +381,7 @@ class Graph(ServiceBase):
                     GraphEdgeType.BELONGS_TO_PERSONA,
                     actor_id,
                     env.persona_id,
-                    {"joined_at": now.isoformat()},
+                    {"since": now.isoformat()},
                 )
 
     # -- persona operator commands (M9.G4) -------------------------------------
@@ -472,7 +472,7 @@ class Graph(ServiceBase):
                 GraphEdgeType.BELONGS_TO_PERSONA,
                 actor_id,
                 persona_row.id,
-                {"joined_at": now.isoformat()},
+                {"since": now.isoformat()},
             )
         await self.publisher.publish(
             SUBJECT_PERSONA_UPDATED,
