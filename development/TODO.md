@@ -474,3 +474,9 @@ Remaining follow-ups:
   detail panel (the detail modal already has a fallback slot).
 - "Mark as incident" on a THREAD -> relabel its OP message (needs the OP message id;
   thread_summary.op_message_id has it).
+
+## BUG: test_classify_end_to_end_when_model_present FAILS
+
+`tests/unit/incidents/test_classifier.py::test_classify_end_to_end_when_model_present`
+fails (pre-existing, from the in-flight mmBERT/incident-model work — NOT from graph/
+enrichment changes). Triage + fix so the suite is fully green.
