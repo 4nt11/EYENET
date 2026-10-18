@@ -14,6 +14,7 @@ from eyenet.models import (
     InfrastructureArtifactMentionTable,
     LinkageTable,
     MessageTable,
+    ThreadSummaryTable,
 )
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 
 _M = MessageTable
 _MN = InfrastructureArtifactMentionTable
+_TS = ThreadSummaryTable
 
 
 class ActorMessages(LocalSQLEnrichment):
@@ -56,6 +58,27 @@ class ActorGroups(LocalSQLEnrichment):
 
     def build_select(self, src_id: UUID) -> tuple[Any, Any]:
         return select(_M.group_id).where(_M.actor_id == src_id).distinct(), col(_M.group_id)
+
+
+class ActorStartedThreads(LocalSQLEnrichment):
+    """Forum threads the actor STARTED (authored the OP), vs the broader `groups`
+    (active_in) which includes threads they merely replied in. Uses the canonical OP
+    record (thread_summary.op_message_id) the forum reader/geo/incidents all join on,
+    so the graph agrees with the rest of the system. Threads are search-indexed, so this
+    hydrates normally - no reindex."""
+
+    src_type = "actor"
+    name = "started"
+    output_type = "thread"
+    edge_kind = "started"
+
+    def build_select(self, src_id: UUID) -> tuple[Any, Any]:
+        return (
+            select(_TS.group_id)
+            .join(_M, col(_M.id) == col(_TS.op_message_id))
+            .where(_M.actor_id == src_id),
+            col(_TS.group_id),
+        )
 
 
 class ActorLinked(LocalSQLEnrichment):

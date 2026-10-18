@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from eyenet.contracts.enums import GroupKind, SourceKind
-from eyenet.models import MessageTable
+from eyenet.models import MessageTable, ThreadSummaryTable
 from eyenet.models._base import new_uuid7
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -134,6 +134,32 @@ async def test_url_artifact_to_domain(storage: BaseRepository) -> None:
     await storage.close()
 
 
+async def test_actor_started_threads(storage: BaseRepository) -> None:
+    _src, gid, actor, mid, _art = await _seed(storage)
+    # Make the actor the OP of the (forum_thread) group via the canonical thread_summary.
+    async with storage.session() as s:
+        s.add(
+            ThreadSummaryTable(
+                group_id=gid,
+                op_message_id=mid,
+                op_sent_at=_NOW,
+                victim_status="unknown",
+                engine_version="test",
+                computed_at=_NOW,
+            )
+        )
+        await s.commit()
+    nodes, edges, total, more = await storage.graph_expand(
+        src_type="actor", src_id=actor, enrichment="started", limit=10, offset=0, want_total=True
+    )
+    assert [n.entity_id for n in nodes] == [gid]
+    assert nodes[0].entity_type == "thread"
+    assert edges[0]["kind"] == "started"
+    assert total == 1
+    assert more is False
+    await storage.close()
+
+
 async def test_message_author_is_single(storage: BaseRepository) -> None:
     _src, _gid, actor, mid, _art = await _seed(storage)
     nodes, edges, total, more = await storage.graph_expand(
@@ -153,6 +179,7 @@ async def test_counts_and_unknown_guard(storage: BaseRepository) -> None:
         "messages": 1,
         "artifacts": 1,
         "groups": 1,
+        "started": 0,
         "linked": 0,
         "related": 0,
         "source": 1,

@@ -420,3 +420,42 @@ document edges, copy notes, attach exhibit, write audit, "Open case." Re-promote
 **Before building:** read the case<->entity association model and the linkage
 model (`create_case`, `transition_linkage`) first. Reuse the existing case
 entity-association surface; do NOT invent a parallel "case subject" table.
+
+## Sub-graphs (graphs within graphs) — Graph Explorer
+
+**Deferred. Raised 2026-10-17.** Honors the RULE OF KOOL (bigger, cooler graphs)
+AND is a real performance lever (render/layout a collapsed super-node instead of
+its whole interior).
+
+**Vision:** a graph node can BE another graph. Nest them arbitrarily:
+
+```
+LATAM threat-actor landscape  (top graph)
+- Group A  -> actors A, B, C + their messages, posts, groups, ...   (a sub-graph)
+- Group B  -> actors D, E, F + their messages, posts, threads, ...  (a sub-graph)
+- ... ad absurdum
+```
+
+A super-node collapses an entire sub-graph to one node; expand to descend into it,
+collapse to zoom back out. The top graph stays small and fast; the detail lives one
+level down.
+
+**Why it helps performance:** the big-node / layout cost is paid per visible node.
+Collapsing a cluster to one super-node means cytoscape lays out/renders N super-nodes,
+not the thousands inside them. Pairs with the existing HEAVY_NODE_COUNT budget + the
+big-enrich warning.
+
+**Shape to figure out when we build it:**
+- Model: a saved graph that can reference other saved graphs as members (an
+  `investigation_graph` node whose entity is itself a graph id). No entity-model
+  change — it is a graph-of-graphs, built on the saved-graph tables.
+- Cytoscape: compound nodes (parent/child) OR a collapse/expand that swaps a cluster
+  for a synthetic super-node (cytoscape-expand-collapse ext, or hand-rolled). Decide
+  which; compound nodes are native but fight fcose/dagre; swap-to-super-node keeps
+  layouts simple.
+- Collapse heuristics: auto-collapse by source/group/persona cluster; manual
+  box-select -> "group into sub-graph".
+- Enrichment across boundaries: expanding inside a sub-graph must not re-explode the
+  parent; the big-enrich warning + per-sub-graph node budget apply.
+- Save/restore: a sub-graph collapse state persists with the saved graph (and the
+  localStorage draft).
