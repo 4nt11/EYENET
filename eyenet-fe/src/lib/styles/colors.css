@@ -63,24 +63,25 @@
      at a glance on black and tell neighbours apart; actor keeps the brand violet,
      artifacts pop (they are the CTI objects). Any type without a token falls back
      to --etype-default. */
-  --etype-actor:#b26bff;       /* violet · the brand-adjacent primary subject */
-  --etype-persona:#6d8bff;     /* indigo */
-  --etype-crew:#ff6f9d;        /* pink */
-  --etype-case:#ffb43d;        /* amber */
-  --etype-group:#2fd1c4;       /* teal */
-  --etype-monitored_group:#2fd1c4;   /* teal · a TG group/channel we monitor */
-  --etype-monitored_category:#d99a3d;/* amber · a forum board/section */
-  --etype-post:#ff4d6d;              /* RED · PROVISIONAL: forum posts need the backend
-                                        container_kind field; recolor once wired+verified */
-  --etype-thread:#53d97a;      /* green */
-  --etype-message:#45a6ff;     /* sky blue */
-  --etype-mention:#ff8a3d;     /* orange */
-  --etype-incident:#ff5a5f;    /* signal red (incidents only) */
-  --etype-document:#c07bff;    /* magenta-violet */
-  --etype-attachment:#9aa7b4;  /* steel · intentionally quieter (secondary) */
-  --etype-artifact:#ffd23f;    /* bright gold · infra artifacts stand out */
-  --etype-source:#e6ebf5;      /* platinum · the collector origin, brightest root node */
-  --etype-default:#8a8fa0;     /* fallback */
+  /* OKLCH even-spread: L=72% C=0.16, hues 27 deg apart (no clashes by construction);
+     iconic colors held near home, neutrals kept off the wheel. */
+  --etype-crew:#f275a0;        /* H0  pink */
+  --etype-incident:#f9786a;    /* H28 red · signal, reserved */
+  --etype-mention:#ef852e;     /* H55 orange */
+  --etype-artifact:#d59900;    /* H83 gold */
+  --etype-case:#aaad00;        /* H111 olive-yellow */
+  --etype-thread:#6fbb52;      /* H138 green */
+  --etype-monitored_category:#00c38d;/* H166 emerald · forum board */
+  --etype-group:#00c2c2;       /* H194 teal (base = monitored group) */
+  --etype-monitored_group:#00c2c2;   /* H194 teal · TG group/channel */
+  --etype-post:#00b9eb;        /* H222 cyan · forum post */
+  --etype-message:#46aaff;     /* H249 blue */
+  --etype-persona:#8d98ff;     /* H277 indigo */
+  --etype-actor:#bc88f4;       /* H305 violet */
+  --etype-document:#dd7bd1;    /* H332 magenta */
+  --etype-attachment:#9aa7b4;  /* steel · neutral (off the hue wheel) */
+  --etype-source:#e6ebf5;      /* platinum · neutral, brightest root node */
+  --etype-default:#8a8fa0;     /* grey · fallback */
 
   /* Graph edge tints */
   --edge-derived:#6b7080;      /* grey · read-only, machine-derived (now visible) */

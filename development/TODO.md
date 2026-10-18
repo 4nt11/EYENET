@@ -459,3 +459,24 @@ big-enrich warning.
   parent; the big-enrich warning + per-sub-graph node budget apply.
 - Save/restore: a sub-graph collapse state persists with the saved graph (and the
   localStorage draft).
+
+## Incident nodes + wire the Incident API into the graph
+
+**Deferred. Raised 2026-10-17.** `incident` is already an EntityType + has an
+`--etype-incident` color, but there are NO incident nodes on the graph and no
+enrichments produce them. The classifier/incident pipeline exists (incident.detected
+events, incident model, geo); the graph just does not surface it.
+
+**To build:**
+- Enrichments that yield incident nodes, e.g. `message -> incidents` (incidents
+  detected on a message / its thread OP), `thread -> incidents`, maybe `actor ->
+  incidents` (incidents across their posts). Incidents join off `op_message_id` /
+  `message_id` (see thread_summary + IncidentTable).
+- Make incidents search-indexed OR synthesize incident nodes from IncidentTable
+  (like source/domain) so they hydrate on the graph. Check whether incidents are
+  in search_document already (backfill `counts` did not list incident).
+- Wire the Incident API read surface into the FE (open an incident node ->
+  classifier labels, geo/victim country, severity). Reuse the existing incident
+  endpoints.
+- Incident is the one entity that SHOULD pop red (signal color) - keep it out of
+  the even-spread palette, reserve red for it.
