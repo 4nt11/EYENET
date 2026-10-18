@@ -98,7 +98,8 @@ export const ENTITY_TYPE_LABELS = {
   // enrichment calls, these are DISPLAY-only). See computeDisplayType().
   monitored_group: 'Monitored Group', // TG group/channel/chat we monitor
   monitored_category: 'Monitored Category', // a forum board/section
-  post: 'Post' // a forum post (a MessageTable row inside a forum thread)
+  post: 'Post', // a forum post (a MessageTable row inside a forum thread)
+  handle: 'Handle' // a @name on another platform (artifact, shown as an identity)
 };
 export const entityTypeLabel = (t) => label(ENTITY_TYPE_LABELS, t);
 
@@ -136,6 +137,9 @@ export function computeDisplayType(entityType, fields = {}, _status = null) {
     return fields?.kind === 'forum_category' ? 'monitored_category' : 'monitored_group';
   if (entityType === 'message')
     return fields?.container_kind === 'forum_thread' ? 'post' : 'message';
+  // A handle (@name on another platform) is stored as an artifact but is an IDENTITY -
+  // give it its own display so it reads as identity, not generic infra.
+  if (entityType === 'artifact' && fields?.kind === 'handle_other_platform') return 'handle';
   return entityType;
 }
 export const nodeDisplayType = (n) =>

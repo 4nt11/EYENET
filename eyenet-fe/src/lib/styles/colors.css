@@ -79,6 +79,7 @@
   --etype-persona:#8a96ff;     /* H277 indigo */
   --etype-actor:#bf83fe;       /* H305 violet */
   --etype-document:#e375d6;    /* H332 magenta */
+  --etype-handle:#c4a4fe;      /* soft lavender · a @handle (artifact, shown as identity) */
   --etype-attachment:#9aa7b4;  /* steel · neutral (off the hue wheel) */
   --etype-source:#e6ebf5;      /* platinum · neutral, brightest root node */
   --etype-default:#8a8fa0;     /* grey · fallback */

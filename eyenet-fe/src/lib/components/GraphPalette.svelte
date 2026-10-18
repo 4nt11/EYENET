@@ -2,6 +2,7 @@
   // Maltego-style entity palette for the exploration canvas: seed from corpus (scoped
   // search), and a categorized type list. Click a type to SCOPE the search to it;
   // shift-drag onto the canvas to hand-create one (wired by the parent via onDragType).
+  import At from 'phosphor-svelte/lib/At';
   import User from 'phosphor-svelte/lib/User';
   import UsersThree from 'phosphor-svelte/lib/UsersThree';
   import ShareNetwork from 'phosphor-svelte/lib/ShareNetwork';
@@ -43,7 +44,8 @@
       items: [
         { label: 'Actor', desc: 'A handle/account seen in a source', icon: User, color: 'var(--etype-actor)', scope: { id: 'actor', types: 'actor' }, create: { kind: 'actor' } },
         { label: 'Persona', desc: 'Confirmed same-person cluster of actors', icon: UsersThree, color: 'var(--etype-persona)', scope: { id: 'persona', types: 'persona' }, create: { kind: 'persona' } },
-        { label: 'Crew', desc: 'A named group of collaborating actors', icon: ShareNetwork, color: 'var(--etype-crew)', scope: { id: 'crew', types: 'crew' }, create: { kind: 'crew' } }
+        { label: 'Crew', desc: 'A named group of collaborating actors', icon: ShareNetwork, color: 'var(--etype-crew)', scope: { id: 'crew', types: 'crew' }, create: { kind: 'crew' } },
+        { label: 'Handle', desc: 'A @name on another platform (an identity, not yet an actor)', icon: At, color: 'var(--etype-handle)', scope: { id: 'handle', dsl: 'artifact.kind:handle_other_platform' }, create: { kind: 'artifact', artifactKind: 'handle_other_platform' } }
       ]
     },
     {
