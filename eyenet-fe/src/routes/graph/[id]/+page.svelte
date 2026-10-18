@@ -26,6 +26,9 @@
   } from '$lib/explorer.svelte.js';
   import { nodeTypeLabel, nodeDisplayType, enrichmentLabel, kindLabel, groupKindLabel } from '$lib/labels.js';
   import { history, undoGraph, redoGraph, recordHistory, resetHistory } from '$lib/history.svelte.js';
+  import BehavePanel from '$lib/components/BehavePanel.svelte';
+  import CircadianPanel from '$lib/components/CircadianPanel.svelte';
+  import { actorView, loadActorDetail } from '$lib/actor.svelte.js';
 
   // Canvas api handle (positions + view controls).
   let canvasApi = null;
@@ -216,6 +219,7 @@
   function onKeydown(e) {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'Escape') { detailsOpen = false; menu = null; edgeMenu = null; return; }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
@@ -298,6 +302,15 @@
     });
   });
   const fmtDate = (s) => (s ? new Date(s).toISOString().slice(0, 10) : '—');
+
+  // Full-dossier modal: the heavy BEHAVE + circadian view, loaded on demand (one click),
+  // reusing the actors-page machinery (loadActorDetail -> actorView.behave/circadian).
+  let detailsOpen = $state(false);
+  function openDetails() {
+    if (!selNode) return;
+    detailsOpen = true;
+    if (selNode.entityType === 'actor') loadActorDetail(selNode.id);
+  }
   const fmtCount = (c) => (c == null ? '·' : Number(c).toLocaleString('en-US'));
   const edgeLabel = (k) => k.replace(/_/g, ' ');
 
@@ -582,6 +595,10 @@
           </table>
         {/if}
 
+        {#if selNode.entityType === 'actor'}
+          <button class="btn ad-details-btn" onclick={openDetails}>Open full details</button>
+        {/if}
+
         <div class="ins-notes">
           <div class="ins-label">Notes</div>
           <textarea class="note" bind:value={noteBody} placeholder="Operator note for this entity…" rows="5"></textarea>
@@ -591,6 +608,32 @@
           </div>
         </div>
       </aside>
+    {/if}
+
+    <!-- full-dossier modal: heavy BEHAVE + circadian, loaded on demand -->
+    {#if detailsOpen && selNode}
+      <div class="dm-scrim" role="presentation" onclick={() => (detailsOpen = false)}></div>
+      <div class="dm">
+        <div class="dm-head">
+          <span class="dot" style="background:var(--etype-{nodeDisplayType(selNode)}, var(--etype-default))"></span>
+          <span class="dm-title">{selNode.title || selNode.id}</span>
+          <span class="dm-type">{nodeTypeLabel(selNode)}</span>
+          <button class="x" onclick={() => (detailsOpen = false)} aria-label="close">×</button>
+        </div>
+        <div class="dm-body">
+          {#if selNode.entityType === 'actor'}
+            {#if actorView.behave}
+              <BehavePanel behave={actorView.behave} />
+            {:else}
+              <div class="dm-empty">Loading dossier…</div>
+            {/if}
+            {#if actorView.circadian}<CircadianPanel circadian={actorView.circadian} />{/if}
+            {#if actorView.error}<div class="err">{actorView.error}</div>{/if}
+          {:else}
+            <div class="dm-empty">No extended details for this entity type yet.</div>
+          {/if}
+        </div>
+      </div>
     {/if}
 
     <!-- edge-kind picker (shift-drag between two nodes) -->
@@ -733,6 +776,15 @@
   .ad-ak { flex: 0 0 auto; color: var(--text-faint); }
   .ad-assess { padding: 8px 10px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border); border-radius: var(--radius-sm, 3px); font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-body); white-space: pre-wrap; }
   .mono { font-family: var(--font-mono); word-break: break-all; }
+  .ad-details-btn { width: 100%; margin-top: 12px; }
+  .dm-scrim { position: absolute; inset: 0; z-index: 50; background: rgba(0,0,0,.55); }
+  .dm { position: absolute; z-index: 51; top: 4vh; left: 50%; transform: translateX(-50%); width: 92%; max-width: 1200px; max-height: 92vh; display: flex; flex-direction: column; background: var(--panel, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0,0,0,.6); overflow: hidden; }
+  .dm-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .dm-title { font-family: var(--font-sans); font-size: var(--fs-14, 14px); color: var(--text-body); }
+  .dm-type { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .dm-head .x { margin-left: auto; }
+  .dm-body { flex: 1 1 auto; overflow: auto; padding: 16px; }
+  .dm-empty { padding: 40px; text-align: center; font-family: var(--font-sans); font-size: var(--fs-13, 13px); color: var(--text-muted); }
   .note { width: 100%; resize: vertical; padding: 8px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); line-height: var(--lh-normal); }
   .note:focus { outline: none; border-color: var(--accent); }
   .note-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
