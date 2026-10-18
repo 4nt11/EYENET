@@ -29,6 +29,9 @@
   import BehavePanel from '$lib/components/BehavePanel.svelte';
   import CircadianPanel from '$lib/components/CircadianPanel.svelte';
   import { actorView, loadActorDetail } from '$lib/actor.svelte.js';
+  import { relabelIncident, loadMessageIncident } from '$lib/incident.svelte.js';
+  import { INCIDENT_LABELS } from '$lib/data.js';
+  import { incidentLabelName } from '$lib/labels.js';
 
   // Canvas api handle (positions + view controls).
   let canvasApi = null;
@@ -219,7 +222,7 @@
   function onKeydown(e) {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    if (e.key === 'Escape') { detailsOpen = false; menu = null; edgeMenu = null; return; }
+    if (e.key === 'Escape') { detailsOpen = false; incidentDlg = null; menu = null; edgeMenu = null; return; }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
@@ -310,6 +313,32 @@
     if (!selNode) return;
     detailsOpen = true;
     if (selNode.entityType === 'actor') loadActorDetail(selNode.id);
+  }
+
+  // Mark-as-incident / reclassify: the mmBERT v1 misses some, so the operator sets the true
+  // label set on a message (PUT /v1/incidents/{id}/labels). Reuses the triage machinery.
+  let incidentDlg = $state(null); // { messageId, title, selected: string[], reason, busy, err } | null
+  async function openIncident(node) {
+    incidentDlg = { messageId: node.id, title: node.title || node.id, selected: [], reason: '', busy: true, err: null };
+    const cur = await loadMessageIncident(node.id);
+    const pre = cur?.corrected_labels ?? cur?.incident_labels ?? [];
+    if (incidentDlg && incidentDlg.messageId === node.id) incidentDlg = { ...incidentDlg, selected: [...pre], busy: false };
+  }
+  function toggleIncidentLabel(l) {
+    if (!incidentDlg) return;
+    const s = new Set(incidentDlg.selected);
+    if (s.has(l)) s.delete(l); else s.add(l);
+    incidentDlg = { ...incidentDlg, selected: [...s] };
+  }
+  async function saveIncident() {
+    if (!incidentDlg) return;
+    const { messageId, selected, reason } = incidentDlg;
+    incidentDlg = { ...incidentDlg, busy: true, err: null };
+    const ok = await relabelIncident(messageId, selected, reason);
+    if (!ok) { incidentDlg = { ...incidentDlg, busy: false, err: 'Relabel failed (need write:incidents?)' }; return; }
+    incidentDlg = null;
+    // Reflect the new classification on the canvas if this message is still selected.
+    if (selNode?.id === messageId) expandNode(selNode, 'incidents');
   }
   const fmtCount = (c) => (c == null ? '·' : Number(c).toLocaleString('en-US'));
   const edgeLabel = (k) => k.replace(/_/g, ' ');
@@ -598,6 +627,9 @@
         {#if selNode.entityType === 'actor'}
           <button class="btn ad-details-btn" onclick={openDetails}>Open full details</button>
         {/if}
+        {#if selNode.entityType === 'message'}
+          <button class="btn ad-details-btn" onclick={() => openIncident(selNode)}>Mark as incident</button>
+        {/if}
 
         <div class="ins-notes">
           <div class="ins-label">Notes</div>
@@ -632,6 +664,29 @@
           {:else}
             <div class="dm-empty">No extended details for this entity type yet.</div>
           {/if}
+        </div>
+      </div>
+    {/if}
+
+    <!-- mark-as-incident / reclassify dialog -->
+    {#if incidentDlg}
+      <div class="edge-pick-scrim" role="presentation" onclick={() => (incidentDlg = null)}></div>
+      <div class="inc-dlg">
+        <div class="ep-head">Mark as incident: <b>{incidentDlg.title}</b></div>
+        {#if incidentDlg.busy && !incidentDlg.selected.length}
+          <div class="ctx-empty">Loading…</div>
+        {/if}
+        <div class="inc-labels">
+          {#each INCIDENT_LABELS as l}
+            <button class="inc-chip" class:on={incidentDlg.selected.includes(l)} onclick={() => toggleIncidentLabel(l)}>{incidentLabelName(l)}</button>
+          {/each}
+        </div>
+        <input class="search inc-reason" bind:value={incidentDlg.reason} placeholder="reason (audited)" spellcheck="false" />
+        {#if incidentDlg.err}<div class="err inc-err">{incidentDlg.err}</div>{/if}
+        <div class="inc-actions">
+          <button class="btn" onclick={saveIncident} disabled={incidentDlg.busy}>{incidentDlg.busy ? 'Saving…' : 'Save labels'}</button>
+          <button class="ep-kind" onclick={() => (incidentDlg = null)}>Cancel</button>
+          <span class="inc-hint">empty = false positive</span>
         </div>
       </div>
     {/if}
@@ -785,6 +840,15 @@
   .dm-head .x { margin-left: auto; }
   .dm-body { flex: 1 1 auto; overflow: auto; padding: 16px; }
   .dm-empty { padding: 40px; text-align: center; font-family: var(--font-sans); font-size: var(--fs-13, 13px); color: var(--text-muted); }
+  .inc-dlg { position: absolute; z-index: 41; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 420px; max-width: 92%; padding: 16px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  .inc-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+  .inc-chip { padding: 5px 9px; background: none; border: 1px solid var(--border-strong); border-radius: var(--radius-sm, 3px); color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
+  .inc-chip:hover { border-color: var(--accent); color: var(--accent-text); }
+  .inc-chip.on { background: color-mix(in srgb, var(--etype-incident) 18%, transparent); border-color: var(--etype-incident); color: var(--etype-incident); }
+  .inc-reason { width: 100%; margin-bottom: 10px; }
+  .inc-actions { display: flex; align-items: center; gap: 10px; }
+  .inc-hint { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); margin-left: auto; }
+  .inc-err { margin-bottom: 10px; }
   .note { width: 100%; resize: vertical; padding: 8px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); line-height: var(--lh-normal); }
   .note:focus { outline: none; border-color: var(--accent); }
   .note-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
