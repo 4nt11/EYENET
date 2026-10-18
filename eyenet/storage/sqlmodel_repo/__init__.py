@@ -52,6 +52,7 @@ from .profiles import ProfilesMixin
 from .relations import RelationsMixin
 from .saved_graphs import SavedGraphsMixin
 from .search import SearchMixin
+from .settings import SettingsMixin
 from .sources import SourcesMixin
 from .syslog import SyslogMixin
 from .users import UsersMixin
@@ -101,6 +102,7 @@ class SQLModelRepository(
     RelationsMixin,
     SavedGraphsMixin,
     SearchMixin,
+    SettingsMixin,
     SourcesMixin,
     SyslogMixin,
     UsersMixin,

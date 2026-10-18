@@ -2014,6 +2014,15 @@ class BaseRepository(ABC):
     ) -> dict[str, dict[str, int]]:
         """Facet counts for ``q``: ``{"by_type": {...}, "by_source": {...}}``."""
 
+    # ---- runtime settings (app_setting KV) --------------------------------
+    @abstractmethod
+    async def get_setting(self, key: str) -> str | None:
+        """Raw string value for a runtime operator setting, or None if unset."""
+
+    @abstractmethod
+    async def set_setting(self, key: str, value: str, *, updated_by: str | None = None) -> None:
+        """Upsert a runtime operator setting."""
+
     @abstractmethod
     async def induced_edges(
         self,

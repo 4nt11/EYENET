@@ -56,6 +56,7 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "admin:incident_rules",
             "admin:users",
             "admin:tokens",
+            "admin:settings",
         },
     ),
     SystemUserRole.ANALYST: frozenset(

@@ -244,6 +244,10 @@ from eyenet.api.v1.schemas.errors import ProblemDetail
 from eyenet.api.v1.search.api_list_search import router as search_global_router
 from eyenet.api.v1.search.api_search_graph import router as search_graph_router
 
+# === settings (runtime operator knobs) ===
+from eyenet.api.v1.settings.api_get_setting import router as settings_get_router
+from eyenet.api.v1.settings.api_set_setting import router as settings_set_router
+
 # === sources (M9.D1 discovery) ===
 from eyenet.api.v1.sources.api_add_source_domain import router as sources_add_domain_router
 from eyenet.api.v1.sources.api_create_source import router as sources_create_router
@@ -362,6 +366,8 @@ v1_router.include_router(graph_expand_counts_router)
 v1_router.include_router(graph_hydrate_router)
 v1_router.include_router(search_global_router)
 v1_router.include_router(search_graph_router)
+v1_router.include_router(settings_get_router)
+v1_router.include_router(settings_set_router)
 v1_router.include_router(graph_assert_edge_router)
 v1_router.include_router(graph_retract_edge_router)
 

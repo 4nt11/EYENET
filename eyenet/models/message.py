@@ -88,6 +88,10 @@ class AttachmentTable(SQLModel, table=True):
     sha256: str = Field(index=True)
     filename: str | None = None
     storage_uri: str | None = None
+    # Operator retrieval link for a blob we did NOT store on disk (e.g. a file over the
+    # download size gate): a platform deep-link the operator can open to fetch it by hand.
+    # Set for every collected attachment as provenance, even when storage_uri is populated.
+    source_ref: str | None = None
     classifier_tier: SensitivityTier = Field(default=SensitivityTier.NORMAL)
     operator_tier_override: SensitivityTier | None = None
 

@@ -13,6 +13,7 @@ from sqlmodel import SQLModel
 from .access_artifact import GroupAccessArtifactTable
 from .actor import ActorAliasHistoryTable, ActorTable
 from .anchor import AuditAnchorTable
+from .app_setting import AppSettingTable
 from .asserted_edge import AssertedEdgeTable
 from .audit import AuditLogTable
 from .auth import (
@@ -93,6 +94,7 @@ __all__ = [
     "ActorArtifactTable",
     "ActorRelationTable",
     "ActorTable",
+    "AppSettingTable",
     "AssertedEdgeTable",
     "AttachmentTable",
     "AuditAnchorTable",

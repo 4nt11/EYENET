@@ -627,6 +627,30 @@ def _drop_entity_note_schema(conn: Any) -> None:
         SQLModel.metadata.drop_all(conn, tables=tables)
 
 
+_APP_SETTING_TABLES = frozenset({"app_setting"})
+
+
+def _apply_app_setting_schema(conn: Any) -> None:
+    """Create ``app_setting`` (pg-0016). Created from the model for index/constraint
+    parity with the no-drift test. Main DB only."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_APP_SETTING_TABLES)
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_app_setting_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_app_setting_schema`."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_APP_SETTING_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
 def seed_indicator_rules(conn: Any) -> int:
     """Insert the vendored default indicator rules not already present; return the
     count inserted.

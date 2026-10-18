@@ -1221,6 +1221,46 @@ paths:
         "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
+  /v1/settings/{key}:
+    get:
+      tags: [settings]
+      operationId: settings_get
+      summary: Read a runtime operator setting's effective value (admin:settings).
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: The setting's stored value, or its registered default.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingValue' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    put:
+      tags: [settings]
+      operationId: settings_set
+      summary: Update a runtime operator setting (admin:settings). Validated per key.
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingUpdate' }
+      responses:
+        "200":
+          description: The updated setting value.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingValue' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/graph/expand:
     get:
       tags: [graph]
@@ -4529,6 +4569,21 @@ components:
       required: [actor_id]
       properties:
         actor_id: { type: string, format: uuid }
+    SettingValue:
+      type: object
+      description: A runtime operator setting's effective value (stored, or the registered default).
+      required: [key, value, is_default, description]
+      properties:
+        key: { type: string }
+        value: { type: string }
+        is_default: { type: boolean }
+        description: { type: string }
+    SettingUpdate:
+      type: object
+      description: Admin update body for a setting value (validated against the key's spec).
+      required: [value]
+      properties:
+        value: { type: string }
     ResolutionState:
       type: string
       description: Bridge-resolution state for an InfrastructureArtifact (MODELS §2.25).
