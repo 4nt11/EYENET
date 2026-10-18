@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from eyenet.contracts.enums import GroupKind, SourceKind
-from eyenet.models import IncidentTable, MessageTable, ThreadSummaryTable
+from eyenet.contracts.enums import AttachmentKind, GroupKind, SensitivityTier, SourceKind
+from eyenet.models import AttachmentTable, IncidentTable, MessageTable, ThreadSummaryTable
 from eyenet.models._base import new_uuid7
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -256,6 +256,39 @@ async def test_message_incidents(storage: BaseRepository) -> None:
     assert nodes[0].entity_type == "incident"
     assert nodes[0].fields["labels"] == ["data_breach", "credential_leak"]
     assert edges[0]["kind"] == "classified_as"
+    assert total == 1
+    assert more is False
+    await storage.close()
+
+
+async def test_message_attachments(storage: BaseRepository) -> None:
+    _src, _gid, _actor, mid, _art = await _seed(storage)
+    async with storage.session() as s:
+        s.add(
+            AttachmentTable(
+                message_id=mid,
+                kind=AttachmentKind.DOCUMENT,
+                mime="application/pdf",
+                size_bytes=4096,
+                sha256="deadbeef",
+                filename="dump.pdf",
+                classifier_tier=SensitivityTier.RESTRICTED,
+            )
+        )
+        await s.commit()
+    nodes, edges, total, more = await storage.graph_expand(
+        src_type="message",
+        src_id=mid,
+        enrichment="attachments",
+        limit=10,
+        offset=0,
+        want_total=True,
+    )
+    assert len(nodes) == 1
+    assert nodes[0].entity_type == "attachment"
+    assert nodes[0].title == "dump.pdf"
+    assert nodes[0].fields["tier"] == "restricted"  # effective tier, for the API clearance filter
+    assert edges[0]["kind"] == "attached"
     assert total == 1
     assert more is False
     await storage.close()

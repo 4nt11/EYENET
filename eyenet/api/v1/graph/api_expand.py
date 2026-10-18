@@ -9,19 +9,51 @@ See ``development/GRAPH_EXPLORER.md`` §6.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params, encode_cursor
-from eyenet.api.v1._clearance import enforce_entity_tier_clearance
+from eyenet.api.v1._clearance import enforce_entity_tier_clearance, required_clearance_scope
 from eyenet.api.v1.schemas.enums import EntityType
 from eyenet.api.v1.schemas.search import GraphExpandResult, SearchGraphEdge, SearchGraphNode
+from eyenet.contracts.enums import SensitivityTier
+from eyenet.enrichments.base import ExpandNode
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["graph"])
+
+
+def _cleared_for(fields: dict[str, Any] | None, current_user: CurrentUser) -> bool:
+    """True if the caller may see a neighbour of this node's effective tier.
+
+    Untiered nodes (no ``fields.tier``) always pass. An unknown tier string fails
+    closed (treated as not cleared) rather than leaking.
+    """
+    raw = (fields or {}).get("tier")
+    if not raw:
+        return True
+    try:
+        needed = required_clearance_scope(SensitivityTier(raw))
+    except ValueError:
+        return False  # unknown tier -> fail closed
+    return needed is None or needed.value in current_user.effective_scopes
+
+
+def _filter_cleared(
+    rows: list[ExpandNode], edges: list[dict[str, Any]], current_user: CurrentUser
+) -> tuple[list[ExpandNode], list[dict[str, Any]]]:
+    """Drop over-clearance neighbour nodes and any edge touching a dropped node."""
+    kept = [r for r in rows if _cleared_for(r.fields, current_user)]
+    if len(kept) == len(rows):
+        return rows, edges
+    dropped_ids = {r.entity_id for r in rows} - {r.entity_id for r in kept}
+    # Edges run source -> neighbour; the source is not in rows. Drop an edge only when it
+    # touches a DROPPED neighbour; edges to surviving/untiered nodes stay.
+    pruned = [e for e in edges if e["src_id"] not in dropped_ids and e["dst_id"] not in dropped_ids]
+    return kept, pruned
 
 
 @router.get(
@@ -52,11 +84,16 @@ async def graph_expand(
         )
     except ValueError as exc:
         raise UnprocessableError(str(exc)) from exc
+    # Per-node clearance: enrichments that synthesize tier-gated neighbours (attachments,
+    # future documents) stamp fields.tier. The src gate above only covers the source, so
+    # drop over-clearance neighbours here and prune edges that reference the dropped ones.
+    # (An entity with no fields.tier is untiered and always passes.)
+    rows, edges = _filter_cleared(rows, edges, current_user)
     nodes = [
         SearchGraphNode(
             entity_type=EntityType(r.entity_type),
             entity_id=r.entity_id,
-            title=r.title,
+            title=r.title or "",
             status=r.status,
             source_id=r.source_id,
             fields=r.fields or {},
