@@ -48,6 +48,20 @@ def required_clearance_scope(tier: SensitivityTier) -> ClearanceScope | None:
     return _TIER_SCOPE[tier]
 
 
+def hidden_tiers_for(current_user: CurrentUser) -> list[SensitivityTier]:
+    """Tiers the caller is NOT cleared to read (NORMAL is never hidden).
+
+    Used to filter tier-gated rows out of surfaces that return many entities at once
+    (global search), where a per-row ``enforce_*`` raise is wrong — the row must just
+    not appear. Fail-closed: a tier whose scope the caller lacks is hidden.
+    """
+    return [
+        tier
+        for tier, scope in _TIER_SCOPE.items()
+        if scope is not None and scope.value not in current_user.effective_scopes
+    ]
+
+
 def enforce_tier_clearance(current_user: CurrentUser, effective_tier: SensitivityTier) -> None:
     """Raise :class:`ScopeForbidden` (403) if the caller may not read ``effective_tier``.
 
@@ -144,6 +158,7 @@ async def resolve_scope_grant(
 __all__ = [
     "enforce_entity_tier_clearance",
     "enforce_tier_clearance",
+    "hidden_tiers_for",
     "required_clearance_scope",
     "resolve_scope_grant",
     "resolve_tier_grant",

@@ -1981,10 +1981,14 @@ class BaseRepository(ABC):
         types: Sequence[str] | None = None,
         status: Sequence[str] | None = None,
         source_id: UUID | None = None,
+        exclude_tiers: Sequence[str] | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[object]:
-        """Ranked cross-entity hits for ``q``; SearchDocumentTable rows type-erased."""
+        """Ranked cross-entity hits for ``q``; SearchDocumentTable rows type-erased.
+
+        ``exclude_tiers`` drops rows whose effective sensitivity tier the caller is
+        not cleared to read (the clearance gate on the global-search surface)."""
 
     @abstractmethod
     async def count_search_global(
@@ -1994,6 +1998,7 @@ class BaseRepository(ABC):
         types: Sequence[str] | None = None,
         status: Sequence[str] | None = None,
         source_id: UUID | None = None,
+        exclude_tiers: Sequence[str] | None = None,
     ) -> int:
         """Total `search_document` rows matching ``q`` + filters."""
 
@@ -2005,6 +2010,7 @@ class BaseRepository(ABC):
         types: Sequence[str] | None = None,
         status: Sequence[str] | None = None,
         source_id: UUID | None = None,
+        exclude_tiers: Sequence[str] | None = None,
     ) -> dict[str, dict[str, int]]:
         """Facet counts for ``q``: ``{"by_type": {...}, "by_source": {...}}``."""
 
@@ -2042,9 +2048,7 @@ class BaseRepository(ABC):
         rows: ``(nodes, edges, total, has_more)``. ValueError on unknown enrichment."""
 
     @abstractmethod
-    async def graph_expand_counts(
-        self, *, src_type: str, src_id: UUID
-    ) -> dict[str, int | None]:
+    async def graph_expand_counts(self, *, src_type: str, src_id: UUID) -> dict[str, int | None]:
         """Per-enrichment neighbour totals for the degree preview (``None`` for a
         remote enrichment with no cheap count)."""
 
@@ -2130,9 +2134,7 @@ class BaseRepository(ABC):
         On update, body + ``updated_at`` change, author + ``created_at`` persist."""
 
     @abstractmethod
-    async def get_entity_note(
-        self, *, entity_type: str, entity_id: UUID
-    ) -> EntityNoteRow | None:
+    async def get_entity_note(self, *, entity_type: str, entity_id: UUID) -> EntityNoteRow | None:
         """The note for an entity, or None."""
 
     @abstractmethod

@@ -239,16 +239,21 @@ def case_doc(c: CaseTable) -> dict[str, Any]:
 
 
 def document_doc(d: DocumentTable) -> dict[str, Any]:
+    # Effective tier: operator override wins over the classifier. Stamped BOTH as the
+    # top-level `tier` column (so global search filters uncleared rows out) and in
+    # `fields` (so the graph-neighbour hydrate path can clearance-filter a document node).
+    tier = _enum_value(d.operator_tier_override or d.classifier_tier)
     return {
         "entity_type": "document",
         "entity_id": d.id,
         "source_id": None,
         "status": None,
+        "tier": tier,
         "title": d.filename or f"document {str(d.id)[:8]}",
         "subtitle": d.mime,
         "haystack": clean(d.filename, d.extracted_text),
         "handles": None,
-        "fields": {"filename": d.filename, "mime": d.mime},
+        "fields": {"filename": d.filename, "mime": d.mime, "tier": tier},
     }
 
 

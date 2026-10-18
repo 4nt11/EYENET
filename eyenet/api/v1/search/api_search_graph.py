@@ -15,6 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
+from eyenet.api.v1._clearance import hidden_tiers_for
 from eyenet.api.v1.schemas.search import SearchGraph, SearchGraphEdge, SearchGraphNode
 from eyenet.models.asserted_edge import AssertedEdgeTable
 from eyenet.models.search import SearchDocumentTable
@@ -38,7 +39,7 @@ def _csv(value: str | None) -> list[str] | None:
     status_code=200,
 )
 async def search_graph(
-    _: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
+    current_user: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     q: Annotated[str, Query(min_length=1, max_length=256)],
     types: Annotated[str | None, Query(description="CSV of entity types")] = None,
@@ -50,7 +51,13 @@ async def search_graph(
         rows = cast(
             "list[SearchDocumentTable]",
             await storage.search_global(
-                q, types=_csv(types), status=_csv(status), source_id=source, limit=limit, offset=0
+                q,
+                types=_csv(types),
+                status=_csv(status),
+                source_id=source,
+                exclude_tiers=[t.value for t in hidden_tiers_for(current_user)],
+                limit=limit,
+                offset=0,
             ),
         )
     except UnknownFieldError as exc:

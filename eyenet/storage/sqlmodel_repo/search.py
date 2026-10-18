@@ -73,6 +73,7 @@ _COLUMNS = (
     "source_id",
     "status",
     "kind",
+    "tier",
     "title",
     "subtitle",
     "haystack",
@@ -178,6 +179,7 @@ class SearchMixin:
         types: Sequence[str] | None,
         status: Sequence[str] | None,
         source_id: UUID | None,
+        exclude_tiers: Sequence[str] | None = None,
     ) -> Any:
         if types:
             stmt = stmt.where(col(SearchDocumentTable.entity_type).in_(list(types)))
@@ -185,6 +187,10 @@ class SearchMixin:
             stmt = stmt.where(col(SearchDocumentTable.status).in_(list(status)))
         if source_id is not None:
             stmt = stmt.where(SearchDocumentTable.source_id == source_id)
+        if exclude_tiers:
+            # Clearance: drop rows at a tier the caller cannot read. Untiered entities
+            # sit at "normal" and are never excluded; this gates tiered docs only.
+            stmt = stmt.where(col(SearchDocumentTable.tier).notin_(list(exclude_tiers)))
         return stmt
 
     # ---- reads ------------------------------------------------------------
@@ -195,6 +201,7 @@ class SearchMixin:
         types: Sequence[str] | None = None,
         status: Sequence[str] | None = None,
         source_id: UUID | None = None,
+        exclude_tiers: Sequence[str] | None = None,
         limit: int,
         offset: int = 0,
     ) -> list[object]:
@@ -206,7 +213,13 @@ class SearchMixin:
         ) as span:
             async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
                 stmt = select(SearchDocumentTable).where(self._compile_query(q))
-                stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
+                stmt = self._apply_filters(
+                    stmt,
+                    types=types,
+                    status=status,
+                    source_id=source_id,
+                    exclude_tiers=exclude_tiers,
+                )
                 stmt = (
                     stmt.order_by(self._type_rank())
                     .order_by(col(SearchDocumentTable.updated_at).desc())
@@ -225,12 +238,19 @@ class SearchMixin:
         types: Sequence[str] | None = None,
         status: Sequence[str] | None = None,
         source_id: UUID | None = None,
+        exclude_tiers: Sequence[str] | None = None,
     ) -> int:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(func.count()).select_from(SearchDocumentTable).where(self._compile_query(q))
             )
-            stmt = self._apply_filters(stmt, types=types, status=status, source_id=source_id)
+            stmt = self._apply_filters(
+                stmt,
+                types=types,
+                status=status,
+                source_id=source_id,
+                exclude_tiers=exclude_tiers,
+            )
             result = await session.exec(stmt)
             return int(result.one())
 
@@ -241,11 +261,14 @@ class SearchMixin:
         types: Sequence[str] | None = None,
         status: Sequence[str] | None = None,
         source_id: UUID | None = None,
+        exclude_tiers: Sequence[str] | None = None,
     ) -> dict[str, dict[str, int]]:
         """``{"by_type": {...}, "by_source": {...}}``.
 
         by_type ignores the ``types`` filter (so the UI shows every type's count
-        to pivot into); by_source ignores the ``source_id`` filter likewise.
+        to pivot into); by_source ignores the ``source_id`` filter likewise. The
+        clearance ``exclude_tiers`` gate applies to ALL facets — an uncleared caller
+        must not even learn the COUNT of documents they cannot see.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             # by_type: apply status + source, NOT types.
@@ -254,7 +277,9 @@ class SearchMixin:
                 .where(self._compile_query(q))
                 .group_by(col(SearchDocumentTable.entity_type))
             )
-            t_stmt = self._apply_filters(t_stmt, types=None, status=status, source_id=source_id)
+            t_stmt = self._apply_filters(
+                t_stmt, types=None, status=status, source_id=source_id, exclude_tiers=exclude_tiers
+            )
             by_type = {str(k): int(v) for k, v in (await session.exec(t_stmt)).all()}
 
             # by_source: apply types + status, NOT source.
@@ -263,7 +288,9 @@ class SearchMixin:
                 .where(self._compile_query(q))
                 .group_by(col(SearchDocumentTable.source_id))
             )
-            s_stmt = self._apply_filters(s_stmt, types=types, status=status, source_id=None)
+            s_stmt = self._apply_filters(
+                s_stmt, types=types, status=status, source_id=None, exclude_tiers=exclude_tiers
+            )
             by_source = {
                 (str(k) if k is not None else ""): int(v)
                 for k, v in (await session.exec(s_stmt)).all()
@@ -277,7 +304,9 @@ class SearchMixin:
                 .where(col(SearchDocumentTable.kind).is_not(None))
                 .group_by(col(SearchDocumentTable.kind))
             )
-            k_stmt = self._apply_filters(k_stmt, types=types, status=status, source_id=source_id)
+            k_stmt = self._apply_filters(
+                k_stmt, types=types, status=status, source_id=source_id, exclude_tiers=exclude_tiers
+            )
             by_kind = {str(k): int(v) for k, v in (await session.exec(k_stmt)).all()}
         return {"by_type": by_type, "by_source": by_source, "by_kind": by_kind}
 
@@ -287,6 +316,8 @@ class SearchMixin:
         row = {k: fields.get(k) for k in _COLUMNS}
         if row.get("updated_at") is None:
             row["updated_at"] = now_utc()
+        if row.get("tier") is None:
+            row["tier"] = "normal"  # untiered entities are always visible
         if row.get("title") is None:
             row["title"] = ""
         if row.get("haystack") is None:

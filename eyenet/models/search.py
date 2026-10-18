@@ -46,6 +46,12 @@ class SearchDocumentTable(SQLModel, table=True):
     # the search API can facet + filter "which kind of artifact". NULL when the
     # type has no sub-kind.
     kind: str | None = Field(default=None, index=True)
+    # Effective sensitivity tier (SensitivityTier.value: normal/restricted/classified),
+    # plain str like entity_type/status to dodge a native PG enum. Default "normal" so
+    # every untiered entity is always visible; tiered entities (documents) stamp their
+    # effective tier here so global search can filter rows the caller is not cleared for
+    # WITHOUT a cross-table join. The search box is otherwise a clearance bypass.
+    tier: str = Field(default="normal", index=True)
     # Display label + secondary line for the result row.
     title: str = Field(default="")
     subtitle: str | None = None

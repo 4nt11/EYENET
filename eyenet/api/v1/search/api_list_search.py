@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
 from eyenet.api.deps_paging import CursorParams, cursor_params
+from eyenet.api.v1._clearance import hidden_tiers_for
 from eyenet.api.v1.schemas.search import CursorPageSearchHit, SearchHit
 from eyenet.models.search import SearchDocumentTable
 from eyenet.storage.query import UnknownFieldError
@@ -33,7 +34,7 @@ def _csv(value: str | None) -> list[str] | None:
     status_code=200,
 )
 async def search_global(
-    _: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
+    current_user: Annotated[CurrentUser, Depends(RequireScope("read:search"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     page: Annotated[CursorParams, Depends(cursor_params)],
     q: Annotated[str, Query(min_length=1, max_length=256)],
@@ -43,6 +44,8 @@ async def search_global(
 ) -> CursorPageSearchHit:
     types_list = _csv(types)
     status_list = _csv(status)
+    # Clearance: never surface (or count, or facet) a document the caller can't read.
+    exclude_tiers = [t.value for t in hidden_tiers_for(current_user)]
     try:
         rows = cast(
             "list[SearchDocumentTable]",
@@ -51,19 +54,28 @@ async def search_global(
                 types=types_list,
                 status=status_list,
                 source_id=source,
+                exclude_tiers=exclude_tiers,
                 limit=page.fetch_limit,
                 offset=page.offset,
             ),
         )
         estimated_total = (
             await storage.count_search_global(
-                q, types=types_list, status=status_list, source_id=source
+                q,
+                types=types_list,
+                status=status_list,
+                source_id=source,
+                exclude_tiers=exclude_tiers,
             )
             if page.include_total
             else None
         )
         facets = await storage.search_global_facets(
-            q, types=types_list, status=status_list, source_id=source
+            q,
+            types=types_list,
+            status=status_list,
+            source_id=source,
+            exclude_tiers=exclude_tiers,
         )
     except UnknownFieldError as exc:
         raise UnprocessableError(str(exc)) from exc
