@@ -40,6 +40,10 @@ def _attachment_node(a: AttachmentTable) -> ExpandNode:
             "filename": a.filename,
             "sha256": a.sha256,
             "tier": tier,
+            # present when we stored the bytes; else source_ref is the operator's
+            # retrieval link for a blob kept metadata-only (over the size gate).
+            "stored": a.storage_uri is not None,
+            "source_ref": a.source_ref,
         },
     )
 

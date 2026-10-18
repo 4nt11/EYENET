@@ -74,14 +74,19 @@ from eyenet.identity_pool.loader import IdentityFileEntry
 
 if TYPE_CHECKING:
     from cryptography.fernet import Fernet
+from eyenet.app_settings import TELEGRAM_ATTACHMENT_MAX_BYTES, default_value
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.services.discovery.scout_graduation import ScoutGraduationService
+from eyenet.storage.attachments import store_attachment
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
 
 _log = structlog.get_logger()
+
+# TTL for the cached attachment-download size gate (see _attachment_max_bytes).
+_ATT_GATE_TTL_S = 60.0
 _tracer = trace.get_tracer("eyenet.collector.telegram")
 
 # max subscriptions returned in health()
@@ -150,6 +155,10 @@ class TelegramCollector(CollectorSkeleton):
         # can't GC them mid-sweep (RUF006); each self-discards on completion.
         self._bg_backfills: set[asyncio.Task[None]] = set()
         self._recent: deque[float] = deque(maxlen=3600)
+        # Cached (monotonic_ts, bytes) of the admin-tunable attachment download gate
+        # (telegram.attachment_max_bytes), refreshed with a short TTL so an operator's
+        # API change takes effect within ~a minute without restarting the collector.
+        self._att_max_cache: tuple[float, int] | None = None
         # E5 discovery recursion: this collector's own DB row + the join core.
         self._collector_id: UUID | None = None
         self._join: CollectorJoinHandler | None = None
@@ -1064,13 +1073,16 @@ class TelegramCollector(CollectorSkeleton):
         body = msg.message
         body_sha256 = hashlib.sha256(body.encode("utf-8")).hexdigest()
 
-        # Attachment metadata
+        # Attachment: metadata always; bytes downloaded + stored when within the size
+        # gate (telegram.attachment_max_bytes, admin-tunable). Photos are always pulled
+        # (Telegram caps them small); documents/video gate on their declared size. Over
+        # the gate we keep metadata + a retrieval link (source_ref) for the operator.
         attachments: list[AttachmentTable] = []
         has_attachment = bool(msg.media)
         if msg.media:
-            att = _extract_attachment_meta(msg.media, new_uuid7())
-            if att is not None:
-                attachments.append(att)
+            meta = _attachment_meta(msg.media)
+            if meta is not None:
+                attachments.append(await self._build_attachment(msg, meta, platform_groupid))
 
         source_uuid: UUID = self._source_uuid
         # For a forward, the actor IS the origin author, so record it as the
@@ -1162,6 +1174,70 @@ class TelegramCollector(CollectorSkeleton):
             )
             return "reattributed"
         return "skipped"
+
+    async def _attachment_max_bytes(self) -> int:
+        """The attachment download size gate (bytes), admin-tunable via the settings API.
+
+        Cached with a 60s TTL so a change lands promptly without a per-message DB read or
+        a collector restart. Falls back to the registry default on an unset/garbage value.
+        """
+        now = _time.monotonic()
+        if self._att_max_cache is not None and now - self._att_max_cache[0] < _ATT_GATE_TTL_S:
+            return self._att_max_cache[1]
+        raw = await self._storage.get_setting(TELEGRAM_ATTACHMENT_MAX_BYTES)
+        try:
+            val = int(raw) if raw is not None else int(default_value(TELEGRAM_ATTACHMENT_MAX_BYTES))
+        except ValueError:
+            val = int(default_value(TELEGRAM_ATTACHMENT_MAX_BYTES))
+        self._att_max_cache = (now, val)
+        return val
+
+    async def _build_attachment(
+        self, msg: TLMessage, meta: _AttMeta, platform_groupid: str
+    ) -> AttachmentTable:
+        """Build the attachment row, downloading + storing the blob when within the gate.
+
+        message_id is a placeholder (new_uuid7) the caller overwrites with the real FK.
+        A download failure is logged and degrades to metadata-only (never drops the row).
+        """
+        aid = new_uuid7()
+        source_ref = _tme_link(platform_groupid, msg.id)
+        sha256 = "0" * 64
+        storage_uri: str | None = None
+        size = meta.size
+        # Photos are always small (Telegram-capped); documents/video gate on declared size.
+        max_bytes = await self._attachment_max_bytes()
+        should_download = meta.is_photo or (0 < meta.size <= max_bytes)
+        if should_download:
+            payload: bytes | None = None
+            try:
+                payload = await self._client.download_media(msg, file=bytes)  # type: ignore[union-attr]
+            except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
+                _log.warning(
+                    "collector.attachment_download_failed",
+                    platform_groupid=platform_groupid,
+                    msgid=msg.id,
+                    error=str(exc),
+                )
+            if payload:
+                sha256, storage_uri = store_attachment(
+                    self._storage.data_dir,
+                    payload,
+                    source=SourceKind.TELEGRAM,
+                    instance_id=self.instance_id,
+                )
+                size = len(payload)
+        return AttachmentTable(
+            id=aid,
+            message_id=aid,  # overwritten by caller with the real message FK
+            kind=meta.kind,
+            mime=meta.mime,
+            size_bytes=size,
+            sha256=sha256,
+            filename=meta.filename,
+            storage_uri=storage_uri,
+            source_ref=source_ref,
+        )
 
     async def health(self) -> CollectorHealth:
         now = _time.monotonic()
@@ -1397,22 +1473,21 @@ def _chat_kind(chat: object) -> GroupKind:
     return GroupKind.CHAT
 
 
-def _extract_attachment_meta(
-    media: object,
-    placeholder_id: UUID,
-) -> AttachmentTable | None:
-    """Extract attachment metadata without downloading."""
+@dataclass
+class _AttMeta:
+    """Attachment metadata extracted from the media object (no download)."""
+
+    kind: AttachmentKind
+    mime: str
+    size: int  # declared size in bytes; 0 when the media type doesn't carry one
+    filename: str | None
+    is_photo: bool  # a Telegram-compressed photo (always within the size gate)
+
+
+def _attachment_meta(media: object) -> _AttMeta | None:
+    """Extract attachment metadata (kind/mime/size/filename) without downloading."""
     if isinstance(media, MessageMediaPhoto) and isinstance(media.photo, Photo):
-        return AttachmentTable(
-            id=placeholder_id,
-            message_id=placeholder_id,  # overwritten by caller
-            kind=AttachmentKind.IMAGE,
-            mime="image/jpeg",
-            size_bytes=0,
-            sha256="0" * 64,
-            filename=None,
-            storage_uri=None,
-        )
+        return _AttMeta(AttachmentKind.IMAGE, "image/jpeg", 0, None, is_photo=True)
     if isinstance(media, MessageMediaDocument) and isinstance(media.document, Document):
         doc = media.document
         mime = doc.mime_type or "application/octet-stream"
@@ -1423,18 +1498,19 @@ def _extract_attachment_meta(
             if name:
                 filename = name
                 break
-        kind = _mime_to_kind(mime)
-        return AttachmentTable(
-            id=placeholder_id,
-            message_id=placeholder_id,  # overwritten by caller
-            kind=kind,
-            mime=mime,
-            size_bytes=size,
-            sha256="0" * 64,
-            filename=filename,
-            storage_uri=None,
-        )
+        return _AttMeta(_mime_to_kind(mime), mime, size, filename, is_photo=False)
     return None
+
+
+def _tme_link(platform_groupid: str, msgid: int) -> str:
+    """Best-effort t.me deep-link to a message, for operator retrieval of a blob we did
+    not store. A @username group gets ``t.me/<name>/<id>``; a numeric channel id gets the
+    private ``t.me/c/<id>/<id>`` form (the ``-100`` supergroup prefix stripped)."""
+    gid = platform_groupid.lstrip("@")
+    stripped = gid.removeprefix("-100").lstrip("-")
+    if stripped.isdigit():
+        return f"https://t.me/c/{stripped}/{msgid}"
+    return f"https://t.me/{gid}/{msgid}"
 
 
 def _mime_to_kind(mime: str) -> AttachmentKind:
