@@ -96,6 +96,10 @@ _ATT_GATE_TTL_S = 60.0
 # is never called), re-reading its rate setting every cycle. One cycle processes up to
 # `telegram.attachment_backfill_per_tick` shells, so this interval is the throttle unit.
 _ATT_BACKFILL_INTERVAL_S = 5.0
+# Hard cap on one shell's network work (resolve + get_messages + download). A single
+# stuck/flood-limited fetch must not freeze the serial backfill — on timeout we record
+# the link only and move on, so a pathological shell can't head-of-line block the rest.
+_ATT_FETCH_TIMEOUT_S = 60.0
 _tracer = trace.get_tracer("eyenet.collector.telegram")
 
 # max subscriptions returned in health()
@@ -1265,8 +1269,15 @@ class TelegramCollector(CollectorSkeleton):
                 return
             try:
                 await self._backfill_attachments_once()
-            except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
-                _log.warning("collector.attachment_backfill_cycle_failed", error=str(exc))
+            except Exception as exc:
+                # A background backfill worker must NEVER die: holding its task ref
+                # (RUF006) means asyncio would otherwise swallow the exception silently.
+                # Log the whole cycle and keep going; the next cycle retries.
+                _log.warning(
+                    "collector.attachment_backfill_cycle_failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
 
     async def _backfill_attachments_once(self) -> None:
         """Re-fetch + store one batch of legacy metadata-only attachments for this
@@ -1299,16 +1310,38 @@ class TelegramCollector(CollectorSkeleton):
         self, att_id: UUID, platform_groupid: str, platform_msgid: str
     ) -> None:
         """Re-fetch one shell's message and store its blob (or just the link if still over
-        the gate). Marks the row processed either way (stamps source_ref), so it leaves the
-        shell set. A vanished message/media is marked with the link only."""
+        the gate). The network work is bounded by a hard timeout so one stuck/flood-limited
+        fetch can't freeze the serial backfill; a timeout records the link only, dropping the
+        row out of the shell set so it never head-of-line blocks the rest. Either way the row
+        is marked processed (source_ref stamped)."""
         source_ref = _tme_link(platform_groupid, int(platform_msgid))
+        try:
+            stored = await asyncio.wait_for(
+                self._fetch_store_attachment(att_id, platform_groupid, platform_msgid, source_ref),
+                timeout=_ATT_FETCH_TIMEOUT_S,
+            )
+        except TimeoutError:
+            _log.warning(
+                "collector.attachment_backfill_timeout",
+                att_id=str(att_id),
+                platform_groupid=platform_groupid,
+            )
+            await self._storage.set_attachment_source_ref(att_id, source_ref)
+            return
+        if not stored:
+            # vanished message/media, over the gate, or empty download — link only.
+            await self._storage.set_attachment_source_ref(att_id, source_ref)
+
+    async def _fetch_store_attachment(
+        self, att_id: UUID, platform_groupid: str, platform_msgid: str, source_ref: str
+    ) -> bool:
+        """Resolve + fetch the message and, if within the gate, download + store the blob.
+        Returns True iff a blob was stored (caller records the link only otherwise)."""
         entity = await self._resolve_public_entity(platform_groupid)
         msg = await self._client.get_messages(entity, ids=int(platform_msgid))  # type: ignore[union-attr]
         meta = _attachment_meta(msg.media) if (msg is not None and msg.media) else None
         if meta is None:
-            # message or media gone (deleted/expired) — keep the row, record the link.
-            await self._storage.set_attachment_source_ref(att_id, source_ref)
-            return
+            return False
         max_bytes = await self._attachment_max_bytes()
         if meta.is_photo or (0 < meta.size <= max_bytes):
             payload = await self._client.download_media(msg, file=bytes)  # type: ignore[union-attr]
@@ -1326,9 +1359,8 @@ class TelegramCollector(CollectorSkeleton):
                     storage_uri=storage_uri,
                     source_ref=source_ref,
                 )
-                return
-        # over the gate (or empty download) — link only.
-        await self._storage.set_attachment_source_ref(att_id, source_ref)
+                return True
+        return False
 
     async def health(self) -> CollectorHealth:
         now = _time.monotonic()
