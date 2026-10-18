@@ -480,11 +480,3 @@ events, incident model, geo); the graph just does not surface it.
   endpoints.
 - Incident is the one entity that SHOULD pop red (signal color) - keep it out of
   the even-spread palette, reserve red for it.
-
-## BUG (triage): crew node note fetch / crew detail
-
-Raised 2026-10-17. Graph inspector hits `GET /v1/notes/crew/{id}` for a crew node
-(the generic entity-note fetch). ANTI expected the crew detail at `GET /v1/crews/{id}`
-(which exists). Suspected search-index / entity-type routing issue. Deferred - triage:
-is the note endpoint rejecting entity_type=crew, or is it just a 404 (no note yet)?
-Decide whether crew nodes should carry notes and/or load a crew dossier.

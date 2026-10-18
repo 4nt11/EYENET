@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import pytest
 
 from eyenet.contracts.enums import GroupKind, SourceKind
-from eyenet.models import MessageTable, ThreadSummaryTable
+from eyenet.models import IncidentTable, MessageTable, ThreadSummaryTable
 from eyenet.models._base import new_uuid7
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository
@@ -236,6 +236,31 @@ async def test_actor_replied_in_threads(storage: BaseRepository) -> None:
     await storage.close()
 
 
+async def test_message_incidents(storage: BaseRepository) -> None:
+    _src, _gid, _actor, mid, _art = await _seed(storage)
+    async with storage.session() as s:
+        s.add(
+            IncidentTable(
+                message_id=mid,
+                labels=["data_breach", "credential_leak"],
+                scores={"data_breach": 0.91},
+                model_version="test-v1",
+                classified_at=_NOW,
+            )
+        )
+        await s.commit()
+    nodes, edges, total, more = await storage.graph_expand(
+        src_type="message", src_id=mid, enrichment="incidents", limit=10, offset=0, want_total=True
+    )
+    assert len(nodes) == 1
+    assert nodes[0].entity_type == "incident"
+    assert nodes[0].fields["labels"] == ["data_breach", "credential_leak"]
+    assert edges[0]["kind"] == "classified_as"
+    assert total == 1
+    assert more is False
+    await storage.close()
+
+
 async def test_message_author_is_single(storage: BaseRepository) -> None:
     _src, _gid, actor, mid, _art = await _seed(storage)
     nodes, edges, total, more = await storage.graph_expand(
@@ -257,6 +282,7 @@ async def test_counts_and_unknown_guard(storage: BaseRepository) -> None:
         "groups": 1,
         "started": 0,
         "replied_in": 0,
+        "incidents": 0,
         "linked": 0,
         "related": 0,
         "source": 1,
