@@ -4,29 +4,38 @@
   import { apiGet, apiPut } from '$lib/api.js';
 
   const NOAUTH = new Set([401, 403]);
+  const MIB = 1048576;
 
-  // The runtime knobs this page edits. `kind: 'bytes'` renders a MiB hint; the stored
-  // value is always the raw string the API validates (bytes / integer count).
+  // The runtime knobs this page edits. `kind: 'mib'` edits in MiB (type 3, we store
+  // 3*1048576 bytes); the API value is always the raw stored string (bytes / count).
   const KEYS = [
     {
       key: 'telegram.attachment_max_bytes',
       label: 'Attachment download size gate',
-      unit: 'bytes',
-      kind: 'bytes',
-      hint: (v) =>
-        `${(Number(v) / 1048576).toFixed(2)} MiB per file. Photos are always pulled. Larger documents and video keep metadata + a t.me link only. 0 disables downloads entirely.`
+      unit: 'MiB',
+      kind: 'mib',
+      step: '0.1',
+      // `d` is the MiB draft; show the exact byte count we'll store.
+      hint: (d) =>
+        `${Math.round((Number(d) || 0) * MIB).toLocaleString()} bytes per file. Photos are always pulled. Larger documents and video keep metadata + a t.me link only. 0 disables downloads entirely.`
     },
     {
       key: 'telegram.attachment_backfill_per_tick',
       label: 'Attachment backfill rate',
       unit: 'shells / tick',
       kind: 'count',
-      hint: (v) =>
-        Number(v) > 0
-          ? `HOT. Re-pulling up to ${v} historical attachment(s) per collector tick, through the live sessions. Set 0 to pause.`
+      step: '1',
+      hint: (d) =>
+        Number(d) > 0
+          ? `HOT. Re-pulling up to ${d} historical attachment(s) per collector tick, through the live sessions. Set 0 to pause.`
           : 'HELD. Raise above 0 to start re-pulling historical attachment bytes. Ramp slowly (5-10) and watch the sessions.'
     }
   ];
+
+  // stored byte/count string <-> the draft shown in the input (MiB for a 'mib' knob).
+  const toDraft = (it, stored) => (it.kind === 'mib' ? Number(stored) / MIB : stored);
+  const toStored = (it, draft) =>
+    it.kind === 'mib' ? String(Math.max(0, Math.round((Number(draft) || 0) * MIB))) : String(draft).trim();
 
   let items = $state([]);
   let loaded = $state(false);
@@ -44,7 +53,7 @@
             value: r.value,
             is_default: r.is_default,
             description: r.description,
-            draft: r.value,
+            draft: toDraft(k, r.value),
             saving: false,
             err: null,
             saved: false
@@ -63,10 +72,10 @@
     it.err = null;
     it.saved = false;
     try {
-      const r = await apiPut(`/v1/settings/${it.key}`, { value: String(it.draft).trim() }, { auth: true });
+      const r = await apiPut(`/v1/settings/${it.key}`, { value: toStored(it, it.draft) }, { auth: true });
       it.value = r.value;
       it.is_default = r.is_default;
-      it.draft = r.value;
+      it.draft = toDraft(it, r.value);
       it.saved = true;
     } catch (e) {
       it.err = e.message ?? 'save failed';
@@ -107,6 +116,7 @@
                 <input
                   type="number"
                   min="0"
+                  step={it.step}
                   bind:value={it.draft}
                   spellcheck="false"
                 />
@@ -115,7 +125,7 @@
               <Button
                 variant="primary"
                 size="sm"
-                disabled={it.saving || String(it.draft).trim() === String(it.value).trim()}
+                disabled={it.saving || toStored(it, it.draft) === it.value}
                 onclick={() => save(it)}
               >
                 {it.saving ? 'Saving…' : 'Save'}
@@ -123,7 +133,7 @@
             </div>
             <p class="hint">{it.hint(it.draft)}</p>
             {#if it.err}<p class="err">{it.err}</p>{/if}
-            {#if it.saved && String(it.draft).trim() === String(it.value).trim()}<p class="ok">Saved.</p>{/if}
+            {#if it.saved && toStored(it, it.draft) === it.value}<p class="ok">Saved.</p>{/if}
           </section>
         {/each}
       </div>
