@@ -21,7 +21,7 @@
     saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion,
     deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft
   } from '$lib/explorer.svelte.js';
-  import { nodeTypeLabel, nodeDisplayType } from '$lib/labels.js';
+  import { nodeTypeLabel, nodeDisplayType, enrichmentLabel } from '$lib/labels.js';
 
   // Canvas api handle (positions + view controls).
   let canvasApi = null;
@@ -419,7 +419,7 @@
         {:else if menu.items.length}
           {#each menu.items as [name, count]}
             <button class="ctx-row" onclick={() => runEnrichment(name)}>
-              <span>{name}</span><span class="ctx-count">{fmtCount(count)}</span>
+              <span>{enrichmentLabel(name)}</span><span class="ctx-count">{fmtCount(count)}</span>
             </button>
           {/each}
         {:else}

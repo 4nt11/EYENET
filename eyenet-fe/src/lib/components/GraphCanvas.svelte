@@ -88,6 +88,7 @@
         source: e.srcId,
         target: e.dstId,
         kind: e.kind,
+        klabel: (e.kind || '').replace(/_/g, ' '), // humanized edge label (no machine tokens)
         provenance: e.provenance,
         w,
         raw: e
@@ -135,7 +136,7 @@
       selector: 'edge',
       style: {
         width: 'data(w)',
-        label: 'data(kind)',
+        label: 'data(klabel)',
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
         'font-family': getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',

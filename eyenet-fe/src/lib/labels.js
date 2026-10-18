@@ -102,6 +102,28 @@ export const ENTITY_TYPE_LABELS = {
 };
 export const entityTypeLabel = (t) => label(ENTITY_TYPE_LABELS, t);
 
+// Enrichment name -> human label for the right-click menu (no raw machine tokens). Unknown
+// names (a dropped-in plugin) fall back to Title Case via label().
+export const ENRICHMENT_LABELS = {
+  messages: 'Messages',
+  artifacts: 'Infrastructure',
+  groups: 'Groups & threads',
+  started: 'Threads started',
+  replied_in: 'Replied in',
+  linked: 'Linked actors',
+  related: 'Related actors',
+  source: 'Source',
+  actors: 'Actors',
+  connected_wallets: 'Connected wallets',
+  domain: 'Host / domain',
+  author: 'Author',
+  container: 'Container',
+  participants: 'Participants',
+  op: 'Original poster',
+  wallets: 'Wallets'
+};
+export const enrichmentLabel = (n) => label(ENRICHMENT_LABELS, n);
+
 // Graph display type: the overloaded `group`/`message` entities map to the clean taxonomy
 // ANTI set - monitored group (TG) vs monitored category (forum); message (TG) vs post
 // (forum). The real entityType is untouched (enrichment calls still use it).
