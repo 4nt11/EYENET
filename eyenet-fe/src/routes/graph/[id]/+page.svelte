@@ -13,6 +13,8 @@
   import MagnifyingGlassMinus from 'phosphor-svelte/lib/MagnifyingGlassMinus';
   import Snowflake from 'phosphor-svelte/lib/Snowflake';
   import Sparkle from 'phosphor-svelte/lib/Sparkle';
+  import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
+  import ArrowClockwise from 'phosphor-svelte/lib/ArrowClockwise';
   import { ui } from '$lib/ui.svelte.js';
   import {
     explorer, seedSearch, addSeed, fetchCounts, expandNode, clearGraph,
@@ -22,6 +24,7 @@
     deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft
   } from '$lib/explorer.svelte.js';
   import { nodeTypeLabel, nodeDisplayType, enrichmentLabel } from '$lib/labels.js';
+  import { history, undoGraph, redoGraph, recordHistory, resetHistory } from '$lib/history.svelte.js';
 
   // Canvas api handle (positions + view controls).
   let canvasApi = null;
@@ -48,7 +51,15 @@
   let draftOffer = $state(null); // { count, at, draft } | null
   $effect(() => {
     const id = $page.params.id;
-    if (id) loadGraph(id).then(() => maybeOfferDraft());
+    if (id) { resetHistory(); loadGraph(id).then(() => maybeOfferDraft()); }
+  });
+
+  // Record a history entry on every structural change (add/remove node or edge). Reading
+  // the ids/length here makes the effect reactive to the set, not just a count.
+  $effect(() => {
+    const trig = explorer.nodes.map((n) => n.id).join(',') + '|' + explorer.edges.length;
+    void trig;
+    recordHistory();
   });
   function maybeOfferDraft() {
     const d = loadDraft();
@@ -199,12 +210,19 @@
     menu = null;
     selNode = null;
   }
-  // Delete / Backspace removes the current selection (or the inspected node), unless the
-  // operator is typing in a field.
+  // Keyboard: Delete/Backspace removes the selection/inspected node; Ctrl/Cmd+Z undo,
+  // Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo. All suppressed while typing in a field.
   function onKeydown(e) {
-    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) redoGraph(); else undoGraph();
+      return;
+    }
+    if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redoGraph(); return; }
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
     const sel = canvasApi?.selectedIds?.() ?? [];
     if (sel.length) { e.preventDefault(); removeNodes(sel); canvasApi?.clearSelection?.(); selNode = null; }
     else if (selNode) { e.preventDefault(); removeNodes([selNode.id]); selNode = null; }
@@ -385,6 +403,9 @@
 
     <!-- view toolbar -->
     <div class="viewbar">
+      <button class="vb" onclick={undoGraph} disabled={!history.past.length} title="Undo (Ctrl+Z)"><ArrowCounterClockwise size={18} weight="bold" /></button>
+      <button class="vb" onclick={redoGraph} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)"><ArrowClockwise size={18} weight="bold" /></button>
+      <div class="vb-div"></div>
       {#each LAYOUTS as l}
         {@const Icon = l.icon}
         <button class="vb" class:on={activeLayout === l.id} onclick={() => setLayout(l.id)} title={l.title}><Icon size={18} weight="bold" /></button>
@@ -571,7 +592,8 @@
   .vb-dismiss { background: none; border: 0; color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-11); cursor: pointer; }
   .vb-dismiss:hover { color: var(--text-body); }
   .vb { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; background: none; border: 1px solid transparent; border-radius: 7px; color: var(--text-muted); cursor: pointer; transition: color .1s, background .1s, border-color .1s; }
-  .vb:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .vb:hover:not(:disabled) { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .vb:disabled { opacity: .3; cursor: default; }
   .vb.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
   .hint { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: 560px; padding: 10px 14px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-muted); }
   .hint b { color: var(--text-body); }
