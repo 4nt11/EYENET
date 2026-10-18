@@ -82,7 +82,16 @@ class PostgresRepository(SQLModelRepository):
         pool_size: int = 5,
         max_overflow: int = 10,
         ndjson_path: Path | None = None,
+        data_dir: Path | None = None,
     ) -> None:
+        # Postgres holds the relational data, but attachment/document BLOBS still live
+        # on disk (the sharded store under data_dir/attachments). The factory forwards
+        # the caller's data_dir; fall back to EYENET_DATA_DIR so a bare construction in
+        # the deployed env still finds the mounted volume.
+        env_data_dir = os.environ.get("EYENET_DATA_DIR")
+        self._data_dir = (
+            data_dir if data_dir is not None else (Path(env_data_dir) if env_data_dir else None)
+        )
         url = url if url is not None else os.environ.get("EYENET_PG_URL")
         if not url:
             raise ValueError("PostgresRepository requires url= or EYENET_PG_URL")
@@ -127,7 +136,7 @@ class PostgresRepository(SQLModelRepository):
 
     @property
     def data_dir(self) -> Path | None:
-        return None
+        return self._data_dir
 
     # --- audit chain ---------------------------------------------------------
 

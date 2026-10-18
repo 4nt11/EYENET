@@ -1225,8 +1225,11 @@ class TelegramCollector(CollectorSkeleton):
         storage_uri: str | None = None
         size = meta.size
         # Photos are always small (Telegram-capped); documents/video gate on declared size.
+        # No data_dir -> no blob store (keep metadata-only rather than crash).
         max_bytes = await self._attachment_max_bytes()
-        should_download = meta.is_photo or (0 < meta.size <= max_bytes)
+        should_download = self._storage.data_dir is not None and (
+            meta.is_photo or (0 < meta.size <= max_bytes)
+        )
         if should_download:
             payload: bytes | None = None
             try:
@@ -1340,7 +1343,7 @@ class TelegramCollector(CollectorSkeleton):
         entity = await self._resolve_public_entity(platform_groupid)
         msg = await self._client.get_messages(entity, ids=int(platform_msgid))  # type: ignore[union-attr]
         meta = _attachment_meta(msg.media) if (msg is not None and msg.media) else None
-        if meta is None:
+        if meta is None or self._storage.data_dir is None:
             return False
         max_bytes = await self._attachment_max_bytes()
         if meta.is_photo or (0 < meta.size <= max_bytes):
