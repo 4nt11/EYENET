@@ -74,7 +74,11 @@ from eyenet.identity_pool.loader import IdentityFileEntry
 
 if TYPE_CHECKING:
     from cryptography.fernet import Fernet
-from eyenet.app_settings import TELEGRAM_ATTACHMENT_MAX_BYTES, default_value
+from eyenet.app_settings import (
+    TELEGRAM_ATTACHMENT_BACKFILL_PER_TICK,
+    TELEGRAM_ATTACHMENT_MAX_BYTES,
+    default_value,
+)
 from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.search_indexer.events import publish_entity_changed
@@ -560,6 +564,7 @@ class TelegramCollector(CollectorSkeleton):
         await self._refresh_requested_match_forms()
         await self._probe_requested_memberships()
         await self._sweep_dead_groups()
+        await self._backfill_attachments_tick()
 
     async def _probe_requested_memberships(self) -> None:
         """Backstop approval detector: for each REQUESTED candidate assigned to
@@ -1238,6 +1243,68 @@ class TelegramCollector(CollectorSkeleton):
             storage_uri=storage_uri,
             source_ref=source_ref,
         )
+
+    async def _backfill_attachments_tick(self) -> None:
+        """Re-fetch + store a throttled batch of legacy metadata-only attachments for this
+        collector's source. HELD at 0 by default (telegram.attachment_backfill_per_tick);
+        an admin raises it via the settings API to start + throttle the re-pull through the
+        live session. Per-row isolation: a failed fetch is logged + skipped, never aborts
+        the batch; it just retries on a later tick (the row keeps source_ref NULL)."""
+        if self._client is None or self._source_uuid is None:
+            return
+        raw = await self._storage.get_setting(TELEGRAM_ATTACHMENT_BACKFILL_PER_TICK)
+        try:
+            per_tick = int(raw) if raw is not None else 0
+        except ValueError:
+            per_tick = 0
+        if per_tick <= 0:
+            return
+        shells = await self._storage.iter_attachment_shells(self._source_uuid, limit=per_tick)
+        for att_id, platform_groupid, platform_msgid in shells:
+            try:
+                await self._backfill_one_attachment(att_id, platform_groupid, platform_msgid)
+            except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
+                _log.warning(
+                    "collector.attachment_backfill_failed",
+                    att_id=str(att_id),
+                    platform_groupid=platform_groupid,
+                    error=str(exc),
+                )
+
+    async def _backfill_one_attachment(
+        self, att_id: UUID, platform_groupid: str, platform_msgid: str
+    ) -> None:
+        """Re-fetch one shell's message and store its blob (or just the link if still over
+        the gate). Marks the row processed either way (stamps source_ref), so it leaves the
+        shell set. A vanished message/media is marked with the link only."""
+        source_ref = _tme_link(platform_groupid, int(platform_msgid))
+        entity = await self._resolve_public_entity(platform_groupid)
+        msg = await self._client.get_messages(entity, ids=int(platform_msgid))  # type: ignore[union-attr]
+        meta = _attachment_meta(msg.media) if (msg is not None and msg.media) else None
+        if meta is None:
+            # message or media gone (deleted/expired) — keep the row, record the link.
+            await self._storage.set_attachment_source_ref(att_id, source_ref)
+            return
+        max_bytes = await self._attachment_max_bytes()
+        if meta.is_photo or (0 < meta.size <= max_bytes):
+            payload = await self._client.download_media(msg, file=bytes)  # type: ignore[union-attr]
+            if payload:
+                sha256, storage_uri = store_attachment(
+                    self._storage.data_dir,
+                    payload,
+                    source=SourceKind.TELEGRAM,
+                    instance_id=self.instance_id,
+                )
+                await self._storage.set_attachment_blob(
+                    att_id,
+                    sha256=sha256,
+                    size_bytes=len(payload),
+                    storage_uri=storage_uri,
+                    source_ref=source_ref,
+                )
+                return
+        # over the gate (or empty download) — link only.
+        await self._storage.set_attachment_source_ref(att_id, source_ref)
 
     async def health(self) -> CollectorHealth:
         now = _time.monotonic()

@@ -51,6 +51,9 @@ class AttachmentRow(DbRowBase):
     sha256: str
     filename: str | None = None
     storage_uri: str | None = None
+    # Operator retrieval link for a blob we did not store on disk (over the size gate);
+    # also set as provenance when the blob IS stored. See AttachmentTable.source_ref.
+    source_ref: str | None = None
     # Field-parity with AttachmentTable (M10): the classifier-authoritative tier
     # + the operator promote-only override. Collectors insert provisional
     # CLASSIFIED; the ClassifierService settles it (fail-closed, §0).

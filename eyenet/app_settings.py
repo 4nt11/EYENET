@@ -10,11 +10,18 @@ AppSettingTable); the coercer is the single place that parses them.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # --- keys ---
 TELEGRAM_ATTACHMENT_MAX_BYTES = "telegram.attachment_max_bytes"
+# Max shell-attachment blobs each Telegram collector re-fetches per tick during backfill.
+# 0 = OFF (the default): backfill is held until an admin raises it, which also throttles
+# the re-pull rate through the live covert session (N per tick).
+TELEGRAM_ATTACHMENT_BACKFILL_PER_TICK = "telegram.attachment_backfill_per_tick"
 
 
 def _coerce_nonneg_int(raw: str) -> str:
@@ -38,6 +45,12 @@ SETTINGS: dict[str, SettingSpec] = {
         description="Max attachment size (bytes) the Telegram collector downloads and stores. "
         "Larger files keep metadata + a retrieval link only. 0 disables downloads.",
     ),
+    TELEGRAM_ATTACHMENT_BACKFILL_PER_TICK: SettingSpec(
+        default="0",
+        coerce=_coerce_nonneg_int,
+        description="Shell attachments each Telegram collector re-fetches per tick (backfill). "
+        "0 = off (held). Raise it to start/throttle re-pulling historical media.",
+    ),
 }
 
 
@@ -58,6 +71,7 @@ def validate_value(key: str, raw: str) -> str:
 
 __all__ = [
     "SETTINGS",
+    "TELEGRAM_ATTACHMENT_BACKFILL_PER_TICK",
     "TELEGRAM_ATTACHMENT_MAX_BYTES",
     "SettingSpec",
     "default_value",

@@ -15,7 +15,8 @@ from eyenet.contracts.audit_subjects import AuditSubject
 from eyenet.contracts.enums import CaseSubjectKind, SensitivityTier
 from eyenet.contracts.message import AttachmentRow
 from eyenet.models.case import CaseMemberTable
-from eyenet.models.message import AttachmentTable
+from eyenet.models.group import GroupTable
+from eyenet.models.message import AttachmentTable, MessageTable
 from eyenet.storage.errors import ReclassifyDemotionError
 from eyenet.storage.reclassify import ReclassifyOutcome
 
@@ -40,6 +41,66 @@ class AttachmentsMixin:
             if table is None:
                 return None
             return AttachmentRow.model_validate(table.model_dump())
+
+    async def iter_attachment_shells(
+        self, source_id: UUID, *, limit: int
+    ) -> list[tuple[UUID, str, str]]:
+        """Legacy metadata-only attachments for one source + their Telegram coordinates,
+        for backfill re-fetch. Returns ``(attachment_id, platform_groupid, platform_msgid)``
+        ordered by id. ``source_ref IS NULL`` is the "not yet processed by the download
+        path" marker (new code always stamps source_ref), so a shell drops out of this
+        query once backfill touches it — whether it stored the blob or only the link. No
+        cursor needed."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(
+                    AttachmentTable.id,
+                    GroupTable.platform_groupid,
+                    MessageTable.platform_msgid,
+                )
+                .join(MessageTable, col(AttachmentTable.message_id) == col(MessageTable.id))
+                .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id))
+                .where(col(AttachmentTable.source_ref).is_(None))
+                .where(MessageTable.source_id == source_id)
+                .order_by(col(AttachmentTable.id))
+                .limit(limit)
+            )
+            rows = await session.exec(stmt)
+            return [(r[0], r[1], r[2]) for r in rows]
+
+    async def set_attachment_blob(
+        self,
+        attachment_id: UUID,
+        *,
+        sha256: str,
+        size_bytes: int,
+        storage_uri: str,
+        source_ref: str | None = None,
+    ) -> None:
+        """Record a now-stored blob on an existing attachment row (backfill fill-in)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(AttachmentTable, attachment_id)
+            if row is None:
+                return
+            row.sha256 = sha256
+            row.size_bytes = size_bytes
+            row.storage_uri = storage_uri
+            if source_ref is not None:
+                row.source_ref = source_ref
+            session.add(row)
+            await session.commit()
+
+    async def set_attachment_source_ref(self, attachment_id: UUID, source_ref: str) -> None:
+        """Stamp only the operator retrieval link (no blob stored) — the backfill outcome
+        for a shell still over the size gate. Also marks it processed (drops it out of
+        iter_attachment_shells)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(AttachmentTable, attachment_id)
+            if row is None:
+                return
+            row.source_ref = source_ref
+            session.add(row)
+            await session.commit()
 
     def _attachments_filtered_stmt(
         self, *, mime: str | None, message_id: UUID | None = None

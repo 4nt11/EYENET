@@ -966,6 +966,29 @@ class BaseRepository(ABC):
     async def get_attachment(self, attachment_id: UUID) -> AttachmentRow | None: ...
 
     @abstractmethod
+    async def iter_attachment_shells(
+        self, source_id: UUID, *, limit: int
+    ) -> list[tuple[UUID, str, str]]:
+        """Metadata-only attachments for a source + their (platform_groupid,
+        platform_msgid), for backfill re-fetch."""
+
+    @abstractmethod
+    async def set_attachment_blob(
+        self,
+        attachment_id: UUID,
+        *,
+        sha256: str,
+        size_bytes: int,
+        storage_uri: str,
+        source_ref: str | None = None,
+    ) -> None:
+        """Record a now-stored blob on an existing attachment row (backfill)."""
+
+    @abstractmethod
+    async def set_attachment_source_ref(self, attachment_id: UUID, source_ref: str) -> None:
+        """Stamp only the retrieval link on a shell left metadata-only (over the gate)."""
+
+    @abstractmethod
     async def list_attachments(
         self,
         *,
