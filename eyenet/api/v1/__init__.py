@@ -32,6 +32,7 @@ from eyenet.api.v1.actors.api_set_assessment import router as actors_set_assessm
 
 # === artifacts ===
 from eyenet.api.v1.artifacts.api_create_artifact import router as artifacts_create_router
+from eyenet.api.v1.artifacts.api_get_artifact import router as artifacts_get_router
 from eyenet.api.v1.artifacts.api_list_artifact_mentions import router as artifacts_mentions_router
 from eyenet.api.v1.artifacts.api_list_artifacts import router as artifacts_list_router
 
@@ -150,6 +151,7 @@ from eyenet.api.v1.graphs.api_replace_graph_nodes import router as graphs_replac
 from eyenet.api.v1.graphs.api_update_graph import router as graphs_update_router
 from eyenet.api.v1.groups.api_backfill_group import router as groups_backfill_router
 from eyenet.api.v1.groups.api_create_group import router as groups_create_router
+from eyenet.api.v1.groups.api_get_group import router as groups_get_router
 
 # === groups (monitored-groups: see + join at will) ===
 from eyenet.api.v1.groups.api_join_group import router as groups_join_router
@@ -310,6 +312,7 @@ v1_router.include_router(actors_set_assessment_router)
 v1_router.include_router(artifacts_create_router)  # POST /artifacts (operator entity)
 v1_router.include_router(artifacts_list_router)  # /artifacts (literal) before the detail route
 v1_router.include_router(artifacts_mentions_router)
+v1_router.include_router(artifacts_get_router)  # GET /artifacts/{id} (dossier)
 v1_router.include_router(calibration_get_router)
 v1_router.include_router(actors_neighbors_router)
 v1_router.include_router(actors_observations_router)
@@ -465,6 +468,7 @@ v1_router.include_router(groups_backfill_router)
 v1_router.include_router(groups_join_router)
 v1_router.include_router(groups_leave_router)
 v1_router.include_router(groups_scan_router)
+v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /groups/* routes
 
 # identities + panic
 v1_router.include_router(identities_list_router)

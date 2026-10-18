@@ -113,6 +113,26 @@ class CursorPageGroupSummary(CursorPage[GroupSummary]):
     """200 page response for GET /v1/groups."""
 
 
+class GroupDetail(ApiSchema):
+    """One group's core record for `GET /v1/groups/{id}` (graph-inspector dossier).
+
+    Projection of the GroupTable row (MODELS §1.3). Lifecycle `status`
+    (monitored/candidate) is a candidate-side facet and is NOT carried here; the
+    graph already derives it from the node's display type."""
+
+    group_id: UUID
+    source_id: UUID
+    platform_groupid: str = Field(max_length=512)
+    kind: GroupKind
+    title: str | None = None
+    description: str | None = None
+    is_public: bool | None = None
+    member_count: int | None = None
+    first_seen_at_ingest: datetime
+    last_observed_at_ingest: datetime
+    provenance: str = "collected"
+
+
 class JoinGroupRequest(ApiSchema):
     """Body for POST /v1/groups/join — operator-initiated join.
 

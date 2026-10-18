@@ -399,6 +399,43 @@ class ArtifactsMixin:
                 for art, mentions, actors, groups, fts, lts in result
             ]
 
+    async def get_infrastructure_artifact_summary(
+        self, artifact_id: UUID
+    ) -> tuple[InfrastructureArtifactRow, int, int, int, datetime | None, datetime | None] | None:
+        """One artifact with its read-time mention aggregates (same shape as a
+        :meth:`list_infrastructure_artifacts` row), or None. Dossier for the graph
+        inspector. Generic SQL - no dialect leak."""
+        a = InfrastructureArtifactTable
+        m = InfrastructureArtifactMentionTable
+        msg = MessageTable
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(  # type: ignore[call-overload]
+                    a,
+                    func.count(distinct(col(m.message_id))),
+                    func.count(distinct(col(msg.actor_id))),
+                    func.count(distinct(col(msg.group_id))),
+                    func.min(col(m.ts)),
+                    func.max(col(m.ts)),
+                )
+                .outerjoin(m, col(m.artifact_id) == col(a.id))
+                .outerjoin(msg, col(msg.id) == col(m.message_id))
+                .where(col(a.id) == artifact_id)
+                .group_by(col(a.id))
+            )
+            row = (await session.exec(stmt)).first()
+            if row is None:
+                return None
+            art, mentions, actors, groups, fts, lts = row
+            return (
+                _artifact_row(art),
+                mentions,
+                actors,
+                groups,
+                _coerce_utc(fts),
+                _coerce_utc(lts),
+            )
+
     async def count_infrastructure_artifacts(
         self,
         *,

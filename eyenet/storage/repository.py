@@ -2968,6 +2968,13 @@ class BaseRepository(ABC):
         is one of recent|mentions|value|first_seen."""
 
     @abstractmethod
+    async def get_infrastructure_artifact_summary(
+        self, artifact_id: UUID
+    ) -> tuple[InfrastructureArtifactRow, int, int, int, datetime | None, datetime | None] | None:
+        """One artifact with its mention aggregates (same tuple shape as a
+        :meth:`list_infrastructure_artifacts` row), or None if it does not exist."""
+
+    @abstractmethod
     async def count_infrastructure_artifacts(
         self,
         *,

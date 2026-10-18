@@ -376,6 +376,26 @@ export async function fetchActorDetail(id) {
   }
 }
 
+// Artifact dossier (GET /v1/artifacts/{id} -> ArtifactSummary): mention aggregates +
+// first/last seen. Group dossier (GET /v1/groups/{id} -> GroupDetail): member count,
+// kind, first/last seen. Both one cheap call for the inspector.
+export async function fetchArtifactDetail(id) {
+  try {
+    return await apiGet(`/v1/artifacts/${id}`, { auth: true });
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    return null;
+  }
+}
+export async function fetchGroupDetail(id) {
+  try {
+    return await apiGet(`/v1/groups/${id}`, { auth: true });
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    return null;
+  }
+}
+
 // Per-entity note (the inspector Notes field). loadNote returns the body string
 // ('' when none); saveNote upserts; deleteNote removes.
 export async function loadNote(node) {

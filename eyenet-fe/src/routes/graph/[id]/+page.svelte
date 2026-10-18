@@ -21,9 +21,10 @@
     EDGE_KINDS, MEMBERSHIP_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
     saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion,
-    deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft, fetchActorDetail
+    deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft,
+    fetchActorDetail, fetchArtifactDetail, fetchGroupDetail
   } from '$lib/explorer.svelte.js';
-  import { nodeTypeLabel, nodeDisplayType, enrichmentLabel } from '$lib/labels.js';
+  import { nodeTypeLabel, nodeDisplayType, enrichmentLabel, kindLabel, groupKindLabel } from '$lib/labels.js';
   import { history, undoGraph, redoGraph, recordHistory, resetHistory } from '$lib/history.svelte.js';
 
   // Canvas api handle (positions + view controls).
@@ -271,18 +272,30 @@
 
   const fieldRows = $derived(selNode ? Object.entries(selNode.fields ?? {}) : []);
 
-  // Rich actor dossier: when an actor node is selected, pull GET /v1/actors/{id} for the
-  // full stats (observations, first/last seen, bot, score, persona, aliases, assessment,
-  // timezone). Guarded against a stale response after a fast re-selection.
-  let actorDetail = $state(null);
-  let actorSeq = 0;
+  // Entity dossier: on selecting a node, pull its detail endpoint for the rich stats the
+  // sparse search-doc fields lack. Dispatched by entity type; guarded against a stale
+  // response after a fast re-selection. (thread rows are groups -> the group endpoint.)
+  const DETAIL_FETCHERS = {
+    actor: fetchActorDetail,
+    artifact: fetchArtifactDetail,
+    group: fetchGroupDetail,
+    thread: fetchGroupDetail
+  };
+  let actorDetail = $state(null);   // actor dossier (distinct shape -> own var for the markup)
+  let detail = $state(null);        // artifact/group/thread dossier
+  let detailSeq = 0;
   $effect(() => {
     const n = selNode;
     actorDetail = null;
-    if (n?.entityType !== 'actor') return;
+    detail = null;
+    const f = n ? DETAIL_FETCHERS[n.entityType] : null;
+    if (!f) return;
     const id = n.id;
-    const mine = ++actorSeq;
-    fetchActorDetail(id).then((d) => { if (mine === actorSeq) actorDetail = d; });
+    const mine = ++detailSeq;
+    f(id).then((d) => {
+      if (mine !== detailSeq) return;
+      if (n.entityType === 'actor') actorDetail = d; else detail = d;
+    });
   });
   const fmtDate = (s) => (s ? new Date(s).toISOString().slice(0, 10) : '—');
   const fmtCount = (c) => (c == null ? '·' : Number(c).toLocaleString('en-US'));
@@ -533,6 +546,40 @@
             <div class="ins-label">Operator assessment</div>
             <div class="ad-assess">{actorDetail.assessment}</div>
           {/if}
+        {/if}
+
+        {#if detail && selNode.entityType === 'artifact'}
+          <div class="ins-label">Dossier</div>
+          <div class="ad-stats">
+            <div class="ad-stat"><span class="ad-n">{Number(detail.mention_count ?? 0).toLocaleString('en-US')}</span><span class="ad-k">mentions</span></div>
+            <div class="ad-stat"><span class="ad-n">{Number(detail.distinct_actors ?? 0).toLocaleString('en-US')}</span><span class="ad-k">distinct actors</span></div>
+            <div class="ad-stat"><span class="ad-n">{Number(detail.distinct_groups ?? 0).toLocaleString('en-US')}</span><span class="ad-k">distinct groups</span></div>
+            <div class="ad-stat"><span class="ad-n">{fmtDate(detail.first_mention_at ?? detail.first_seen_at_ingest)}</span><span class="ad-k">first seen</span></div>
+          </div>
+          <table class="ins-fields">
+            <tbody>
+              <tr><th>kind</th><td>{kindLabel(detail.kind)}</td></tr>
+              <tr><th>last seen</th><td>{fmtDate(detail.last_mention_at ?? detail.last_seen_at_ingest)}</td></tr>
+              {#if detail.resolved_to_source_id}<tr><th>resolves to</th><td class="mono">{detail.resolved_to_source_id}</td></tr>{/if}
+            </tbody>
+          </table>
+        {/if}
+
+        {#if detail && (selNode.entityType === 'group' || selNode.entityType === 'thread')}
+          <div class="ins-label">Dossier</div>
+          <div class="ad-stats">
+            <div class="ad-stat"><span class="ad-n">{detail.member_count != null ? Number(detail.member_count).toLocaleString('en-US') : '—'}</span><span class="ad-k">members</span></div>
+            <div class="ad-stat"><span class="ad-n">{fmtDate(detail.first_seen_at_ingest)}</span><span class="ad-k">first seen</span></div>
+            <div class="ad-stat"><span class="ad-n">{fmtDate(detail.last_observed_at_ingest)}</span><span class="ad-k">last seen</span></div>
+            <div class="ad-stat"><span class="ad-n">{detail.is_public == null ? '—' : (detail.is_public ? 'public' : 'private')}</span><span class="ad-k">visibility</span></div>
+          </div>
+          <table class="ins-fields">
+            <tbody>
+              <tr><th>kind</th><td>{groupKindLabel(detail.kind)}</td></tr>
+              <tr><th>platform id</th><td class="mono">{detail.platform_groupid}</td></tr>
+              {#if detail.provenance && detail.provenance !== 'collected'}<tr><th>provenance</th><td>{detail.provenance}</td></tr>{/if}
+            </tbody>
+          </table>
         {/if}
 
         <div class="ins-notes">
