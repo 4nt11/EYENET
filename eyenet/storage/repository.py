@@ -713,6 +713,33 @@ class BaseRepository(ABC):
         """Classification history for one message, latest run first."""
 
     @abstractmethod
+    async def effective_incident(self, message_id: UUID) -> dict[str, object] | None:
+        """The effective incident for a message (operator correction if present, else latest
+        model); labels may be [] (false-positive); None if no classification. One per msg."""
+
+    @abstractmethod
+    async def all_incident_message_ids(self) -> list[UUID]:
+        """Every message id with a classification (model OR operator) - backfill iterator."""
+
+    @abstractmethod
+    async def all_effective_incidents(self) -> list[dict[str, object]]:
+        """Every non-empty effective incident (operator wins) - search-backfill bulk source."""
+
+    @abstractmethod
+    async def effective_incidents_for_scope(
+        self,
+        *,
+        message_id: UUID | None = None,
+        group_id: UUID | None = None,
+        actor_id: UUID | None = None,
+        limit: int,
+        offset: int,
+        want_total: bool,
+    ) -> tuple[list[dict[str, object]], int | None, bool]:
+        """Effective incidents (non-empty) for one message / a group's / an actor's messages,
+        paginated. Returns (page, total|None, has_more)."""
+
+    @abstractmethod
     async def recent_incidents(
         self,
         limit: int = 50,

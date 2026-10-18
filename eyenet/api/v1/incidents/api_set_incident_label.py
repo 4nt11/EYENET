@@ -15,10 +15,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
 
-from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_audit, get_storage
+from eyenet.api.deps import (
+    CurrentUser,
+    RequireScope,
+    UnprocessableError,
+    get_audit,
+    get_publisher,
+    get_storage,
+)
 from eyenet.api.v1.schemas.incidents import IncidentLabelOut, IncidentLabelUpdate
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.incident import IncidentLabelRow
 from eyenet.incidents import rules
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -39,6 +48,7 @@ async def set_incident_label(
     current_user: Annotated[CurrentUser, Depends(RequireScope(WRITE_SCOPE))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
+    publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
     idempotency_key: Annotated[  # noqa: ARG001 — read by IdempotencyMiddleware; declared for OpenAPI
         str | None, Header(alias="Idempotency-Key", max_length=128)
     ] = None,
@@ -65,6 +75,8 @@ async def set_incident_label(
         system_user_id=current_user.user_id,
         payload={"labels": row.labels, "reason": row.reason},
     )
+    # Reindex the effective incident so it hydrates/searches (operator labels win).
+    await publish_entity_changed(publisher, entity_type="incident", entity_id=message_id)
     return IncidentLabelOut(
         message_id=row.message_id,
         labels=row.labels,

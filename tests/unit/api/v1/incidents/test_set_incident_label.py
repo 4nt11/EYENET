@@ -23,8 +23,11 @@ class _FakeStorage:
 
     async def set_incident_label(self, message_id, labels, *, decided_by, reason, decided_at):
         row = IncidentLabelRow(
-            message_id=message_id, labels=labels, reason=reason,
-            decided_by=decided_by, decided_at=decided_at,
+            message_id=message_id,
+            labels=labels,
+            reason=reason,
+            decided_by=decided_by,
+            decided_at=decided_at,
         )
         self.saved[message_id] = row
         return row
@@ -42,14 +45,27 @@ def _user():
     return SimpleNamespace(user_id=uuid4(), username="op.anti")
 
 
+class _FakePublisher:
+    async def publish(self, subject, envelope, **_kw):
+        return None
+
+
+_PUB = _FakePublisher()
+
+
 def test_relabel_stores_dedups_and_audits() -> None:
     storage, audit = _FakeStorage(), _FakeAudit()
     mid = uuid4()
     out = asyncio.run(
         set_incident_label(
             message_id=mid,
-            body=IncidentLabelUpdate(labels=["breach_dump", "breach_dump", "intrusion"], reason="misfire"),
-            current_user=_user(), storage=storage, audit=audit,
+            body=IncidentLabelUpdate(
+                labels=["breach_dump", "breach_dump", "intrusion"], reason="misfire"
+            ),
+            current_user=_user(),
+            storage=storage,
+            audit=audit,
+            publisher=_PUB,
         )
     )
     assert out.labels == ["breach_dump", "intrusion"]  # deduped, order preserved
@@ -62,8 +78,12 @@ def test_relabel_empty_is_false_positive() -> None:
     storage, audit = _FakeStorage(), _FakeAudit()
     out = asyncio.run(
         set_incident_label(
-            message_id=uuid4(), body=IncidentLabelUpdate(labels=[], reason="not a leak"),
-            current_user=_user(), storage=storage, audit=audit,
+            message_id=uuid4(),
+            body=IncidentLabelUpdate(labels=[], reason="not a leak"),
+            current_user=_user(),
+            storage=storage,
+            audit=audit,
+            publisher=_PUB,
         )
     )
     assert out.labels == []  # empty = false positive, a valid correction
@@ -76,6 +96,9 @@ def test_relabel_rejects_unknown_label() -> None:
             set_incident_label(
                 message_id=uuid4(),
                 body=IncidentLabelUpdate(labels=["banana"], reason=None),
-                current_user=_user(), storage=storage, audit=audit,
+                current_user=_user(),
+                storage=storage,
+                audit=audit,
+                publisher=_PUB,
             )
         )

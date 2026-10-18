@@ -28,6 +28,7 @@ from eyenet.contracts._base import TraceContext
 from eyenet.contracts.incident import INCIDENT_SUBJECT, IncidentEnvelope, IncidentRow
 from eyenet.contracts.raw_message import RawMessageEnvelope
 from eyenet.incidents import classifier, rules
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.service.base import ServiceBase
 from eyenet.telemetry import get_logger
 from eyenet.telemetry.propagation import ZERO_TRACEPARENT, current_traceparent
@@ -184,6 +185,10 @@ class IncidentClassifierService(ServiceBase):
                     model_version=row.model_version,
                     classified_at=row.classified_at,
                 ),
+            )
+            # Also reindex the effective incident so it hydrates/searches on the graph.
+            await publish_entity_changed(
+                self._publisher, entity_type="incident", entity_id=row.message_id
             )
         except Exception as exc:  # incident is already persisted; feed emit is best-effort
             _log.warning("incident.publish_failed", evidence_ref=evidence_ref, error=str(exc))

@@ -8,7 +8,7 @@ eyenet/models/incident.py and CLAUDE.md §2.3 (Rule 1: no dialect leak in mixins
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -37,6 +37,33 @@ from ._helpers import safe_session
 def _escape_like(term: str) -> str:
     """Escape LIKE wildcards so ``q`` matches literally (used with escape='\\')."""
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _model_incident_dict(m: IncidentTable) -> dict[str, Any]:
+    return {
+        "message_id": m.message_id,
+        "labels": list(m.labels or []),
+        "source": "model",
+        "model_version": m.model_version,
+        "scores": dict(m.scores or {}),
+        "decided_by": None,
+        "at": m.classified_at,
+    }
+
+
+def _operator_incident_dict(o: IncidentLabelTable) -> dict[str, Any]:
+    return {
+        "message_id": o.message_id,
+        "labels": list(o.labels or []),
+        "source": "operator",
+        "model_version": None,
+        "scores": {},
+        "decided_by": o.decided_by,
+        "at": o.decided_at,
+    }
 
 
 def _label_row(t: IncidentLabelTable) -> IncidentLabelRow:
@@ -83,6 +110,105 @@ class IncidentsMixin:
             )
             result = await session.exec(stmt)
             return list(result.all())
+
+    async def effective_incident(self, message_id: UUID) -> dict[str, Any] | None:
+        """The effective incident for a message: operator correction if present, else the
+        latest model classification. ``labels`` may be [] (operator false-positive); None
+        when the message has no classification at all. One incident per message."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            op = (
+                await session.exec(
+                    select(IncidentLabelTable).where(IncidentLabelTable.message_id == message_id)
+                )
+            ).first()
+            if op is not None:
+                return _operator_incident_dict(op)
+            m = (
+                await session.exec(
+                    select(IncidentTable)
+                    .where(IncidentTable.message_id == message_id)
+                    .order_by(col(IncidentTable.classified_at).desc())
+                    .limit(1)
+                )
+            ).first()
+            return _model_incident_dict(m) if m is not None else None
+
+    async def all_incident_message_ids(self) -> list[UUID]:
+        """Every message id with a classification (model OR operator). Backfill iterator."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            a = set(await session.exec(select(IncidentTable.message_id)))
+            b = set(await session.exec(select(IncidentLabelTable.message_id)))
+            return list(a | b)
+
+    async def all_effective_incidents(self) -> list[dict[str, Any]]:
+        """Every non-empty effective incident (operator wins over model). Search-backfill
+        bulk source. Loads only the sparse incident rows."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            ops = {o.message_id: o for o in await session.exec(select(IncidentLabelTable))}
+            models: dict[UUID, IncidentTable] = {}
+            for m in await session.exec(
+                select(IncidentTable).order_by(col(IncidentTable.classified_at).desc())
+            ):
+                models.setdefault(m.message_id, m)
+        out: list[dict[str, Any]] = []
+        for mid in ops.keys() | models.keys():
+            d = (
+                _operator_incident_dict(ops[mid])
+                if mid in ops
+                else _model_incident_dict(models[mid])
+            )
+            if d["labels"]:
+                out.append(d)
+        return out
+
+    async def effective_incidents_for_scope(
+        self,
+        *,
+        message_id: UUID | None = None,
+        group_id: UUID | None = None,
+        actor_id: UUID | None = None,
+        limit: int,
+        offset: int,
+        want_total: bool,
+    ) -> tuple[list[dict[str, Any]], int | None, bool]:
+        """Effective incidents (non-empty) for a scope: one message, a group/thread's
+        messages, or an actor's messages. Operator correction wins over model; empties
+        (false-positives) are excluded. Fetches only the sparse incident rows (joined to
+        message for scope), builds the effective view + paginates in memory."""
+        op_stmt = select(IncidentLabelTable)
+        model_stmt = select(IncidentTable)
+        if message_id is not None:
+            op_stmt = op_stmt.where(IncidentLabelTable.message_id == message_id)
+            model_stmt = model_stmt.where(IncidentTable.message_id == message_id)
+        else:
+            scope_col = MessageTable.group_id if group_id is not None else MessageTable.actor_id
+            scope_val = group_id if group_id is not None else actor_id
+            op_stmt = op_stmt.join(
+                MessageTable, col(MessageTable.id) == col(IncidentLabelTable.message_id)
+            ).where(col(scope_col) == scope_val)
+            model_stmt = model_stmt.join(
+                MessageTable, col(MessageTable.id) == col(IncidentTable.message_id)
+            ).where(col(scope_col) == scope_val)
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            ops = {o.message_id: o for o in await session.exec(op_stmt)}
+            models: dict[UUID, IncidentTable] = {}
+            for m in await session.exec(
+                model_stmt.order_by(col(IncidentTable.classified_at).desc())
+            ):
+                models.setdefault(m.message_id, m)  # first seen = latest
+        effective: list[dict[str, Any]] = []
+        for mid in ops.keys() | models.keys():
+            d = (
+                _operator_incident_dict(ops[mid])
+                if mid in ops
+                else _model_incident_dict(models[mid])
+            )
+            if d["labels"]:  # empty = operator false-positive -> not an incident
+                effective.append(d)
+        effective.sort(key=lambda d: d["at"] or _EPOCH, reverse=True)
+        total = len(effective) if want_total else None
+        page = effective[offset : offset + limit]
+        return page, total, offset + limit < len(effective)
 
     def _apply_incident_filters(
         self,

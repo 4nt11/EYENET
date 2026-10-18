@@ -111,6 +111,9 @@ class SearchIndexerService(ServiceBase):
             await self._reindex_artifact(env.entity_id)
         elif env.entity_type == "crew":
             await self._reindex_crew(env.entity_id)
+        elif env.entity_type == "incident":
+            # entity_id is the MESSAGE id; the incident node id is derived from it.
+            await self._reindex_incident(env.entity_id)
         else:
             _log.warning("search_indexer.unknown_entity_type", entity_type=env.entity_type)
 
@@ -255,6 +258,17 @@ class SearchIndexerService(ServiceBase):
                 if actor is not None:
                     handles.append(actor.current_handle or actor.current_display_name or "")
         await self._storage.put_search_document(**haystack.crew_doc(crew, handles))
+
+    async def _reindex_incident(self, message_id: UUID) -> None:
+        from eyenet.incidents.graph import incident_node_id  # noqa: PLC0415
+
+        eff = await self._storage.effective_incident(message_id)
+        iid = incident_node_id(message_id)
+        if eff is None or not eff.get("labels"):
+            # no classification, or operator false-positive -> drop any stale incident doc
+            await self._storage.delete_search_document("incident", iid)
+            return
+        await self._storage.put_search_document(**haystack.incident_doc(eff))
 
     async def _reindex_document(self, document_id: UUID) -> None:
         async with self._storage.session() as s:

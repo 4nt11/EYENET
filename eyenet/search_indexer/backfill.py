@@ -158,6 +158,11 @@ async def backfill_search(
     counts["message"] = await _backfill_messages(
         storage, group_title, group_kind, actor_handle, batch, full
     )
+
+    # Incidents: one effective node per classified message (operator wins over model).
+    eff_incidents = await storage.all_effective_incidents()
+    await _bulk(storage, [haystack.incident_doc(d) for d in eff_incidents])
+    counts["incident"] = len(eff_incidents)
     return counts
 
 

@@ -79,8 +79,8 @@ def test_flush_stores_only_fired_and_audits(monkeypatch):
     assert row.scores == {"tooling": 0.9, "leak": 0.05}  # all heads scored
     assert len(s._audit.events) == 1  # one detection audited
     assert s._audit.events[0]["event"] == "incident_detected"
-    # the fired incident is published on the bus for the triage feed
-    assert len(s._bus.published) == 1
+    # the fired incident is published twice: triage feed + search-reindex trigger
+    assert len(s._bus.published) == 2
     subject, payload = s._bus.published[0]
     assert subject == "incident.detected"
     assert b"tooling" in payload

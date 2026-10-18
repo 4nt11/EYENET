@@ -185,6 +185,31 @@ def thread_doc(
     }
 
 
+def incident_doc(eff: dict[str, Any]) -> dict[str, Any]:
+    """Search doc for an effective incident (one per message; see incidents/graph.py). ``eff``
+    is the effective-incident dict from storage.effective_incident()."""
+    from eyenet.incidents.graph import incident_node_id  # noqa: PLC0415 (avoid import cycle)
+
+    labels = list(eff.get("labels") or [])
+    mid = eff["message_id"]
+    return {
+        "entity_type": "incident",
+        "entity_id": incident_node_id(mid),
+        "source_id": None,
+        "status": eff.get("source"),  # model | operator
+        "title": ", ".join(labels) if labels else "incident",
+        "subtitle": eff.get("source"),
+        "haystack": clean(*labels),
+        "handles": None,
+        "fields": {
+            "labels": labels,
+            "source": eff.get("source"),
+            "model_version": eff.get("model_version"),
+            "message_id": str(mid),
+        },
+    }
+
+
 def persona_doc(p: PersonaTable, member_handles: list[str]) -> dict[str, Any]:
     return {
         "entity_type": "persona",
