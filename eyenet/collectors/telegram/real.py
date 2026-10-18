@@ -14,6 +14,7 @@ config. Panic (`eyenet.control.global.panic`) freezes the pool fleet-wide.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import time as _time
@@ -91,6 +92,10 @@ _log = structlog.get_logger()
 
 # TTL for the cached attachment-download size gate (see _attachment_max_bytes).
 _ATT_GATE_TTL_S = 60.0
+# The attachment backfill is a self-driven loop (this collector is event-driven; tick()
+# is never called), re-reading its rate setting every cycle. One cycle processes up to
+# `telegram.attachment_backfill_per_tick` shells, so this interval is the throttle unit.
+_ATT_BACKFILL_INTERVAL_S = 5.0
 _tracer = trace.get_tracer("eyenet.collector.telegram")
 
 # max subscriptions returned in health()
@@ -163,6 +168,8 @@ class TelegramCollector(CollectorSkeleton):
         # (telegram.attachment_max_bytes), refreshed with a short TTL so an operator's
         # API change takes effect within ~a minute without restarting the collector.
         self._att_max_cache: tuple[float, int] | None = None
+        # Held ref to the self-driven attachment-backfill loop (RUF006).
+        self._attachment_backfill_task: asyncio.Task[None] | None = None
         # E5 discovery recursion: this collector's own DB row + the join core.
         self._collector_id: UUID | None = None
         self._join: CollectorJoinHandler | None = None
@@ -295,6 +302,10 @@ class TelegramCollector(CollectorSkeleton):
         # everything this account can see (non-blocking). Hold the reference so the
         # loop's weak task ref can't GC it mid-run (RUF006).
         self._scan_task = asyncio.create_task(self._scan_on_start())
+
+        # Self-driven attachment backfill (this collector is event-driven; tick() never
+        # runs). Idles cheaply while the rate setting is 0 (HELD). RUF006: hold the ref.
+        self._attachment_backfill_task = asyncio.create_task(self._attachment_backfill_loop())
 
         # Seed the hot-path REQUESTED match-form set (Defect 6) so the very
         # first messages after a restart can confirm a pending approval without
@@ -564,7 +575,6 @@ class TelegramCollector(CollectorSkeleton):
         await self._refresh_requested_match_forms()
         await self._probe_requested_memberships()
         await self._sweep_dead_groups()
-        await self._backfill_attachments_tick()
 
     async def _probe_requested_memberships(self) -> None:
         """Backstop approval detector: for each REQUESTED candidate assigned to
@@ -1244,12 +1254,26 @@ class TelegramCollector(CollectorSkeleton):
             source_ref=source_ref,
         )
 
-    async def _backfill_attachments_tick(self) -> None:
-        """Re-fetch + store a throttled batch of legacy metadata-only attachments for this
+    async def _attachment_backfill_loop(self) -> None:
+        """Self-driven backfill worker (this collector is event-driven; tick() never runs).
+        Each cycle re-reads the rate setting and processes one batch; the interval between
+        cycles is the throttle unit. Idles cheaply while HELD (rate 0). Exits on shutdown."""
+        while not self.stop_event.is_set():
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self.stop_event.wait(), timeout=_ATT_BACKFILL_INTERVAL_S)
+            if self.stop_event.is_set():
+                return
+            try:
+                await self._backfill_attachments_once()
+            except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
+                _log.warning("collector.attachment_backfill_cycle_failed", error=str(exc))
+
+    async def _backfill_attachments_once(self) -> None:
+        """Re-fetch + store one batch of legacy metadata-only attachments for this
         collector's source. HELD at 0 by default (telegram.attachment_backfill_per_tick);
         an admin raises it via the settings API to start + throttle the re-pull through the
         live session. Per-row isolation: a failed fetch is logged + skipped, never aborts
-        the batch; it just retries on a later tick (the row keeps source_ref NULL)."""
+        the batch; it just retries on a later cycle (the row keeps source_ref NULL)."""
         if self._client is None or self._source_uuid is None:
             return
         raw = await self._storage.get_setting(TELEGRAM_ATTACHMENT_BACKFILL_PER_TICK)
