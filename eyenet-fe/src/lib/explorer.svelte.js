@@ -363,6 +363,19 @@ export async function createOperatorEntity(type, payload) {
   }
 }
 
+// Full actor dossier for the inspector (GET /v1/actors/{id} -> ActorDetail): observation/
+// message counts, first/last seen, bot flag, score, persona link, alias history, operator
+// assessment, circadian/timezone hint. One cheap call; the heavy BEHAVE panel (observation-
+// derived) is deliberately not loaded here.
+export async function fetchActorDetail(id) {
+  try {
+    return await apiGet(`/v1/actors/${id}`, { auth: true });
+  } catch (e) {
+    explorer.error = e.message ?? String(e);
+    return null;
+  }
+}
+
 // Per-entity note (the inspector Notes field). loadNote returns the body string
 // ('' when none); saveNote upserts; deleteNote removes.
 export async function loadNote(node) {

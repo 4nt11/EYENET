@@ -21,7 +21,7 @@
     EDGE_KINDS, MEMBERSHIP_KINDS, assertEdge, loadNote, saveNote,
     GROUP_KINDS, createOperatorEntity,
     saveGraph, loadGraph, searchEntities, removeNodes, deleteEdge, classifyEdgeDeletion,
-    deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft
+    deleteEntity, saveDraft, loadDraft, clearDraft, restoreDraft, fetchActorDetail
   } from '$lib/explorer.svelte.js';
   import { nodeTypeLabel, nodeDisplayType, enrichmentLabel } from '$lib/labels.js';
   import { history, undoGraph, redoGraph, recordHistory, resetHistory } from '$lib/history.svelte.js';
@@ -270,6 +270,21 @@
   }
 
   const fieldRows = $derived(selNode ? Object.entries(selNode.fields ?? {}) : []);
+
+  // Rich actor dossier: when an actor node is selected, pull GET /v1/actors/{id} for the
+  // full stats (observations, first/last seen, bot, score, persona, aliases, assessment,
+  // timezone). Guarded against a stale response after a fast re-selection.
+  let actorDetail = $state(null);
+  let actorSeq = 0;
+  $effect(() => {
+    const n = selNode;
+    actorDetail = null;
+    if (n?.entityType !== 'actor') return;
+    const id = n.id;
+    const mine = ++actorSeq;
+    fetchActorDetail(id).then((d) => { if (mine === actorSeq) actorDetail = d; });
+  });
+  const fmtDate = (s) => (s ? new Date(s).toISOString().slice(0, 10) : '—');
   const fmtCount = (c) => (c == null ? '·' : Number(c).toLocaleString('en-US'));
   const edgeLabel = (k) => k.replace(/_/g, ' ');
 
@@ -484,6 +499,42 @@
           </table>
         {/if}
 
+        {#if actorDetail}
+          <div class="ins-label">Dossier</div>
+          <div class="ad-stats">
+            <div class="ad-stat"><span class="ad-n">{Number(actorDetail.observation_count ?? 0).toLocaleString('en-US')}</span><span class="ad-k">observations</span></div>
+            <div class="ad-stat"><span class="ad-n">{Number(actorDetail.message_count ?? 0).toLocaleString('en-US')}</span><span class="ad-k">messages</span></div>
+            <div class="ad-stat"><span class="ad-n">{fmtDate(actorDetail.first_seen)}</span><span class="ad-k">first seen</span></div>
+            <div class="ad-stat"><span class="ad-n">{fmtDate(actorDetail.last_seen)}</span><span class="ad-k">last seen</span></div>
+          </div>
+          <table class="ins-fields">
+            <tbody>
+              <tr><th>platforms</th><td>{(actorDetail.platforms ?? []).join(', ') || '—'}</td></tr>
+              {#if actorDetail.is_bot}<tr><th>bot</th><td>yes (platform flag)</td></tr>{/if}
+              {#if actorDetail.score != null}<tr><th>score</th><td>{actorDetail.score}</td></tr>{/if}
+              <tr><th>aliases</th><td>{actorDetail.alias_count ?? 0}</td></tr>
+              {#if actorDetail.persona_id}<tr><th>persona</th><td class="mono">{actorDetail.persona_id}</td></tr>{/if}
+              {#if actorDetail.circadian?.inferred_tz}
+                {@const tz = actorDetail.circadian.inferred_tz}
+                {#if tz.zone_best || tz.offset_hours != null}
+                  <tr><th>timezone</th><td>{tz.zone_best ?? `UTC${tz.offset_hours >= 0 ? '+' : ''}${tz.offset_hours}`} <span class="ad-conf">{tz.confidence ?? ''}</span></td></tr>
+                {/if}
+              {/if}
+            </tbody>
+          </table>
+          {#if actorDetail.aliases?.length}
+            <div class="ad-aliases">
+              {#each actorDetail.aliases.slice(0, 8) as a}
+                <div class="ad-alias"><span class="ad-av">{a.value}</span><span class="ad-ak">{a.kind}</span></div>
+              {/each}
+            </div>
+          {/if}
+          {#if actorDetail.assessment}
+            <div class="ins-label">Operator assessment</div>
+            <div class="ad-assess">{actorDetail.assessment}</div>
+          {/if}
+        {/if}
+
         <div class="ins-notes">
           <div class="ins-label">Notes</div>
           <textarea class="note" bind:value={noteBody} placeholder="Operator note for this entity…" rows="5"></textarea>
@@ -623,7 +674,18 @@
   .ins-fields tr { border-bottom: 1px solid var(--border); }
 
   .ins-notes { margin-top: 16px; }
-  .ins-label { margin-bottom: 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .ins-label { margin: 14px 0 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
+  .ad-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+  .ad-stat { display: flex; flex-direction: column; padding: 8px 10px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border); border-radius: var(--radius-sm, 3px); }
+  .ad-n { font-family: var(--font-mono); font-size: var(--fs-13, 13px); color: var(--text-body); }
+  .ad-k { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
+  .ad-conf { color: var(--text-faint); }
+  .ad-aliases { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; }
+  .ad-alias { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: var(--font-mono); font-size: var(--fs-11); }
+  .ad-av { color: var(--text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ad-ak { flex: 0 0 auto; color: var(--text-faint); }
+  .ad-assess { padding: 8px 10px; background: var(--panel-2, var(--surface)); border: 1px solid var(--border); border-radius: var(--radius-sm, 3px); font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-body); white-space: pre-wrap; }
+  .mono { font-family: var(--font-mono); word-break: break-all; }
   .note { width: 100%; resize: vertical; padding: 8px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); line-height: var(--lh-normal); }
   .note:focus { outline: none; border-color: var(--accent); }
   .note-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
