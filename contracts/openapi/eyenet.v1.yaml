@@ -869,6 +869,20 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
         "503": { $ref: '#/components/responses/Unavailable' }
+    delete:
+      tags: [personas]
+      operationId: personas_delete
+      summary: Delete an empty persona (operator cleanup from the graph canvas).
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+      responses:
+        "204": { description: Persona deleted. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/personas/{persona_id}/members:
     get:
@@ -889,6 +903,42 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+    post:
+      tags: [personas]
+      operationId: personas_add_member
+      summary: Attach one actor to this persona (operator, from the graph canvas).
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PersonaAddMemberRequest' }
+      responses:
+        "204": { description: Actor attached. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
+  /v1/personas/{persona_id}/members/{actor_id}:
+    delete:
+      tags: [personas]
+      operationId: personas_remove_member
+      summary: Detach one actor from this persona (non-deleting unlink from the canvas).
+      parameters:
+        - { $ref: '#/components/parameters/PersonaIdPath' }
+        - { $ref: '#/components/parameters/ActorIdPath' }
+      responses:
+        "204": { description: Actor detached. }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "422": { $ref: '#/components/responses/Validation' }
         "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/personas/{persona_id}/merge:
@@ -1024,6 +1074,24 @@ paths:
         "401": { $ref: '#/components/responses/Unauthorized' }
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
+
+  /v1/artifacts/{artifact_id}:
+    get:
+      tags: [artifacts]
+      operationId: artifacts_get
+      summary: One artifact's core record (graph-inspector dossier).
+      parameters:
+        - { name: artifact_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Artifact summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtifactSummary' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
 
   /v1/artifacts/{artifact_id}/mentions:
     get:
@@ -3579,6 +3647,24 @@ paths:
         "403": { $ref: '#/components/responses/Forbidden' }
         "422": { $ref: '#/components/responses/Validation' }
 
+  /v1/groups/{group_id}:
+    get:
+      tags: [groups]
+      operationId: groups_get
+      summary: One group's core record (graph-inspector dossier).
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Group detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/groups/{category_id}/threads:
     get:
       tags: [groups]
@@ -4421,6 +4507,73 @@ components:
         distinct_groups: { type: integer, minimum: 0 }
         first_mention_at: { type: string, format: date-time, nullable: true }
         last_mention_at: { type: string, format: date-time, nullable: true }
+    GroupDetail:
+      type: object
+      description: One group's core record for `GET /v1/groups/{id}` (graph-inspector dossier).
+      required: [group_id, source_id, platform_groupid, kind, first_seen_at_ingest, last_observed_at_ingest]
+      properties:
+        group_id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        platform_groupid: { type: string, maxLength: 512 }
+        kind: { $ref: '#/components/schemas/GroupKind' }
+        title: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        is_public: { type: boolean, nullable: true }
+        member_count: { type: integer, nullable: true }
+        first_seen_at_ingest: { type: string, format: date-time }
+        last_observed_at_ingest: { type: string, format: date-time }
+        provenance: { type: string, default: collected }
+    PersonaAddMemberRequest:
+      type: object
+      description: Body for `POST /v1/personas/{id}/members` — attach one actor to a persona.
+      required: [actor_id]
+      properties:
+        actor_id: { type: string, format: uuid }
+    ResolutionState:
+      type: string
+      description: Bridge-resolution state for an InfrastructureArtifact (MODELS §2.25).
+      enum: [unresolved, resolved, ambiguous, not_applicable]
+    InferredTimezone:
+      type: object
+      description: EYENET-side timezone inference from circadian signals. A HINT, not a fact.
+      properties:
+        offset_hours: { type: integer, nullable: true }
+        zone_best: { type: string, nullable: true }
+        zone_candidates: { type: array, items: { type: string } }
+        confidence: { type: string, enum: [none, low, medium, high], default: none }
+        supporting_signals: { type: array, items: { type: string } }
+        local_active_window:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 2
+          items: { type: integer }
+        quiet_window_utc:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 2
+          items: { type: integer }
+    ActorCircadian:
+      type: object
+      description: Per-actor activity-rhythm panel (UTC distributions + derived timezone).
+      properties:
+        hour_histogram: { type: array, items: { type: number } }
+        dow_histogram: { type: array, items: { type: number } }
+        hour_dow_histogram: { type: array, items: { type: number } }
+        quiet_span_utc:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 2
+          items: { type: integer }
+        inferred_tz: { $ref: '#/components/schemas/InferredTimezone' }
+    BackfillRequest:
+      type: object
+      description: Optional page range for a CATEGORY backfill (ignored for a thread).
+      properties:
+        from_page: { type: integer, minimum: 1, nullable: true }
+        to_page: { type: integer, minimum: 1, nullable: true }
     ArtifactMention:
       type: object
       required: [message_id, actor_id, group_id, source_id, ts]
