@@ -778,7 +778,7 @@
   .mono { font-family: var(--font-mono); word-break: break-all; }
   .ad-details-btn { width: 100%; margin-top: 12px; }
   .dm-scrim { position: absolute; inset: 0; z-index: 50; background: rgba(0,0,0,.55); }
-  .dm { position: absolute; z-index: 51; top: 4vh; left: 50%; transform: translateX(-50%); width: 92%; max-width: 1200px; max-height: 92vh; display: flex; flex-direction: column; background: var(--panel, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0,0,0,.6); overflow: hidden; }
+  .dm { position: absolute; z-index: 51; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 92%; max-width: 1200px; max-height: 78vh; display: flex; flex-direction: column; background: var(--panel, var(--surface)); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0,0,0,.6); overflow: hidden; }
   .dm-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
   .dm-title { font-family: var(--font-sans); font-size: var(--fs-14, 14px); color: var(--text-body); }
   .dm-type { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
