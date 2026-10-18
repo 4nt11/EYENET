@@ -14,7 +14,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
 
-from eyenet.api.deps import CurrentUser, RequireScope, ResourceNotFound, get_storage
+from eyenet.api.deps import (
+    CurrentUser,
+    RequireScope,
+    ResourceNotFound,
+    get_publisher,
+    get_storage,
+)
 from eyenet.api.v1.schemas.manual_crews import (
     AddCrewMemberRequest,
     CreateManualCrewRequest,
@@ -24,7 +30,9 @@ from eyenet.api.v1.schemas.manual_crews import (
     ManualCrewMemberEntry,
     ManualCrewSummary,
 )
+from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.relations.mentions import normalize_handle
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["crews"])
@@ -55,6 +63,7 @@ async def crews_create(
     body: CreateManualCrewRequest,
     current_user: Annotated[CurrentUser, Depends(RequireScope("write:actors"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
+    publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
 ) -> CreateManualCrewResult:
     now = datetime.now(tz=UTC)
     crew_id = await storage.create_manual_crew(
@@ -62,6 +71,8 @@ async def crews_create(
     )
     for actor_id in body.members:
         await storage.add_manual_crew_member(crew_id=crew_id, actor_id=actor_id, now=now)
+    # Index the crew so it hydrates by name on the graph (else it shows its id on reload).
+    await publish_entity_changed(publisher, entity_type="crew", entity_id=crew_id)
     return CreateManualCrewResult(crew_id=crew_id)
 
 
@@ -102,6 +113,7 @@ async def crews_add_member(
     body: AddCrewMemberRequest,
     _: Annotated[CurrentUser, Depends(RequireScope("write:actors"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
+    publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
 ) -> ManualCrewDetail:
     actor_id = body.actor_id
     if actor_id is None:
@@ -115,6 +127,7 @@ async def crews_add_member(
     )
     if not ok:
         raise ResourceNotFound("crew")
+    await publish_entity_changed(publisher, entity_type="crew", entity_id=crew_id)
     return await _detail(storage, crew_id)
 
 
@@ -129,12 +142,14 @@ async def crews_remove_member(
     actor_id: UUID,
     _: Annotated[CurrentUser, Depends(RequireScope("write:actors"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
+    publisher: Annotated[BusEnvelopePublisher, Depends(get_publisher)],
 ) -> ManualCrewDetail:
     if not await storage.manual_crew_exists(crew_id):
         raise ResourceNotFound("crew")
     await storage.remove_manual_crew_member(
         crew_id=crew_id, actor_id=actor_id, now=datetime.now(tz=UTC)
     )
+    await publish_entity_changed(publisher, entity_type="crew", entity_id=crew_id)
     return await _detail(storage, crew_id)
 
 
@@ -147,4 +162,6 @@ async def crews_delete(
     if not await storage.manual_crew_exists(crew_id):
         raise ResourceNotFound("crew")
     await storage.delete_manual_crew(crew_id)
+    # Drop the search doc so a deleted crew stops hydrating as a ghost.
+    await storage.delete_search_document("crew", crew_id)
     return Response(status_code=204)

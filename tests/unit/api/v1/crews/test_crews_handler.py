@@ -35,6 +35,16 @@ async def _actor(storage: BaseRepository, key: str, handle: str) -> UUID:
     ))[0]
 
 
+class _FakePublisher:
+    """Swallows published envelopes; crew handlers publish entity.crew.changed."""
+
+    async def publish(self, subject: str, envelope: object, **_kw: object) -> None:
+        return None
+
+
+_PUB = _FakePublisher()
+
+
 async def test_crew_lifecycle(
     storage: BaseRepository, mkuser: Callable[..., CurrentUser]
 ) -> None:
@@ -43,7 +53,7 @@ async def test_crew_lifecycle(
     bob = await _actor(storage, "tg:bob", "@bob")
 
     created = await crews_create(
-        CreateManualCrewRequest(name="The Gentlemen", notes="doxbyte"), user, storage
+        CreateManualCrewRequest(name="The Gentlemen", notes="doxbyte"), user, storage, _PUB
     )
     cid = created.crew_id
 
@@ -53,16 +63,16 @@ async def test_crew_lifecycle(
     assert listed.items[0].member_count == 0
 
     # add by actor_id, then by handle
-    d = await crews_add_member(cid, AddCrewMemberRequest(actor_id=alice), user, storage)
+    d = await crews_add_member(cid, AddCrewMemberRequest(actor_id=alice), user, storage, _PUB)
     assert {m.actor_id for m in d.members} == {alice}
-    d = await crews_add_member(cid, AddCrewMemberRequest(handle="@bob"), user, storage)
+    d = await crews_add_member(cid, AddCrewMemberRequest(handle="@bob"), user, storage, _PUB)
     assert {m.actor_id for m in d.members} == {alice, bob}
     # idempotent
-    d = await crews_add_member(cid, AddCrewMemberRequest(actor_id=alice), user, storage)
+    d = await crews_add_member(cid, AddCrewMemberRequest(actor_id=alice), user, storage, _PUB)
     assert len(d.members) == 2
 
     # remove one
-    d = await crews_remove_member(cid, alice, user, storage)
+    d = await crews_remove_member(cid, alice, user, storage, _PUB)
     assert {m.actor_id for m in d.members} == {bob}
 
     # delete → gone
@@ -76,10 +86,10 @@ async def test_add_unknown_handle_404(
     storage: BaseRepository, mkuser: Callable[..., CurrentUser]
 ) -> None:
     user = mkuser("write:actors", "read:actors")
-    created = await crews_create(CreateManualCrewRequest(name="x"), user, storage)
+    created = await crews_create(CreateManualCrewRequest(name="x"), user, storage, _PUB)
     with pytest.raises(ResourceNotFound):
         await crews_add_member(
-            created.crew_id, AddCrewMemberRequest(handle="@ghost"), user, storage
+            created.crew_id, AddCrewMemberRequest(handle="@ghost"), user, storage, _PUB
         )
 
 
@@ -89,7 +99,7 @@ async def test_add_to_missing_crew_404(
     user = mkuser("write:actors", "read:actors")
     alice = await _actor(storage, "tg:alice", "@alice")
     with pytest.raises(ResourceNotFound):
-        await crews_add_member(uuid4(), AddCrewMemberRequest(actor_id=alice), user, storage)
+        await crews_add_member(uuid4(), AddCrewMemberRequest(actor_id=alice), user, storage, _PUB)
 
 
 def test_add_member_request_requires_exactly_one() -> None:

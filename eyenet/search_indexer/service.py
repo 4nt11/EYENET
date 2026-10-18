@@ -37,6 +37,8 @@ from eyenet.models import (
     GroupCandidateTable,
     GroupTable,
     InfrastructureArtifactTable,
+    ManualCrewMemberTable,
+    ManualCrewTable,
     MessageTable,
     PersonaTable,
 )
@@ -107,6 +109,8 @@ class SearchIndexerService(ServiceBase):
             await self._reindex_case(env.entity_id)
         elif env.entity_type == "artifact":
             await self._reindex_artifact(env.entity_id)
+        elif env.entity_type == "crew":
+            await self._reindex_crew(env.entity_id)
         else:
             _log.warning("search_indexer.unknown_entity_type", entity_type=env.entity_type)
 
@@ -232,6 +236,25 @@ class SearchIndexerService(ServiceBase):
                 if actor is not None:
                     handles.append(actor.current_handle or actor.current_display_name or "")
         await self._storage.put_search_document(**haystack.persona_doc(persona, handles))
+
+    async def _reindex_crew(self, crew_id: UUID) -> None:
+        async with self._storage.session() as s:
+            crew = await s.get(ManualCrewTable, crew_id)
+            if crew is None:
+                return  # deleted; the delete endpoint drops the search doc directly
+            member_ids = (
+                await s.exec(
+                    select(ManualCrewMemberTable.actor_id).where(
+                        ManualCrewMemberTable.crew_id == crew_id
+                    )
+                )
+            ).all()
+            handles: list[str] = []
+            for aid in member_ids:
+                actor = await s.get(ActorTable, aid)
+                if actor is not None:
+                    handles.append(actor.current_handle or actor.current_display_name or "")
+        await self._storage.put_search_document(**haystack.crew_doc(crew, handles))
 
     async def _reindex_document(self, document_id: UUID) -> None:
         async with self._storage.session() as s:
