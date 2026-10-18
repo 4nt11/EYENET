@@ -2,6 +2,29 @@
 
 Deferred work, captured so it isn't lost. Not in priority order.
 
+## Telegram attachment bytes — DONE 2026-10-18 (backfill HELD, pending trigger)
+
+The TG collector shipped a metadata-only stub (fake sha256, 0-byte images, no
+blob); ~50k live attachments are hollow shells. Fixed:
+- Forward path downloads + stores bytes within an admin-tunable size gate
+  (`telegram.attachment_max_bytes`, default 3 MiB; photos always pulled). Over the
+  gate: metadata + `source_ref` t.me link only. Downloaded TG media = tier NORMAL.
+- Settings KV + admin API (`GET/PUT /v1/settings/{key}`, scope `admin:settings`).
+- Backfill of the 50k shells runs in-collector, driven by
+  `telegram.attachment_backfill_per_tick` (default 0 = HELD). To run: PUT that
+  setting to N (shells re-pulled per collector tick, throttling the live session);
+  set back to 0 to pause. Resumable (shell = `source_ref IS NULL`).
+- NOT YET DEPLOYED as of this note: the forward download is a live behavior change
+  on covert sessions — redeploy eyenet:base to activate it.
+- Follow-up: surface `source_ref` in the attachment manifest/list API + FE so an
+  operator can click the link (graph node already carries it).
+
+## Documents (M10) pipeline has ingested ZERO rows in prod (noted 2026-10-18)
+
+`DocumentTable` is empty live; the only "documents" are `DOCUMENT`-kind attachments
+in chats. The search clearance gate (migration 0015) is therefore preventive. If
+doc ingest is wanted, wire `DOCUMENT`-kind attachment blobs -> the M10 pipeline.
+
 ## POST /v1/identities — session-file upload (provision an identity from the UI)
 
 **Vision:** configure a new Telegram (or Matrix) identity by uploading its
@@ -480,3 +503,37 @@ Remaining follow-ups:
 `tests/unit/incidents/test_classifier.py::test_classify_end_to_end_when_model_present`
 fails (pre-existing, from the in-flight mmBERT/incident-model work — NOT from graph/
 enrichment changes). Triage + fix so the suite is fully green.
+
+## Discord collector (not started; raised 2026-10-18)
+
+CTI collection of threat-actor Discord guilds. Scope it incrementally: identity + token
+storage first, then ONE read-only channel pull (prove token + fingerprint + rate limits),
+then the Gateway for live. Don't build the whole thing before one GET /messages is 200.
+
+**The API reality:**
+- Bot API is useless (a bot must be INVITED to the guild; never happens on a target).
+- Use the USER API (the client's own REST + Gateway) with a warmed account's USER TOKEN:
+  - history: `GET /api/v9/channels/{channel_id}/messages?limit=100&before={snowflake}`
+  - live: the Gateway WebSocket (MESSAGE_CREATE), same as the client.
+- This is the Telegram-`.session` / forum-cookie-jar analogue: a warmed account, not a bot.
+
+**Already solved (reuse existing tradecraft):**
+- `ServiceBase` collector, plural from day one; identity = user token + UA + super-properties
+  as source-prefixed TOML fields (`discord_user_token`, ... per [[feedback_identity_toml_source_prefix]]).
+- Token stored OFF-network, encrypted at rest (like the Telegram `.session`; never on reads).
+- Snowflake ids are timestamp-encoded -> before/after pagination drops into the forward-only
+  cursor + backfill-command model (like [[project_telegram_backfill_forward_only]]).
+- TLS/JA3 impersonation via curl-cffi already proven on the forum collector (httpx ClientHello
+  is the Python tell) - Discord is behind Cloudflare, same playbook.
+- Invisible presence instinct from the Matrix collector ([[feedback_matrix_collector_offline_only]]).
+- Taxonomy fits: guild->channels->messages, Discord forum channel = category, threads = thread,
+  posts = messages -> the monitored-group/category/thread/post display taxonomy already built.
+
+**Be wary (the hard parts):**
+- SELF-BOT BAN RISK: automating a user account violates Discord ToS; aggressive detection.
+  Warmed throwaway accounts, human pacing, invisible status, burn-and-replace, keep spares.
+- FINGERPRINTING: every request carries `X-Super-Properties` (base64 JSON: OS/browser/client
+  build no.). UA <-> super-properties <-> account's origin client MUST match (same coupling as
+  forum_user_agent <-> cookie-mint browser). Likely needs curl-cffi JA3 impersonation.
+- RATE LIMITS: strict, per-route (`X-RateLimit-*`, 429 + retry_after) + a global bucket.
+  Respect them or the account gets flagged (same windowing discipline as the forum evasion).
