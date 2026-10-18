@@ -160,6 +160,82 @@ async def test_actor_started_threads(storage: BaseRepository) -> None:
     await storage.close()
 
 
+async def test_actor_replied_in_threads(storage: BaseRepository) -> None:
+    src = await storage.upsert_source(kind=SourceKind.FORUM, display_name="f", created_at=_NOW)
+    gid, _ = await storage.upsert_group(
+        source_id=src, platform_groupid="t9", kind=GroupKind.FORUM_THREAD, title="T9", seen_at=_NOW
+    )
+    opener, _ = await storage.upsert_actor(
+        source_id=src,
+        actor_key="op",
+        platform_userid="10",
+        handle="op",
+        display_name="op",
+        seen_at=_NOW,
+    )
+    replier, _ = await storage.upsert_actor(
+        source_id=src,
+        actor_key="rep",
+        platform_userid="11",
+        handle="rep",
+        display_name="rep",
+        seen_at=_NOW,
+    )
+    op_mid, rep_mid = new_uuid7(), new_uuid7()
+    for mid, who, ref in ((op_mid, opener, "mybb:op"), (rep_mid, replier, "mybb:rep")):
+        await storage.put_message(
+            MessageTable(
+                id=mid,
+                source_id=src,
+                group_id=gid,
+                actor_id=who,
+                platform_msgid=ref,
+                evidence_ref=ref,
+                body="x",
+                length_chars=1,
+                length_words=1,
+                sent_at_source=_NOW,
+                ingested_at=_NOW,
+            ),
+            None,
+        )
+    async with storage.session() as s:
+        s.add(
+            ThreadSummaryTable(
+                group_id=gid,
+                op_message_id=op_mid,
+                op_sent_at=_NOW,
+                victim_status="unknown",
+                engine_version="test",
+                computed_at=_NOW,
+            )
+        )
+        await s.commit()
+    await storage.put_search_document(entity_type="thread", entity_id=gid, title="T9")
+    # replier posted but didn't start -> replied_in returns the thread
+    nodes, edges, _t, _m = await storage.graph_expand(
+        src_type="actor",
+        src_id=replier,
+        enrichment="replied_in",
+        limit=10,
+        offset=0,
+        want_total=False,
+    )
+    assert [n.entity_id for n in nodes] == [gid]
+    assert edges[0]["kind"] == "replied_in"
+    # the OP themselves did start it -> replied_in is empty for them
+    op_nodes, _e, _t2, _m2 = await storage.graph_expand(
+        src_type="actor",
+        src_id=opener,
+        enrichment="replied_in",
+        limit=10,
+        offset=0,
+        want_total=False,
+    )
+    assert op_nodes == []
+    await storage.close()
+
+
 async def test_message_author_is_single(storage: BaseRepository) -> None:
     _src, _gid, actor, mid, _art = await _seed(storage)
     nodes, edges, total, more = await storage.graph_expand(
@@ -180,6 +256,7 @@ async def test_counts_and_unknown_guard(storage: BaseRepository) -> None:
         "artifacts": 1,
         "groups": 1,
         "started": 0,
+        "replied_in": 0,
         "linked": 0,
         "related": 0,
         "source": 1,

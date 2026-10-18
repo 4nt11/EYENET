@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import case, or_
+from sqlalchemy.orm import aliased
 from sqlmodel import col, select
 
 from eyenet.enrichments.base import LocalSQLEnrichment
@@ -78,6 +79,28 @@ class ActorStartedThreads(LocalSQLEnrichment):
             .join(_M, col(_M.id) == col(_TS.op_message_id))
             .where(_M.actor_id == src_id),
             col(_TS.group_id),
+        )
+
+
+class ActorRepliedIn(LocalSQLEnrichment):
+    """Forum threads the actor posted in but did NOT start (someone else is the OP) - who
+    the actor talks to / collaborates with, vs `started` (what they pwned). Same canonical
+    OP source (thread_summary); threads are indexed, so no reindex."""
+
+    src_type = "actor"
+    name = "replied_in"
+    output_type = "thread"
+    edge_kind = "replied_in"
+
+    def build_select(self, src_id: UUID) -> tuple[Any, Any]:
+        op = aliased(_M)  # the thread's OP message, distinct from the actor's own post
+        return (
+            select(_M.group_id)
+            .join(_TS, col(_TS.group_id) == col(_M.group_id))
+            .join(op, col(op.id) == col(_TS.op_message_id))
+            .where(_M.actor_id == src_id, col(op.actor_id) != src_id)
+            .distinct(),
+            col(_M.group_id),
         )
 
 
