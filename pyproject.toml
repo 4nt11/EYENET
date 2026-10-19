@@ -253,6 +253,7 @@ omit = [
   "eyenet/collectors/telegram/real.py",
   "eyenet/collectors/telegram/auth.py",
   "eyenet/collectors/matrix/real.py",
+  "eyenet/collectors/discord/real.py",
   # Postgres backend: needs a live PostgreSQL (testcontainers), so the unit+
   # contract suite cannot reach it. Proven by the e2e backend/parity/data-move/
   # pgbouncer tests. Same treatment as the other live-service modules above.

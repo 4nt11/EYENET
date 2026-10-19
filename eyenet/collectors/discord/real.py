@@ -23,15 +23,23 @@ import asyncio
 import random
 import uuid
 import zlib
+from datetime import UTC, datetime
 from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, cast
+from uuid import UUID
 
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
-from eyenet.contracts.enums import GroupKind, SourceKind
+from eyenet.contracts.actor import actor_key
+from eyenet.contracts.enums import GroupKind, SourceKind, SystemLogLevel
+from eyenet.models import MessageTable
+from eyenet.models._base import new_uuid7
+from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
+    from cryptography.fernet import Fernet
+
     from eyenet.contracts.bus import Bus
     from eyenet.contracts.identity_pool import IdentityPool
     from eyenet.identity_pool.loader import IdentityFileEntry
@@ -43,6 +51,74 @@ API = "https://discord.com/api/v9"
 GATEWAY_URL = "wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream"
 ZLIB_SUFFIX = b"\x00\x00\xff\xff"
 _READABLE_CHANNEL_TYPES = (0, 5, 15)  # text, announcement, forum
+
+
+# --- pure mapping helpers (unit-tested; no storage / no network) --------------
+
+def _parse_ts(iso: str | None) -> datetime | None:
+    """Discord timestamps are ISO-8601 with offset. Return tz-aware UTC, or None.
+    A missing/bad stamp returns None (skip the row) and NEVER now() — false recency
+    on an old leak is load-bearing-wrong, same rule as the forum collector."""
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def _actor_fields(author: dict[str, Any]) -> tuple[str, str | None, str | None, bool]:
+    """(platform_userid, handle, display_name, is_bot) from a message author.
+    The Discord user id (snowflake) is GLOBALLY unique, so no board-scoping needed."""
+    uid = str(author.get("id") or "")
+    handle = author.get("username") or None
+    display = author.get("global_name") or author.get("username") or None
+    return uid, handle, display, bool(author.get("bot", False))
+
+
+def _build_message_row(
+    *, source_id: UUID, group_id: UUID, actor_id: UUID, channel_id: str,
+    msg: dict[str, Any], sent_at: datetime, now: datetime,
+) -> MessageTable:
+    """Message dict -> MessageTable row. evidence_ref = the snowflake (idempotent).
+    Embeds/attachments/reactions/reply reference ride in source_specific; who-reacted
+    and attachment blobs land later (WS events + a download pass)."""
+    body = msg.get("content") or ""
+    atts = msg.get("attachments") or []
+    author = msg.get("author") or {}
+    return MessageTable(
+        id=new_uuid7(),
+        source_id=source_id,
+        group_id=group_id,
+        actor_id=actor_id,
+        platform_msgid=str(msg.get("id") or ""),
+        evidence_ref=f"discord:{channel_id}:{msg.get('id')}",
+        body=body,
+        length_chars=len(body),
+        length_words=len(body.split()),
+        sent_at_source=sent_at,
+        ingested_at=now,
+        has_attachment=bool(atts),
+        reply_to_msg_id=None,  # platform ref kept below; resolve to internal id later
+        forward_of_msg_id=None,
+        forward_origin_actor_id=None,
+        source_specific={
+            "type": msg.get("type"),
+            "edited_timestamp": msg.get("edited_timestamp"),
+            "author_username": author.get("username"),
+            "author_global_name": author.get("global_name"),
+            "message_reference": msg.get("message_reference"),  # responded_to (platform ids)
+            "reactions": msg.get("reactions"),  # emoji + count (WHO reacted = WS/REST later)
+            "embeds": msg.get("embeds"),
+            "attachments": [
+                {"id": a.get("id"), "filename": a.get("filename"), "url": a.get("url"),
+                 "size": a.get("size"), "content_type": a.get("content_type")}
+                for a in atts
+            ],
+            "mentions": [str(m.get("id")) for m in (msg.get("mentions") or [])],
+        },
+    )
 
 
 class RespClass(Enum):
@@ -83,14 +159,18 @@ class DiscordCollector(CollectorSkeleton):
         storage: BaseRepository,
         pool: IdentityPool,
         identity_name: str,
+        session_key: Fernet | None = None,
     ) -> None:
         super().__init__(
             bus=bus, storage=storage, pool=pool,
             identity_name=identity_name, source_kind=SourceKind.DISCORD,
         )
+        self._session_key = session_key  # Fernet; decrypts the session_path blob at boot
         self._session: Any = None  # curl_cffi.requests.Session(impersonate=...), REST + WS
         self._flare: Any = None  # FlareSolverrClient, for cf_clearance remint (optional)
         self._headers: dict[str, str] = {}
+        self._source_uuid: UUID | None = None  # bound in on_subscribe
+        self._channel_titles: dict[str, str] = {}  # id -> "guild / channel" from discovery
         # per-channel resume cursors: {channel_id: {"newest": snowflake, "oldest": snowflake}}
         self._cursors: dict[str, dict[str, str]] = {}
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
@@ -100,12 +180,16 @@ class DiscordCollector(CollectorSkeleton):
     async def on_subscribe(self) -> None:
         await super().on_subscribe()  # claims identity -> self._claimed
         entry = cast("IdentityFileEntry", self._claimed)
-        # The claimed entry carries session_path (Fernet-encrypted token + cookie jar,
-        # same seam as telegram) plus the discord_* fingerprint and pacing knobs. Build
-        # ONE curl_cffi impersonated Session (impersonate=entry.discord_impersonate) and
-        # the order-preserved REST header set (see probe.py build_headers; Accept-Encoding
-        # and Connection omitted). The impersonate target MUST match the token's browser.
-        # When entry.discord_enable_waf_bypass is set, keep a FlareSolverrClient (from
+        # session_path (Fernet-encrypted) carries this issuer's FULL fingerprint, not
+        # just token + cookie: the X-header set too (X-Super-Properties, X-Installation-Id,
+        # X-Discord-Locale, X-Discord-Timezone, X-Debug-Options) + UA + capabilities, all
+        # per-session and CAPTURED from the minting browser. Build ONE curl_cffi
+        # impersonated Session (impersonate=entry.discord_impersonate) and the order-
+        # preserved REST header set INCLUDING every X-header (see probe.py build_headers;
+        # Accept-Encoding/Connection omitted). The WS IDENTIFY properties are the base64
+        # DECODE of this session's X-Super-Properties (_build_identify) so REST and WS are
+        # byte-identical. impersonate MUST match the token's browser. When
+        # entry.discord_enable_waf_bypass is set, keep a FlareSolverrClient (from
         # eyenet.collectors.forum._flaresolverr) on self._flare for cf_clearance reminting.
         raise NotImplementedError(
             f"build the impersonated session for {entry.name} from its identity blob"
@@ -123,10 +207,15 @@ class DiscordCollector(CollectorSkeleton):
             gname = g.get("properties", {}).get("name") or g.get("name") or g.get("id")
             for c in g.get("channels", []):
                 if c.get("type") in _READABLE_CHANNEL_TYPES and self._can_view(g, c):
+                    cid = str(c["id"])
+                    title = f"{gname} / {c.get('name', '?')}"
+                    # Cache id->name: the REST message fetch has no channel name, so
+                    # ingest labels the group from this discovery map.
+                    self._channel_titles[cid] = title
                     out.append(VisibleGroup(
-                        platform_groupid=str(c["id"]),
+                        platform_groupid=cid,
                         kind=GroupKind.CHANNEL,
-                        title=f"{gname} / {c.get('name', '?')}",
+                        title=title,
                         is_member=True,
                     ))
         _log.info("discord.discovery", guilds=len(ready.get("guilds", [])), channels=len(out))
@@ -213,36 +302,82 @@ class DiscordCollector(CollectorSkeleton):
     # ------------------------------------------------------------- ingest
 
     async def _ingest_message(self, channel_id: str, msg: dict[str, Any]) -> None:
-        """Map a Discord message -> actor(author) + group(channel) + message, with
-        embeds + attachments. evidence_ref = the message snowflake (idempotent). Bots/
-        drop-bots carry the payload in embeds, not content — ingest both."""
-        # Upsert the author actor (id/username/bot flag), ensure the channel group, then
-        # storage.put_message with evidence_ref = the snowflake and sent_at_source parsed
-        # from msg["timestamp"]; store embeds (title/description/fields) + attachments.
-        _log.debug("discord.ingest.todo", channel=channel_id, msg_id=msg.get("id"))
-        self._record_emission()
-        raise NotImplementedError("map message -> storage.put_message + embeds/attachments")
+        """Map a Discord message -> actor(author) + group(channel) + message. Idempotent
+        on the snowflake evidence_ref. Embeds/attachments/reactions/reply reference ride in
+        source_specific (who-reacted + attachment blobs are later passes). Bots/drop-bots
+        put the payload in embeds, not content, so both are kept."""
+        source_uuid = self._source_uuid
+        if source_uuid is None:
+            return
+        uid, handle, display, is_bot = _actor_fields(msg.get("author") or {})
+        if not uid:  # no author id -> cannot attribute; WHO is non-negotiable
+            await self.syslog(
+                level=SystemLogLevel.ERROR,
+                event="discord.msg_skipped_no_author",
+                message=f"{self._identity_name}: channel={channel_id} msg={msg.get('id')} "
+                "no author id, row refused",
+            )
+            return
+        # Discord always stamps; a missing one is malformed -> skip, never now().
+        sent_at = _parse_ts(msg.get("timestamp"))
+        if sent_at is None:
+            return
+        now = datetime.now(tz=UTC)
+
+        group_id, group_changed = await self._storage.upsert_group(
+            source_id=source_uuid,
+            platform_groupid=str(channel_id),
+            kind=GroupKind.CHANNEL,
+            title=self._channel_titles.get(str(channel_id)),
+            seen_at=now,
+        )
+        if group_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="group", entity_id=group_id, source_id=source_uuid
+            )
+        actor_id, actor_changed = await self._storage.upsert_actor(
+            source_id=source_uuid,
+            actor_key=actor_key(SourceKind.DISCORD, uid),
+            platform_userid=uid,
+            handle=handle,
+            display_name=display,
+            seen_at=sent_at,
+            is_bot=is_bot,
+        )
+        if actor_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="actor", entity_id=actor_id, source_id=source_uuid
+            )
+
+        row = _build_message_row(
+            source_id=source_uuid, group_id=group_id, actor_id=actor_id,
+            channel_id=str(channel_id), msg=msg, sent_at=sent_at, now=now,
+        )
+        # TODO: pass real AttachmentTable rows once the blob-download pass lands; for now
+        # attachment metadata is in source_specific (has_attachment set, bytes deferred).
+        if await self._storage.put_message(row, []):
+            self._record_emission()
 
     # ------------------------------------------------------------- helpers
 
     @staticmethod
-    def _build_identify(entry: IdentityFileEntry, token: str) -> dict[str, Any]:
-        """IDENTIFY op2 — mirror the captured client frame; fresh launch ids per connect,
-        stable installation_id. See gateway.build_identify / DESIGN.md."""
+    def _build_identify(
+        super_props: dict[str, Any], token: str, *, capabilities: int
+    ) -> dict[str, Any]:
+        """IDENTIFY op2. `properties` MUST be the base64-DECODE of THIS session's
+        `X-Super-Properties` header (the same fingerprint REST sends) so the two legs are
+        byte-coherent — we do NOT reconstruct it. Only the per-launch ids regenerate.
+        `super_props` + `capabilities` come from the session blob (per issuer)."""
+        props = {
+            **super_props,
+            "client_launch_id": str(uuid.uuid4()),
+            "launch_signature": str(uuid.uuid4()),
+            "client_app_state": "focused",
+        }
         return {"op": 2, "d": {
             "token": token,
-            "capabilities": 1734653,
-            "properties": {
-                "os": "Linux", "browser": "Chrome", "device": "",
-                "browser_user_agent": entry.discord_user_agent or "",
-                "release_channel": "stable",
-                "client_build_number": entry.discord_build_number,
-                "client_launch_id": str(uuid.uuid4()),
-                "launch_signature": str(uuid.uuid4()),
-                "client_app_state": "focused",
-                "gateway_connect_reasons": "AppSkeleton",
-                "installation_id": entry.discord_installation_id or "",
-            },
+            "capabilities": capabilities,
+            "properties": props,
             "presence": {"status": "unknown", "since": 0, "activities": [], "afk": False},
             "compress": False, "client_state": {"guild_versions": {}}, "qos_token": "CgIIAQ==",
         }}

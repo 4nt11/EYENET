@@ -127,6 +127,25 @@ Consequences for the collector:
 - Burp canNOT read server->client dispatches (zlib-stream compressed); our own inflating
   client (gateway.py) is the only way to see their shapes. Map the model from it.
 
+## Session fingerprint headers — per-issuer, REST AND WS must match
+
+Each session carries a client fingerprint CAPTURED from the browser that minted the
+token, and it varies per issuer. It is NOT optional and NOT generic:
+
+- **REST** sends the full X-header set every request: `X-Super-Properties` (base64),
+  `X-Installation-Id`, `X-Discord-Locale`, `X-Discord-Timezone`, `X-Debug-Options`, plus
+  the matching UA. (probe.py build_headers already does this.)
+- **WS IDENTIFY** `properties` is the **base64-DECODE of that same `X-Super-Properties`**,
+  plus `capabilities` (also per-client). Do NOT reconstruct `properties` field-by-field —
+  decode the header so REST and WS present the IDENTICAL fingerprint. Only
+  `client_launch_id` / `launch_signature` regenerate per connect.
+- All of it (token, cookie, X-Super-Properties, X-Installation-Id, UA, capabilities) lives
+  in the per-identity encrypted session blob, captured at provision time. The loader's
+  `discord_*` fields are impersonate target + pacing only, NOT the fingerprint source.
+
+A mismatch between the REST X-Super-Properties and the WS IDENTIFY properties (or a
+generic fingerprint on a token minted elsewhere) is a flag.
+
 ## Scope
 
 - In: Gateway discovery + live events; REST backfill (upward), embeds, attachments,
