@@ -125,7 +125,14 @@
                   type="text"
                   inputmode={it.kind === 'mib' ? 'decimal' : 'numeric'}
                   value={it.draft}
-                  oninput={(e) => (it.draft = sanitizeNum(it.kind, e.currentTarget.value))}
+                  oninput={(e) => {
+                    const clean = sanitizeNum(it.kind, e.currentTarget.value);
+                    // Force the DOM back to the cleaned value even when the model is
+                    // unchanged (type "5" then "a" both sanitize to "5" — Svelte would
+                    // otherwise skip the re-render and leave the stray char on screen).
+                    e.currentTarget.value = clean;
+                    it.draft = clean;
+                  }}
                   spellcheck="false"
                   autocomplete="off"
                 />
