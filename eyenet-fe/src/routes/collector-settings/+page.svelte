@@ -32,6 +32,14 @@
     }
   ];
 
+  // Keep the input numeric no matter what is typed/pasted: a 'count' knob is digits only,
+  // a 'mib' knob allows digits + a single decimal point. Everything else is stripped.
+  function sanitizeNum(kind, raw) {
+    const s = String(raw ?? '');
+    if (kind === 'mib') return s.replace(/[^\d.]/g, '').replace(/(\.\d*)\./g, '$1');
+    return s.replace(/\D/g, '');
+  }
+
   // stored byte/count string <-> the draft shown in the input (MiB for a 'mib' knob).
   const toDraft = (it, stored) => (it.kind === 'mib' ? Number(stored) / MIB : stored);
   const toStored = (it, draft) =>
@@ -114,11 +122,12 @@
             <div class="editor">
               <label>
                 <input
-                  type="number"
-                  min="0"
-                  step={it.step}
-                  bind:value={it.draft}
+                  type="text"
+                  inputmode={it.kind === 'mib' ? 'decimal' : 'numeric'}
+                  value={it.draft}
+                  oninput={(e) => (it.draft = sanitizeNum(it.kind, e.currentTarget.value))}
                   spellcheck="false"
+                  autocomplete="off"
                 />
                 <span class="unit">{it.unit}</span>
               </label>
