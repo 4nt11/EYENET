@@ -3,7 +3,7 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
-  import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll, replaceSession } from '$lib/identity.svelte.js';
+  import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll, replaceSession, saveIdentityConfig } from '$lib/identity.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
   import { curlToNetscape, extractCookieString, hostFromUrl } from '$lib/curl-cookies.js';
 
@@ -162,6 +162,73 @@
     const gone = await deleteIdentity(sel.id);
     if (gone) selectedId = null;
   }
+
+  // --- collector config editor ---
+  const EVASION_LEVELS = ['', 'ghost', 'lurker', 'regular', 'brisk', 'smash'];
+  // curl-cffi targets (FORUM_TLS_IMPERSONATE_TARGETS) + '' = none (httpx/Tor path).
+  const IMPERSONATE_TARGETS = ['', 'firefox147', 'firefox135', 'chrome131'];
+
+  let showConfig = $state(false);
+  let restartOnSave = $state(false);
+  let cfg = $state(null);
+
+  const splitLines = (s) => (s ?? '').split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+  const arrEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+  function seedCfg(r) {
+    return {
+      forum_base_url: r.forum_base_url ?? '',
+      forum_thread_urls: (r.forum_thread_urls ?? []).join('\n'),
+      forum_engine: r.forum_engine ?? '',
+      forum_user_agent: r.forum_user_agent ?? '',
+      forum_evasion_level: r.forum_evasion_level ?? '',
+      forum_tls_impersonate: r.forum_tls_impersonate ?? '',
+      forum_enable_waf_bypass: !!r.forum_enable_waf_bypass,
+      forum_delay_min: r.forum_delay_min ?? '',
+      forum_delay_max: r.forum_delay_max ?? '',
+      forum_discovery_interval: r.forum_discovery_interval ?? '',
+      forum_max_category_pages: r.forum_max_category_pages ?? '',
+      forum_max_thread_pages: r.forum_max_thread_pages ?? '',
+      forum_steady_pages: r.forum_steady_pages ?? '',
+      forum_discovery_depth: r.forum_discovery_depth ?? '',
+      monitor_groups: (r.monitor_groups ?? []).join('\n')
+    };
+  }
+
+  // Re-seed the draft whenever the loaded detail changes (select / after save).
+  $effect(() => {
+    if (identityView.raw) cfg = seedCfg(identityView.raw);
+  });
+
+  function buildUpdates() {
+    const r = identityView.raw;
+    const u = {};
+    if (!r || !cfg) return u;
+    if (sourceKind === 'telegram') {
+      const mg = splitLines(cfg.monitor_groups);
+      if (!arrEq(mg, r.monitor_groups ?? [])) u.monitor_groups = mg;
+      return u;
+    }
+    const setStr = (k) => { const v = (cfg[k] ?? '').trim(); if (v !== (r[k] ?? '')) u[k] = v; };
+    ['forum_base_url', 'forum_engine', 'forum_user_agent', 'forum_evasion_level', 'forum_tls_impersonate'].forEach(setStr);
+    const tu = splitLines(cfg.forum_thread_urls);
+    if (!arrEq(tu, r.forum_thread_urls ?? [])) u.forum_thread_urls = tu;
+    if (cfg.forum_enable_waf_bypass !== !!r.forum_enable_waf_bypass) u.forum_enable_waf_bypass = cfg.forum_enable_waf_bypass;
+    // Only send a numeric if the operator actually changed it — so picking a new evasion
+    // level (which the backend expands) isn't clobbered by stale delay fields in the box.
+    const setNum = (k) => { const v = cfg[k]; if (v === '' || v === null) return; const n = Number(v); if (n !== r[k]) u[k] = n; };
+    ['forum_delay_min', 'forum_delay_max', 'forum_discovery_interval', 'forum_max_category_pages', 'forum_max_thread_pages', 'forum_steady_pages', 'forum_discovery_depth'].forEach(setNum);
+    return u;
+  }
+
+  const pendingUpdates = $derived(buildUpdates());
+  const dirty = $derived(Object.keys(pendingUpdates).length > 0);
+
+  async function saveConfig() {
+    if (!sel || !dirty) return;
+    await saveIdentityConfig(sel.id, pendingUpdates, { restart: restartOnSave });
+    restartOnSave = false;
+  }
 </script>
 
 <main>
@@ -232,11 +299,67 @@
               <span class="hint">cURL is auto-converted to a Netscape jar{forumHost ? ` scoped to ${forumHost}` : ''}. Already-Netscape text is sent as-is.</span>
             {/if}
           </div>
+          <div class="config-row">
+            <div class="actions-label">Collector config</div>
+            {#if !showConfig}
+              <Button variant="ghost" size="sm" onclick={() => (showConfig = true)}>Edit config</Button>
+              <span class="hint">Pacing, evasion, engine, fingerprint. Read at collector boot — editing it does not take effect until the collector restarts.</span>
+            {:else if cfg}
+              {#if sourceKind === 'telegram'}
+                <label class="cfg-f">Monitored groups (one per line)
+                  <textarea class="field mono" rows="4" bind:value={cfg.monitor_groups} placeholder="@channel or -100… id"></textarea>
+                </label>
+              {:else}
+                <div class="cfg-grid">
+                  <label class="cfg-f wide">Base URL<input class="field" type="text" bind:value={cfg.forum_base_url} /></label>
+                  <label class="cfg-f wide">Thread URLs (one per line)
+                    <textarea class="field mono" rows="3" bind:value={cfg.forum_thread_urls}></textarea>
+                  </label>
+                  <label class="cfg-f">Engine<input class="field" type="text" bind:value={cfg.forum_engine} placeholder="mybb" /></label>
+                  <label class="cfg-f">Evasion level
+                    <select class="field" bind:value={cfg.forum_evasion_level}>
+                      {#each EVASION_LEVELS as lvl}<option value={lvl}>{lvl || '— custom —'}</option>{/each}
+                    </select>
+                  </label>
+                  <label class="cfg-f">Delay min (s)<input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_min} /></label>
+                  <label class="cfg-f">Delay max (s)<input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_max} /></label>
+                  <label class="cfg-f">Discovery depth<input class="field" type="number" min="0" bind:value={cfg.forum_discovery_depth} /></label>
+                  <label class="cfg-f">Discovery interval (s)<input class="field" type="number" min="0" bind:value={cfg.forum_discovery_interval} /></label>
+                  <label class="cfg-f">Max category pages<input class="field" type="number" min="0" bind:value={cfg.forum_max_category_pages} /></label>
+                  <label class="cfg-f">Max thread pages<input class="field" type="number" min="0" bind:value={cfg.forum_max_thread_pages} /></label>
+                  <label class="cfg-f">Steady pages<input class="field" type="number" min="0" bind:value={cfg.forum_steady_pages} /></label>
+                  <label class="cfg-f">TLS impersonate
+                    <select class="field" bind:value={cfg.forum_tls_impersonate}>
+                      {#each IMPERSONATE_TARGETS as t}<option value={t}>{t || '— none (Tor/httpx) —'}</option>{/each}
+                    </select>
+                  </label>
+                  <label class="cfg-f wide">User-Agent<input class="field" type="text" bind:value={cfg.forum_user_agent} /></label>
+                  <label class="cfg-f check"><input type="checkbox" bind:checked={cfg.forum_enable_waf_bypass} /> Enable WAF bypass (FlareSolverr)</label>
+                </div>
+                <p class="warn-note">⚠ Fingerprint coherence: User-Agent, TLS impersonate, and the browser that minted the cookie jar must ALL be the same Firefox. A mismatch is more detectable than no impersonation.</p>
+              {/if}
+              <label class="cfg-f check restart">
+                <input type="checkbox" bind:checked={restartOnSave} disabled={!identityView.collectorId} />
+                Restart the collector on save to apply now
+                {#if identityView.collectorId}
+                  <span class="hint inline">(its session will briefly drop{identityView.collectorState ? ` · now ${identityView.collectorState}` : ''})</span>
+                {:else}
+                  <span class="hint inline">(no collector bound — save only; it applies next time one runs)</span>
+                {/if}
+              </label>
+              {#if !restartOnSave}<span class="hint">Unchecked: changes are saved but the running collector keeps the OLD config until you restart it.</span>{/if}
+              <div class="actions-row">
+                <Button variant="primary" size="sm" disabled={identityView.submitting || !dirty} onclick={saveConfig}>{restartOnSave ? 'Save & restart' : 'Save config'}</Button>
+                <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showConfig = false; restartOnSave = false; cfg = seedCfg(identityView.raw); }}>Cancel</Button>
+                {#if dirty}<span class="hint">{Object.keys(pendingUpdates).length} field(s) changed</span>{/if}
+              </div>
+            {/if}
+          </div>
           <div class="danger-row">
             <Button variant="destructive" size="sm" disabled={identityView.submitting} onclick={removeIdentity}>Delete identity</Button>
             <span class="hint">Removes the row (only if no collector binds it). Burn to retire a compromised one.</span>
           </div>
-          {#if identityView.submitMsg}<p class="submitmsg" class:ok={identityView.submitTone === 'ok'} class:err={identityView.submitTone === 'err'}>{identityView.submitMsg}</p>{/if}
+          {#if identityView.submitMsg}<p class="submitmsg" class:ok={identityView.submitTone === 'ok'} class:err={identityView.submitTone === 'err'} class:warn={identityView.submitTone === 'warn'}>{identityView.submitMsg}</p>{/if}
         </div>
       </div>
     {/if}
@@ -278,6 +401,17 @@
   .submitmsg { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
   .submitmsg.ok { color: var(--accent-text); }
   .submitmsg.err { color: var(--red-text); }
+  .submitmsg.warn { color: var(--warn-text, #d8a657); }
+
+  .config-row { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cfg-f { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
+  .cfg-f.wide { grid-column: 1 / -1; }
+  .cfg-f.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text-body); font-size: var(--fs-12); }
+  .cfg-f.check.restart { padding-top: 6px; border-top: 1px solid var(--border); margin-top: 4px; }
+  .cfg-f select.field { font-family: var(--font-mono); font-size: var(--fs-12); }
+  .hint.inline { display: inline; }
+  .warn-note { margin: 2px 0 0; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--warn-text, #d8a657); line-height: var(--lh-normal); }
   .preview { margin: -2px 0 0; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); }
   .preview.ok { color: var(--accent-text); }
   .preview.err { color: var(--red-text); }

@@ -3,7 +3,7 @@
 // (claim/release/freeze/burn + freeze_all) persist synchronously in the handler
 // (the operator-under-attack invariant), so a reload shows the new state — no
 // polling. Every action requires a reason (IdentityActionRequest).
-import { apiDelete, apiGet, apiPost, apiPostForm, apiPutForm } from './api.js';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostForm, apiPutForm } from './api.js';
 
 const shortTs = (ts) => (ts ? ts.replace('T', ' ').replace(/\..*$/, 'Z') : '·');
 
@@ -46,6 +46,9 @@ export const identityView = $state({
   delayMin: null,
   delayMax: null,
   discoveryDepth: null,
+  raw: null, // the full GET detail — drives the config editor
+  collectorId: null,
+  collectorState: null,
   loading: false,
   error: null,
   submitting: false,
@@ -65,6 +68,9 @@ export async function loadIdentityDetail(id) {
   identityView.delayMin = null;
   identityView.delayMax = null;
   identityView.discoveryDepth = null;
+  identityView.raw = null;
+  identityView.collectorId = null;
+  identityView.collectorState = null;
   identityView.error = null;
   identityView.submitMsg = null;
   identityView.submitTone = null;
@@ -77,6 +83,9 @@ export async function loadIdentityDetail(id) {
     identityView.delayMin = d.forum_delay_min;
     identityView.delayMax = d.forum_delay_max;
     identityView.discoveryDepth = d.forum_discovery_depth;
+    identityView.raw = d;
+    identityView.collectorId = d.collector_id;
+    identityView.collectorState = d.collector_observed_state;
     identityView.error = null;
   } catch (e) {
     if (mine !== detailSeq) return;
@@ -169,6 +178,55 @@ export async function replaceSession(id, file, { note = '' } = {}) {
     return false;
   } finally {
     identityView.submitting = false;
+  }
+}
+
+// Edit a collector's non-secret config (PATCH /v1/identities/{id}/config, admin).
+// `updates` carries ONLY the changed fields (the backend merges exclude_unset). Config is
+// read at collector boot, so nothing is live until a restart — `restart:true` bounces the
+// bound collector (stop → wait for STOPPED → start), the conscious apply the operator ticks.
+export async function saveIdentityConfig(id, updates, { restart = false } = {}) {
+  identityView.submitting = true;
+  identityView.submitMsg = null;
+  identityView.submitTone = null;
+  try {
+    await apiPatch(`/v1/identities/${id}/config`, updates, { auth: true });
+    let msg = '✓ Config saved.';
+    if (restart) {
+      const ok = await restartCollector(identityView.collectorId);
+      msg += ok ? ' Collector restarting to apply.' : ' Saved, but restart failed — restart it manually.';
+    } else {
+      msg += ' NOT live until the collector restarts.';
+    }
+    await loadIdentityDetail(id); // clears submitMsg, so set the confirmation AFTER
+    identityView.submitMsg = msg;
+    identityView.submitTone = restart ? 'ok' : 'warn';
+    return true;
+  } catch (e) {
+    identityView.submitMsg = `✗ Save failed: ${e.message ?? e}`;
+    identityView.submitTone = 'err';
+    return false;
+  } finally {
+    identityView.submitting = false;
+  }
+}
+
+// Restart the bound collector so it re-reads source_config: stop → poll until the
+// supervisor reports STOPPED → start (the supervisor respawns with the new config).
+// Returns false if no collector is bound or the sequence errors.
+async function restartCollector(collectorId) {
+  if (!collectorId) return false;
+  try {
+    await apiPost(`/v1/collectors/${collectorId}/stop`, {}, { auth: true });
+    for (let i = 0; i < 12; i++) {
+      const c = await apiGet(`/v1/collectors/${collectorId}`, { auth: true });
+      if (c.observed_state === 'stopped') break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    await apiPost(`/v1/collectors/${collectorId}/start`, {}, { auth: true });
+    return true;
+  } catch {
+    return false;
   }
 }
 
