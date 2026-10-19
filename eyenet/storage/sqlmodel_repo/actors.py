@@ -12,10 +12,10 @@ from sqlalchemy import ColumnElement, exists, func, or_
 from sqlmodel import col, select
 
 from eyenet.contracts.actor import ActorRow
-from eyenet.contracts.enums import GroupKind, SourceKind
+from eyenet.contracts.enums import GroupKind, MembershipRole, SourceKind
 from eyenet.contracts.group import GroupRow
 from eyenet.contracts.source import SourceRow
-from eyenet.models import ActorTable, GroupTable, SourceTable
+from eyenet.models import ActorTable, GroupTable, MembershipTable, SourceTable
 from eyenet.models.actor import ActorAliasHistoryTable
 from eyenet.models.message import MessageTable
 from eyenet.models.observation import ObservationTable
@@ -463,6 +463,52 @@ class ActorsMixin:
             row_id = row.id
             await session.commit()
             return row_id, search_changed
+
+    async def upsert_membership(
+        self,
+        *,
+        actor_id: UUID,
+        group_id: UUID,
+        role: MembershipRole,
+        seen_at: datetime,
+        joined_at_source: datetime | None = None,
+    ) -> tuple[UUID, bool]:
+        """Upsert an actor<->group membership with its platform role. The role is the
+        cross-platform primitive: Discord rank, IRC user mode, Matrix power level all
+        land here (MODELS §2.2). Unique on (actor_id, group_id). Returns
+        ``(membership_id, role_changed)`` — ``role_changed`` is True on create or when
+        the role actually changed, and a seen membership is un-left (``left_at`` cleared).
+        Generic ORM only (no dialect SQL): safe in the shared mixin layer."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(MembershipTable).where(
+                    MembershipTable.actor_id == actor_id,
+                    MembershipTable.group_id == group_id,
+                )
+            )
+            row = result.first()
+            if row is None:
+                row = MembershipTable(
+                    actor_id=actor_id,
+                    group_id=group_id,
+                    role=role,
+                    joined_at_source=joined_at_source,
+                    joined_at_ingest=seen_at,
+                )
+                session.add(row)
+                await session.flush()
+                changed = True
+            else:
+                changed = row.role != role
+                row.role = role
+                if joined_at_source is not None and row.joined_at_source is None:
+                    row.joined_at_source = joined_at_source
+                row.left_at_ingest = None  # we just saw them, so they are present
+                session.add(row)
+                await session.flush()
+            row_id = row.id
+            await session.commit()
+            return row_id, changed
 
 
 __all__ = ["ActorsMixin"]

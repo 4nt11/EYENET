@@ -66,6 +66,7 @@ if TYPE_CHECKING:
         IdentityRole,
         IdentityState,
         JoinedVia,
+        MembershipRole,
         MentionKind,
         RedundancyPolicy,
         RelationKind,
@@ -1943,6 +1944,22 @@ class BaseRepository(ABC):
     ) -> tuple[UUID, bool]:
         """Upsert an actor; returns ``(actor_id, search_changed)`` where
         ``search_changed`` gates the ``entity.actor.changed`` event."""
+
+    @abstractmethod
+    async def upsert_membership(
+        self,
+        *,
+        actor_id: UUID,
+        group_id: UUID,
+        role: MembershipRole,
+        seen_at: datetime,
+        joined_at_source: datetime | None = None,
+    ) -> tuple[UUID, bool]:
+        """Upsert an actor<->group membership with its platform role (MODELS §2.2).
+        The cross-platform primitive for Discord rank / IRC user mode / Matrix power
+        level. Unique on (actor_id, group_id). Returns ``(membership_id, role_changed)``
+        where ``role_changed`` is True on create or when the role actually changed; a
+        seen membership is un-left."""
 
     @abstractmethod
     async def resolve_actor_id(self, actor_key: str) -> UUID | None: ...
