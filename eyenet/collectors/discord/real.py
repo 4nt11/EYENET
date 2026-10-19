@@ -20,6 +20,7 @@ Load-bearing design rules (see DESIGN.md + [[project_discord_collector_reads_upw
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import random
 import uuid
@@ -32,6 +33,7 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eyenet.collectors.base._credentials import DiscordSession, materialize_discord_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.contracts.actor import actor_key
 from eyenet.contracts.enums import GroupKind, MembershipRole, SourceKind, SystemLogLevel
@@ -123,6 +125,37 @@ def _build_message_row(
             "mentions": [str(m.get("id")) for m in (msg.get("mentions") or [])],
         },
     )
+
+
+# EXACT captured REST header order (probe.py). Accept-Encoding/Connection omitted
+# (decode trap / illegal on h2). Referer is added per-request (it needs the channel).
+_REST_HEADER_ORDER = (
+    "User-Agent", "Accept", "Accept-Language", "Authorization", "X-Super-Properties",
+    "X-Installation-Id", "X-Discord-Locale", "X-Discord-Timezone", "X-Debug-Options",
+    "Alt-Used", "Cookie", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site",
+)
+
+
+def _build_rest_headers(ds: DiscordSession) -> dict[str, str]:
+    """Order-preserved REST header set from the session fingerprint (same X-headers the
+    captured browser sends; the WS IDENTIFY decodes the same X-Super-Properties)."""
+    values = {
+        "User-Agent": ds.user_agent,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Authorization": ds.token,
+        "X-Super-Properties": ds.super_properties,
+        "X-Installation-Id": ds.installation_id,
+        "X-Discord-Locale": ds.locale,
+        "X-Discord-Timezone": ds.timezone,
+        "X-Debug-Options": "bugReporterEnabled",
+        "Alt-Used": "discord.com",
+        "Cookie": ds.cookie,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    return {k: values[k] for k in _REST_HEADER_ORDER}
 
 
 _ADMINISTRATOR = 1 << 3  # Discord permission bit; a role carrying it is admin-grade
@@ -229,10 +262,14 @@ class DiscordCollector(CollectorSkeleton):
             identity_name=identity_name, source_kind=SourceKind.DISCORD,
         )
         self._session_key = session_key  # Fernet; decrypts the session_path blob at boot
-        self._session: Any = None  # curl_cffi.requests.Session(impersonate=...), REST + WS
+        self._session: Any = None  # curl_cffi AsyncSession(impersonate=...) for REST
         self._flare: Any = None  # FlareSolverrClient, for cf_clearance remint (optional)
-        self._headers: dict[str, str] = {}
+        self._headers: dict[str, str] = {}  # base REST headers (Referer added per request)
+        self._super_props: dict[str, Any] = {}  # decoded X-Super-Properties, for IDENTIFY
+        self._capabilities = 0  # per-issuer IDENTIFY capabilities
+        self._token = ""  # user token (also in _headers Authorization)
         self._source_uuid: UUID | None = None  # bound in on_subscribe
+        self._collector_id: UUID | None = None  # our collector row, for membership logs
         self._channel_titles: dict[str, str] = {}  # id -> "guild / channel" from discovery
         self._guild_names: dict[str, str] = {}  # guild_id -> name (for the guild group_ node)
         self._guild_roles: dict[str, dict[str, dict[str, Any]]] = {}  # guild -> {role_id: role}
@@ -245,20 +282,28 @@ class DiscordCollector(CollectorSkeleton):
     async def on_subscribe(self) -> None:
         await super().on_subscribe()  # claims identity -> self._claimed
         entry = cast("IdentityFileEntry", self._claimed)
-        # session_path (Fernet-encrypted) carries this issuer's FULL fingerprint, not
-        # just token + cookie: the X-header set too (X-Super-Properties, X-Installation-Id,
-        # X-Discord-Locale, X-Discord-Timezone, X-Debug-Options) + UA + capabilities, all
-        # per-session and CAPTURED from the minting browser. Build ONE curl_cffi
-        # impersonated Session (impersonate=entry.discord_impersonate) and the order-
-        # preserved REST header set INCLUDING every X-header (see probe.py build_headers;
-        # Accept-Encoding/Connection omitted). The WS IDENTIFY properties are the base64
-        # DECODE of this session's X-Super-Properties (_build_identify) so REST and WS are
-        # byte-identical. impersonate MUST match the token's browser. When
-        # entry.discord_enable_waf_bypass is set, keep a FlareSolverrClient (from
-        # eyenet.collectors.forum._flaresolverr) on self._flare for cf_clearance reminting.
-        raise NotImplementedError(
-            f"build the impersonated session for {entry.name} from its identity blob"
-        )
+        # The session blob carries this issuer's FULL per-browser fingerprint: token,
+        # cookie, X-Super-Properties, X-Installation-Id, UA, capabilities. REST sends the
+        # X-headers; the WS IDENTIFY decodes the SAME X-Super-Properties, so both legs are
+        # byte-coherent (see DESIGN.md).
+        ds = materialize_discord_session(entry, self._session_key)
+        self._token = ds.token
+        self._capabilities = ds.capabilities
+        self._super_props = json.loads(base64.b64decode(ds.super_properties))
+        self._headers = _build_rest_headers(ds)
+        # curl_cffi impersonated session (TLS matches the token's browser). Lazy import:
+        # only the clearnet path needs curl-cffi.
+        from curl_cffi.requests import AsyncSession  # noqa: PLC0415
+
+        self._session = AsyncSession(impersonate=entry.discord_impersonate, timeout=30.0)
+        # TODO: when entry.discord_enable_waf_bypass, build a FlareSolverrClient on
+        # self._flare for cf_clearance reminting (see _remint_clearance).
+        # Ingest into the source the operator chose at collector-creation; never
+        # auto-create one (mirrors the forum collector).
+        collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
+        self._collector_id = collector.id if collector is not None else None
+        if collector is not None:
+            self._source_uuid = collector.source_id
 
     # ---------------------------------------------------- discovery: gateway WS
 
@@ -322,23 +367,64 @@ class DiscordCollector(CollectorSkeleton):
     async def _backfill_channel(
         self, channel_id: str, *, delay: float, limit: int = 100, max_pages: int = 0
     ) -> int:
-        """UPWARD before-walk (newest->oldest). NEVER after=0. 429 = hard stop. Lifted
-        from probe.py --backfill; ingest each page, persist oldest_seen as the resume
-        cursor, stop on a short page (channel start)."""
-        # TODO: port probe.backfill loop; call _ingest_message per message; sleep(delay)
-        #   jittered between pages; update self._cursors[channel_id]["oldest"].
-        raise NotImplementedError("port probe.py backfill (upward)")
+        """UPWARD before-walk (newest->oldest); NEVER after=0. Ingest each page, persist
+        oldest_seen as the resume cursor, stop on a short page (channel start) or a pause.
+        Returns the count ingested."""
+        cur = self._cursors.setdefault(channel_id, {})
+        before = cur.get("oldest")
+        pages = total = 0
+        while max_pages == 0 or pages < max_pages:
+            if asyncio.get_event_loop().time() < self._paused_until:
+                break
+            batch = await self._rest_messages(channel_id, before=before, limit=limit)
+            if not batch:
+                break
+            pages += 1
+            total += len(batch)
+            for msg in batch:
+                await self._ingest_message(channel_id, msg)
+            before = str(batch[-1]["id"])
+            cur["oldest"] = before
+            cur.setdefault("newest", str(batch[0]["id"]))  # first page's top = newest seen
+            if len(batch) < limit:
+                break  # reached channel start
+            await asyncio.sleep(self._jitter(delay, delay * 2))
+        return total
 
     async def _rest_messages(
         self, channel_id: str, *, before: str | None = None,
         after: str | None = None, limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """GET /channels/{id}/messages with the coherent impersonated headers.
-        Classify the response; on CF_CHALLENGE pause+remint, on DISCORD_RATE_LIMIT
-        hard-stop+back off. Returns the message list on OK."""
-        # TODO: self._session.get(url, headers=self._headers, impersonate=...,
-        #   default_headers=False); then _classify; act; return r.json() on OK.
-        raise NotImplementedError("port probe.py fetch + response classification")
+        """GET /channels/{id}/messages with the coherent impersonated headers. Classify
+        the response: a Cloudflare challenge pauses + remints, a Discord 429 backs off.
+        Returns the message list on OK, [] otherwise."""
+        qs = f"?limit={limit}"
+        if before:
+            qs += f"&before={before}"
+        if after:
+            qs += f"&after={after}"
+        headers = {**self._headers, "Referer": f"https://discord.com/channels/@me/{channel_id}"}
+        r = await self._session.get(
+            f"{API}/channels/{channel_id}/messages{qs}", headers=headers, default_headers=False
+        )
+        status = int(r.status_code)
+        cls = self._classify(status, dict(r.headers), "" if status == HTTPStatus.OK else r.text)
+        if cls is RespClass.OK:
+            return list(r.json())
+        if cls is RespClass.CF_CHALLENGE:
+            await self._remint_clearance()  # pauses the collector; never retry blind
+            return []
+        if cls is RespClass.DISCORD_RATE_LIMIT:
+            ct = r.headers.get("content-type", "")
+            data = r.json() if ct.startswith("application/json") else {}
+            retry = float(data.get("retry_after", 5))
+            self._paused_until = asyncio.get_event_loop().time() + retry
+            _log.warning("discord.rate_limited", channel=channel_id, retry_after=retry)
+            return []
+        if cls is RespClass.AUTH_FAIL:
+            raise RuntimeError(f"{self._identity_name}: Discord token rejected (401)")
+        _log.warning("discord.rest_unexpected", channel=channel_id, status=status)
+        return []
 
     # ---------------------------------------------------- cloudflare fail-safe
 

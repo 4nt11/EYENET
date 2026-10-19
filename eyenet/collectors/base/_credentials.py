@@ -13,6 +13,8 @@ in-memory Telethon ``StringSession``, never written back out.
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +27,51 @@ if TYPE_CHECKING:
     from cryptography.fernet import Fernet
 
     from eyenet.identity_pool.loader import IdentityFileEntry
+
+
+@dataclass(frozen=True)
+class DiscordSession:
+    """The per-issuer Discord credential set, decrypted in memory. REST and the WS
+    gateway BOTH derive their fingerprint from this one capture, so they stay
+    byte-coherent (see poc-discord/DESIGN.md)."""
+
+    token: str
+    cookie: str
+    super_properties: str  # base64 X-Super-Properties; IDENTIFY decodes it
+    user_agent: str
+    installation_id: str = ""
+    capabilities: int = 0
+    locale: str = "en-US"
+    timezone: str = "America/Santiago"
+
+
+def materialize_discord_session(
+    entry: IdentityFileEntry,
+    session_key: Fernet | None,
+) -> DiscordSession:
+    """Decrypt the per-identity Discord session blob into its credential set.
+
+    The blob at ``session_path`` (written at provision time) is JSON carrying the
+    FULL per-issuer fingerprint: ``token``, ``cookie`` (the raw Cookie header incl
+    cf_clearance), ``super_properties`` (base64), ``user_agent``, ``installation_id``,
+    ``capabilities``. Same decrypt-on-boot seam as telegram/forum: plaintext never
+    touches disk when ``session_key`` is set.
+    """
+    path = Path(entry.session_path)
+    raw = path.read_text(encoding="utf-8") if session_key is None else decrypt_session(
+        session_key, path.read_bytes()
+    )
+    data = json.loads(raw)
+    return DiscordSession(
+        token=data["token"],
+        cookie=data["cookie"],
+        super_properties=data["super_properties"],
+        user_agent=data["user_agent"],
+        installation_id=data.get("installation_id", ""),
+        capabilities=int(data.get("capabilities", 0)),
+        locale=data.get("locale", "en-US"),
+        timezone=data.get("timezone", "America/Santiago"),
+    )
 
 
 def materialize_telegram_session(

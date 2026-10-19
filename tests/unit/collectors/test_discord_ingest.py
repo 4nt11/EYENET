@@ -1,21 +1,29 @@
 """Unit tests for the Discord collector's pure ingest mappers (no storage/network)."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 
+from eyenet.collectors.base._credentials import DiscordSession, materialize_discord_session
 from eyenet.collectors.discord.real import (
+    _REST_HEADER_ORDER,
     _actor_fields,
     _build_message_row,
+    _build_rest_headers,
     _emoji_str,
     _member_items,
     _parse_ts,
     _reaction_from_event,
     _resolve_rank,
 )
-from eyenet.contracts.enums import MembershipRole
+from eyenet.contracts.enums import MembershipRole, SourceKind
+from eyenet.crypto import encrypt_session
+from eyenet.identity_pool.loader import IdentityFileEntry
 
 pytestmark = pytest.mark.unit
 
@@ -156,3 +164,38 @@ def test_member_items_list_update_skips_group_headers() -> None:
     }
     items = _member_items("GUILD_MEMBER_LIST_UPDATE", d)
     assert [m["user"]["id"] for m in items] == ["42"]
+
+
+# ---- session materialization + REST headers (the live-I/O foundation) --------
+
+def test_materialize_discord_session_roundtrip(tmp_path: Path) -> None:
+    key = Fernet.generate_key()
+    fernet = Fernet(key)
+    blob = {
+        "token": "TOK", "cookie": "cf_clearance=x; locale=en-US",
+        "super_properties": "eyJvcyI6IkxpbnV4In0=", "user_agent": "Firefox/157",
+        "installation_id": "iid.abc", "capabilities": 1734653,
+    }
+    path = tmp_path / "sess.enc"
+    path.write_bytes(encrypt_session(fernet, json.dumps(blob)))
+    entry = IdentityFileEntry(name="dc", source=SourceKind.DISCORD, session_path=str(path))
+
+    ds = materialize_discord_session(entry, fernet)
+    assert ds.token == "TOK"
+    assert ds.capabilities == 1734653
+    assert ds.cookie.startswith("cf_clearance=")
+    assert ds.user_agent == "Firefox/157"
+
+
+def test_build_rest_headers_order_and_xheaders() -> None:
+    ds = DiscordSession(
+        token="TOK", cookie="c", super_properties="SP", user_agent="UA",
+        installation_id="iid", capabilities=1,
+    )
+    h = _build_rest_headers(ds)
+    assert list(h.keys()) == list(_REST_HEADER_ORDER)  # exact captured order
+    assert h["Authorization"] == "TOK"
+    assert h["X-Super-Properties"] == "SP"
+    assert h["X-Installation-Id"] == "iid"
+    assert "Accept-Encoding" not in h  # decode trap
+    assert "Connection" not in h  # illegal on h2
