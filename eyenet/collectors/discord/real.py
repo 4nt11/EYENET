@@ -234,6 +234,7 @@ class DiscordCollector(CollectorSkeleton):
         self._headers: dict[str, str] = {}
         self._source_uuid: UUID | None = None  # bound in on_subscribe
         self._channel_titles: dict[str, str] = {}  # id -> "guild / channel" from discovery
+        self._guild_names: dict[str, str] = {}  # guild_id -> name (for the guild group_ node)
         self._guild_roles: dict[str, dict[str, dict[str, Any]]] = {}  # guild -> {role_id: role}
         # per-channel resume cursors: {channel_id: {"newest": snowflake, "oldest": snowflake}}
         self._cursors: dict[str, dict[str, str]] = {}
@@ -269,7 +270,13 @@ class DiscordCollector(CollectorSkeleton):
         out: list[VisibleGroup] = []
         for g in ready.get("guilds", []):
             gname = g.get("properties", {}).get("name") or g.get("name") or g.get("id")
+            gid = str(g.get("id") or "")
             self._cache_guild_roles(g)  # role defs for member-rank resolution
+            if gid:
+                self._guild_names[gid] = gname
+                out.append(VisibleGroup(  # the guild itself is a container node
+                    platform_groupid=gid, kind=GroupKind.GUILD, title=gname, is_member=True,
+                ))
             for c in g.get("channels", []):
                 if c.get("type") in _READABLE_CHANNEL_TYPES and self._can_view(g, c):
                     cid = str(c["id"])
@@ -492,20 +499,44 @@ class DiscordCollector(CollectorSkeleton):
                 await session.rollback()  # idempotent re-delivery on evidence_ref
 
     async def _handle_members(self, t: str, d: dict[str, Any]) -> None:
-        """member.roles x guild.roles -> each member's rank + role names (the diamond:
-        returnero=Admin). Persisting actor-in-guild rank is a schema follow-up (no flat
-        storage path yet); for now resolve + log so the signal is visible + testable."""
+        """member.roles x guild.roles -> each member's rank, persisted as an actor<->guild
+        membership (the diamond: returnero=Admin becomes a membership row). The guild is
+        its own GroupKind.GUILD group_ node; rank lands via upsert_membership."""
+        source_uuid = self._source_uuid
         guild_id = str(d.get("guild_id") or "")
+        if source_uuid is None or not guild_id:
+            return
         guild_roles = self._guild_roles.get(guild_id, {})
+        now = datetime.now(tz=UTC)
+        group_id, group_changed = await self._storage.upsert_group(
+            source_id=source_uuid, platform_groupid=guild_id, kind=GroupKind.GUILD,
+            title=self._guild_names.get(guild_id), seen_at=now,
+        )
+        if group_changed:
+            await publish_entity_changed(
+                self.publisher, entity_type="group", entity_id=group_id, source_id=source_uuid
+            )
         for member in _member_items(t, d):
-            uid = str((member.get("user") or {}).get("id") or "")
+            user = member.get("user") or {}
+            uid = str(user.get("id") or "")
             if not uid:
                 continue
-            rank, names = _resolve_rank(
+            rank, _names = _resolve_rank(
                 [str(r) for r in (member.get("roles") or [])], guild_roles
             )
-            _log.info("discord.member", guild=guild_id, user=uid, rank=rank.value, roles=names)
-            # TODO: persist actor-in-guild membership + rank once a storage path exists.
+            actor_id, actor_changed = await self._storage.upsert_actor(
+                source_id=source_uuid, actor_key=actor_key(SourceKind.DISCORD, uid),
+                platform_userid=uid, handle=user.get("username") or None,
+                display_name=user.get("global_name") or user.get("username") or None,
+                seen_at=now, is_bot=bool(user.get("bot", False)),
+            )
+            if actor_changed:
+                await publish_entity_changed(
+                    self.publisher, entity_type="actor", entity_id=actor_id, source_id=source_uuid
+                )
+            await self._storage.upsert_membership(
+                actor_id=actor_id, group_id=group_id, role=rank, seen_at=now
+            )
 
     def _cache_guild_roles(self, guild: dict[str, Any]) -> None:
         gid = str(guild.get("id") or "")

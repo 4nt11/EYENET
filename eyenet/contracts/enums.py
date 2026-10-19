@@ -28,6 +28,7 @@ class SourceKind(StrEnum):
 class GroupKind(StrEnum):
     """Shape of a chat container (MODELS §1.3)."""
 
+    GUILD = "guild"  # a server/community container (Discord guild; IRC network, Matrix space)
     CHAT = "chat"
     CHANNEL = "channel"
     DM = "dm"
