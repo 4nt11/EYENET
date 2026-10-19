@@ -35,6 +35,12 @@ _A = AttachmentTable
 def _attachment_node(a: AttachmentTable) -> ExpandNode:
     kind = a.kind.value
     tier = (a.operator_tier_override or a.classifier_tier).value
+    # A not-yet-retrieved shell carries a placeholder sha256 (all zeros) + size 0; surface
+    # those as unknown (None) rather than a wall of zeros, and give the operator a clear
+    # retrieval state: stored (bytes on disk) / linked (over the gate, link only) /
+    # pending (metadata-only, awaiting backfill or forward download).
+    is_shell = a.sha256 == "0" * 64
+    state = "stored" if a.storage_uri else ("linked" if a.source_ref else "pending")
     return ExpandNode(
         entity_type="attachment",
         entity_id=a.id,
@@ -42,15 +48,14 @@ def _attachment_node(a: AttachmentTable) -> ExpandNode:
         status=None,
         source_id=None,
         fields={
+            "state": state,
             "kind": kind,
             "mime": a.mime,
-            "size_bytes": a.size_bytes,
+            "size_bytes": a.size_bytes or None,
             "filename": a.filename,
-            "sha256": a.sha256,
+            "sha256": None if is_shell else a.sha256,
             "tier": tier,
-            # present when we stored the bytes; else source_ref is the operator's
-            # retrieval link for a blob kept metadata-only (over the size gate).
-            "stored": a.storage_uri is not None,
+            # operator retrieval link for a blob we did not store (over the size gate).
             "source_ref": a.source_ref,
         },
     )

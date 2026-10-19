@@ -277,7 +277,21 @@
     guardedExpand(node, name, count);
   }
 
-  const fieldRows = $derived(selNode ? Object.entries(selNode.fields ?? {}) : []);
+  // Drop null/empty fields (a not-yet-retrieved attachment shell would otherwise show a
+  // wall of nulls/zeros) and prettify a couple of known keys.
+  const fieldRows = $derived(
+    selNode
+      ? Object.entries(selNode.fields ?? {}).filter(
+          ([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && v.length === 0)
+        )
+      : []
+  );
+  function fmtField(k, v) {
+    if (k === 'size_bytes' && typeof v === 'number')
+      return v >= 1048576 ? `${(v / 1048576).toFixed(1)} MiB` : v >= 1024 ? `${(v / 1024).toFixed(1)} KiB` : `${v} B`;
+    if (k === 'sha256' && typeof v === 'string') return `${v.slice(0, 16)}…`;
+    return typeof v === 'object' ? JSON.stringify(v) : v;
+  }
 
   // Entity dossier: on selecting a node, pull its detail endpoint for the rich stats the
   // sparse search-doc fields lack. Dispatched by entity type; guarded against a stale
@@ -548,7 +562,7 @@
           <table class="ins-fields">
             <tbody>
               {#each fieldRows as [k, v]}
-                <tr><th>{k}</th><td>{typeof v === 'object' ? JSON.stringify(v) : v}</td></tr>
+                <tr><th>{k}</th><td>{fmtField(k, v)}</td></tr>
               {/each}
             </tbody>
           </table>
