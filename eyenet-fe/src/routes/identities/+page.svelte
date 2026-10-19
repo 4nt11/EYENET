@@ -164,6 +164,24 @@
   }
 
   // --- collector config editor ---
+  // Hover help per field (native title tooltip), so the knobs are self-explaining.
+  const HELP = {
+    forum_base_url: 'The forum root URL (onion or clearnet). Everything the collector crawls is resolved against this.',
+    forum_thread_urls: 'Specific thread URLs to monitor directly, one per line. Leave empty to rely on category discovery.',
+    forum_engine: 'The forum software — selects the HTML parser (mybb, xenforo, …). A wrong engine silently parses nothing.',
+    forum_evasion_level: 'Named pacing preset: ghost (slowest/stealthiest) → lurker → regular → brisk → smash (fastest). Picking one fills in the delay + discovery-depth values below; "custom" keeps your manual numbers.',
+    forum_delay_min: 'Minimum wait between requests (seconds). Each fetch waits a RANDOM time between min and max — higher is stealthier but slower.',
+    forum_delay_max: 'Maximum wait between requests (seconds). Each fetch waits a random time between min and max.',
+    forum_discovery_depth: 'How many subforum levels to descend when enumerating categories. 0 = only the top-level categories on the index.',
+    forum_discovery_interval: 'How often (seconds) to re-enumerate the category thread-lists to find new threads. Higher = quieter / less load.',
+    forum_max_category_pages: 'Cap on how many category listing pages are crawled per sweep. 0 = no cap (all pages).',
+    forum_max_thread_pages: 'How many pages deep to read within a thread on a sweep. 0 = all pages; 1 = first page only.',
+    forum_steady_pages: 'In steady-state polling (after the first backfill), how many recent pages of each thread to re-check for new posts.',
+    forum_tls_impersonate: 'curl-cffi TLS fingerprint (JA3/JA4) used on a clearnet WAF board. MUST match the User-Agent and the browser that minted the cookie jar. "none" uses plain httpx (fine over Tor, where TLS is wrapped).',
+    forum_user_agent: 'The exact User-Agent of the browser that exported the cookie jar. Must stay coherent with the TLS impersonate target — a UA flip mid-session is itself a ban signal.',
+    forum_enable_waf_bypass: 'Route requests through FlareSolverr (a real headless browser) to clear a Cloudflare JS challenge / Anubis proof-of-work. Off by default.',
+    monitor_groups: 'Telegram groups/channels to collect, one per line — a @username or a numeric -100… channel id.'
+  };
   const EVASION_LEVELS = ['', 'ghost', 'lurker', 'regular', 'brisk', 'smash'];
   // curl-cffi targets (FORUM_TLS_IMPERSONATE_TARGETS) + '' = none (httpx/Tor path).
   const IMPERSONATE_TARGETS = ['', 'firefox147', 'firefox135', 'chrome131'];
@@ -306,35 +324,35 @@
               <span class="hint">Pacing, evasion, engine, fingerprint. Read at collector boot — editing it does not take effect until the collector restarts.</span>
             {:else if cfg}
               {#if sourceKind === 'telegram'}
-                <label class="cfg-f">Monitored groups (one per line)
+                <label class="cfg-f" title={HELP.monitor_groups}>Monitored groups (one per line) <span class="q">?</span>
                   <textarea class="field mono" rows="4" bind:value={cfg.monitor_groups} placeholder="@channel or -100… id"></textarea>
                 </label>
               {:else}
                 <div class="cfg-grid">
-                  <label class="cfg-f wide">Base URL<input class="field" type="text" bind:value={cfg.forum_base_url} /></label>
-                  <label class="cfg-f wide">Thread URLs (one per line)
+                  <label class="cfg-f wide" title={HELP.forum_base_url}>Base URL <span class="q">?</span><input class="field" type="text" bind:value={cfg.forum_base_url} /></label>
+                  <label class="cfg-f wide" title={HELP.forum_thread_urls}>Thread URLs (one per line) <span class="q">?</span>
                     <textarea class="field mono" rows="3" bind:value={cfg.forum_thread_urls}></textarea>
                   </label>
-                  <label class="cfg-f">Engine<input class="field" type="text" bind:value={cfg.forum_engine} placeholder="mybb" /></label>
-                  <label class="cfg-f">Evasion level
+                  <label class="cfg-f" title={HELP.forum_engine}>Engine <span class="q">?</span><input class="field" type="text" bind:value={cfg.forum_engine} placeholder="mybb" /></label>
+                  <label class="cfg-f" title={HELP.forum_evasion_level}>Evasion level <span class="q">?</span>
                     <select class="field" bind:value={cfg.forum_evasion_level}>
                       {#each EVASION_LEVELS as lvl}<option value={lvl}>{lvl || '— custom —'}</option>{/each}
                     </select>
                   </label>
-                  <label class="cfg-f">Delay min (s)<input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_min} /></label>
-                  <label class="cfg-f">Delay max (s)<input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_max} /></label>
-                  <label class="cfg-f">Discovery depth<input class="field" type="number" min="0" bind:value={cfg.forum_discovery_depth} /></label>
-                  <label class="cfg-f">Discovery interval (s)<input class="field" type="number" min="0" bind:value={cfg.forum_discovery_interval} /></label>
-                  <label class="cfg-f">Max category pages<input class="field" type="number" min="0" bind:value={cfg.forum_max_category_pages} /></label>
-                  <label class="cfg-f">Max thread pages<input class="field" type="number" min="0" bind:value={cfg.forum_max_thread_pages} /></label>
-                  <label class="cfg-f">Steady pages<input class="field" type="number" min="0" bind:value={cfg.forum_steady_pages} /></label>
-                  <label class="cfg-f">TLS impersonate
+                  <label class="cfg-f" title={HELP.forum_delay_min}>Delay min (s) <span class="q">?</span><input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_min} /></label>
+                  <label class="cfg-f" title={HELP.forum_delay_max}>Delay max (s) <span class="q">?</span><input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_max} /></label>
+                  <label class="cfg-f" title={HELP.forum_discovery_depth}>Discovery depth <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_discovery_depth} /></label>
+                  <label class="cfg-f" title={HELP.forum_discovery_interval}>Discovery interval (s) <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_discovery_interval} /></label>
+                  <label class="cfg-f" title={HELP.forum_max_category_pages}>Max category pages <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_max_category_pages} /></label>
+                  <label class="cfg-f" title={HELP.forum_max_thread_pages}>Max thread pages <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_max_thread_pages} /></label>
+                  <label class="cfg-f" title={HELP.forum_steady_pages}>Steady pages <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_steady_pages} /></label>
+                  <label class="cfg-f" title={HELP.forum_tls_impersonate}>TLS impersonate <span class="q">?</span>
                     <select class="field" bind:value={cfg.forum_tls_impersonate}>
                       {#each IMPERSONATE_TARGETS as t}<option value={t}>{t || '— none (Tor/httpx) —'}</option>{/each}
                     </select>
                   </label>
-                  <label class="cfg-f wide">User-Agent<input class="field" type="text" bind:value={cfg.forum_user_agent} /></label>
-                  <label class="cfg-f check"><input type="checkbox" bind:checked={cfg.forum_enable_waf_bypass} /> Enable WAF bypass (FlareSolverr)</label>
+                  <label class="cfg-f wide" title={HELP.forum_user_agent}>User-Agent <span class="q">?</span><input class="field" type="text" bind:value={cfg.forum_user_agent} /></label>
+                  <label class="cfg-f check" title={HELP.forum_enable_waf_bypass}><input type="checkbox" bind:checked={cfg.forum_enable_waf_bypass} /> Enable WAF bypass (FlareSolverr) <span class="q">?</span></label>
                 </div>
                 <p class="warn-note">⚠ Fingerprint coherence: User-Agent, TLS impersonate, and the browser that minted the cookie jar must ALL be the same Firefox. A mismatch is more detectable than no impersonation.</p>
               {/if}
@@ -407,6 +425,8 @@
   .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .cfg-f { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
   .cfg-f.wide { grid-column: 1 / -1; }
+  .q { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border: 1px solid var(--border-strong); border-radius: 50%; font-size: 9px; color: var(--text-faint); cursor: help; vertical-align: middle; }
+  .cfg-f:hover .q { border-color: var(--accent); color: var(--accent-text); }
   .cfg-f.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text-body); font-size: var(--fs-12); }
   .cfg-f.check.restart { padding-top: 6px; border-top: 1px solid var(--border); margin-top: 4px; }
   .cfg-f select.field { font-family: var(--font-mono); font-size: var(--fs-12); }
