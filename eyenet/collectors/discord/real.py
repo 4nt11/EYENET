@@ -56,6 +56,8 @@ _log = get_logger()
 API = "https://discord.com/api/v9"
 GATEWAY_URL = "wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream"
 ZLIB_SUFFIX = b"\x00\x00\xff\xff"
+_OP_DISPATCH = 0  # gateway op: a dispatch event (has `t` + `d`)
+_OP_HELLO = 10  # gateway op: HELLO (carries heartbeat_interval)
 _READABLE_CHANNEL_TYPES = (0, 5, 15)  # text, announcement, forum
 
 
@@ -276,6 +278,7 @@ class DiscordCollector(CollectorSkeleton):
         # per-channel resume cursors: {channel_id: {"newest": snowflake, "oldest": snowflake}}
         self._cursors: dict[str, dict[str, str]] = {}
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
+        self._last_seq: int | None = None  # gateway dispatch seq, for heartbeat + resume
 
     # ------------------------------------------------------------------ boot
 
@@ -339,12 +342,62 @@ class DiscordCollector(CollectorSkeleton):
         return out
 
     async def _gateway_ready(self) -> dict[str, Any]:
-        """Native WS connect -> HELLO -> IDENTIFY(+op41) -> heartbeat -> read until
-        READY, then close. Port gateway.py: _StreamInflator + build_identify + the
-        recv/inflate loop, over self._session.ws_connect(GATEWAY_URL, impersonate=...)
-        with the Cookie/Origin headers. Classify a non-101 upgrade via _classify."""
-        # TODO: lift gateway.py run() body (minus the printing) and return msg["d"].
-        raise NotImplementedError("port gateway.py gateway handshake -> READY payload")
+        """One-shot: connect, IDENTIFY, read until READY, return its payload, close.
+        Discovery (enumerate_visible_groups) rides this. Clean async over curl_cffi's
+        AsyncWebSocket; the persistent live stream is _run_gateway."""
+        inflator = _StreamInflator()
+        async with self._session.ws_connect(
+            GATEWAY_URL, headers=self._ws_headers(), default_headers=False
+        ) as ws:
+            hello = await self._ws_recv(ws, inflator)
+            if not hello or hello.get("op") != _OP_HELLO:
+                raise RuntimeError(f"{self._identity_name}: expected gateway HELLO, got {hello}")
+            await self._ws_identify(ws)
+            deadline = asyncio.get_event_loop().time() + 30.0
+            while asyncio.get_event_loop().time() < deadline:
+                msg = await self._ws_recv(ws, inflator)
+                if msg is None:
+                    break
+                if msg.get("op") == _OP_DISPATCH and msg.get("t") == "READY":
+                    return dict(msg.get("d") or {})
+        raise RuntimeError(f"{self._identity_name}: no gateway READY within 30s")
+
+    def _ws_headers(self) -> dict[str, str]:
+        """Upgrade headers for the gateway WS: UA + cookie (cf_clearance) from the same
+        session, Origin discord.com. TLS fingerprint comes from the session's impersonate."""
+        return {
+            "User-Agent": self._headers.get("User-Agent", ""),
+            "Origin": "https://discord.com",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cookie": self._headers.get("Cookie", ""),
+        }
+
+    async def _ws_identify(self, ws: Any) -> None:
+        """Send IDENTIFY (properties = this session's decoded X-Super-Properties) + the
+        proprietary op-41 init the real client emits right after."""
+        await ws.send(json.dumps(
+            self._build_identify(self._super_props, self._token, capabilities=self._capabilities)
+        ))
+        await ws.send(json.dumps({"op": 41, "d": {
+            "initialization_timestamp": int(datetime.now(tz=UTC).timestamp() * 1000),
+            "session_id": str(uuid.uuid4()),
+            "client_launch_id": str(uuid.uuid4()),
+        }}))
+
+    @staticmethod
+    async def _ws_recv(ws: Any, inflator: _StreamInflator) -> dict[str, Any] | None:
+        """Recv frames until a full inflated gateway message, parse JSON. None on close."""
+        while True:
+            raw = await ws.recv()
+            if isinstance(raw, tuple):
+                raw = raw[0]
+            if raw is None:
+                return None
+            if not raw:
+                continue
+            text = inflator.feed(raw)
+            if text is not None:
+                return cast("dict[str, Any]", json.loads(text))
 
     @staticmethod
     def _can_view(_guild: dict[str, Any], _channel: dict[str, Any]) -> bool:
@@ -523,16 +576,12 @@ class DiscordCollector(CollectorSkeleton):
         heartbeat + resume come from the gateway connect (ported from gateway.py in
         on_subscribe). This is the 'diamond': reactions, members/roles become model here."""
         while not self.stop_event.is_set():
-            raw = ws.recv()
-            if isinstance(raw, tuple):
-                raw = raw[0]
-            if not raw:
-                continue
-            text = inflator.feed(raw)
-            if text is None:
-                continue
-            msg = json.loads(text)
-            if msg.get("op") == 0 and msg.get("t"):
+            msg = await self._ws_recv(ws, inflator)
+            if msg is None:
+                return  # socket closed -> _run_gateway reconnects
+            if msg.get("s") is not None:
+                self._last_seq = int(msg["s"])
+            if msg.get("op") == _OP_DISPATCH and msg.get("t"):
                 await self._dispatch(str(msg["t"]), msg.get("d") or {})
 
     async def _dispatch(self, t: str, d: dict[str, Any]) -> None:
