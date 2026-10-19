@@ -115,6 +115,23 @@ class IdentityFileEntry(BaseModel):
     # collector's _build_forum_client + _flaresolverr.py.
     forum_enable_waf_bypass: bool = False
 
+    # Discord-specific (required when source=discord). Auth is a USER token + the
+    # browser cookie jar (incl cf_clearance), stored in the encrypted session blob at
+    # session_path (same Fernet seam as telegram), NOT here. These are the non-secret
+    # client-fingerprint + pacing knobs; keep them COHERENT with the token's browser
+    # (one browser across REST + WS — see poc-discord/DESIGN.md).
+    discord_impersonate: str = "chrome150"  # curl_cffi target; MUST match the token's browser
+    discord_user_agent: str | None = None  # exact UA of that browser (coherent with impersonate)
+    discord_build_number: int = 641004  # client_build_number in IDENTIFY (goes stale; refresh)
+    discord_installation_id: str | None = None  # X-Installation-Id / IDENTIFY installation_id
+    discord_delay_min: float = 0.4  # jittered gap between REST reads (human-brisk, measured OK)
+    discord_delay_max: float = 1.0
+    discord_steady_limit: int = 100  # REST page size (Discord max is 100)
+    # Default ON: Discord is ALWAYS Cloudflare-fronted, so the remint path should be
+    # armed by default — a fat-fingered False trips CF with no recovery and looks like a
+    # dead collector. Turn off only if you knowingly handle clearance some other way.
+    discord_enable_waf_bypass: bool = True  # remint cf_clearance via FlareSolverr on challenge
+
     @model_validator(mode="after")
     def _default_session_path(self) -> IdentityFileEntry:
         if not self.session_path:

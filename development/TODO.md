@@ -2,6 +2,25 @@
 
 Deferred work, captured so it isn't lost. Not in priority order.
 
+## EYENET MCP server — stop hand-running raw SQL (noted 2026-10-18)
+
+Investigations currently mean `docker exec ... psql` one-offs against the live
+`eyenet` DB: slow, error-prone, and the creds end up in shell history. Build a
+read-only MCP server exposing the corpus as typed tools so an analyst (or Claude)
+queries by intent, not by remembering column names.
+
+- Read-only role/connection (SELECT only; never touch the live WAL path).
+- Tools over the common moves: actor lookup (handle/display/alias), actor
+  messages, group roster + timeline, persona members + attributed actors,
+  cross-actor shared-group / co-occurrence, body full-text search, geo/linguistic
+  tells. Return trimmed rows, not raw dumps.
+- Resolve the 8-hex id prefixes the dossiers use; hide the `|`-delimited psql
+  plumbing.
+- Honor clearance tiers (minor-subject PII, sensitive evidence) at the tool layer.
+- Nice-to-have: an "alias net" tool (given a handle, pull all actor rows + body
+  mentions across spelling variants) — exactly the vansel/vnsleaks hunt done by
+  hand today.
+
 ## Telegram attachment bytes — DONE 2026-10-18 (backfill HELD, pending trigger)
 
 The TG collector shipped a metadata-only stub (fake sha256, 0-byte images, no
