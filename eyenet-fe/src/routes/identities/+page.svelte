@@ -193,6 +193,19 @@
   const splitLines = (s) => (s ?? '').split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
   const arrEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
+  // Keep numeric fields numeric: strip anything non-numeric on input, and force the
+  // cleaned value back onto the DOM so a stray char can't stick when the model is
+  // unchanged (type "5" then "a" both sanitize to "5"). `decimal` allows one dot.
+  function sanitizeNum(raw, decimal) {
+    const s = String(raw ?? '');
+    return decimal ? s.replace(/[^\d.]/g, '').replace(/(\.\d*)\./g, '$1') : s.replace(/\D/g, '');
+  }
+  function onNum(e, key, decimal = false) {
+    const clean = sanitizeNum(e.currentTarget.value, decimal);
+    e.currentTarget.value = clean;
+    cfg[key] = clean;
+  }
+
   function seedCfg(r) {
     return {
       forum_base_url: r.forum_base_url ?? '',
@@ -339,13 +352,13 @@
                       {#each EVASION_LEVELS as lvl}<option value={lvl}>{lvl || '— custom —'}</option>{/each}
                     </select>
                   </label>
-                  <label class="cfg-f" title={HELP.forum_delay_min}>Delay min (s) <span class="q">?</span><input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_min} /></label>
-                  <label class="cfg-f" title={HELP.forum_delay_max}>Delay max (s) <span class="q">?</span><input class="field" type="number" min="0" step="0.5" bind:value={cfg.forum_delay_max} /></label>
-                  <label class="cfg-f" title={HELP.forum_discovery_depth}>Discovery depth <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_discovery_depth} /></label>
-                  <label class="cfg-f" title={HELP.forum_discovery_interval}>Discovery interval (s) <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_discovery_interval} /></label>
-                  <label class="cfg-f" title={HELP.forum_max_category_pages}>Max category pages <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_max_category_pages} /></label>
-                  <label class="cfg-f" title={HELP.forum_max_thread_pages}>Max thread pages <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_max_thread_pages} /></label>
-                  <label class="cfg-f" title={HELP.forum_steady_pages}>Steady pages <span class="q">?</span><input class="field" type="number" min="0" bind:value={cfg.forum_steady_pages} /></label>
+                  <label class="cfg-f" title={HELP.forum_delay_min}>Delay min (s) <span class="q">?</span><input class="field" type="text" inputmode="decimal" value={cfg.forum_delay_min} oninput={(e) => onNum(e, 'forum_delay_min', true)} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.forum_delay_max}>Delay max (s) <span class="q">?</span><input class="field" type="text" inputmode="decimal" value={cfg.forum_delay_max} oninput={(e) => onNum(e, 'forum_delay_max', true)} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.forum_discovery_depth}>Discovery depth <span class="q">?</span><input class="field" type="text" inputmode="numeric" value={cfg.forum_discovery_depth} oninput={(e) => onNum(e, 'forum_discovery_depth')} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.forum_discovery_interval}>Discovery interval (s) <span class="q">?</span><input class="field" type="text" inputmode="numeric" value={cfg.forum_discovery_interval} oninput={(e) => onNum(e, 'forum_discovery_interval')} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.forum_max_category_pages}>Max category pages <span class="q">?</span><input class="field" type="text" inputmode="numeric" value={cfg.forum_max_category_pages} oninput={(e) => onNum(e, 'forum_max_category_pages')} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.forum_max_thread_pages}>Max thread pages <span class="q">?</span><input class="field" type="text" inputmode="numeric" value={cfg.forum_max_thread_pages} oninput={(e) => onNum(e, 'forum_max_thread_pages')} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.forum_steady_pages}>Steady pages <span class="q">?</span><input class="field" type="text" inputmode="numeric" value={cfg.forum_steady_pages} oninput={(e) => onNum(e, 'forum_steady_pages')} spellcheck="false" autocomplete="off" /></label>
                   <label class="cfg-f" title={HELP.forum_tls_impersonate}>TLS impersonate <span class="q">?</span>
                     <select class="field" bind:value={cfg.forum_tls_impersonate}>
                       {#each IMPERSONATE_TARGETS as t}<option value={t}>{t || '— none (Tor/httpx) —'}</option>{/each}
