@@ -54,6 +54,7 @@ _EXPECTED: dict[tuple[str, str], tuple[str, str, bool, bool]] = {
     ("thread", "incidents"): ("incident", "has_incident", False, False),
     ("actor", "incidents"): ("incident", "has_incident", False, False),
     ("message", "attachments"): ("attachment", "attached", False, False),
+    ("actor", "attachments"): ("attachment", "posted", False, False),
 }
 
 
@@ -72,7 +73,7 @@ def test_builtin_count_matches_expected() -> None:
     builtin = [
         e for e in REGISTRY.values() if type(e).__module__.startswith("eyenet.enrichments.builtins")
     ]
-    assert len(builtin) == len(_EXPECTED) == 32
+    assert len(builtin) == len(_EXPECTED) == 33
 
 
 def test_for_src_type_groups_by_source() -> None:

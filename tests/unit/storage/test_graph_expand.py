@@ -294,6 +294,38 @@ async def test_message_attachments(storage: BaseRepository) -> None:
     await storage.close()
 
 
+async def test_actor_attachments(storage: BaseRepository) -> None:
+    _src, _gid, actor, mid, _art = await _seed(storage)
+    async with storage.session() as s:
+        s.add(
+            AttachmentTable(
+                message_id=mid,
+                kind=AttachmentKind.IMAGE,
+                mime="image/jpeg",
+                size_bytes=2048,
+                sha256="cafe",
+                filename="leak.jpg",
+                classifier_tier=SensitivityTier.NORMAL,
+            )
+        )
+        await s.commit()
+    nodes, edges, total, more = await storage.graph_expand(
+        src_type="actor",
+        src_id=actor,
+        enrichment="attachments",
+        limit=10,
+        offset=0,
+        want_total=True,
+    )
+    assert len(nodes) == 1
+    assert nodes[0].entity_type == "attachment"
+    assert nodes[0].title == "leak.jpg"
+    assert edges[0] == {"src_id": actor, "dst_id": nodes[0].entity_id, "kind": "posted"}
+    assert total == 1
+    assert more is False
+    await storage.close()
+
+
 async def test_message_author_is_single(storage: BaseRepository) -> None:
     _src, _gid, actor, mid, _art = await _seed(storage)
     nodes, edges, total, more = await storage.graph_expand(
@@ -316,6 +348,7 @@ async def test_counts_and_unknown_guard(storage: BaseRepository) -> None:
         "started": 0,
         "replied_in": 0,
         "incidents": 0,
+        "attachments": 0,
         "linked": 0,
         "related": 0,
         "source": 1,
