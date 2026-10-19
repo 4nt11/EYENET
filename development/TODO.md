@@ -21,6 +21,26 @@ queries by intent, not by remembering column names.
   mentions across spelling variants) — exactly the vansel/vnsleaks hunt done by
   hand today.
 
+## Persona-level combined BEHAVE profile (join member actors' observations)
+
+A persona today is a container of attributed actors; its behavioural signals are
+per-actor. Compute the persona's observations as the UNION of its member actors'
+observations and derive ONE combined BEHAVE profile for the persona (circadian,
+stylometric simhashes, lexical, etc.) over the pooled corpus.
+
+- Payoff: a persona whose individual actors each sit BELOW the Verifier corpus-minimum
+  can cross it once pooled, so the Verifier (stylometric authorship linkage) can finally
+  run on the persona. This is the @Ageraper/cutzinger case: @Ageraper alone was "Verifier
+  skipped, corpus below minimum"; pooled with the cutzinger + 0xpl0it actors the persona
+  has enough.
+- Circularity guard (load-bearing): the Verifier must test each member actor's OWN prose
+  against the others (does @Ageraper write like cutzinger?), NOT score the pooled persona
+  corpus against itself, which would just reflect the operator's own attribution back.
+  Keep per-actor provenance on every pooled observation.
+- Recompute on actor attach/detach. LLM-laundered / mixed-locale members carry their
+  per-actor caveats into the pool (never blend a laundered drop into the stylometry).
+  Raised during the SoulHem work 2026-10-18.
+
 ## Telegram attachment bytes — DONE 2026-10-18 (backfill HELD, pending trigger)
 
 The TG collector shipped a metadata-only stub (fake sha256, 0-byte images, no
