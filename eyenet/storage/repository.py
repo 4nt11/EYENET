@@ -2429,6 +2429,10 @@ class BaseRepository(ABC):
         """Return one collector row by id, or ``None``."""
 
     @abstractmethod
+    async def get_collector_by_identity(self, identity_id: UUID) -> CollectorRow | None:
+        """The collector bound to an identity (unique FK), or ``None``."""
+
+    @abstractmethod
     async def resolve_collector_by_instance_id(self, instance_id: str) -> CollectorRow | None:
         """Reverse the 8-char bus ``instance_id`` to its collector row, or None
         (M9.E2). Recomputes ``compute_instance_id(identity name, kind)`` per
@@ -2845,6 +2849,12 @@ class BaseRepository(ABC):
         role: IdentityRole,
     ) -> IdentityRow:
         """Set an identity's discovery-loop role. Raises if it doesn't exist."""
+
+    @abstractmethod
+    async def update_identity_source_config(
+        self, *, identity_id: UUID, source_config: dict[str, object]
+    ) -> IdentityRow:
+        """Replace an identity's non-secret collector config. Raises if missing."""
 
     @abstractmethod
     async def set_identity_state(

@@ -1636,6 +1636,30 @@ paths:
         "404": { $ref: '#/components/responses/NotFound' }
         "409": { $ref: '#/components/responses/Conflict' }
 
+  /v1/identities/{identity_id}/config:
+    patch:
+      tags: [identities]
+      operationId: identities_update_config
+      summary: Edit a collector's non-secret config (admin). Validated; does not restart.
+      parameters:
+        - { $ref: '#/components/parameters/IdentityIdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IdentityConfigUpdate' }
+      responses:
+        "200":
+          description: Updated identity detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityDetail' }
+        "401": { $ref: '#/components/responses/Unauthorized' }
+        "403": { $ref: '#/components/responses/Forbidden' }
+        "404": { $ref: '#/components/responses/NotFound' }
+        "422": { $ref: '#/components/responses/Validation' }
+        "503": { $ref: '#/components/responses/Unavailable' }
+
   /v1/identities/{identity_id}/session:
     put:
       tags: [identities]
@@ -5394,10 +5418,43 @@ components:
         cooldown_seconds: { type: integer }
         graduated_at:     { type: string, format: date-time, nullable: true }
         notes:            { type: string, nullable: true }
+        forum_base_url:   { type: string, nullable: true }
+        forum_thread_urls: { type: array, items: { type: string } }
+        forum_engine:     { type: string, nullable: true }
+        forum_user_agent: { type: string, nullable: true }
         forum_evasion_level: { type: string, nullable: true, description: 'running pacing profile (ghost|lurker|regular|brisk|smash); null if none/non-forum' }
         forum_delay_min:  { type: number, nullable: true, description: resolved inter-request delay floor (seconds) }
         forum_delay_max:  { type: number, nullable: true, description: resolved inter-request delay ceiling (seconds) }
         forum_discovery_depth: { type: integer, nullable: true, description: 'subforum-discovery depth (0 = index top-level categories only)' }
+        forum_discovery_interval: { type: integer, nullable: true }
+        forum_max_category_pages: { type: integer, nullable: true }
+        forum_max_thread_pages: { type: integer, nullable: true }
+        forum_steady_pages: { type: integer, nullable: true }
+        forum_tls_impersonate: { type: string, nullable: true }
+        forum_enable_waf_bypass: { type: boolean, nullable: true }
+        monitor_groups:   { type: array, items: { type: string } }
+        collector_id:     { type: string, format: uuid, nullable: true }
+        collector_observed_state: { $ref: '#/components/schemas/CollectorObservedState', nullable: true }
+    IdentityConfigUpdate:
+      description: Editable non-secret collector config (PATCH). Only sent fields are merged.
+      type: object
+      additionalProperties: false
+      properties:
+        forum_base_url:   { type: string, maxLength: 1024, nullable: true }
+        forum_thread_urls: { type: array, items: { type: string }, nullable: true }
+        forum_engine:     { type: string, maxLength: 32, nullable: true }
+        forum_user_agent: { type: string, maxLength: 512, nullable: true }
+        forum_evasion_level: { type: string, maxLength: 32, nullable: true }
+        forum_tls_impersonate: { type: string, maxLength: 64, nullable: true }
+        forum_enable_waf_bypass: { type: boolean, nullable: true }
+        forum_delay_min:  { type: number, minimum: 0, nullable: true }
+        forum_delay_max:  { type: number, minimum: 0, nullable: true }
+        forum_discovery_interval: { type: integer, minimum: 0, nullable: true }
+        forum_max_category_pages: { type: integer, minimum: 0, nullable: true }
+        forum_max_thread_pages: { type: integer, minimum: 0, nullable: true }
+        forum_steady_pages: { type: integer, minimum: 0, nullable: true }
+        forum_discovery_depth: { type: integer, minimum: 0, nullable: true }
+        monitor_groups:   { type: array, items: { type: string }, nullable: true }
     Body_identities_replace_session:
       description: |
         Multipart form for PUT /v1/identities/{identity_id}/session. `session` is

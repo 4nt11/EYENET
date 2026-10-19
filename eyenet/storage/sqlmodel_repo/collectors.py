@@ -81,6 +81,16 @@ class CollectorsMixin:
             table = await session.get(CollectorTable, collector_id)
             return _row(table) if table is not None else None
 
+    async def get_collector_by_identity(self, identity_id: UUID) -> CollectorRow | None:
+        """The collector bound to an identity (unique FK), or None. Lets the identity
+        config surface show + restart the collector that reads that config."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(CollectorTable).where(col(CollectorTable.identity_id) == identity_id)
+            )
+            table = result.first()
+            return _row(table) if table is not None else None
+
     async def resolve_collector_by_instance_id(self, instance_id: str) -> CollectorRow | None:
         """Reverse the 8-char bus ``instance_id`` to its collector row (M9.E2).
 

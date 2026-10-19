@@ -124,6 +124,21 @@ class IdentitiesMixin:
             await session.refresh(table)
             return _identity_row(table)
 
+    async def update_identity_source_config(
+        self, *, identity_id: UUID, source_config: dict[str, object]
+    ) -> IdentityRow:
+        """Replace an identity's non-secret collector config (source_config). The caller
+        validates + merges; this just persists. Raises if the identity does not exist."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(IdentityTable, identity_id)
+            if table is None:
+                raise ValueError(f"identity {identity_id} not found")
+            table.source_config = source_config
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _identity_row(table)
+
     async def delete_identity(self, *, identity_id: UUID) -> None:
         """Delete an identity not bound to a collector.
 

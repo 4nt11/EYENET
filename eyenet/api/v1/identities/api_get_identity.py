@@ -29,4 +29,5 @@ async def identities_get(
     row = await storage.get_identity(identity_id)
     if row is None:
         raise ResourceNotFound("identity")
-    return IdentityDetail.from_domain(row)
+    collector = await storage.get_collector_by_identity(identity_id)
+    return IdentityDetail.from_domain(row, collector)
