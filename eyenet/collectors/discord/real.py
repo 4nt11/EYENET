@@ -20,6 +20,7 @@ Load-bearing design rules (see DESIGN.md + [[project_discord_collector_reads_upw
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import uuid
 import zlib
@@ -29,11 +30,14 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.contracts.actor import actor_key
-from eyenet.contracts.enums import GroupKind, SourceKind, SystemLogLevel
+from eyenet.contracts.enums import GroupKind, MembershipRole, SourceKind, SystemLogLevel
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
+from eyenet.models.reaction import ReactionTable
 from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.telemetry.logging import get_logger
 
@@ -121,6 +125,65 @@ def _build_message_row(
     )
 
 
+_ADMINISTRATOR = 1 << 3  # Discord permission bit; a role carrying it is admin-grade
+
+
+def _emoji_str(emoji: dict[str, Any]) -> str:
+    """Unicode emoji -> its char; custom emoji -> 'name:id' (a stable key)."""
+    name = emoji.get("name") or ""
+    eid = emoji.get("id")
+    return f"{name}:{eid}" if eid else name
+
+
+def _reaction_from_event(d: dict[str, Any]) -> tuple[str, str, str, str] | None:
+    """(channel_id, message_id, user_id, emoji) from MESSAGE_REACTION_ADD/REMOVE, or
+    None if malformed. This is the reacted_by the message object never carries."""
+    ch = str(d.get("channel_id") or "")
+    mid = str(d.get("message_id") or "")
+    uid = str(d.get("user_id") or "")
+    emoji = _emoji_str(d.get("emoji") or {})
+    if not (ch and mid and uid and emoji):
+        return None
+    return ch, mid, uid, emoji
+
+
+def _member_items(t: str, d: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize to a list of member objects (user/roles/nick/joined_at).
+    GUILD_MEMBER_UPDATE is one member; GUILD_MEMBER_LIST_UPDATE nests them in
+    ops[].items[].member (the lazy op14 response)."""
+    if t == "GUILD_MEMBER_UPDATE":
+        return [d]
+    out: list[dict[str, Any]] = []
+    for op in d.get("ops", []):
+        for item in op.get("items", []):
+            member = item.get("member")
+            if member:
+                out.append(member)
+    return out
+
+
+def _resolve_rank(
+    role_ids: list[str], guild_roles: dict[str, dict[str, Any]]
+) -> tuple[MembershipRole, list[str]]:
+    """Join a member's role IDs against the guild role table (from READY) -> a coarse
+    MembershipRole + the resolved role names. A role with the ADMINISTRATOR permission
+    bit makes the member admin-grade. This is the returnero=Admin case made meaningful.
+    (Guild OWNER is guild.owner_id, set separately; this resolves role-grade only.)"""
+    names: list[str] = []
+    admin = False
+    for rid in role_ids:
+        role = guild_roles.get(str(rid))
+        if not role:
+            continue
+        names.append(role.get("name") or str(rid))
+        try:
+            if int(role.get("permissions", 0)) & _ADMINISTRATOR:
+                admin = True
+        except (TypeError, ValueError):
+            pass
+    return (MembershipRole.ADMIN if admin else MembershipRole.MEMBER), names
+
+
 class RespClass(Enum):
     """How a gateway/REST response should be treated."""
 
@@ -171,6 +234,7 @@ class DiscordCollector(CollectorSkeleton):
         self._headers: dict[str, str] = {}
         self._source_uuid: UUID | None = None  # bound in on_subscribe
         self._channel_titles: dict[str, str] = {}  # id -> "guild / channel" from discovery
+        self._guild_roles: dict[str, dict[str, dict[str, Any]]] = {}  # guild -> {role_id: role}
         # per-channel resume cursors: {channel_id: {"newest": snowflake, "oldest": snowflake}}
         self._cursors: dict[str, dict[str, str]] = {}
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
@@ -205,6 +269,7 @@ class DiscordCollector(CollectorSkeleton):
         out: list[VisibleGroup] = []
         for g in ready.get("guilds", []):
             gname = g.get("properties", {}).get("name") or g.get("name") or g.get("id")
+            self._cache_guild_roles(g)  # role defs for member-rank resolution
             for c in g.get("channels", []):
                 if c.get("type") in _READABLE_CHANNEL_TYPES and self._can_view(g, c):
                     cid = str(c["id"])
@@ -357,6 +422,106 @@ class DiscordCollector(CollectorSkeleton):
         # attachment metadata is in source_specific (has_attachment set, bytes deferred).
         if await self._storage.put_message(row, []):
             self._record_emission()
+
+    # ------------------------------------------------ gateway dispatch loop
+
+    async def _consume_gateway(self, ws: Any, inflator: _StreamInflator) -> None:
+        """Live event loop: recv -> inflate -> route each op-0 dispatch. The WS recv +
+        heartbeat + resume come from the gateway connect (ported from gateway.py in
+        on_subscribe). This is the 'diamond': reactions, members/roles become model here."""
+        while not self.stop_event.is_set():
+            raw = ws.recv()
+            if isinstance(raw, tuple):
+                raw = raw[0]
+            if not raw:
+                continue
+            text = inflator.feed(raw)
+            if text is None:
+                continue
+            msg = json.loads(text)
+            if msg.get("op") == 0 and msg.get("t"):
+                await self._dispatch(str(msg["t"]), msg.get("d") or {})
+
+    async def _dispatch(self, t: str, d: dict[str, Any]) -> None:
+        """Route one gateway dispatch to its model handler."""
+        if t in ("MESSAGE_CREATE", "MESSAGE_UPDATE"):
+            await self._ingest_message(str(d.get("channel_id") or ""), d)
+        elif t == "MESSAGE_REACTION_ADD":
+            await self._handle_reaction(d)
+        elif t in ("GUILD_MEMBER_LIST_UPDATE", "GUILD_MEMBER_UPDATE"):
+            await self._handle_members(t, d)
+        elif t in ("GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE", "GUILD_ROLE_DELETE"):
+            self._handle_role(t, d)
+        elif t == "GUILD_CREATE":
+            self._cache_guild_roles(d)  # roles + channels arrive on join
+        # PRESENCE_UPDATE / TYPING_START: ephemeral; ignored for now (TODO: last-seen)
+
+    async def _handle_reaction(self, d: dict[str, Any]) -> None:
+        """reacted_by: who reacted to what. Needs the target message already stored
+        (resolve by snowflake). Reaction events carry no timestamp, so a LIVE event's
+        time is now() — correct here, it is a real-time dispatch."""
+        source_uuid = self._source_uuid
+        parsed = _reaction_from_event(d)
+        if source_uuid is None or parsed is None:
+            return
+        channel_id, message_id, user_id, emoji = parsed
+        now = datetime.now(tz=UTC)
+        group_id, _ = await self._storage.upsert_group(
+            source_id=source_uuid, platform_groupid=channel_id, kind=GroupKind.CHANNEL,
+            title=self._channel_titles.get(channel_id), seen_at=now,
+        )
+        target = await self._storage.resolve_message_id(
+            source_id=source_uuid, group_id=group_id, platform_msgid=message_id,
+        )
+        if target is None:
+            _log.debug("discord.reaction.target_unknown", message=message_id, emoji=emoji)
+            return  # reaction to a message we have not stored; drop
+        actor_id, _ = await self._storage.upsert_actor(
+            source_id=source_uuid, actor_key=actor_key(SourceKind.DISCORD, user_id),
+            platform_userid=user_id, handle=None, display_name=None, seen_at=now,
+        )
+        row = ReactionTable(
+            id=new_uuid7(), message_id=target, actor_id=actor_id, emoji=emoji,
+            reacted_at=now, evidence_ref=f"discord:reaction:{message_id}:{user_id}:{emoji}",
+        )
+        async with self._storage.session() as session:
+            session.add(row)
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()  # idempotent re-delivery on evidence_ref
+
+    async def _handle_members(self, t: str, d: dict[str, Any]) -> None:
+        """member.roles x guild.roles -> each member's rank + role names (the diamond:
+        returnero=Admin). Persisting actor-in-guild rank is a schema follow-up (no flat
+        storage path yet); for now resolve + log so the signal is visible + testable."""
+        guild_id = str(d.get("guild_id") or "")
+        guild_roles = self._guild_roles.get(guild_id, {})
+        for member in _member_items(t, d):
+            uid = str((member.get("user") or {}).get("id") or "")
+            if not uid:
+                continue
+            rank, names = _resolve_rank(
+                [str(r) for r in (member.get("roles") or [])], guild_roles
+            )
+            _log.info("discord.member", guild=guild_id, user=uid, rank=rank.value, roles=names)
+            # TODO: persist actor-in-guild membership + rank once a storage path exists.
+
+    def _cache_guild_roles(self, guild: dict[str, Any]) -> None:
+        gid = str(guild.get("id") or "")
+        if gid:
+            self._guild_roles[gid] = {
+                str(r["id"]): r for r in guild.get("roles", []) if r.get("id")
+            }
+
+    def _handle_role(self, t: str, d: dict[str, Any]) -> None:
+        roles = self._guild_roles.setdefault(str(d.get("guild_id") or ""), {})
+        if t == "GUILD_ROLE_DELETE":
+            roles.pop(str(d.get("role_id") or ""), None)
+        else:
+            role = d.get("role") or {}
+            if role.get("id"):
+                roles[str(role["id"])] = role
 
     # ------------------------------------------------------------- helpers
 

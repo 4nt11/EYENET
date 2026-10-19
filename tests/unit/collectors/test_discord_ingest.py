@@ -6,9 +6,26 @@ from uuid import uuid4
 
 import pytest
 
-from eyenet.collectors.discord.real import _actor_fields, _build_message_row, _parse_ts
+from eyenet.collectors.discord.real import (
+    _actor_fields,
+    _build_message_row,
+    _emoji_str,
+    _member_items,
+    _parse_ts,
+    _reaction_from_event,
+    _resolve_rank,
+)
+from eyenet.contracts.enums import MembershipRole
 
 pytestmark = pytest.mark.unit
+
+# MortemTeam guild role table (real ids/perms from the gateway READY capture).
+_MORTEM_ROLES = {
+    "1559644444641202359": {"name": "Admin", "permissions": "8864258447638527"},
+    "1561541094007771186": {"name": "MortemTeam", "permissions": "0"},
+    "1560064810765393991": {"name": "Owner", "permissions": "1032"},
+    "1560373184656572508": {"name": "SpicyMember", "permissions": "0"},
+}
 
 
 def _msg(**over: Any) -> dict[str, Any]:
@@ -85,3 +102,57 @@ def test_build_row_attachments_and_embed_only() -> None:
     assert row.source_specific["attachments"][0]["filename"] == "x.sql"
     assert row.source_specific["embeds"][0]["title"] == "leak"  # bot/drop payload kept
     assert row.body == ""  # embed-only message, empty content, still ingested
+
+
+# ---- dispatch mappers (the diamond: reactions / member rank) -----------------
+
+def test_resolve_rank_returnero_is_admin() -> None:
+    # returnero's three roles: the Admin role carries the ADMINISTRATOR bit -> admin.
+    rank, names = _resolve_rank(
+        ["1559644444641202359", "1561541094007771186", "1560064810765393991"], _MORTEM_ROLES
+    )
+    assert rank is MembershipRole.ADMIN
+    assert names == ["Admin", "MortemTeam", "Owner"]
+
+
+def test_resolve_rank_tag_only_is_member() -> None:
+    rank, names = _resolve_rank(["1561541094007771186"], _MORTEM_ROLES)
+    assert rank is MembershipRole.MEMBER
+    assert names == ["MortemTeam"]
+
+
+def test_resolve_rank_unknown_role_ignored() -> None:
+    rank, names = _resolve_rank(["does-not-exist", "1560373184656572508"], _MORTEM_ROLES)
+    assert rank is MembershipRole.MEMBER
+    assert names == ["SpicyMember"]  # unknown id dropped, known name kept
+
+
+def test_emoji_str_unicode_vs_custom() -> None:
+    assert _emoji_str({"name": "🔥", "id": None}) == "🔥"
+    assert _emoji_str({"name": "pepe", "id": "999"}) == "pepe:999"
+
+
+def test_reaction_from_event_ok_and_malformed() -> None:
+    ok = _reaction_from_event(
+        {"channel_id": "c", "message_id": "m", "user_id": "u", "emoji": {"name": "🔥"}}
+    )
+    assert ok == ("c", "m", "u", "🔥")
+    assert _reaction_from_event({"channel_id": "c", "message_id": "m"}) is None  # no user/emoji
+
+
+def test_member_items_single_update() -> None:
+    d = {"guild_id": "g", "user": {"id": "42"}, "roles": ["r1"]}
+    items = _member_items("GUILD_MEMBER_UPDATE", d)
+    assert [m["user"]["id"] for m in items] == ["42"]
+
+
+def test_member_items_list_update_skips_group_headers() -> None:
+    d = {
+        "guild_id": "g",
+        "ops": [{"op": "SYNC", "range": [0, 1], "items": [
+            {"group": {"id": "online", "count": 5}},  # section header, not a member
+            {"member": {"user": {"id": "42"}, "roles": ["1559644444641202359"]}},
+        ]}],
+    }
+    items = _member_items("GUILD_MEMBER_LIST_UPDATE", d)
+    assert [m["user"]["id"] for m in items] == ["42"]
