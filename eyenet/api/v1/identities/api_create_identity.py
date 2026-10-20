@@ -98,6 +98,16 @@ async def identities_create(
         bool,
         Form(description="route via FlareSolverr to clear a CF JS challenge + Anubis PoW"),
     ] = False,
+    discord_impersonate: Annotated[
+        str | None,
+        Form(max_length=64, description="curl-cffi target matching the token's browser"),
+    ] = None,
+    discord_user_agent: Annotated[str | None, Form(max_length=1024)] = None,
+    discord_delay_min: Annotated[float | None, Form(ge=0)] = None,
+    discord_delay_max: Annotated[float | None, Form(ge=0)] = None,
+    discord_enable_waf_bypass: Annotated[
+        bool, Form(description="remint cf_clearance via FlareSolverr (default on for Discord)")
+    ] = True,
     cooldown_seconds: Annotated[int, Form(ge=0)] = 21_600,
     proxy_uri: Annotated[str | None, Form(max_length=1024)] = None,
     role: Annotated[IdentityRole, Form()] = IdentityRole.MONITOR,
@@ -127,6 +137,11 @@ async def identities_create(
         forum_evasion_level=forum_evasion_level,
         forum_tls_impersonate=forum_tls_impersonate,
         forum_enable_waf_bypass=forum_enable_waf_bypass,
+        discord_impersonate=discord_impersonate,
+        discord_user_agent=discord_user_agent,
+        discord_delay_min=discord_delay_min,
+        discord_delay_max=discord_delay_max,
+        discord_enable_waf_bypass=discord_enable_waf_bypass,
     )
 
     try:
@@ -164,7 +179,7 @@ async def identities_create(
     return IdentityDetail.from_domain(row)
 
 
-def _build_source_config(
+def _build_source_config(  # noqa: PLR0912  (per-source dispatcher; branches are inherent)
     source_kind: SourceKind,
     *,
     telegram_api_id: int | None,
@@ -177,6 +192,11 @@ def _build_source_config(
     forum_evasion_level: str | None = None,
     forum_tls_impersonate: str | None = None,
     forum_enable_waf_bypass: bool = False,
+    discord_impersonate: str | None = None,
+    discord_user_agent: str | None = None,
+    discord_delay_min: float | None = None,
+    discord_delay_max: float | None = None,
+    discord_enable_waf_bypass: bool = True,
 ) -> dict[str, object]:
     """Assemble the non-secret per-source config, keyed by IdentityFileEntry field
     names so the pool can splat it back into an entry. New sources add a branch."""
@@ -265,6 +285,14 @@ def _build_source_config(
         if forum_enable_waf_bypass:
             config["forum_enable_waf_bypass"] = True
         return config
+    if source_kind == SourceKind.DISCORD:
+        return _discord_source_config(
+            impersonate=discord_impersonate,
+            user_agent=discord_user_agent,
+            delay_min=discord_delay_min,
+            delay_max=discord_delay_max,
+            enable_waf_bypass=discord_enable_waf_bypass,
+        )
     raise RequestValidationError(
         [
             {
@@ -274,3 +302,27 @@ def _build_source_config(
             }
         ]
     )
+
+
+def _discord_source_config(
+    *,
+    impersonate: str | None,
+    user_agent: str | None,
+    delay_min: float | None,
+    delay_max: float | None,
+    enable_waf_bypass: bool,
+) -> dict[str, object]:
+    """Non-secret Discord collector config (keyed by IdentityFileEntry fields). Secrets
+    (token, cookie, X-Super-Properties, UA) ride in the uploaded JSON blob. WAF bypass
+    defaults ON (Discord is always Cloudflare-fronted); impersonate MUST match the token's
+    browser (operator-coherent, validated at connect)."""
+    cfg: dict[str, object] = {"discord_enable_waf_bypass": enable_waf_bypass}
+    if impersonate:
+        cfg["discord_impersonate"] = impersonate
+    if user_agent:
+        cfg["discord_user_agent"] = user_agent
+    if delay_min is not None:
+        cfg["discord_delay_min"] = delay_min
+    if delay_max is not None:
+        cfg["discord_delay_max"] = delay_max
+    return cfg

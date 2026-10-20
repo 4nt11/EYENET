@@ -47,6 +47,39 @@
       curlMsg = `✗ ${e.message}`;
     }
   }
+  // discord — one coherent browser session: token + cookie (incl cf_clearance) +
+  // X-Super-Properties + UA, all captured together. The blob is assembled client-side
+  // and uploaded as the `session` part; the backend keeps only the non-secret knobs.
+  let dcToken = $state('');
+  let dcCookie = $state('');
+  let dcSuperProps = $state('');
+  let dcInstallationId = $state('');
+  let dcUserAgent = $state('');
+  let dcCapabilities = $state('1734653');
+  let dcImpersonate = $state('firefox147');
+  let dcDelayMin = $state('1.0');
+  let dcDelayMax = $state('1.5');
+  let dcCurl = $state('');
+  let dcCurlMsg = $state('');
+  const DC_TARGETS = ['firefox133', 'firefox135', 'firefox144', 'firefox147', 'chrome146', 'chrome150'];
+
+  // Paste a DevTools "Copy as cURL" of any /api/v9 request; pull the auth headers
+  // (token, cookie, super-properties, installation-id, UA) into the fields below.
+  function extractDiscordFromCurl() {
+    const grab = (re) => (dcCurl.match(re)?.[1] ?? '').trim();
+    const tok = grab(/-H\s+['"]?[Aa]uthorization:\s*([^'"\\]+)/);
+    const cookie = grab(/-H\s+['"]?[Cc]ookie:\s*([^'"\\]+)/) || grab(/-b\s+['"]([^'"]+)/);
+    const sp = grab(/-H\s+['"]?[Xx]-[Ss]uper-[Pp]roperties:\s*([^'"\\]+)/);
+    const iid = grab(/-H\s+['"]?[Xx]-[Ii]nstallation-[Ii]d:\s*([^'"\\]+)/);
+    const ua = grab(/-H\s+['"]?[Uu]ser-[Aa]gent:\s*([^'"\\]+)/);
+    if (tok) dcToken = tok;
+    if (cookie) dcCookie = cookie;
+    if (sp) dcSuperProps = sp;
+    if (iid) dcInstallationId = iid;
+    if (ua) dcUserAgent = ua;
+    const got = [tok && 'token', cookie && 'cookie', sp && 'super-props', iid && 'install-id', ua && 'UA'].filter(Boolean);
+    dcCurlMsg = got.length ? `✓ ${got.join(', ')}` : '✗ no auth headers found in that cURL';
+  }
   // shared
   let cooldown = $state('21600');
   let proxyUri = $state('');
@@ -67,7 +100,9 @@
   });
 
   const fileSources = $derived(
-    sourceCtx.list.filter((s) => s.platform === 'telegram' || s.platform === 'forum')
+    sourceCtx.list.filter(
+      (s) => s.platform === 'telegram' || s.platform === 'forum' || s.platform === 'discord'
+    )
   );
   const selected = $derived(sourceCtx.list.find((s) => s.id === sourceId));
   const kind = $derived(selected?.platform ?? '');
@@ -82,7 +117,9 @@
         ? hasFile && apiId.trim() !== '' && apiHash.trim() !== ''
         : kind === 'forum'
           ? hasCookies && forumBaseUrl.trim() !== ''
-          : false)
+          : kind === 'discord'
+            ? dcToken.trim() !== '' && dcCookie.trim() !== '' && dcSuperProps.trim() !== ''
+            : false)
   );
 
   onMount(loadSources);
@@ -113,6 +150,30 @@
       if (forumEvasion) fd.append('forum_evasion_level', forumEvasion);
       if (forumTls) fd.append('forum_tls_impersonate', forumTls);
       if (forumWafBypass) fd.append('forum_enable_waf_bypass', 'true');
+    } else if (kind === 'discord') {
+      // The per-issuer session as JSON, uploaded as the `session` part (same generic
+      // secret-blob seam telegram/forum use). Secrets stay in the blob; only the knobs
+      // go up as form fields.
+      const blob = new File(
+        [
+          JSON.stringify({
+            token: dcToken.trim(),
+            cookie: dcCookie.trim(),
+            super_properties: dcSuperProps.trim(),
+            user_agent: dcUserAgent.trim(),
+            installation_id: dcInstallationId.trim(),
+            capabilities: Number(dcCapabilities) || 0
+          })
+        ],
+        'discord.json',
+        { type: 'application/json' }
+      );
+      fd.append('session', blob);
+      if (dcImpersonate) fd.append('discord_impersonate', dcImpersonate);
+      if (dcUserAgent.trim()) fd.append('discord_user_agent', dcUserAgent.trim());
+      if (dcDelayMin.trim()) fd.append('discord_delay_min', dcDelayMin.trim());
+      if (dcDelayMax.trim()) fd.append('discord_delay_max', dcDelayMax.trim());
+      fd.append('discord_enable_waf_bypass', 'true');
     }
 
     // cooldown is bound to a type=number input, so Svelte hands back a number once
@@ -173,7 +234,7 @@
         <option value="" disabled>Select a source…</option>
         {#each fileSources as s}<option value={s.id}>{s.name} · {s.platform}</option>{/each}
       </select>
-      {#if sourceCtx.loaded && !fileSources.length}<span class="hint">No Telegram or Forum sources yet — create one first.</span>{/if}
+      {#if sourceCtx.loaded && !fileSources.length}<span class="hint">No Telegram, Forum, or Discord sources yet — create one first.</span>{/if}
     </label>
 
     <label class="fld"><span class="flabel">Identity name</span>
@@ -250,6 +311,50 @@
       <label class="fld"><span class="flabel">WAF bypass (FlareSolverr)</span>
         <label class="check"><input type="checkbox" bind:checked={forumWafBypass} /> route every request through the FlareSolverr sidecar</label>
         <span class="hint">For a board that stacks a Cloudflare JS/behavioural challenge or an Anubis proof-of-work in front of every page — gates no bare HTTP client (httpx or curl-cffi) can clear. Drives a real browser to solve them. Independent of pacing above: a WAF challenge doesn't imply rate-limiting. Needs the flaresolverr sidecar running. Leave off for onion/Tor boards.</span></label>
+    {:else if kind === 'discord'}
+      <label class="fld"><span class="flabel">Paste DevTools "Copy as cURL" (fastest)</span>
+        <textarea class="fin mono" rows="3" bind:value={dcCurl} placeholder="DevTools → Network → click a /api/v9/… request → right-click → Copy → Copy as cURL, paste here"></textarea>
+        <div class="curl-row">
+          <Button variant="ghost" type="button" onclick={extractDiscordFromCurl}>Extract auth →</Button>
+          {#if dcCurlMsg}<span class="hint" class:ok={dcCurlMsg.startsWith('✓')}>{dcCurlMsg}</span>{/if}
+        </div>
+        <span class="hint">Pulls token, Cookie (incl cf_clearance), X-Super-Properties, X-Installation-Id and UA into the fields below. REST and the gateway both ride this ONE capture, so keep it from a single browser session.</span>
+      </label>
+
+      <label class="fld"><span class="flabel">User token (Authorization)</span>
+        <input class="fin mono" type="text" bind:value={dcToken} placeholder="paste, or use the cURL extractor above" /></label>
+
+      <label class="fld"><span class="flabel">Cookie header (incl cf_clearance)</span>
+        <textarea class="fin mono" rows="3" bind:value={dcCookie} placeholder="__dcfduid=…; cf_clearance=…; …"></textarea></label>
+
+      <label class="fld"><span class="flabel">X-Super-Properties (base64)</span>
+        <textarea class="fin mono" rows="2" bind:value={dcSuperProps} placeholder="eyJvcyI6…"></textarea>
+        <span class="hint">The client fingerprint. The gateway IDENTIFY decodes this exact value, so it must match the UA and impersonate target.</span></label>
+
+      <div class="two">
+        <label class="fld"><span class="flabel">X-Installation-Id (optional)</span>
+          <input class="fin mono" type="text" bind:value={dcInstallationId} placeholder="1561…" /></label>
+        <label class="fld"><span class="flabel">Capabilities</span>
+          <input class="fin" type="number" bind:value={dcCapabilities} placeholder="1734653" /></label>
+      </div>
+
+      <label class="fld"><span class="flabel">User-Agent</span>
+        <input class="fin mono" type="text" bind:value={dcUserAgent} placeholder="Mozilla/5.0 (X11; Linux x86_64; rv:157.0) … Firefox/157.0" />
+        <span class="hint">Must match the browser that minted the token/cookie AND the impersonate target below.</span></label>
+
+      <label class="fld"><span class="flabel">TLS impersonation target</span>
+        <select class="fin" bind:value={dcImpersonate}>
+          {#each DC_TARGETS as t}<option value={t}>{t}</option>{/each}
+        </select>
+        <span class="hint">curl-cffi target matching the token's browser (FF157 → firefox147, Chrome → chrome150). A mismatch voids cf_clearance.</span></label>
+
+      <div class="two">
+        <label class="fld"><span class="flabel">REST delay min (s)</span>
+          <input class="fin" type="text" bind:value={dcDelayMin} placeholder="1.0" /></label>
+        <label class="fld"><span class="flabel">REST delay max (s)</span>
+          <input class="fin" type="text" bind:value={dcDelayMax} placeholder="1.5" /></label>
+      </div>
+      <span class="hint">WAF bypass (FlareSolverr cf_clearance remint) is on by default for Discord — it is always Cloudflare-fronted.</span>
     {:else if sourceId}
       <p class="hint">This source kind can't be provisioned from this form.</p>
     {/if}
