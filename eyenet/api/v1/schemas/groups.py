@@ -32,6 +32,39 @@ def _s(value: object) -> str | None:
     return str(value) if value is not None else None
 
 
+def _reactions(ss: dict[str, object]) -> list[ReactionTally]:
+    """Aggregate emoji tallies from ``source_specific.reactions`` (the raw Discord
+    ``message.reactions`` shape: ``[{emoji:{name,id}, count}, ...]``). Emoji + count
+    only; WHO reacted lives in the reaction table and is a later drill. Unicode emoji
+    render as the char; a custom emoji becomes ``:name:`` (no CDN image fetch here).
+    Defensive: a missing/malformed list yields no tallies (forum/telegram have none)."""
+    raw = ss.get("reactions")
+    if not isinstance(raw, list):
+        return []
+    out: list[ReactionTally] = []
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        emoji = r.get("emoji")
+        emoji = emoji if isinstance(emoji, dict) else {}
+        name = _s(emoji.get("name")) or "?"
+        display = f":{name}:" if emoji.get("id") else name  # custom (has id) vs unicode
+        try:
+            count = int(r.get("count", 0))
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            out.append(ReactionTally(emoji=display, count=count))
+    return out
+
+
+class ReactionTally(ApiSchema):
+    """One emoji's reaction count on a message (aggregate; not who-reacted)."""
+
+    emoji: str
+    count: int
+
+
 # Candidate state (+ member_dialog) -> operator-facing status.
 _STATUS: dict[CandidateState, str] = {
     CandidateState.JOINED: "monitored",
@@ -194,6 +227,7 @@ class GroupMessage(ApiSchema):
     reply_gated: bool = False
     edited: bool = False
     has_attachment: bool = False
+    reactions: list[ReactionTally] = Field(default_factory=list)  # emoji + count (Discord)
     incident_labels: list[str] = Field(default_factory=list)  # classifier verdict, if any
     corrected_labels: list[str] | None = None  # operator ground-truth (None = uncorrected)
     corrected_by: str | None = None
@@ -238,6 +272,7 @@ class GroupMessage(ApiSchema):
             reply_gated=bool(ss.get("reply_gated", False)),
             edited=bool(ss.get("edited", False)),
             has_attachment=msg.has_attachment,
+            reactions=_reactions(ss),
             incident_labels=incident_labels or [],
             corrected_labels=list(correction.labels) if correction is not None else None,
             corrected_by=correction.decided_by if correction is not None else None,

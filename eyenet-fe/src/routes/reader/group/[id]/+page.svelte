@@ -191,6 +191,14 @@
               <div class="pbody plain">{m.body}</div>
             {/if}
 
+            {#if m.reactions?.length}
+              <div class="reactions">
+                {#each m.reactions as r}
+                  <span class="react" title={`${r.emoji} · ${r.count}`}><span class="remoji">{r.emoji}</span><span class="rcount">{r.count}</span></span>
+                {/each}
+              </div>
+            {/if}
+
             <div class="relabel">
               {#if editId === m.id}
                 <div class="chips">
@@ -265,6 +273,10 @@
   .hint.err { color: var(--red-text); }
   .pbody { color: var(--text-body); font-size: var(--fs-13); line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; }
   .pbody.plain { white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-12); }
+  .reactions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .react { display: inline-flex; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 11px; padding: 1px 8px; }
+  .remoji { font-size: var(--fs-13); line-height: 1.4; }
+  .rcount { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-secondary); }
   /* links come from sanitized {@html}, so they need :global to be reachable.
      Browser-default dark blue is unreadable on black; use the theme link token. */
   .pbody :global(a) { color: var(--link); text-decoration: underline; overflow-wrap: anywhere; cursor: pointer; }
