@@ -15,6 +15,7 @@ decrypts the blob back into an in-memory ``StringSession`` at boot.
 from __future__ import annotations
 
 import contextlib
+import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -102,7 +103,27 @@ def _materialize_secret(source_kind: SourceKind, secret_blob: bytes) -> str:
         return _telegram_string_from_blob(secret_blob)
     if source_kind == SourceKind.FORUM:
         return _forum_cookiejar_from_blob(secret_blob)
+    if source_kind == SourceKind.DISCORD:
+        return _discord_blob_from_bytes(secret_blob)
     raise SessionValidationError(f"identity upload not supported for source: {source_kind.value}")
+
+
+def _discord_blob_from_bytes(secret_blob: bytes) -> str:
+    """Validate the uploaded Discord session blob (JSON) -> its text, stored verbatim.
+
+    The operator captures a logged-in browser session (token + Cookie header incl
+    cf_clearance + X-Super-Properties + UA) and hands it over as JSON. Shape check: it
+    must parse and carry the auth essentials, so an empty/garbage upload is rejected
+    (422), not stored. The collector reads it via materialize_discord_session at boot.
+    """
+    try:
+        data = json.loads(secret_blob.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SessionValidationError("discord_blob_not_json") from exc
+    missing = [k for k in ("token", "cookie", "super_properties", "user_agent") if not data.get(k)]
+    if missing:
+        raise SessionValidationError(f"discord_blob_missing:{','.join(missing)}")
+    return secret_blob.decode("utf-8")
 
 
 def _write_encrypted_blob(data_dir: Path, ciphertext: bytes) -> str:

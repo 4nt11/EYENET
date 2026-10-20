@@ -17,6 +17,7 @@ from eyenet.bus import MemoryBus, NATSBus
 from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.classifier.service import ClassifierService
 from eyenet.cli.config import LinkerConfig, RuntimeConfig, VerifierConfig
+from eyenet.collectors.discord.real import DiscordCollector
 from eyenet.collectors.forum.real import MyBBForumCollector
 from eyenet.collectors.matrix.real import MatrixCollector
 from eyenet.collectors.matrix.stub import MatrixCollectorStub
@@ -328,6 +329,25 @@ def collector_run(  # pragma: no cover
 
         def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
             return MyBBForumCollector(
+                bus=bus,
+                storage=storage,
+                pool=DbIdentityPool(storage),
+                identity_name=identity,
+                session_key=session_key,
+            )
+
+        _run(_factory, cfg, tick=tick or 60.0)
+        return
+
+    # Discord is DB-backed too: the encrypted session blob (token + cookie + the full
+    # X-fingerprint) lives in the IdentityTable, decrypted at boot. The gateway live
+    # stream runs as a background task from on_subscribe; tick() only drives bounded REST
+    # history backfill, so poll slowly (default 60s).
+    if collector == "discord":
+        session_key = load_session_key(cfg.data_dir)
+
+        def _factory(bus: Bus, storage: BaseRepository) -> ServiceBase:
+            return DiscordCollector(
                 bus=bus,
                 storage=storage,
                 pool=DbIdentityPool(storage),
