@@ -257,7 +257,9 @@ def _make_trace_context() -> TraceContext:
 # -- service commands -------------------------------------------------------
 
 
-_COLLECTOR_TYPES = ("telegram-stub", "telegram", "matrix-stub", "matrix", "forum", "stub")
+_COLLECTOR_TYPES = (
+    "telegram-stub", "telegram", "matrix-stub", "matrix", "forum", "discord", "stub"
+)
 # `stub` is the legacy alias for `telegram-stub` — kept for one release to
 # avoid breaking operator scripts written against M1/M2 docs.
 _LEGACY_TELEGRAM_STUB_ALIAS = "stub"
