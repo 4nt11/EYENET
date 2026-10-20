@@ -15,6 +15,9 @@ export function realPlatform(platformGroupId, kind) {
   const k = (kind ?? '').toLowerCase();
   if (k === 'forum_category' || k === 'forum_thread') return 'forum';
   if (k === 'matrix_room') return 'matrix';
+  if (k === 'guild') return 'discord';
+  // NOTE: 'channel' is ambiguous (Telegram AND Discord), so shape can't resolve a
+  // Discord channel — the monitored-groups view overrides it from the source kind.
   if (k === 'chat' || k === 'channel' || k === 'dm') return 'telegram';
   if (k === 'irc_channel') return 'irc';
   const id = platformGroupId ?? '';
@@ -37,4 +40,4 @@ export function foundVia(platformGroupId, kind, memberDialog) {
 }
 
 // The distinct real platforms, for a filter dropdown.
-export const PLATFORMS = ['forum', 'telegram', 'matrix'];
+export const PLATFORMS = ['forum', 'telegram', 'matrix', 'discord'];

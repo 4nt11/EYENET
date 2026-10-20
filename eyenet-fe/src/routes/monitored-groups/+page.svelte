@@ -41,15 +41,17 @@
   // realPlatform is derived from the candidate shape (a telegram @handle found on
   // a forum is a telegram lead), so it can't be a server param — filter here.
   let member = $state('all'); // 'all' | 'member' | 'discovered'
-  let platformFilter = $state(''); // '' | forum | telegram | matrix
+  let platformFilter = $state(''); // '' | forum | telegram | matrix | discord
   let memberCount = $derived(groupCtx.list.filter((g) => g.memberDialog).length);
-  // Platform column shows the candidate's REAL platform (its shape), not the
-  // observing source's.
+  // Platform shows the candidate's REAL platform (its shape), EXCEPT Discord, whose
+  // CHANNEL kind is shape-ambiguous with Telegram — resolve those from the source kind
+  // (authoritative for a monitored group, which is never a cross-platform lead).
+  const rowPlatform = (g) => (srcOf(g.sourceId)?.platform === 'discord' ? 'discord' : g.realPlatform);
   const rows = $derived(
     groupCtx.list
       .filter((g) => member === 'all' || (member === 'member' ? g.memberDialog : !g.memberDialog))
-      .filter((g) => !platformFilter || g.realPlatform === platformFilter)
-      .map((g) => ({ ...g, platform: g.realPlatform, forum: forumHostOf(g.sourceId) || '—' }))
+      .filter((g) => !platformFilter || rowPlatform(g) === platformFilter)
+      .map((g) => ({ ...g, platform: rowPlatform(g), forum: forumHostOf(g.sourceId) || '—' }))
   );
 
   let selectedId = $state(null);
