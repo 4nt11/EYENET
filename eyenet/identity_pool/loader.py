@@ -124,8 +124,10 @@ class IdentityFileEntry(BaseModel):
     discord_user_agent: str | None = None  # exact UA of that browser (coherent with impersonate)
     discord_build_number: int = 641004  # client_build_number in IDENTIFY (goes stale; refresh)
     discord_installation_id: str | None = None  # X-Installation-Id / IDENTIFY installation_id
-    discord_delay_min: float = 0.4  # jittered gap between REST reads (human-brisk, measured OK)
-    discord_delay_max: float = 1.0
+    # Jittered gap between REST reads, per identity. Default 1.0-1.5s: brisk enough to
+    # ride clean (measured), slow enough to stay clearly sub-human-scroll. Tune per board.
+    discord_delay_min: float = 1.0
+    discord_delay_max: float = 1.5
     discord_steady_limit: int = 100  # REST page size (Discord max is 100)
     # Default ON: Discord is ALWAYS Cloudflare-fronted, so the remint path should be
     # armed by default — a fat-fingered False trips CF with no recovery and looks like a

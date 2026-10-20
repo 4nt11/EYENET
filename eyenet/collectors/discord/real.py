@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import random
 import uuid
@@ -59,6 +60,7 @@ ZLIB_SUFFIX = b"\x00\x00\xff\xff"
 _OP_DISPATCH = 0  # gateway op: a dispatch event (has `t` + `d`)
 _OP_HELLO = 10  # gateway op: HELLO (carries heartbeat_interval)
 _READABLE_CHANNEL_TYPES = (0, 5, 15)  # text, announcement, forum
+_BACKFILL_PAGES_PER_TICK = 3  # bounded history walk per tick; resumes via the cursor
 
 
 # --- pure mapping helpers (unit-tested; no storage / no network) --------------
@@ -275,8 +277,14 @@ class DiscordCollector(CollectorSkeleton):
         self._channel_titles: dict[str, str] = {}  # id -> "guild / channel" from discovery
         self._guild_names: dict[str, str] = {}  # guild_id -> name (for the guild group_ node)
         self._guild_roles: dict[str, dict[str, dict[str, Any]]] = {}  # guild -> {role_id: role}
-        # per-channel resume cursors: {channel_id: {"newest": snowflake, "oldest": snowflake}}
-        self._cursors: dict[str, dict[str, str]] = {}
+        self._channel_guild: dict[str, str] = {}  # channel_id -> guild_id (for op14 subscribe)
+        self._monitored: set[str] = set()  # channel ids the operator chose; refreshed in tick
+        self._gw_task: asyncio.Task[None] | None = None  # the persistent gateway stream
+        self._delay_min = 1.0  # REST backfill pacing [min, max]s (from the identity entry)
+        self._delay_max = 1.5
+        # per-channel resume state: {channel_id: {"newest","oldest": snowflake,
+        # "backfill_complete": bool}}
+        self._cursors: dict[str, dict[str, Any]] = {}
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
         self._last_seq: int | None = None  # gateway dispatch seq, for heartbeat + resume
 
@@ -303,10 +311,23 @@ class DiscordCollector(CollectorSkeleton):
         # self._flare for cf_clearance reminting (see _remint_clearance).
         # Ingest into the source the operator chose at collector-creation; never
         # auto-create one (mirrors the forum collector).
+        self._delay_min = float(entry.discord_delay_min)
+        self._delay_max = float(entry.discord_delay_max)
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         self._collector_id = collector.id if collector is not None else None
         if collector is not None:
             self._source_uuid = collector.source_id
+        self._monitored = set(await self._monitored_channels())  # for READY op14 + live gate
+        # Launch the persistent gateway stream (live events = the diamond). tick() drives
+        # the REST history backfill separately.
+        self._gw_task = asyncio.create_task(self._run_gateway())
+
+    async def stop(self) -> None:
+        if self._gw_task is not None:
+            self._gw_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._gw_task
+        await super().stop()
 
     # ---------------------------------------------------- discovery: gateway WS
 
@@ -315,31 +336,43 @@ class DiscordCollector(CollectorSkeleton):
         scan_visible_groups turns these into GroupCandidates. Channel NAMES only exist
         here (the REST message fetch has none), so we carry them in .title."""
         ready = await self._gateway_ready()
+        self._cache_from_ready(ready)
         out: list[VisibleGroup] = []
         for g in ready.get("guilds", []):
-            gname = g.get("properties", {}).get("name") or g.get("name") or g.get("id")
             gid = str(g.get("id") or "")
-            self._cache_guild_roles(g)  # role defs for member-rank resolution
             if gid:
-                self._guild_names[gid] = gname
                 out.append(VisibleGroup(  # the guild itself is a container node
-                    platform_groupid=gid, kind=GroupKind.GUILD, title=gname, is_member=True,
+                    platform_groupid=gid, kind=GroupKind.GUILD,
+                    title=self._guild_names.get(gid), is_member=True,
                 ))
             for c in g.get("channels", []):
                 if c.get("type") in _READABLE_CHANNEL_TYPES and self._can_view(g, c):
                     cid = str(c["id"])
-                    title = f"{gname} / {c.get('name', '?')}"
-                    # Cache id->name: the REST message fetch has no channel name, so
-                    # ingest labels the group from this discovery map.
-                    self._channel_titles[cid] = title
                     out.append(VisibleGroup(
-                        platform_groupid=cid,
-                        kind=GroupKind.CHANNEL,
-                        title=title,
-                        is_member=True,
+                        platform_groupid=cid, kind=GroupKind.CHANNEL,
+                        title=self._channel_titles.get(cid), is_member=True,
                     ))
         _log.info("discord.discovery", guilds=len(ready.get("guilds", [])), channels=len(out))
         return out
+
+    def _cache_from_ready(self, ready: dict[str, Any]) -> None:
+        """Populate the in-memory maps from a READY payload: guild names/roles, channel
+        titles, and channel->guild (needed to label groups + target op14 subscribes).
+        Shared by discovery and the live stream, both of which get a READY."""
+        for g in ready.get("guilds", []):
+            gid = str(g.get("id") or "")
+            if not gid:
+                continue
+            name = g.get("properties", {}).get("name") or g.get("name") or gid
+            self._guild_names[gid] = name
+            self._cache_guild_roles(g)
+            for c in g.get("channels", []):
+                cid = str(c.get("id") or "")
+                if not cid:
+                    continue
+                self._channel_guild[cid] = gid
+                if c.get("type") in _READABLE_CHANNEL_TYPES:
+                    self._channel_titles[cid] = f"{name} / {c.get('name', '?')}"
 
     async def _gateway_ready(self) -> dict[str, Any]:
         """One-shot: connect, IDENTIFY, read until READY, return its payload, close.
@@ -408,21 +441,39 @@ class DiscordCollector(CollectorSkeleton):
     # -------------------------------------------------------- read / backfill
 
     async def tick(self) -> None:
-        """Per monitored channel: live catch-up (after=newest_seen) + drain any
-        operator backfill requests. Human-brisk pacing; honor _paused_until."""
+        """Drive REST HISTORY backfill of monitored channels, a bounded chunk per tick
+        (resumable via the cursor). Live messages arrive on the gateway stream, so tick
+        does not poll for them. Honors the CF/429 pause."""
+        if self._session is None or self._source_uuid is None:
+            return
         if asyncio.get_event_loop().time() < self._paused_until:
             return
-        # TODO: for each monitored (promoted) channel:
-        #   - live: _rest_messages(ch, after=self._cursors[ch]["newest"]) -> ingest, advance newest
-        #   - backfill: drain forum-style backfill requests via _backfill_channel
-        raise NotImplementedError("wire monitored-channel catch-up + backfill drain")
+        self._monitored = set(await self._monitored_channels())  # refresh the live gate
+        for channel_id in self._monitored:
+            if self._cursors.get(channel_id, {}).get("backfill_complete"):
+                continue  # history done; the gateway handles everything newer
+            await self._backfill_channel(channel_id, max_pages=_BACKFILL_PAGES_PER_TICK)
+
+    async def _monitored_channels(self) -> list[str]:
+        """Channel ids the operator chose to monitor = this collector's active
+        memberships filtered to CHANNEL groups (a DB read; opening one is a manual
+        operator action, never automatic). Fail-closed if none."""
+        if self._collector_id is None:
+            return []
+        out: list[str] = []
+        for m in await self._storage.list_active_memberships(collector_id=self._collector_id):
+            grp = await self._storage.get_group(m.group_id)
+            if grp is not None and grp.kind == GroupKind.CHANNEL:
+                out.append(grp.platform_groupid)
+        return out
 
     async def _backfill_channel(
-        self, channel_id: str, *, delay: float, limit: int = 100, max_pages: int = 0
+        self, channel_id: str, *, limit: int = 100, max_pages: int = 0
     ) -> int:
         """UPWARD before-walk (newest->oldest); NEVER after=0. Ingest each page, persist
-        oldest_seen as the resume cursor, stop on a short page (channel start) or a pause.
-        Returns the count ingested."""
+        oldest_seen as the resume cursor, mark backfill_complete at the channel start.
+        Paces each inter-page gap by the identity's [delay_min, delay_max] jitter.
+        Returns the count ingested this call."""
         cur = self._cursors.setdefault(channel_id, {})
         before = cur.get("oldest")
         pages = total = 0
@@ -440,8 +491,9 @@ class DiscordCollector(CollectorSkeleton):
             cur["oldest"] = before
             cur.setdefault("newest", str(batch[0]["id"]))  # first page's top = newest seen
             if len(batch) < limit:
-                break  # reached channel start
-            await asyncio.sleep(self._jitter(delay, delay * 2))
+                cur["backfill_complete"] = True  # reached channel start
+                break
+            await asyncio.sleep(self._jitter(self._delay_min, self._delay_max))
         return total
 
     async def _rest_messages(
@@ -571,25 +623,85 @@ class DiscordCollector(CollectorSkeleton):
 
     # ------------------------------------------------ gateway dispatch loop
 
+    async def _run_gateway(self) -> None:
+        """Persistent live stream: connect, IDENTIFY, heartbeat, consume dispatches,
+        reconnect on drop. Runs until stop(). The diamond feeds on this."""
+        while not self.stop_event.is_set():
+            inflator = _StreamInflator()
+            try:
+                async with self._session.ws_connect(
+                    GATEWAY_URL, headers=self._ws_headers(), default_headers=False
+                ) as ws:
+                    hello = await self._ws_recv(ws, inflator)
+                    if not hello or hello.get("op") != _OP_HELLO:
+                        raise RuntimeError(f"{self._identity_name}: gateway sent no HELLO")
+                    interval = float(hello["d"]["heartbeat_interval"]) / 1000.0
+                    await self._ws_identify(ws)
+                    hb = asyncio.create_task(self._heartbeat(ws, interval))
+                    try:
+                        await self._consume_gateway(ws, inflator)
+                    finally:
+                        hb.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await hb
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _log.warning(
+                    "discord.gateway.reconnect", identity=self._identity_name, error=str(exc)
+                )
+                await asyncio.sleep(self._jitter(3.0, 8.0))
+
+    async def _heartbeat(self, ws: Any, interval: float) -> None:
+        """op1 every HELLO interval, jittered; carries last_seq. Miss it and we're dropped."""
+        await asyncio.sleep(interval * random.uniform(0.85, 1.0))  # noqa: S311  (jitter)
+        while not self.stop_event.is_set():
+            await ws.send(json.dumps({"op": 1, "d": self._last_seq}))
+            await asyncio.sleep(interval * random.uniform(0.9, 1.0))  # noqa: S311  (jitter)
+
     async def _consume_gateway(self, ws: Any, inflator: _StreamInflator) -> None:
-        """Live event loop: recv -> inflate -> route each op-0 dispatch. The WS recv +
-        heartbeat + resume come from the gateway connect (ported from gateway.py in
-        on_subscribe). This is the 'diamond': reactions, members/roles become model here."""
+        """recv -> inflate -> route. On READY, cache the tree + op14-subscribe monitored
+        channels so member lists stream. The 'diamond': reactions, members, live messages
+        become model here."""
         while not self.stop_event.is_set():
             msg = await self._ws_recv(ws, inflator)
             if msg is None:
                 return  # socket closed -> _run_gateway reconnects
             if msg.get("s") is not None:
                 self._last_seq = int(msg["s"])
-            if msg.get("op") == _OP_DISPATCH and msg.get("t"):
-                await self._dispatch(str(msg["t"]), msg.get("d") or {})
+            if msg.get("op") != _OP_DISPATCH:
+                continue
+            t, d = msg.get("t"), msg.get("d") or {}
+            if t == "READY":
+                self._cache_from_ready(d)
+                await self._subscribe_members(ws)
+            elif t:
+                await self._dispatch(str(t), d)
+
+    async def _subscribe_members(self, ws: Any) -> None:
+        """op14: subscribe to each monitored channel's member list so
+        GUILD_MEMBER_LIST_UPDATE (the ranks) streams in. Grouped per guild."""
+        by_guild: dict[str, list[str]] = {}
+        for cid in self._monitored:
+            gid = self._channel_guild.get(cid)
+            if gid:
+                by_guild.setdefault(gid, []).append(cid)
+        for gid, cids in by_guild.items():
+            await ws.send(json.dumps({"op": 14, "d": {
+                "guild_id": gid, "typing": True, "activities": True, "threads": False,
+                "channels": {cid: [[0, 99]] for cid in cids},
+            }}))
 
     async def _dispatch(self, t: str, d: dict[str, Any]) -> None:
-        """Route one gateway dispatch to its model handler."""
+        """Route one gateway dispatch. Message + reaction ingest is gated on the monitored
+        channel set; member/role events are already scoped by the op14 subscribes we sent."""
         if t in ("MESSAGE_CREATE", "MESSAGE_UPDATE"):
-            await self._ingest_message(str(d.get("channel_id") or ""), d)
+            ch = str(d.get("channel_id") or "")
+            if ch in self._monitored:
+                await self._ingest_message(ch, d)
         elif t == "MESSAGE_REACTION_ADD":
-            await self._handle_reaction(d)
+            if str(d.get("channel_id") or "") in self._monitored:
+                await self._handle_reaction(d)
         elif t in ("GUILD_MEMBER_LIST_UPDATE", "GUILD_MEMBER_UPDATE"):
             await self._handle_members(t, d)
         elif t in ("GUILD_ROLE_CREATE", "GUILD_ROLE_UPDATE", "GUILD_ROLE_DELETE"):
