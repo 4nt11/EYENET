@@ -56,6 +56,34 @@
   const sourceKind = $derived(sourceOf?.platform ?? '');
   const forumHost = $derived(hostFromUrl(sourceOf?.forumBaseUrl ?? ''));
 
+  // discord credential rotation: the full logged-in session (token + cookie incl
+  // cf_clearance + X-Super-Properties + UA) is reassembled as a JSON blob, same shape
+  // as provision. Paste a fresh "Copy as cURL" of any /api/v9 request and extract.
+  let dcCurl = $state('');
+  let dcToken = $state('');
+  let dcCookie = $state('');
+  let dcSuperProps = $state('');
+  let dcInstallationId = $state('');
+  let dcUserAgent = $state('');
+  let dcCapabilities = $state('1734653');
+  let dcCurlMsg = $state('');
+  const dcReady = $derived(dcToken.trim() && dcCookie.trim() && dcSuperProps.trim() && dcUserAgent.trim());
+  function extractDiscordFromCurl() {
+    const grab = (re) => (dcCurl.match(re)?.[1] ?? '').trim();
+    const tok = grab(/-H\s+['"]?[Aa]uthorization:\s*([^'"\\]+)/);
+    const cookie = grab(/-H\s+['"]?[Cc]ookie:\s*([^'"\\]+)/) || grab(/-b\s+['"]([^'"]+)/);
+    const sp = grab(/-H\s+['"]?[Xx]-[Ss]uper-[Pp]roperties:\s*([^'"\\]+)/);
+    const iid = grab(/-H\s+['"]?[Xx]-[Ii]nstallation-[Ii]d:\s*([^'"\\]+)/);
+    const ua = grab(/-H\s+['"]?[Uu]ser-[Aa]gent:\s*([^'"\\]+)/);
+    if (tok) dcToken = tok;
+    if (cookie) dcCookie = cookie;
+    if (sp) dcSuperProps = sp;
+    if (iid) dcInstallationId = iid;
+    if (ua) dcUserAgent = ua;
+    const got = [tok && 'token', cookie && 'cookie', sp && 'super-props', iid && 'install-id', ua && 'UA'].filter(Boolean);
+    dcCurlMsg = got.length ? `✓ ${got.join(', ')}` : '✗ no auth headers found in that cURL';
+  }
+
   // Live classification of the pasted cookie blob, so the operator sees it parsed
   // BEFORE pressing Replace: Netscape jar vs cURL/Cookie-header, and the count.
   const cookiePreview = $derived.by(() => {
@@ -101,6 +129,7 @@
     cookieInput = '';
     sessionFile = null;
     converted = false;
+    dcCurl = dcToken = dcCookie = dcSuperProps = dcInstallationId = dcUserAgent = dcCurlMsg = '';
   });
 
   onMount(() => {
@@ -114,6 +143,17 @@
     if (sourceKind === 'telegram') {
       if (!sessionFile) return;
       file = sessionFile; // a File with its own .session name
+    } else if (sourceKind === 'discord') {
+      if (!dcReady) return;
+      const blob = JSON.stringify({
+        token: dcToken.trim(),
+        cookie: dcCookie.trim(),
+        super_properties: dcSuperProps.trim(),
+        user_agent: dcUserAgent.trim(),
+        installation_id: dcInstallationId.trim(),
+        capabilities: Number(dcCapabilities) || 0
+      });
+      file = new File([blob], 'discord_session.json', { type: 'application/json' });
     } else {
       if (!cookieInput.trim()) return;
       let text = cookieInput.trim();
@@ -332,6 +372,21 @@
                 <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; sessionFile = null; }}>Cancel</Button>
               </div>
               <span class="hint">Upload a fresh Telegram .session, or re-login live via QR (reuses this identity's api credentials).</span>
+            {:else if sourceKind === 'discord'}
+              <textarea class="field mono" rows="3" bind:value={dcCurl} placeholder={'Paste a fresh "Copy as cURL" of any /api/v9 request'}></textarea>
+              <div class="actions-row">
+                <Button variant="ghost" size="sm" onclick={extractDiscordFromCurl}>Extract auth →</Button>
+                {#if dcCurlMsg}<span class="preview" class:ok={dcCurlMsg.startsWith('✓')} class:err={dcCurlMsg.startsWith('✗')}>{dcCurlMsg}</span>{/if}
+              </div>
+              <label class="cfg-f wide">Token <input class="field mono" type="password" bind:value={dcToken} /></label>
+              <label class="cfg-f wide">Cookie (incl cf_clearance) <input class="field mono" type="text" bind:value={dcCookie} /></label>
+              <label class="cfg-f wide">X-Super-Properties <input class="field mono" type="text" bind:value={dcSuperProps} /></label>
+              <label class="cfg-f wide">User-Agent <input class="field mono" type="text" bind:value={dcUserAgent} /></label>
+              <div class="actions-row">
+                <Button variant="primary" size="sm" disabled={identityView.submitting || !dcReady} onclick={doReplaceSession}>Replace session</Button>
+                <Button variant="ghost" size="sm" disabled={identityView.submitting} onclick={() => { showReplace = false; dcCurl = dcToken = dcCookie = dcSuperProps = dcUserAgent = dcCurlMsg = ''; }}>Cancel</Button>
+              </div>
+              <span class="hint">All four are required and must come from ONE coherent browser session (token ↔ cookie ↔ super-props ↔ UA ↔ impersonate target all the same browser). Installation-id + capabilities are pulled from the cURL when present.</span>
             {:else}
               <textarea class="field mono" rows="4" value={cookieInput} oninput={onCookieInput} placeholder={'Paste DevTools "Copy as cURL", a Cookie header, or a Netscape cookies.txt'}></textarea>
               {#if cookiePreview}
@@ -438,7 +493,7 @@
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .table-col { min-height: 0; overflow: auto; }
-  .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 
   .actions { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
