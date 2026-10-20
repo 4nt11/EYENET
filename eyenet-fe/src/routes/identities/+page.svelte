@@ -225,7 +225,9 @@
     discord_user_agent: 'The exact User-Agent of the browser that exported the session. Must stay coherent with the impersonate target; a UA flip mid-session is itself a ban signal.',
     discord_delay_min: 'Minimum wait between REST history requests (seconds). Each fetch waits a random time between min and max.',
     discord_delay_max: 'Maximum wait between REST history requests (seconds). Live gateway events are not paced by this.',
-    discord_enable_waf_bypass: 'Route through FlareSolverr to remint a fresh cf_clearance when Cloudflare challenges. On by default for Discord.'
+    discord_enable_waf_bypass: 'Route through FlareSolverr to remint a fresh cf_clearance when Cloudflare challenges. On by default for Discord.',
+    cooldown_seconds: 'How long (seconds) the pool rests this identity after a use before it can be claimed again. Higher = stealthier rotation. Default 21600 (6h).',
+    notes: 'Free-form operator notes on this identity (how it was minted, quirks, burn history). Not sent to any platform.'
   };
   const EVASION_LEVELS = ['', 'ghost', 'lurker', 'regular', 'brisk', 'smash'];
   // curl-cffi targets (FORUM_TLS_IMPERSONATE_TARGETS) + '' = none (httpx/Tor path).
@@ -272,7 +274,9 @@
       discord_user_agent: r.discord_user_agent ?? '',
       discord_delay_min: r.discord_delay_min ?? '',
       discord_delay_max: r.discord_delay_max ?? '',
-      discord_enable_waf_bypass: r.discord_enable_waf_bypass ?? true
+      discord_enable_waf_bypass: r.discord_enable_waf_bypass ?? true,
+      cooldown_seconds: r.cooldown_seconds ?? '',
+      notes: r.notes ?? ''
     };
   }
 
@@ -285,6 +289,12 @@
     const r = identityView.raw;
     const u = {};
     if (!r || !cfg) return u;
+    // Pool knobs (cooldown, notes) are kind-agnostic — diff them first so they apply
+    // for every source kind (the per-kind branches below return early).
+    const cs = cfg.cooldown_seconds;
+    if (cs !== '' && cs !== null) { const n = Number(cs); if (n !== r.cooldown_seconds) u.cooldown_seconds = n; }
+    const nt = (cfg.notes ?? '').trim();
+    if (nt !== (r.notes ?? '')) u.notes = nt;
     if (sourceKind === 'telegram') {
       const mg = splitLines(cfg.monitor_groups);
       if (!arrEq(mg, r.monitor_groups ?? [])) u.monitor_groups = mg;
@@ -451,6 +461,11 @@
                 </div>
                 <p class="warn-note">⚠ Fingerprint coherence: User-Agent, TLS impersonate, and the browser that minted the cookie jar must ALL be the same Firefox. A mismatch is more detectable than no impersonation.</p>
               {/if}
+              <!-- Pool knobs, every source kind (identity columns, not source_config). -->
+              <div class="cfg-grid">
+                <label class="cfg-f" title={HELP.cooldown_seconds}>Cooldown (s) <span class="q">?</span><input class="field" type="text" inputmode="numeric" value={cfg.cooldown_seconds} oninput={(e) => onNum(e, 'cooldown_seconds')} spellcheck="false" autocomplete="off" /></label>
+              </div>
+              <label class="cfg-f" title={HELP.notes}>Notes <span class="q">?</span><textarea class="field" rows="2" bind:value={cfg.notes} placeholder="operator notes (optional)"></textarea></label>
               <label class="cfg-f check restart">
                 <input type="checkbox" bind:checked={restartOnSave} disabled={!identityView.collectorId} />
                 Restart the collector on save to apply now
@@ -493,7 +508,9 @@
 
   .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .table-col { min-height: 0; overflow: auto; }
-  .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
+  /* overflow-y:auto alone makes overflow-x compute to auto too (CSS spec), adding a
+     stray horizontal bar — pin x to hidden so only the wanted vertical scroll shows. */
+  .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-y: auto; overflow-x: hidden; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
 
   .actions { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 10px; }

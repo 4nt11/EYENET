@@ -139,6 +139,28 @@ class IdentitiesMixin:
             await session.refresh(table)
             return _identity_row(table)
 
+    async def update_identity_pacing(
+        self,
+        *,
+        identity_id: UUID,
+        cooldown_seconds: int | None = None,
+        notes: str | None = None,
+    ) -> IdentityRow:
+        """Update the pool knobs that live as identity columns (cooldown, notes). Only
+        non-None args are written. Raises if the identity does not exist."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(IdentityTable, identity_id)
+            if table is None:
+                raise ValueError(f"identity {identity_id} not found")
+            if cooldown_seconds is not None:
+                table.cooldown_seconds = cooldown_seconds
+            if notes is not None:
+                table.notes = notes
+            session.add(table)
+            await session.commit()
+            await session.refresh(table)
+            return _identity_row(table)
+
     async def delete_identity(self, *, identity_id: UUID) -> None:
         """Delete an identity not bound to a collector.
 

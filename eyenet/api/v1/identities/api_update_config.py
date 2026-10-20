@@ -55,16 +55,24 @@ async def identities_update_config(
         raise ResourceNotFound("source")
 
     provided = body.model_dump(exclude_unset=True)
-    merged = apply_config_updates(SourceKind(source.kind), row.source_config or {}, provided)
-    updated = await storage.update_identity_source_config(
-        identity_id=identity_id, source_config=merged
-    )
+    # Cooldown + notes are identity COLUMNS (any source kind), not source_config. Pull
+    # them out BEFORE the kind-specific merge so a cooldown-only edit never trips the
+    # "config editing not supported for source X" guard (e.g. matrix).
+    pacing = {k: provided.pop(k) for k in ("cooldown_seconds", "notes") if k in provided}
+    updated = row
+    if provided:
+        merged = apply_config_updates(SourceKind(source.kind), row.source_config or {}, provided)
+        updated = await storage.update_identity_source_config(
+            identity_id=identity_id, source_config=merged
+        )
+    if pacing:
+        updated = await storage.update_identity_pacing(identity_id=identity_id, **pacing)
     await audit.emit(
         event="eyenet.audit.identity.config_updated",
         subject_kind="identity",
         subject_id=identity_id,
         system_user_id=current_user.user_id,
-        payload={"fields": sorted(provided.keys())},
+        payload={"fields": sorted([*provided.keys(), *pacing.keys()])},
     )
     collector = await storage.get_collector_by_identity(identity_id)
     return IdentityDetail.from_domain(updated, collector)

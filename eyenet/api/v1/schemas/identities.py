@@ -173,6 +173,9 @@ class IdentityConfigUpdate(ApiSchema):
     discord_delay_min: float | None = Field(default=None, ge=0)
     discord_delay_max: float | None = Field(default=None, ge=0)
     discord_enable_waf_bypass: bool | None = None
+    # Pool knobs (identity columns, any source kind) — not source_config.
+    cooldown_seconds: int | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=4096)
 
 
 class PanicRequest(ApiSchema):

@@ -2874,6 +2874,18 @@ class BaseRepository(ABC):
         """Replace an identity's non-secret collector config. Raises if missing."""
 
     @abstractmethod
+    async def update_identity_pacing(
+        self,
+        *,
+        identity_id: UUID,
+        cooldown_seconds: int | None = None,
+        notes: str | None = None,
+    ) -> IdentityRow:
+        """Update the pool-level knobs that are identity COLUMNS, not source_config:
+        the post-use cooldown and the operator notes. Only non-None args are written.
+        Raises if the identity doesn't exist."""
+
+    @abstractmethod
     async def set_identity_state(
         self,
         *,
