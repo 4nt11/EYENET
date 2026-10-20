@@ -27,7 +27,7 @@ from eyenet.api.deps import (
 )
 from eyenet.api.v1.schemas.groups import GroupSummary, JoinGroupRequest
 from eyenet.contracts.candidate import GroupCandidateRow
-from eyenet.contracts.enums import CandidateState, GroupKind, JoinedVia
+from eyenet.contracts.enums import CandidateState, GroupKind, JoinedVia, SourceKind
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -38,10 +38,10 @@ _JOINABLE_FROM = frozenset(
     {CandidateState.DISCOVERED, CandidateState.QUEUED, CandidateState.PARKED}
 )
 
-# Canonical walk to JOINED, indexed by the current state. A forum category has
-# no platform join, so we complete this synchronously instead of handing off to
-# the supervisor.
-_FORUM_WALK_FROM = {
+# Canonical walk to JOINED, indexed by the current state. A platform with no join
+# to perform (forum category; a Discord channel we are already in via the guild)
+# completes this synchronously instead of handing off to the supervisor.
+_INTERNAL_WALK_FROM = {
     CandidateState.DISCOVERED: 0,
     CandidateState.QUEUED: 1,
     CandidateState.APPROVED: 2,
@@ -49,7 +49,7 @@ _FORUM_WALK_FROM = {
     # PARKED re-monitors via the existing PARKED -> APPROVED edge (walk from APPROVED).
     CandidateState.PARKED: 1,
 }
-_FORUM_WALK = (
+_INTERNAL_WALK = (
     CandidateState.QUEUED,
     CandidateState.APPROVED,
     CandidateState.JOINING,
@@ -100,7 +100,18 @@ async def groups_join(
     # through the supervisor join dispatch (that machinery acts against the
     # platform, which for a covert read collector would be deanonymizing).
     if (row.kind_hint or body.kind) is GroupKind.FORUM_CATEGORY:
-        return await _monitor_forum_category(storage, audit, current_user, row, body.collector_id)
+        return await _monitor_internal(
+            storage, audit, current_user, row, body.collector_id, kind=GroupKind.FORUM_CATEGORY
+        )
+
+    # Discord is the same case: we are already in the guild, so monitoring a channel
+    # (or the guild node) is a purely internal membership — there is no platform join
+    # and the collector has no join-command handler to dispatch to.
+    if collector.kind is SourceKind.DISCORD:
+        return await _monitor_internal(
+            storage, audit, current_user, row, body.collector_id,
+            kind=(row.kind_hint or body.kind or GroupKind.CHANNEL),
+        )
 
     # Walk to APPROVED (DISCOVERED -> QUEUED -> APPROVED); supervisor joins off-path.
     if row.state not in _JOINABLE_FROM:
@@ -132,33 +143,35 @@ async def groups_join(
     return GroupSummary.from_domain(final)
 
 
-async def _monitor_forum_category(
+async def _monitor_internal(
     storage: BaseRepository,
     audit: AuditEmitter,
     current_user: CurrentUser,
     row: GroupCandidateRow,
     collector_id: UUID,
+    *,
+    kind: GroupKind,
 ) -> GroupSummary:
-    """Open an internal membership for a forum category — no platform action.
+    """Open an internal membership for a group with no platform join to perform
+    (forum category, Discord channel/guild) — no platform action.
 
-    Idempotent: re-monitoring an already-JOINED category is a no-op. The
-    membership is what scopes the collector's read-crawl; nothing here contacts
-    the board.
+    Idempotent: re-monitoring an already-JOINED group is a no-op. The membership
+    is what scopes the collector's read-crawl; nothing here contacts the platform.
     """
     now = datetime.now(tz=UTC)
     group_id, _ = await storage.upsert_group(
         source_id=row.source_id,
         platform_groupid=row.platform_groupid,
-        kind=GroupKind.FORUM_CATEGORY,
+        kind=kind,
         title=row.display_name_hint,
         seen_at=now,
     )
 
     if row.state is not CandidateState.JOINED:
-        start = _FORUM_WALK_FROM.get(row.state)
+        start = _INTERNAL_WALK_FROM.get(row.state)
         if start is None:
-            raise ConflictError(f"category is {row.state.value}; cannot monitor from here")
-        for to_state in _FORUM_WALK[start:]:
+            raise ConflictError(f"group is {row.state.value}; cannot monitor from here")
+        for to_state in _INTERNAL_WALK[start:]:
             kwargs: dict[str, object] = {}
             if to_state is CandidateState.APPROVED:
                 kwargs = {

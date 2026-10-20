@@ -287,6 +287,8 @@ class DiscordCollector(CollectorSkeleton):
         self._cursors: dict[str, dict[str, Any]] = {}
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
         self._last_seq: int | None = None  # gateway dispatch seq, for heartbeat + resume
+        self._last_ready: dict[str, Any] | None = None  # last READY tree (reused by discovery)
+        self._discovered = False  # one-shot self-scan guard (candidates from the live READY)
 
     # ------------------------------------------------------------------ boot
 
@@ -335,7 +337,9 @@ class DiscordCollector(CollectorSkeleton):
         """Gateway READY -> every viewable channel as a VisibleGroup. The base
         scan_visible_groups turns these into GroupCandidates. Channel NAMES only exist
         here (the REST message fetch has none), so we carry them in .title."""
-        ready = await self._gateway_ready()
+        # Reuse the persistent stream's READY when it is already up (self-scan on
+        # first READY); only a standalone discovery pays for a one-shot handshake.
+        ready = self._last_ready or await self._gateway_ready()
         self._cache_from_ready(ready)
         out: list[VisibleGroup] = []
         for g in ready.get("guilds", []):
@@ -673,7 +677,17 @@ class DiscordCollector(CollectorSkeleton):
                 continue
             t, d = msg.get("t"), msg.get("d") or {}
             if t == "READY":
+                self._last_ready = d
                 self._cache_from_ready(d)
+                # First READY = self-discovery: persist every viewable guild/channel as
+                # a GroupCandidate so the operator has something to promote. Without this
+                # nothing is ever monitored (no scan command handler, unlike telegram).
+                if not self._discovered and self._source_uuid is not None:
+                    self._discovered = True
+                    try:
+                        await self.scan_visible_groups(source_id=self._source_uuid)
+                    except Exception as exc:  # loud, non-fatal: the stream still runs
+                        _log.warning("discord.discovery_failed", error=str(exc))
                 await self._subscribe_members(ws)
             elif t:
                 await self._dispatch(str(t), d)

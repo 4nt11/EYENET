@@ -370,6 +370,43 @@ async def test_monitor_forum_category_opens_internal_membership(storage: BaseRep
 
 
 @pytest.mark.unit
+async def test_monitor_discord_channel_opens_internal_membership(storage: BaseRepository) -> None:
+    # Discord has no platform join (we are already in the guild): joining a channel
+    # completes synchronously into a membership, like a forum category.
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.DISCORD, display_name="d", created_at=now)
+    ident = await storage.create_identity(
+        name=f"did{uuid4().hex[:6]}", source_id=sid, session_path="/x"
+    )
+    coll = await storage.create_collector(
+        instance_name=f"cd{uuid4().hex[:6]}",
+        kind=SourceKind.DISCORD,
+        source_id=sid,
+        identity_id=ident.id,
+        config={},
+        created_at=now,
+        created_by_user_id=uuid4(),
+    )
+    cand = await storage.ensure_candidate(
+        source_id=sid, platform_groupid="9001", seen_at=now, kind=GroupKind.CHANNEL
+    )
+
+    result = await groups_join(
+        body=JoinGroupRequest(collector_id=coll.id, candidate_id=cand.id),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+    )
+    assert result.status == "monitored"  # synchronous, never routed to the supervisor
+
+    row = await storage.get_candidate(cand.id)
+    assert row is not None and row.state is CandidateState.JOINED
+    grp = await storage.get_group(row.resulting_group_id)
+    assert grp is not None and grp.kind is GroupKind.CHANNEL  # kept CHANNEL, not FORUM_CATEGORY
+    assert len(await storage.list_active_memberships(collector_id=coll.id)) == 1
+
+
+@pytest.mark.unit
 async def test_groups_messages_returns_thread_posts_oldest_first(storage: BaseRepository) -> None:
     from datetime import timedelta
 
