@@ -180,7 +180,12 @@
     forum_tls_impersonate: 'curl-cffi TLS fingerprint (JA3/JA4) used on a clearnet WAF board. MUST match the User-Agent and the browser that minted the cookie jar. "none" uses plain httpx (fine over Tor, where TLS is wrapped).',
     forum_user_agent: 'The exact User-Agent of the browser that exported the cookie jar. Must stay coherent with the TLS impersonate target — a UA flip mid-session is itself a ban signal.',
     forum_enable_waf_bypass: 'Route requests through FlareSolverr (a real headless browser) to clear a Cloudflare JS challenge / Anubis proof-of-work. Off by default.',
-    monitor_groups: 'Telegram groups/channels to collect, one per line — a @username or a numeric -100… channel id.'
+    monitor_groups: 'Telegram groups/channels to collect, one per line — a @username or a numeric -100… channel id.',
+    discord_impersonate: 'curl-cffi TLS target matching the token’s browser (e.g. firefox147). MUST be the same browser family that minted the cookie jar + the User-Agent — a mismatch is more detectable than none.',
+    discord_user_agent: 'The exact User-Agent of the browser that exported the session. Must stay coherent with the impersonate target; a UA flip mid-session is itself a ban signal.',
+    discord_delay_min: 'Minimum wait between REST history requests (seconds). Each fetch waits a random time between min and max.',
+    discord_delay_max: 'Maximum wait between REST history requests (seconds). Live gateway events are not paced by this.',
+    discord_enable_waf_bypass: 'Route through FlareSolverr to remint a fresh cf_clearance when Cloudflare challenges. On by default for Discord.'
   };
   const EVASION_LEVELS = ['', 'ghost', 'lurker', 'regular', 'brisk', 'smash'];
   // curl-cffi targets (FORUM_TLS_IMPERSONATE_TARGETS) + '' = none (httpx/Tor path).
@@ -222,7 +227,12 @@
       forum_max_thread_pages: r.forum_max_thread_pages ?? '',
       forum_steady_pages: r.forum_steady_pages ?? '',
       forum_discovery_depth: r.forum_discovery_depth ?? '',
-      monitor_groups: (r.monitor_groups ?? []).join('\n')
+      monitor_groups: (r.monitor_groups ?? []).join('\n'),
+      discord_impersonate: r.discord_impersonate ?? '',
+      discord_user_agent: r.discord_user_agent ?? '',
+      discord_delay_min: r.discord_delay_min ?? '',
+      discord_delay_max: r.discord_delay_max ?? '',
+      discord_enable_waf_bypass: r.discord_enable_waf_bypass ?? true
     };
   }
 
@@ -238,6 +248,14 @@
     if (sourceKind === 'telegram') {
       const mg = splitLines(cfg.monitor_groups);
       if (!arrEq(mg, r.monitor_groups ?? [])) u.monitor_groups = mg;
+      return u;
+    }
+    if (sourceKind === 'discord') {
+      const setStrD = (k) => { const v = (cfg[k] ?? '').trim(); if (v !== (r[k] ?? '')) u[k] = v; };
+      ['discord_impersonate', 'discord_user_agent'].forEach(setStrD);
+      const setNumD = (k) => { const v = cfg[k]; if (v === '' || v === null) return; const n = Number(v); if (n !== r[k]) u[k] = n; };
+      ['discord_delay_min', 'discord_delay_max'].forEach(setNumD);
+      if (cfg.discord_enable_waf_bypass !== (r.discord_enable_waf_bypass ?? true)) u.discord_enable_waf_bypass = cfg.discord_enable_waf_bypass;
       return u;
     }
     const setStr = (k) => { const v = (cfg[k] ?? '').trim(); if (v !== (r[k] ?? '')) u[k] = v; };
@@ -340,6 +358,15 @@
                 <label class="cfg-f" title={HELP.monitor_groups}>Monitored groups (one per line) <span class="q">?</span>
                   <textarea class="field mono" rows="4" bind:value={cfg.monitor_groups} placeholder="@channel or -100… id"></textarea>
                 </label>
+              {:else if sourceKind === 'discord'}
+                <div class="cfg-grid">
+                  <label class="cfg-f" title={HELP.discord_impersonate}>TLS impersonate <span class="q">?</span><input class="field" type="text" bind:value={cfg.discord_impersonate} placeholder="firefox147" /></label>
+                  <label class="cfg-f" title={HELP.discord_delay_min}>Delay min (s) <span class="q">?</span><input class="field" type="text" inputmode="decimal" value={cfg.discord_delay_min} oninput={(e) => onNum(e, 'discord_delay_min', true)} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f" title={HELP.discord_delay_max}>Delay max (s) <span class="q">?</span><input class="field" type="text" inputmode="decimal" value={cfg.discord_delay_max} oninput={(e) => onNum(e, 'discord_delay_max', true)} spellcheck="false" autocomplete="off" /></label>
+                  <label class="cfg-f wide" title={HELP.discord_user_agent}>User-Agent <span class="q">?</span><input class="field" type="text" bind:value={cfg.discord_user_agent} /></label>
+                  <label class="cfg-f check" title={HELP.discord_enable_waf_bypass}><input type="checkbox" bind:checked={cfg.discord_enable_waf_bypass} /> Enable WAF bypass (FlareSolverr) <span class="q">?</span></label>
+                </div>
+                <p class="warn-note">⚠ Fingerprint coherence: User-Agent, TLS impersonate, and the browser that minted the session (token + cookie) must ALL be the same browser. The session blob itself is edited via Replace credential, not here.</p>
               {:else}
                 <div class="cfg-grid">
                   <label class="cfg-f wide" title={HELP.forum_base_url}>Base URL <span class="q">?</span><input class="field" type="text" bind:value={cfg.forum_base_url} /></label>

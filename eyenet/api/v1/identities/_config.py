@@ -50,10 +50,44 @@ def apply_config_updates(
             groups = provided["monitor_groups"] or []
             cfg["monitor_groups"] = [str(g).strip() for g in groups if str(g).strip()]
         return cfg
+    if source_kind is SourceKind.DISCORD:
+        _apply_discord_updates(cfg, provided)
+        return cfg
     if source_kind is not SourceKind.FORUM:
         raise _bad("source", f"config editing not supported for source: {source_kind.value}")
     _apply_forum_updates(cfg, provided)
     return cfg
+
+
+# Discord editable pacing/fingerprint knobs. The impersonate target is a free string
+# (curl_cffi validates it at collector boot); user_agent is clearable. The session blob
+# (token/cookie/super_properties) is a SECRET edited via Replace credential, never here.
+_DISCORD_STR_CLEARABLE = ("discord_impersonate", "discord_user_agent")
+_DISCORD_NUMERIC = ("discord_delay_min", "discord_delay_max")
+
+
+def _apply_discord_updates(cfg: dict[str, Any], provided: dict[str, Any]) -> None:
+    """Validate + merge the discord editable fields into ``cfg`` in place."""
+    for field in _DISCORD_STR_CLEARABLE:
+        if field not in provided:
+            continue
+        val = (provided[field] or "").strip()
+        if not val:
+            cfg.pop(field, None)  # empty clears
+        else:
+            cfg[field] = val
+    if "discord_enable_waf_bypass" in provided:
+        cfg["discord_enable_waf_bypass"] = bool(provided["discord_enable_waf_bypass"])
+    for field in _DISCORD_NUMERIC:
+        if provided.get(field) is not None:
+            if provided[field] < 0:
+                raise _bad(field, "must be >= 0")
+            cfg[field] = provided[field]
+    if (
+        "discord_delay_max" in cfg
+        and cfg.get("discord_delay_min", 0) > cfg["discord_delay_max"]
+    ):
+        raise _bad("discord_delay_min", "must be <= discord_delay_max")
 
 
 def _apply_forum_updates(cfg: dict[str, Any], provided: dict[str, Any]) -> None:

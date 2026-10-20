@@ -65,3 +65,27 @@ def test_telegram_monitor_groups_merge() -> None:
     )
     assert out["monitor_groups"] == ["@a", "b"]  # trimmed, blanks dropped
     assert out["telegram_api_hash"] == "secret"  # secret preserved
+
+
+def test_discord_merges_pacing_and_clears_empty_and_preserves_secret() -> None:
+    existing = {
+        "discord_impersonate": "firefox147",
+        "discord_user_agent": "Mozilla/5.0",
+        "discord_session": "SECRET_BLOB",  # must be preserved untouched
+    }
+    out = apply_config_updates(
+        SourceKind.DISCORD,
+        existing,
+        {"discord_delay_min": 2.0, "discord_delay_max": 3.0, "discord_user_agent": ""},
+    )
+    assert out["discord_delay_min"] == 2.0 and out["discord_delay_max"] == 3.0
+    assert "discord_user_agent" not in out  # empty string clears
+    assert out["discord_impersonate"] == "firefox147"  # untouched
+    assert out["discord_session"] == "SECRET_BLOB"  # secret preserved
+
+
+def test_discord_rejects_inverted_delay_window() -> None:
+    with pytest.raises(UnprocessableError):
+        apply_config_updates(
+            SourceKind.DISCORD, {}, {"discord_delay_min": 5.0, "discord_delay_max": 1.0}
+        )

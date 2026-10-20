@@ -80,6 +80,14 @@ class IdentityDetail(IdentitySummary):
     forum_tls_impersonate: str | None = None
     forum_enable_waf_bypass: bool | None = None
     monitor_groups: list[str] = Field(default_factory=list)
+    # Discord (None for a non-discord identity). The session blob (token/cookie/
+    # super_properties) is a secret and deliberately NOT surfaced; these are the
+    # pacing + fingerprint knobs the collector reads at boot.
+    discord_impersonate: str | None = None
+    discord_user_agent: str | None = None
+    discord_delay_min: float | None = None
+    discord_delay_max: float | None = None
+    discord_enable_waf_bypass: bool | None = None
     # The collector that reads this config (so the panel can restart it to apply changes).
     collector_id: UUID | None = None
     collector_observed_state: CollectorObservedState | None = None
@@ -112,6 +120,11 @@ class IdentityDetail(IdentitySummary):
             forum_tls_impersonate=cfg.get("forum_tls_impersonate"),
             forum_enable_waf_bypass=cfg.get("forum_enable_waf_bypass"),
             monitor_groups=cfg.get("monitor_groups") or [],
+            discord_impersonate=cfg.get("discord_impersonate"),
+            discord_user_agent=cfg.get("discord_user_agent"),
+            discord_delay_min=cfg.get("discord_delay_min"),
+            discord_delay_max=cfg.get("discord_delay_max"),
+            discord_enable_waf_bypass=cfg.get("discord_enable_waf_bypass"),
             collector_id=collector.id if collector is not None else None,
             collector_observed_state=collector.observed_state if collector is not None else None,
         )
@@ -154,6 +167,12 @@ class IdentityConfigUpdate(ApiSchema):
     forum_discovery_depth: int | None = Field(default=None, ge=0)
     # Telegram
     monitor_groups: list[str] | None = None
+    # Discord (session blob is a secret, edited via Replace credential, not here)
+    discord_impersonate: str | None = Field(default=None, max_length=64)
+    discord_user_agent: str | None = Field(default=None, max_length=1024)
+    discord_delay_min: float | None = Field(default=None, ge=0)
+    discord_delay_max: float | None = Field(default=None, ge=0)
+    discord_enable_waf_bypass: bool | None = None
 
 
 class PanicRequest(ApiSchema):
