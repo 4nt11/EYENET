@@ -45,6 +45,23 @@
     const m = s.match(/^([a-z2-7]{56})(\.onion.*)$/i);
     return m ? `${m[1].slice(0, 10)}…${m[2]}` : s;
   };
+
+  // One section per source: group on source_id (always present), label it with the
+  // forum host / source label, sort sections by that label and cards by title.
+  const sourceName = (g) => shortUrl(g.source_url) || g.source_label || g.source_id;
+  const sections = $derived.by(() => {
+    const by = new Map();
+    for (const g of groups) {
+      const s = by.get(g.source_id) ?? { id: g.source_id, name: sourceName(g), items: [] };
+      s.items.push(g);
+      by.set(g.source_id, s);
+    }
+    const out = [...by.values()];
+    for (const s of out)
+      s.items.sort((a, b) => (a.title || a.platform_groupid).localeCompare(b.title || b.platform_groupid));
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  });
 </script>
 
 <main>
@@ -62,20 +79,22 @@
     {:else if !groups.length}
       <p class="pnote">Nothing monitored yet. Monitor a forum category or a chat in <a href="/monitored-groups">Monitored groups</a>.</p>
     {:else}
-      <ul class="cards">
-        {#each groups as g}
-          <li>
-            <a class="card" href={href(g)}>
-              <span class="kind">{kindLabel(g.kind)}</span>
-              <span class="title">{g.title || g.platform_groupid}</span>
-              <span class="pid">{g.platform_groupid}</span>
-              {#if g.source_url || g.source_label}
-                <span class="src" title={g.source_url || g.source_label}>{shortUrl(g.source_url) || g.source_label}</span>
-              {/if}
-            </a>
-          </li>
-        {/each}
-      </ul>
+      {#each sections as s (s.id)}
+        <section class="src-group">
+          <h2 class="src-head" title={s.name}>{s.name}<span class="count">{s.items.length}</span></h2>
+          <ul class="cards">
+            {#each s.items as g (g.group_id)}
+              <li>
+                <a class="card" href={href(g)}>
+                  <span class="kind">{kindLabel(g.kind)}</span>
+                  <span class="title">{g.title || g.platform_groupid}</span>
+                  <span class="pid">{g.platform_groupid}</span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/each}
     {/if}
   </div>
 </main>
@@ -98,8 +117,11 @@
   /* clamp to 2 lines so titles don't swing card heights wildly (full text in the link) */
   .title { color: var(--text-body); font-size: var(--fs-14); word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .pid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); word-break: break-all; }
-  /* brighter than --accent so the disambiguating forum URL pops */
-  .src { font-family: var(--font-mono); font-size: var(--fs-11); color: #c88bff; word-break: break-all; }
+  .src-group { margin: 0 0 22px; }
+  /* sticky source header so the group you're scrolling stays labelled; brighter
+     than --accent so the source (forum host / telegram:name / discord) pops */
+  .src-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 0; background: var(--black); font-family: var(--font-mono); font-size: var(--fs-13); color: #c88bff; word-break: break-all; }
+  .src-head .count { font-size: var(--fs-11); color: var(--text-faint); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
   .pnote { margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text-faint); }
   .pnote.err { color: var(--red-text); }
   a { color: var(--accent); }
