@@ -1352,6 +1352,21 @@ class BaseRepository(ABC):
         :meth:`messages_for_group`)."""
 
     @abstractmethod
+    async def get_message(self, message_id: UUID) -> object | None:
+        """One message by id, or None. Type-erased MessageTable for the by-id
+        detail reader (`GET /v1/messages/{id}`)."""
+
+    @abstractmethod
+    async def op_message_for_group(self, group_id: UUID) -> object | None:
+        """The thread's OP = earliest post in the group, or None when empty.
+        A thread is identified by its group_id today."""
+
+    @abstractmethod
+    async def artifacts_for_message(self, message_id: UUID) -> list[object]:
+        """Infrastructure artifacts mentioned in a message (first-seen order).
+        Type-erased InfrastructureArtifactTable rows."""
+
+    @abstractmethod
     async def messages_for_discovery_backfill(
         self, *, limit: int, after_id: UUID | None = None
     ) -> list[object]:

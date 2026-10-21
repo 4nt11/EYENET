@@ -304,6 +304,14 @@ def _expand_link_hrefs(node: Tag) -> None:
             anchor.string = href
 
 
+def _normalize_body_text(text: str) -> str:
+    """Clean the plaintext *display* projection. A forum ``[code]`` block indents
+    with ``&nbsp;``; ``get_text`` decodes that to U+00A0, so the body fills with
+    literal NBSP. Fold NBSP to a plain space and collapse intra-line runs (newlines
+    kept). ``body_html`` keeps the raw ``&nbsp;`` for evidence — this is display only."""
+    return re.sub(r"[^\S\n]{2,}", " ", text.replace("\xa0", " "))
+
+
 def _extract_body_text(body: Tag) -> str:
     """The poster's own words from a ``post_body`` node: drop quote blocks
     (someone else's content), expand auto-link hrefs (recover truncated URLs),
@@ -311,7 +319,7 @@ def _extract_body_text(body: Tag) -> str:
     for quote in body.select("blockquote.mycode_quote"):
         quote.decompose()
     _expand_link_hrefs(body)
-    return body.get_text("\n", strip=True)
+    return _normalize_body_text(body.get_text("\n", strip=True))
 
 
 def body_text_from_html(body_html: str) -> str:

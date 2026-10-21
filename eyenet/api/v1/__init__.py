@@ -172,7 +172,6 @@ from eyenet.api.v1.identities.api_delete_identity import router as identities_de
 from eyenet.api.v1.identities.api_freeze_all import router as identities_freeze_all_router
 from eyenet.api.v1.identities.api_freeze_identity import router as identities_freeze_router
 from eyenet.api.v1.identities.api_get_identity import router as identities_get_router
-from eyenet.api.v1.identities.api_update_config import router as identities_update_config_router
 from eyenet.api.v1.identities.api_list_identities import router as identities_list_router
 from eyenet.api.v1.identities.api_qr_password import router as identities_qr_password_router
 from eyenet.api.v1.identities.api_qr_relogin import router as identities_qr_relogin_router
@@ -182,6 +181,7 @@ from eyenet.api.v1.identities.api_release_identity import router as identities_r
 from eyenet.api.v1.identities.api_replace_identity_session import (
     router as identities_replace_session_router,
 )
+from eyenet.api.v1.identities.api_update_config import router as identities_update_config_router
 
 # === identities ===
 from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
@@ -210,6 +210,7 @@ from eyenet.api.v1.linkages.api_list_linkages import router as linkages_list_rou
 from eyenet.api.v1.linkages.api_reject_linkage import router as linkages_reject_router
 from eyenet.api.v1.linkages.api_suspect_linkage import router as linkages_suspect_router
 from eyenet.api.v1.linker.api_run import router as linker_run_router
+from eyenet.api.v1.messages.api_get_message import router as message_detail_router
 
 # === meta (gated OpenAPI schema, §12.5) ===
 from eyenet.api.v1.meta.api_openapi import router as meta_openapi_router
@@ -269,6 +270,7 @@ from eyenet.api.v1.stream.api_stream_incidents import router as stream_incidents
 from eyenet.api.v1.stream.api_stream_linkages import router as stream_linkages_router
 from eyenet.api.v1.stream.api_stream_personas import router as stream_personas_router
 from eyenet.api.v1.system.api_get_system import router as system_stats_router
+from eyenet.api.v1.threads.api_get_thread import router as thread_detail_router
 
 # Shared error envelopes — propagate into every operation's OpenAPI.
 # Per §7, every 4xx/5xx returns application/problem+json → ProblemDetail.
@@ -470,6 +472,8 @@ v1_router.include_router(groups_create_router)  # POST /groups (operator entity)
 v1_router.include_router(groups_list_router)
 v1_router.include_router(groups_threads_router)
 v1_router.include_router(groups_messages_router)
+v1_router.include_router(message_detail_router)
+v1_router.include_router(thread_detail_router)
 v1_router.include_router(groups_reply_router)
 v1_router.include_router(groups_backfill_router)
 v1_router.include_router(groups_join_router)

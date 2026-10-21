@@ -17,7 +17,7 @@ from eyenet.collectors.forum import (
     parse_thread_links,
     thread_page_count,
 )
-from eyenet.collectors.forum._mybb import _parse_date
+from eyenet.collectors.forum._mybb import _normalize_body_text, _parse_date
 
 pytestmark = pytest.mark.unit
 
@@ -98,6 +98,16 @@ def test_body_text_strips_tags_but_keeps_content(posts: list) -> None:
 
 def test_body_html_is_evidence_faithful(posts: list) -> None:
     assert "<strong>world</strong>" in posts[0].body_html
+
+
+def test_normalize_body_text_folds_nbsp_and_collapses_runs() -> None:
+    # A forum [code] block indents JSON with &nbsp; -> get_text decodes to U+00A0.
+    # The display projection folds that to a plain space and collapses runs; the
+    # leak-dump body stops being \xa0 soup. Newlines are preserved.
+    raw = '\xa0\xa0\xa0"documento": "CC 123",\n\xa0\xa0\xa0"edad": "20a"'
+    out = _normalize_body_text(raw)
+    assert "\xa0" not in out
+    assert out == ' "documento": "CC 123",\n "edad": "20a"'
 
 
 def test_parse_forum_links_dedupes_and_orders() -> None:

@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eyenet-mcp"
+version = "0.1.0"
+description = "MCP server over the EYENET /v1 API — a token-economy read lens on the corpus."
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2,<3",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+eyenet-mcp = "eyenet_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["eyenet_mcp"]
+
+# Own config so pytest stops here and never inherits the parent repo's marker
+# filter / coverage gate. ponytail: add markers + cov when this wheel grows one.
+[tool.pytest.ini_options]
+addopts = ""
+testpaths = ["tests"]
+pythonpath = ["."]

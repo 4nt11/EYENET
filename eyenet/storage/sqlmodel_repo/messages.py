@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import cast
 from uuid import UUID
 
 import structlog
@@ -23,6 +24,8 @@ from eyenet.models import (
     AttachmentTable,
     ContentTemplateTable,
     GroupTable,
+    InfrastructureArtifactMentionTable,
+    InfrastructureArtifactTable,
     MessageTable,
 )
 
@@ -483,6 +486,56 @@ class MessagesMixin:
             result = await session.exec(stmt)
             return int(result.one())
 
+    async def get_message(self, message_id: UUID) -> object | None:
+        """One message by id, or None. Type-erased ``MessageTable`` for the
+        by-id detail reader (`GET /v1/messages/{id}`)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            return (
+                await session.exec(select(MessageTable).where(MessageTable.id == message_id))
+            ).first()
+
+    async def op_message_for_group(self, group_id: UUID) -> object | None:
+        """The thread's OP = earliest post in the group, or None when empty.
+
+        A thread is identified by its ``group_id`` today, so the OP is the
+        oldest message in that group (same tie-break as the reader)."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(MessageTable)
+                .where(MessageTable.group_id == group_id)
+                .order_by(col(MessageTable.sent_at_source).asc())
+                .order_by(col(MessageTable.id).asc())
+                .limit(1)
+            )
+            return (await session.exec(stmt)).first()
+
+    async def artifacts_for_message(self, message_id: UUID) -> list[object]:
+        """Infrastructure artifacts mentioned in a message, first-seen order.
+
+        The mention table is the artifact->message provenance link (where the
+        artifact was actually seen). Type-erased ``InfrastructureArtifactTable``."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            ids = list(
+                await session.exec(
+                    select(InfrastructureArtifactMentionTable.artifact_id).where(
+                        InfrastructureArtifactMentionTable.message_id == message_id
+                    )
+                )
+            )
+            if not ids:
+                return []
+            rows = (
+                await session.exec(
+                    select(InfrastructureArtifactTable).where(
+                        col(InfrastructureArtifactTable.id).in_(list(ids))
+                    )
+                )
+            ).all()
+            # first-seen order; one message's artifacts are few, so sort in Python.
+            return sorted(
+                rows, key=lambda a: cast("InfrastructureArtifactTable", a).first_seen_at_ingest
+            )
+
     async def resolve_message_id(
         self,
         *,
@@ -556,9 +609,7 @@ class MessagesMixin:
             result = await session.exec(stmt)
             return [(mid, body, body_html) for mid, body, body_html in result]
 
-    async def update_message_bodies_bulk(
-        self, rows: list[tuple[UUID, str, int, int]]
-    ) -> int:
+    async def update_message_bodies_bulk(self, rows: list[tuple[UUID, str, int, int]]) -> int:
         """Rewrite ``body`` (+ recomputed ``length_chars``/``length_words``) for
         each ``(id, body, length_chars, length_words)``. Used by the forum body
         repair after the ``body_html`` re-parse. Returns the count updated."""

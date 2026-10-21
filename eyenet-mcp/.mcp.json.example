@@ -1,0 +1,13 @@
+{
+  "//": "Copy to repo-root .mcp.json to share, OR prefer `claude mcp add -s local`.",
+  "//secret": "The token is NOT literal here — ${EYENET_MCP_TOKEN} expands from your shell env, so this file carries no secret and is safe to commit.",
+  "mcpServers": {
+    "eyenet": {
+      "command": "eyenet-mcp",
+      "env": {
+        "EYENET_MCP_BASE": "${EYENET_MCP_BASE:-http://localhost:8000}",
+        "EYENET_MCP_TOKEN": "${EYENET_MCP_TOKEN}"
+      }
+    }
+  }
+}
