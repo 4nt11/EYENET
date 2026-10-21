@@ -61,6 +61,11 @@ _OP_DISPATCH = 0  # gateway op: a dispatch event (has `t` + `d`)
 _OP_HELLO = 10  # gateway op: HELLO (carries heartbeat_interval)
 _READABLE_CHANNEL_TYPES = (0, 5, 15)  # text, announcement, forum
 _BACKFILL_PAGES_PER_TICK = 3  # bounded history walk per tick; resumes via the cursor
+# Consecutive REST 404s on a channel before we treat it as gone (deleted/recreated,
+# or access lost) and retire the membership. A recreated channel 404s forever, so a
+# healthy margin avoids retiring on a transient blip while still self-healing fast.
+# ponytail: a module constant, not a per-identity knob, until one is actually wanted.
+_MAX_CHANNEL_404 = 20
 
 
 # --- pure mapping helpers (unit-tested; no storage / no network) --------------
@@ -285,6 +290,8 @@ class DiscordCollector(CollectorSkeleton):
         # per-channel resume state: {channel_id: {"newest","oldest": snowflake,
         # "backfill_complete": bool}}
         self._cursors: dict[str, dict[str, Any]] = {}
+        self._chan_404: dict[str, int] = {}  # channel_id -> consecutive REST 404s
+        self._chan_group: dict[str, UUID] = {}  # platform_groupid -> group_id, for retire
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
         self._last_seq: int | None = None  # gateway dispatch seq, for heartbeat + resume
         self._last_ready: dict[str, Any] | None = None  # last READY tree (reused by discovery)
@@ -469,7 +476,43 @@ class DiscordCollector(CollectorSkeleton):
             grp = await self._storage.get_group(m.group_id)
             if grp is not None and grp.kind == GroupKind.CHANNEL:
                 out.append(grp.platform_groupid)
+                self._chan_group[grp.platform_groupid] = m.group_id  # for 404 retire
         return out
+
+    async def _note_rest_404(self, channel_id: str) -> None:
+        """Count a REST 404 on a channel. A deleted/recreated channel (new snowflake) or
+        lost access 404s forever, so once it crosses the margin, retire it rather than
+        hammer it every tick. A single OK read resets the count (see ``_rest_messages``)."""
+        self._chan_404[channel_id] = self._chan_404.get(channel_id, 0) + 1
+        if self._chan_404[channel_id] >= _MAX_CHANNEL_404:
+            await self._retire_dead_channel(channel_id, self._chan_404[channel_id])
+
+    async def _retire_dead_channel(self, channel_id: str, count: int) -> None:
+        """Stop monitoring a channel that has 404'd ``count`` times in a row — it was
+        deleted/recreated (new snowflake) or we lost access. Close the membership so the
+        next tick drops it (``list_active_memberships`` filters ``left_at IS NULL``), and
+        warn loudly so the operator re-points at the new channel id. Never automatic
+        re-join: opening a channel is a manual operator action."""
+        group_id = self._chan_group.get(channel_id)
+        self._chan_404.pop(channel_id, None)
+        self._monitored.discard(channel_id)
+        if group_id is None or self._collector_id is None:
+            _log.warning(
+                "discord.channel_dead_unresolved", channel=channel_id, consecutive_404=count
+            )
+            return
+        await self._storage.close_membership(
+            collector_id=self._collector_id,
+            group_id=group_id,
+            left_at=datetime.now(tz=UTC),
+            left_reason="channel_404_retired",
+        )
+        _log.warning(
+            "discord.channel_retired",
+            channel=channel_id,
+            consecutive_404=count,
+            reason="deleted/recreated or access lost; re-point at the new channel id",
+        )
 
     async def _backfill_channel(
         self, channel_id: str, *, limit: int = 100, max_pages: int = 0
@@ -519,6 +562,7 @@ class DiscordCollector(CollectorSkeleton):
         status = int(r.status_code)
         cls = self._classify(status, dict(r.headers), "" if status == HTTPStatus.OK else r.text)
         if cls is RespClass.OK:
+            self._chan_404.pop(channel_id, None)  # recovered; reset the dead-channel counter
             return list(r.json())
         if cls is RespClass.CF_CHALLENGE:
             await self._remint_clearance()  # pauses the collector; never retry blind
@@ -533,6 +577,8 @@ class DiscordCollector(CollectorSkeleton):
         if cls is RespClass.AUTH_FAIL:
             raise RuntimeError(f"{self._identity_name}: Discord token rejected (401)")
         _log.warning("discord.rest_unexpected", channel=channel_id, status=status)
+        if status == HTTPStatus.NOT_FOUND:
+            await self._note_rest_404(channel_id)
         return []
 
     # ---------------------------------------------------- cloudflare fail-safe

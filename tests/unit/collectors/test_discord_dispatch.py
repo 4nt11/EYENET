@@ -7,13 +7,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlmodel import select
 
 from eyenet.bus import MemoryBus
 from eyenet.collectors.discord.real import DiscordCollector
-from eyenet.contracts.enums import GroupKind, MembershipRole, SourceKind
+from eyenet.contracts.enums import GroupKind, JoinedVia, MembershipRole, SourceKind
 from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEntry
 from eyenet.identity_pool.loader import dump
 from eyenet.models import GroupTable, MembershipTable
@@ -66,3 +67,37 @@ async def test_handle_members_persists_rank(tmp_path: Path) -> None:
     assert len(memberships) == 1
     assert memberships[0].role is MembershipRole.ADMIN  # returnero resolved + persisted
     assert memberships[0].group_id == guilds[0].id
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_rest_404s_retire_dead_channel(tmp_path: Path) -> None:
+    """A deleted/recreated channel 404s forever; past the margin the collector retires
+    the membership so it stops hammering (regression for the MortemTeam #general nuke)."""
+    from eyenet.collectors.discord.real import _MAX_CHANNEL_404
+
+    storage = get_repository(in_memory=True)
+    now = datetime.now(tz=UTC)
+    sid = await storage.upsert_source(kind=SourceKind.DISCORD, display_name="d", created_at=now)
+    gid, _ = await storage.upsert_group(
+        source_id=sid, platform_groupid="1561747711072542832",
+        kind=GroupKind.CHANNEL, title="general", seen_at=now,
+    )
+    collector_id = uuid4()  # FK not enforced on in-memory SQLite
+    await storage.open_membership(
+        collector_id=collector_id, group_id=gid, joined_at=now, joined_via=JoinedVia.SEED
+    )
+
+    coll = DiscordCollector(
+        bus=MemoryBus(), storage=storage, pool=_pool(tmp_path), identity_name="dc"
+    )
+    coll._collector_id = collector_id
+    coll._chan_group["1561747711072542832"] = gid
+
+    for _ in range(_MAX_CHANNEL_404 - 1):  # under the margin: still monitored
+        await coll._note_rest_404("1561747711072542832")
+    assert len(await storage.list_active_memberships(collector_id=collector_id)) == 1
+
+    await coll._note_rest_404("1561747711072542832")  # crosses the margin -> retired
+    assert await storage.list_active_memberships(collector_id=collector_id) == []
+    assert "1561747711072542832" not in coll._chan_404  # counter cleared on retire
