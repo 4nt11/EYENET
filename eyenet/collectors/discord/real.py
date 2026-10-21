@@ -37,7 +37,13 @@ from sqlalchemy.exc import IntegrityError
 from eyenet.collectors.base._credentials import DiscordSession, materialize_discord_session
 from eyenet.collectors.base.skeleton import CollectorSkeleton, VisibleGroup
 from eyenet.contracts.actor import actor_key
-from eyenet.contracts.enums import GroupKind, MembershipRole, SourceKind, SystemLogLevel
+from eyenet.contracts.enums import (
+    GroupKind,
+    JoinedVia,
+    MembershipRole,
+    SourceKind,
+    SystemLogLevel,
+)
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.models.reaction import ReactionTable
@@ -292,6 +298,8 @@ class DiscordCollector(CollectorSkeleton):
         self._cursors: dict[str, dict[str, Any]] = {}
         self._chan_404: dict[str, int] = {}  # channel_id -> consecutive REST 404s
         self._chan_group: dict[str, UUID] = {}  # platform_groupid -> group_id, for retire
+        # channel_id -> {name, parent_id, guild} from READY, for nuke-recreate successor match
+        self._channel_meta: dict[str, dict[str, str]] = {}
         self._paused_until: float = 0.0  # monotonic; CF fail-safe backoff
         self._last_seq: int | None = None  # gateway dispatch seq, for heartbeat + resume
         self._last_ready: dict[str, Any] | None = None  # last READY tree (reused by discovery)
@@ -384,6 +392,11 @@ class DiscordCollector(CollectorSkeleton):
                 self._channel_guild[cid] = gid
                 if c.get("type") in _READABLE_CHANNEL_TYPES:
                     self._channel_titles[cid] = f"{name} / {c.get('name', '?')}"
+                    self._channel_meta[cid] = {
+                        "name": str(c.get("name") or ""),
+                        "parent_id": str(c.get("parent_id") or ""),
+                        "guild": gid,
+                    }
 
     async def _gateway_ready(self) -> dict[str, Any]:
         """One-shot: connect, IDENTIFY, read until READY, return its payload, close.
@@ -511,7 +524,72 @@ class DiscordCollector(CollectorSkeleton):
             "discord.channel_retired",
             channel=channel_id,
             consecutive_404=count,
-            reason="deleted/recreated or access lost; re-point at the new channel id",
+            reason="deleted/recreated or access lost",
+        )
+        await self._adopt_successor(dead_id=channel_id)
+
+    def _find_successor(self, dead_id: str) -> str | None:
+        """A channel in the live READY tree with the SAME guild + name (+ category) as the
+        retired one but a NEW id = the nuke-and-recreate successor. None if not found.
+
+        The dead channel's metadata survives in ``_channel_meta`` (the cache is add-only),
+        and ``_last_ready`` holds the current tree (which no longer lists the dead id but
+        does list its replacement). Newest snowflake wins if several somehow match."""
+        meta = self._channel_meta.get(dead_id)
+        if meta is None or self._last_ready is None:
+            return None
+        best: str | None = None
+        for g in self._last_ready.get("guilds", []):
+            if str(g.get("id") or "") != meta["guild"]:
+                continue
+            for c in g.get("channels", []):
+                cid = str(c.get("id") or "")
+                if not cid or cid == dead_id or cid in self._monitored:
+                    continue
+                if c.get("type") not in _READABLE_CHANNEL_TYPES:
+                    continue
+                if str(c.get("name") or "") != meta["name"]:
+                    continue
+                if meta["parent_id"] and str(c.get("parent_id") or "") != meta["parent_id"]:
+                    continue
+                if best is None or int(cid) > int(best):
+                    best = cid
+        return best
+
+    async def _adopt_successor(self, *, dead_id: str) -> None:
+        """Auto-join the nuke-and-recreate successor so monitoring FOLLOWS the channel
+        across a recreation instead of leaving a capture gap. This is a deliberate,
+        operator-sanctioned exception to "opening a channel is a manual action": we are
+        MAINTAINING an existing monitoring decision onto the same channel reborn under a
+        new id, not expanding scope to anything new."""
+        if self._source_uuid is None or self._collector_id is None:
+            return
+        successor = self._find_successor(dead_id)
+        if successor is None:
+            return  # no replacement visible yet; operator (or next discovery) re-points
+        now = datetime.now(tz=UTC)
+        group_id, _ = await self._storage.upsert_group(
+            source_id=self._source_uuid,
+            platform_groupid=successor,
+            kind=GroupKind.CHANNEL,
+            title=self._channel_titles.get(successor),
+            seen_at=now,
+        )
+        existing = await self._storage.list_active_memberships(group_id=group_id)
+        if not any(m.collector_id == self._collector_id for m in existing):
+            await self._storage.open_membership(
+                collector_id=self._collector_id,
+                group_id=group_id,
+                joined_at=now,
+                joined_via=JoinedVia.RESTORED,  # same group reborn; closest existing via
+            )
+        self._chan_group[successor] = group_id
+        self._monitored.add(successor)  # picked up this tick; backfilled next
+        _log.warning(
+            "discord.channel_successor_joined",
+            dead=dead_id,
+            successor=successor,
+            title=self._channel_titles.get(successor),
         )
 
     async def _backfill_channel(
