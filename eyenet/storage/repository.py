@@ -1946,6 +1946,13 @@ class BaseRepository(ABC):
         ``search_changed`` gates the ``entity.group.changed`` event."""
 
     @abstractmethod
+    async def adopt_group_lineage(
+        self, *, predecessor_group_id: UUID, successor_group_id: UUID
+    ) -> None:
+        """Chain a nuke-recreated group onto its predecessor's lineage: successor
+        inherits the predecessor's lineage_id and takes the next group_iteration."""
+
+    @abstractmethod
     async def upsert_actor(
         self,
         *,

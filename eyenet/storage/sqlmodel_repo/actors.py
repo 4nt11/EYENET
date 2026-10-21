@@ -372,6 +372,7 @@ class ActorsMixin:
                     first_seen_at_ingest=seen_at,
                     last_observed_at_ingest=seen_at,
                 )
+                row.lineage_id = row.id  # self-anchored root; a successor overrides this
                 session.add(row)
                 await session.flush()
                 search_changed = True
@@ -388,6 +389,22 @@ class ActorsMixin:
             row_id = row.id
             await session.commit()
             return row_id, search_changed
+
+    async def adopt_group_lineage(
+        self, *, predecessor_group_id: UUID, successor_group_id: UUID
+    ) -> None:
+        """Chain a nuke-recreated group onto its predecessor's lineage: the successor
+        inherits the predecessor's ``lineage_id`` (the stable root) and takes the next
+        ``group_iteration``. No-op if either row is missing."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            pred = await session.get(GroupTable, predecessor_group_id)
+            succ = await session.get(GroupTable, successor_group_id)
+            if pred is None or succ is None:
+                return
+            succ.lineage_id = pred.lineage_id or pred.id
+            succ.group_iteration = pred.group_iteration + 1
+            session.add(succ)
+            await session.commit()
 
     async def get_group(self, group_id: UUID) -> GroupRow | None:
         """Return one GroupRow by id, or ``None`` (used by the leave path)."""

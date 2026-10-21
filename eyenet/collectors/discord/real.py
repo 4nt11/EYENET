@@ -583,6 +583,11 @@ class DiscordCollector(CollectorSkeleton):
                 joined_at=now,
                 joined_via=JoinedVia.RESTORED,  # same group reborn; closest existing via
             )
+        predecessor_group_id = self._chan_group.get(dead_id)
+        if predecessor_group_id is not None:
+            await self._storage.adopt_group_lineage(
+                predecessor_group_id=predecessor_group_id, successor_group_id=group_id
+            )
         self._chan_group[successor] = group_id
         self._monitored.add(successor)  # picked up this tick; backfilled next
         _log.warning(

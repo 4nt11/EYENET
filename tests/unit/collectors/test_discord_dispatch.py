@@ -147,6 +147,13 @@ async def test_retire_auto_joins_nuke_recreate_successor(tmp_path: Path) -> None
     assert monitored == {succ}  # dead one retired, successor adopted
     assert succ in coll._monitored
 
+    # the successor is chained onto the predecessor's lineage (v2)
+    dead_grp = await storage.get_group(gid)
+    succ_grp = await storage.get_group(coll._chan_group[succ])
+    assert dead_grp.lineage_id == gid and dead_grp.group_iteration == 1  # root anchors itself
+    assert succ_grp.lineage_id == gid  # same lineage as the predecessor root
+    assert succ_grp.group_iteration == 2  # next iteration
+
 
 @pytest.mark.unit
 @pytest.mark.asyncio

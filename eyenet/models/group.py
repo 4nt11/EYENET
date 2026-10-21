@@ -27,6 +27,13 @@ class GroupTable(SQLModel, table=True):
     last_observed_at_ingest: datetime
     # "collected" (default) vs "operator_asserted". Open varchar, no DB enum.
     provenance: str = Field(default="collected", index=True)
+    # Reincarnation lineage: the external platform_groupid churns when a channel/board is
+    # nuked-and-recreated, so each incarnation is a distinct row. ``lineage_id`` is the
+    # stable logical-group key shared by every incarnation (== ``id`` for a root), and
+    # ``group_iteration`` is the 1-based version within it. A plain indexed key, not a
+    # DB FK, to keep the self-referential root (lineage_id == id) simple on insert.
+    lineage_id: UUID | None = Field(default=None, index=True)
+    group_iteration: int = Field(default=1)
 
 
 class GroupSnapshotTable(SQLModel, table=True):

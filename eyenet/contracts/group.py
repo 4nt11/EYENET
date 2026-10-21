@@ -25,6 +25,8 @@ class GroupRow(DbRowBase):
     first_seen_at_ingest: datetime
     last_observed_at_ingest: datetime
     provenance: str = "collected"
+    lineage_id: UUID | None = None  # stable key across reincarnations (== id for a root)
+    group_iteration: int = 1  # 1-based version within the lineage
 
 
 class GroupSnapshotRow(DbRowBase):
