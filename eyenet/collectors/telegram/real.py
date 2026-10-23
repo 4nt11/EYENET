@@ -17,10 +17,13 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import os
+import tempfile
 import time as _time
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -85,7 +88,7 @@ from eyenet.models import AttachmentTable, MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.search_indexer.events import publish_entity_changed
 from eyenet.services.discovery.scout_graduation import ScoutGraduationService
-from eyenet.storage.attachments import store_attachment
+from eyenet.storage.attachments import attachment_root, store_attachment_file
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.propagation import current_traceparent
 
@@ -93,6 +96,9 @@ _log = structlog.get_logger()
 
 # TTL for the cached attachment-download size gate (see _attachment_max_bytes).
 _ATT_GATE_TTL_S = 60.0
+# Only emit 10%-step download-progress logs for blobs larger than this (the big
+# stealer archives); below it the download is a blip and the progress log is noise.
+_DOWNLOAD_PROGRESS_MIN_BYTES = 16 * 1024 * 1024  # 16 MiB
 # The attachment backfill is a self-driven loop (this collector is event-driven; tick()
 # is never called), re-reading its rate setting every cycle. One cycle processes up to
 # `telegram.attachment_backfill_per_tick` shells, so this interval is the throttle unit.
@@ -1273,24 +1279,9 @@ class TelegramCollector(CollectorSkeleton):
             meta.is_photo or stealer_bypass or (0 < meta.size <= max_bytes)
         )
         if should_download:
-            payload: bytes | None = None
-            try:
-                payload = await self._client.download_media(msg, file=bytes)  # type: ignore[union-attr]
-            except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
-                _log.warning(
-                    "collector.attachment_download_failed",
-                    platform_groupid=platform_groupid,
-                    msgid=msg.id,
-                    error=str(exc),
-                )
-            if payload:
-                sha256, storage_uri = store_attachment(
-                    self._storage.data_dir,
-                    payload,
-                    source=SourceKind.TELEGRAM,
-                    instance_id=self.instance_id,
-                )
-                size = len(payload)
+            stored = await self._download_media_to_store(msg)
+            if stored is not None:
+                sha256, storage_uri, size = stored
         return AttachmentTable(
             id=aid,
             message_id=aid,  # overwritten by caller with the real message FK
@@ -1302,6 +1293,71 @@ class TelegramCollector(CollectorSkeleton):
             storage_uri=storage_uri,
             source_ref=source_ref,
         )
+
+    async def _download_media_to_store(
+        self, msg: TLMessage
+    ) -> tuple[str, str, int] | None:
+        """Stream a message's media to disk and store it content-addressed.
+
+        Downloads to a temp file on the blob store's filesystem (NOT a RAM `bytes`
+        buffer — stealer archives are multi-GB and would OOM the collector), hashes
+        it in chunks, and moves it into place. Logs download progress at 10% steps
+        for large blobs. The blocking FS work (hashing a multi-GB file, the move) runs
+        in a worker thread so it never stalls the event loop. Returns ``(sha256,
+        storage_uri, size_bytes)``, or ``None`` when there is no media / the download
+        failed / produced nothing.
+        """
+        data_dir = self._storage.data_dir
+        if data_dir is None:
+            return None
+        # Temp file lives UNDER the store root so store_attachment_file's move is an
+        # atomic rename on the same filesystem, not a cross-device copy.
+        fd, tmp_name = await asyncio.to_thread(_make_download_temp, attachment_root(data_dir))
+        tmp_path = Path(tmp_name)
+
+        last_bucket = 0  # 10% progress buckets already logged (0 => log from 10% up)
+
+        def _progress(received: int, total: int) -> None:
+            nonlocal last_bucket
+            if total <= _DOWNLOAD_PROGRESS_MIN_BYTES:
+                return  # don't spam the log for small (normal-cap) downloads
+            bucket = int(received * 10 // total)
+            if bucket > last_bucket:
+                last_bucket = bucket
+                _log.info(
+                    "collector.attachment_download_progress",
+                    msgid=msg.id,
+                    pct=bucket * 10,
+                    received=received,
+                    total=total,
+                )
+
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                result = await self._client.download_media(  # type: ignore[union-attr]
+                    msg, file=fh, progress_callback=_progress
+                )
+        except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
+            _log.warning("collector.attachment_download_failed", msgid=msg.id, error=str(exc))
+            await asyncio.to_thread(_discard_download_temp, tmp_path)
+            return None
+        # Hash (reads the whole file) + move: off the event loop.
+        return await asyncio.to_thread(
+            self._finalize_download, data_dir, tmp_path, result is not None
+        )
+
+    def _finalize_download(
+        self, data_dir: Path, tmp_path: Path, had_media: bool
+    ) -> tuple[str, str, int] | None:
+        """Blocking finalize (runs in a worker thread): size + hash-move or discard."""
+        if not had_media or tmp_path.stat().st_size == 0:
+            tmp_path.unlink(missing_ok=True)  # no media / empty download
+            return None
+        size = tmp_path.stat().st_size
+        sha256, storage_uri = store_attachment_file(
+            data_dir, tmp_path, source=SourceKind.TELEGRAM, instance_id=self.instance_id
+        )
+        return sha256, storage_uri, size
 
     async def _attachment_backfill_loop(self) -> None:
         """Self-driven backfill worker (this collector is event-driven; tick() never runs).
@@ -1390,18 +1446,13 @@ class TelegramCollector(CollectorSkeleton):
         max_bytes = await self._attachment_max_bytes()
         stealer_bypass = platform_groupid in self._stealer_platform_ids
         if meta.is_photo or stealer_bypass or (0 < meta.size <= max_bytes):
-            payload = await self._client.download_media(msg, file=bytes)  # type: ignore[union-attr]
-            if payload:
-                sha256, storage_uri = store_attachment(
-                    self._storage.data_dir,
-                    payload,
-                    source=SourceKind.TELEGRAM,
-                    instance_id=self.instance_id,
-                )
+            stored = await self._download_media_to_store(msg)
+            if stored is not None:
+                sha256, storage_uri, size = stored
                 await self._storage.set_attachment_blob(
                     att_id,
                     sha256=sha256,
-                    size_bytes=len(payload),
+                    size_bytes=size,
                     storage_uri=storage_uri,
                     source_ref=source_ref,
                 )
@@ -1680,6 +1731,18 @@ def _tme_link(platform_groupid: str, msgid: int) -> str:
     if stripped.isdigit():
         return f"https://t.me/c/{stripped}/{msgid}"
     return f"https://t.me/{gid}/{msgid}"
+
+
+def _make_download_temp(tmp_root: Path) -> tuple[int, str]:
+    """Create the store root (if needed) + an empty temp file under it; return (fd, path).
+    Blocking FS — call via asyncio.to_thread from the async download helper."""
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    return tempfile.mkstemp(dir=tmp_root, suffix=".download")
+
+
+def _discard_download_temp(tmp_path: Path) -> None:
+    """Remove a temp download file (best-effort). Blocking FS — call via to_thread."""
+    tmp_path.unlink(missing_ok=True)
 
 
 def _mime_to_kind(mime: str) -> AttachmentKind:

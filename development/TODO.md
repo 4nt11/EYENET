@@ -210,9 +210,27 @@ covert session. Gate the whole thing behind the same `telegram.attachment_backfi
 per_tick` HOLD so it never runs unattended. This is the piece that turns "mark a
 channel I already collect" into "and go fetch the archives I already saw."
 
-## BUG (stealer): cap-bypass downloads buffer the WHOLE file in RAM (2026-10-23)
+## BUG (stealer): cap-bypass downloads buffer the WHOLE file in RAM — FIXED 2026-10-23
 
-The stealer cap-bypass works, but it inherits the existing download path:
+**FIXED:** telegram downloads now stream to a temp file on the blob-store
+filesystem (`_download_media_to_store` + `store_attachment_file`), hash it in
+chunks, and atomic-rename it into the content-addressed store — never a RAM
+`bytes` buffer. The hash+move runs in a worker thread (`asyncio.to_thread`) so it
+doesn't stall the event loop. Progress logs at 10% steps for blobs >16 MiB
+(`collector.attachment_download_progress`). Applies to BOTH the live path and the
+shell re-pull. Verified: 1.3 GB download with flat collector RAM.
+
+**Still open — a hard disk-fill ceiling.** Streaming fixes RAM, not disk: a
+marked channel with a pathological 500 GB post would still fill the disk. Add a
+generous stealer-specific ceiling (`telegram.stealer_attachment_max_bytes`,
+default e.g. 20 GiB) checked against `meta.size` before download — bypass the
+NORMAL cap, not ALL limits. Low priority (no such post seen), but note it.
+
+---
+
+The original report, for context:
+
+The stealer cap-bypass works, but it inherited the existing download path:
 
 ```python
 payload = await self._client.download_media(msg, file=bytes)  # ENTIRE file -> RAM
