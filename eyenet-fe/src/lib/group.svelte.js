@@ -46,31 +46,43 @@ function mapGroup(g) {
   };
 }
 
-export const groupCtx = $state({ list: [], loaded: false, error: null });
+export const GROUP_PAGE_SIZE = 200; // rows per page; raise it to trade DOM weight for fewer pages
 
-export async function loadGroups(search = '', sourceId = '') {
+// One server page at a time. `page` is the 0-based page index, `total` the
+// estimated row count over the current server filter (for the page count).
+export const groupCtx = $state({ list: [], loaded: false, error: null, page: 0, total: null });
+
+// The API cursor is an opaque base64url of the integer offset (deps_paging.py),
+// so page N == cursor(N * PAGE_SIZE). Encoding it here lets us jump to any page.
+// ponytail: couples to the offset cursor format; if the API ever switches to
+// keyset, swap this for a real page/offset query param.
+const cursorFor = (offset) =>
+  offset <= 0 ? null : btoa(String(offset)).replace(/\+/g, '-').replace(/\//g, '_');
+
+// Server-side narrowing: substring search (name + platform id), source, dialog
+// membership (memberDialog), and lifecycle state (e.g. 'joined' for monitored).
+// All axes are server-side so numbered pages + the total stay coherent.
+// estimated_total comes back for the page count.
+export async function loadGroups(
+  search = '', sourceId = '', { page = 0, memberDialog = null, state = '' } = {}
+) {
   try {
-    // Server-side substring search (name + platform id) + source filter cut
-    // through the discovery firehose. Page through the opaque cursor so a source
-    // with >500 groups isn't silently truncated (the old fixed limit=200 was).
-    const base = new URLSearchParams({ limit: '500' });
-    if (search.trim()) base.set('q', search.trim());
-    if (sourceId) base.set('source_id', sourceId);
-    const all = [];
-    let cursor = null;
-    for (let i = 0; i < 50; i++) {
-      const params = new URLSearchParams(base);
-      if (cursor) params.set('cursor', cursor);
-      const page = await apiGet(`/v1/groups?${params}`, { auth: true });
-      all.push(...page.items);
-      cursor = page.next_cursor;
-      if (!cursor) break;
-    }
-    groupCtx.list = all.map(mapGroup);
+    const params = new URLSearchParams({ limit: String(GROUP_PAGE_SIZE), include_total: '1' });
+    if (search.trim()) params.set('q', search.trim());
+    if (sourceId) params.set('source_id', sourceId);
+    if (state) params.set('state', state);
+    if (memberDialog !== null) params.set('member_dialog', memberDialog ? 'true' : 'false');
+    const c = cursorFor(page * GROUP_PAGE_SIZE);
+    if (c) params.set('cursor', c);
+    const res = await apiGet(`/v1/groups?${params}`, { auth: true });
+    groupCtx.list = res.items.map(mapGroup);
+    groupCtx.page = page;
+    groupCtx.total = res.estimated_total ?? null;
     groupCtx.error = null;
   } catch (e) {
     groupCtx.error = e.message ?? String(e);
     groupCtx.list = [];
+    groupCtx.total = null;
   } finally {
     groupCtx.loaded = true;
   }

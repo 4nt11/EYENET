@@ -207,6 +207,39 @@ async def test_list_groups_status_filter(storage: BaseRepository) -> None:
 
 
 @pytest.mark.unit
+async def test_list_groups_member_dialog_param(storage: BaseRepository) -> None:
+    """The direct member_dialog param filters independently of status (FE facet)."""
+    from eyenet.api.deps_paging import CursorParams
+
+    sid = await _source(storage)
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@member", seen_at=datetime.now(tz=UTC), member_dialog=True
+    )
+    await storage.ensure_candidate(
+        source_id=sid, platform_groupid="@disc", seen_at=datetime.now(tz=UTC)
+    )
+
+    async def _list(member_dialog: bool | None):
+        return await groups_list(
+            _=_user(),
+            storage=storage,
+            page=CursorParams(offset=0, limit=50, include_total=True),
+            source_id=None,
+            state=None,
+            status=None,
+            member_dialog=member_dialog,
+        )
+
+    members = await _list(True)
+    assert {i.platform_groupid for i in members.items} == {"@member"}
+    assert members.estimated_total == 1
+    disc = await _list(False)
+    assert {i.platform_groupid for i in disc.items} == {"@disc"}
+    both = await _list(None)
+    assert {i.platform_groupid for i in both.items} == {"@member", "@disc"}
+
+
+@pytest.mark.unit
 async def test_list_groups_q_search(storage: BaseRepository) -> None:
     from eyenet.api.deps_paging import CursorParams
 

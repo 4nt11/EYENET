@@ -7,7 +7,7 @@
   import Dropdown from '$lib/components/Dropdown.svelte';
   import {
     groupCtx, groupView, groupStatusTone, isJoinable, loadGroups, joinGroup, leaveGroup, scanGroups, short,
-    stealerCtx, loadStealerChannels, markStealer
+    stealerCtx, loadStealerChannels, markStealer, GROUP_PAGE_SIZE
   } from '$lib/group.svelte.js';
   import { auth } from '$lib/auth.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
@@ -42,19 +42,21 @@
   // Client-side membership + real-platform filters over the server-narrowed set.
   // realPlatform is derived from the candidate shape (a telegram @handle found on
   // a forum is a telegram lead), so it can't be a server param — filter here.
-  let member = $state('all'); // 'all' | 'member' | 'discovered'
-  let platformFilter = $state(''); // '' | forum | telegram | matrix | discord
-  let monitoredOnly = $state(false); // declutter: show only joined-and-monitored groups
-  let memberCount = $derived(groupCtx.list.filter((g) => g.memberDialog).length);
-  let monitoredCount = $derived(groupCtx.list.filter((g) => g.status === 'monitored').length);
+  let member = $state('all'); // 'all' | 'member' | 'discovered' -> server member_dialog
+  let platformFilter = $state(''); // '' | forum | telegram | matrix | discord (client-side)
+  let monitoredOnly = $state(false); // server state=joined
   // Platform shows the candidate's REAL platform (its shape), EXCEPT Discord, whose
   // CHANNEL kind is shape-ambiguous with Telegram — resolve those from the source kind
   // (authoritative for a monitored group, which is never a cross-platform lead).
   const rowPlatform = (g) => (srcOf(g.sourceId)?.platform === 'discord' ? 'discord' : g.realPlatform);
+  // member + monitored are SERVER-side (member_dialog + state=joined), so counts
+  // and pagination are coherent across the whole set. platform is the one axis
+  // that can't be a server param — realPlatform is the candidate's SHAPE (a
+  // telegram @handle seen on a forum is a telegram lead) — so it refines the
+  // current page client-side only. ponytail: page-local platform filter; make it
+  // server-side only if an operator actually needs cross-page platform counts.
   const rows = $derived(
     groupCtx.list
-      .filter((g) => member === 'all' || (member === 'member' ? g.memberDialog : !g.memberDialog))
-      .filter((g) => !monitoredOnly || g.status === 'monitored')
       .filter((g) => !platformFilter || rowPlatform(g) === platformFilter)
       .map((g) => ({ ...g, platform: rowPlatform(g), forum: forumHostOf(g.sourceId) || '—' }))
   );
@@ -88,15 +90,44 @@
       : []
   );
 
-  // Server-side narrowing: substring search + source filter, debounced so each
-  // keystroke doesn't hammer the API. The initial run (empty) loads all.
+  // Server-side narrowing: substring search + source + monitored-status, debounced
+  // so each keystroke doesn't hammer the API. Any change resets to page 0.
   let search = $state('');
   let sourceFilter = $state('');
+  // The server-side filter set at a given page (member_dialog + state=joined).
+  const filterOpts = (page) => ({
+    page,
+    memberDialog: member === 'all' ? null : member === 'member',
+    state: monitoredOnly ? 'joined' : ''
+  });
   $effect(() => {
-    const s = search, src = sourceFilter;
-    const t = setTimeout(() => loadGroups(s, src), 250);
+    // Track every server axis; any change debounces a reload back to page 0.
+    const s = search, src = sourceFilter, mem = member, mon = monitoredOnly;
+    const t = setTimeout(
+      () => loadGroups(s, src, { page: 0, memberDialog: mem === 'all' ? null : mem === 'member', state: mon ? 'joined' : '' }),
+      250
+    );
     return () => clearTimeout(t);
   });
+
+  // Numbered server-side pagination. pageCount from the estimated total; pager is
+  // the compact token list (first, a window around current, last, with … gaps).
+  const goPage = (p) => loadGroups(search, sourceFilter, filterOpts(p));
+  const pageCount = $derived(
+    groupCtx.total == null ? 1 : Math.max(1, Math.ceil(groupCtx.total / GROUP_PAGE_SIZE))
+  );
+  function pageTokens(cur, count) {
+    if (count <= 1) return [0];
+    const keep = [...new Set([0, count - 1, cur, Math.max(0, cur - 1), Math.min(count - 1, cur + 1)])]
+      .filter((p) => p >= 0 && p < count).sort((a, b) => a - b);
+    const out = [];
+    for (let i = 0; i < keep.length; i++) {
+      if (i > 0 && keep[i] - keep[i - 1] > 1) out.push('…');
+      out.push(keep[i]);
+    }
+    return out;
+  }
+  const pager = $derived(pageTokens(groupCtx.page, pageCount));
 
   // Styled-dropdown option lists ({ v, l }).
   const sourceOpts = $derived([
@@ -144,12 +175,13 @@
         <Dropdown options={sourceOpts} bind:value={sourceFilter} minWidth="190px" />
         <Dropdown options={platformOpts} bind:value={platformFilter} minWidth="124px" />
         <div class="segs">
-          <button class="seg" class:on={member === 'all'} onclick={() => (member = 'all')}>All · {groupCtx.list.length}</button>
-          <button class="seg" class:on={member === 'discovered'} onclick={() => (member = 'discovered')}>Discovered · {groupCtx.list.length - memberCount}</button>
-          <button class="seg" class:on={member === 'member'} onclick={() => (member = 'member')}>Already a member · {memberCount}</button>
+          <button class="seg" class:on={member === 'all'} onclick={() => (member = 'all')}>All</button>
+          <button class="seg" class:on={member === 'discovered'} onclick={() => (member = 'discovered')}>Discovered</button>
+          <button class="seg" class:on={member === 'member'} onclick={() => (member = 'member')}>Already a member</button>
         </div>
         <button class="seg" class:on={monitoredOnly} onclick={() => (monitoredOnly = !monitoredOnly)}
-          title="Show only joined-and-monitored groups">Monitored only · {monitoredCount}</button>
+          title="Show only joined-and-monitored groups">Monitored only</button>
+        {#if groupCtx.total != null}<span class="count">{groupCtx.total.toLocaleString()} match{groupCtx.total === 1 ? '' : 'es'}</span>{/if}
       </div>
       <div class="table-scroll">
       {#if rows.length}
@@ -161,6 +193,19 @@
         </p>
       {/if}
       </div>
+      {#if pageCount > 1}
+        <nav class="pager" aria-label="Group pages">
+          <button class="seg" disabled={groupCtx.page === 0} onclick={() => goPage(groupCtx.page - 1)}>Prev</button>
+          {#each pager as p}
+            {#if p === '…'}
+              <span class="gap">…</span>
+            {:else}
+              <button class="seg" class:on={p === groupCtx.page} onclick={() => goPage(p)}>{p + 1}</button>
+            {/if}
+          {/each}
+          <button class="seg" disabled={groupCtx.page >= pageCount - 1} onclick={() => goPage(groupCtx.page + 1)}>Next</button>
+        </nav>
+      {/if}
     </div>
 
     {#if sel}
@@ -223,6 +268,10 @@
   .seg { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 5px 10px; cursor: pointer; }
   .seg:hover { color: var(--text-body); border-color: var(--accent); }
   .seg.on { color: var(--accent-text); border-color: var(--accent); background: var(--panel); }
+  .seg:disabled { opacity: 0.4; cursor: default; color: var(--text-secondary); border-color: var(--border-strong); }
+  .pager { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; align-items: center; padding-top: 2px; }
+  .pager .gap { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); padding: 0 2px; }
+  .count { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); margin-left: auto; align-self: center; }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .actions { display: flex; flex-direction: column; gap: 8px; }
   .actions-label { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }

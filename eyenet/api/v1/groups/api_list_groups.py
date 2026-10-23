@@ -47,13 +47,19 @@ async def groups_list(
             "|member_unmonitored|discovered|rejected|failed|parked"
         ),
     ] = None,
+    member_dialog: Annotated[
+        bool | None,
+        Query(description="Filter by dialog membership (true=member, false=discovered-only)."),
+    ] = None,
     q: Annotated[
         str | None,
         Query(description="Case-insensitive substring over the group name + platform id."),
     ] = None,
 ) -> CursorPageGroupSummary:
+    # `status` (if given) is the bundled operator facet and wins; otherwise the
+    # direct member_dialog + state params flow through independently (the FE drives
+    # its membership and monitored axes separately for coherent pagination).
     states: list[CandidateState] | None = None
-    member_dialog: bool | None = None
     if status is not None:
         try:
             states, member_dialog = status_filter(status)
