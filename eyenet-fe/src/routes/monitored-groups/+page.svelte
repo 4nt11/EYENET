@@ -188,7 +188,14 @@
           {#if canMarkStealer && sel.groupId}
             <label class="backfill-opt">
               <input type="checkbox" checked={isStealer} disabled={groupView.submitting}
-                onchange={(e) => markStealer(sel.groupId, e.currentTarget.checked)} />
+                onchange={(e) => {
+                  const on = e.currentTarget.checked;
+                  if (window.confirm(`${on ? 'Mark' : 'Unmark'} "${sel.title}" as a stealer-log channel?`)) {
+                    markStealer(sel.groupId, on);
+                  } else {
+                    e.currentTarget.checked = isStealer; // cancelled — revert the box
+                  }
+                }} />
               Stealer-log channel
               <span class="sub">bypasses the attachment size cap — captures the multi-GB archive drops</span>
             </label>
