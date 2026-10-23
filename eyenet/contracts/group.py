@@ -11,6 +11,12 @@ from uuid import UUID
 from ._base import DbRowBase
 from .enums import GroupKind
 
+# Collection-class tag marking a group as a stealer-log drop source. Set via the
+# category column (POST /v1/groups/{id}/category, admin:stealer); the telegram
+# collector reads it to bypass the attachment size cap on these channels. Single
+# source of truth shared by the API and the collector so the two can't drift.
+STEALER_LOG_CATEGORY = "stealer_logs"
+
 
 class GroupRow(DbRowBase):
     """Persisted Group row (MODELS §1.3)."""

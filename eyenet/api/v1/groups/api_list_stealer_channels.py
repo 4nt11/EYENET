@@ -16,10 +16,8 @@ from fastapi import APIRouter, Depends, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.v1.schemas.groups import GroupDetail
+from eyenet.contracts.group import STEALER_LOG_CATEGORY
 from eyenet.storage.repository import BaseRepository
-
-# The collection-class tag marking a channel as a stealer-log drop source.
-STEALER_CATEGORY = "stealer_logs"
 
 router = APIRouter(tags=["groups"])
 
@@ -35,5 +33,5 @@ async def stealer_channels_list(
     storage: Annotated[BaseRepository, Depends(get_storage)],
     source_id: Annotated[UUID | None, Query()] = None,
 ) -> list[GroupDetail]:
-    rows = await storage.list_groups_by_category(STEALER_CATEGORY, source_id=source_id)
+    rows = await storage.list_groups_by_category(STEALER_LOG_CATEGORY, source_id=source_id)
     return [GroupDetail.from_row(r) for r in rows]

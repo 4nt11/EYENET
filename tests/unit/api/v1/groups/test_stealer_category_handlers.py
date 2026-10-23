@@ -9,12 +9,10 @@ from uuid import uuid4
 import pytest
 
 from eyenet.api.deps import CurrentUser, ResourceNotFound
-from eyenet.api.v1.groups.api_list_stealer_channels import (
-    STEALER_CATEGORY,
-    stealer_channels_list,
-)
+from eyenet.api.v1.groups.api_list_stealer_channels import stealer_channels_list
 from eyenet.api.v1.groups.api_mark_group_category import groups_mark_category
 from eyenet.api.v1.schemas.groups import SetGroupCategoryRequest
+from eyenet.contracts.group import STEALER_LOG_CATEGORY as STEALER_CATEGORY
 from eyenet.contracts.enums import GroupKind, SystemUserRole
 from eyenet.storage.factory import get_repository
 from eyenet.storage.repository import BaseRepository

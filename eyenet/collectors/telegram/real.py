@@ -62,6 +62,7 @@ from eyenet.contracts.enums import (
     IdentityState,
     SourceKind,
 )
+from eyenet.contracts.group import STEALER_LOG_CATEGORY
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import (
@@ -190,6 +191,11 @@ class TelegramCollector(CollectorSkeleton):
         # does ZERO DB work per message. Refreshed in tick(); seeded in
         # on_subscribe. joinchat: candidates are NOT here (probe-only, Defect 1).
         self._requested_match_forms: set[str] = set()
+        # platform_groupids of this source's groups marked `stealer_logs` (category
+        # column). Membership lifts the attachment size cap so the multi-GB archive
+        # drops those channels post are captured instead of guillotined. Seeded in
+        # on_subscribe, refreshed each tick() so a mid-session mark takes effect.
+        self._stealer_platform_ids: set[str] = set()
 
     async def on_subscribe(self) -> None:  # noqa: PLR0915 — cohesive boot sequence
         await super().on_subscribe()
@@ -315,6 +321,9 @@ class TelegramCollector(CollectorSkeleton):
         # first messages after a restart can confirm a pending approval without
         # waiting for the first tick().
         await self._refresh_requested_match_forms()
+        # Seed the stealer-channel set so the cap bypass is live from the first
+        # message, not only after the first tick().
+        await self._refresh_stealer_ids()
 
         _log.info(
             "collector.ready",
@@ -322,6 +331,7 @@ class TelegramCollector(CollectorSkeleton):
             instance_id=self.instance_id,
             monitor_raw_ids=sorted(self._monitor_raw_ids),
             monitored_count=len(self._monitor_raw_ids),
+            stealer_channels=len(self._stealer_platform_ids),
             backfill=self._backfill,
         )
 
@@ -521,6 +531,19 @@ class TelegramCollector(CollectorSkeleton):
             forms.add(gid.lower())
         self._requested_match_forms = forms
 
+    async def _refresh_stealer_ids(self) -> None:
+        """Rebuild the set of this source's stealer-marked platform_groupids.
+
+        Cheap single-source query; the stealer set is tiny (a handful of channels
+        an operator hand-marks), so re-reading it each tick keeps a mid-session
+        mark honored without a bus signal or restart."""
+        if self._source_uuid is None:
+            return
+        groups = await self._storage.list_groups_by_category(
+            STEALER_LOG_CATEGORY, source_id=self._source_uuid
+        )
+        self._stealer_platform_ids = {g.platform_groupid for g in groups}
+
     def _event_match_forms(self, event: events.NewMessage.Event, chat: object) -> list[str]:
         """Lowercased forms the arriving chat could match a REQUESTED candidate by.
 
@@ -577,6 +600,7 @@ class TelegramCollector(CollectorSkeleton):
         low-cadence dead-group liveness sweep so a group nuked mid-run is retired
         without waiting for the next (re)subscribe."""
         await self._refresh_requested_match_forms()
+        await self._refresh_stealer_ids()
         await self._probe_requested_memberships()
         await self._sweep_dead_groups()
 
@@ -1227,8 +1251,11 @@ class TelegramCollector(CollectorSkeleton):
         # Photos are always small (Telegram-capped); documents/video gate on declared size.
         # No data_dir -> no blob store (keep metadata-only rather than crash).
         max_bytes = await self._attachment_max_bytes()
+        # Stealer-marked channels bypass the size cap: their value IS the multi-GB
+        # archive drop, so capping it would discard the evidence we marked them for.
+        stealer_bypass = platform_groupid in self._stealer_platform_ids
         should_download = self._storage.data_dir is not None and (
-            meta.is_photo or (0 < meta.size <= max_bytes)
+            meta.is_photo or stealer_bypass or (0 < meta.size <= max_bytes)
         )
         if should_download:
             payload: bytes | None = None
@@ -1346,7 +1373,8 @@ class TelegramCollector(CollectorSkeleton):
         if meta is None or self._storage.data_dir is None:
             return False
         max_bytes = await self._attachment_max_bytes()
-        if meta.is_photo or (0 < meta.size <= max_bytes):
+        stealer_bypass = platform_groupid in self._stealer_platform_ids
+        if meta.is_photo or stealer_bypass or (0 < meta.size <= max_bytes):
             payload = await self._client.download_media(msg, file=bytes)  # type: ignore[union-attr]
             if payload:
                 sha256, storage_uri = store_attachment(
