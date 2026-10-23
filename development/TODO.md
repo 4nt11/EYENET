@@ -210,6 +210,40 @@ covert session. Gate the whole thing behind the same `telegram.attachment_backfi
 per_tick` HOLD so it never runs unattended. This is the piece that turns "mark a
 channel I already collect" into "and go fetch the archives I already saw."
 
+## BUG (stealer): cap-bypass downloads buffer the WHOLE file in RAM (2026-10-23)
+
+The stealer cap-bypass works, but it inherits the existing download path:
+
+```python
+payload = await self._client.download_media(msg, file=bytes)  # ENTIRE file -> RAM
+store_attachment(data_dir, payload, ...)                       # bytes -> disk
+```
+
+`file=bytes` buffers the whole attachment in memory before writing to disk. Under
+the 3 MiB cap that's fine. With the bypass ON, stealer channels are nothing BUT
+multi-GB archives, so this is a loaded OOM gun: a single 5-10 GB drop (or several
+concurrent) blows the collector's RAM. Observed live: forwarding a ~1 GB RAR to a
+marked channel spiked the supervisor container to ~2 GiB RSS mid-download.
+
+**Fix:** stream to disk, never the whole blob in RAM. `download_media` accepts a
+path / file handle and streams in chunks. Shape:
+- Download to a temp file under `data_dir` (same filesystem as the final blob
+  store so the finalize is a rename, not a copy).
+- Compute the sha256 incrementally over the stream (not `hashlib.sha256(payload)`),
+  so `store_attachment` never sees a full `bytes`. Likely refactor
+  `store_attachment` to accept a path/stream, or add a `store_attachment_file`
+  variant that moves an already-written temp file into place keyed by its sha.
+- A hard size ceiling is still worth keeping even on stealer channels (a
+  `telegram.stealer_attachment_max_bytes`, default generous e.g. 20 GiB) so a
+  pathological 500 GB post can't fill the disk unbounded — bypass the NORMAL cap,
+  not ALL limits.
+- Applies to BOTH `_build_attachment` (live) and `_fetch_store_attachment`
+  (shell re-pull / recapture).
+
+This is load-bearing before pointing the bypass at a real high-volume stealer
+channel. Until it's fixed, the bypass is safe only for modest files / the smoke
+test.
+
 ## BUG: joining a Telegram basic group leaks a raw TypeError -> FAILED (2026-10-23)
 
 Joining a candidate that is a Telegram **basic group** (`InputPeerChat`, a legacy
