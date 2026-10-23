@@ -226,12 +226,16 @@ class ClearanceScope(StrEnum):
     - `READ_RESTRICTED` / `READ_CLASSIFIED` gate sensitive-evidence reads (§4.7).
     - `ADMIN_RECLASSIFY` authorises tier promotion (§4.9).
     - `ADMIN_CASE` authorises archive + administrative case actions (§4.10).
+    - `READ_STEALER` gates the stealer-log corpus — time-bounded on purpose so a
+      client's read access lapses with their subscription and an analyst's is
+      justified + expiring (write/admin:stealer are permanent capability grants).
     """
 
     READ_RESTRICTED = "read:restricted"
     READ_CLASSIFIED = "read:classified"
     ADMIN_RECLASSIFY = "admin:reclassify"
     ADMIN_CASE = "admin:case"
+    READ_STEALER = "read:stealer"
 
 
 class ReclassificationSubjectKind(StrEnum):
