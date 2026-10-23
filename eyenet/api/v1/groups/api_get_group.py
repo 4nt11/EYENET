@@ -29,16 +29,4 @@ async def groups_get(
     row = await storage.get_group(group_id)
     if row is None:
         raise ResourceNotFound("group")
-    return GroupDetail(
-        group_id=row.id,
-        source_id=row.source_id,
-        platform_groupid=row.platform_groupid,
-        kind=row.kind,
-        title=row.current_title,
-        description=row.current_description,
-        is_public=row.is_public,
-        member_count=row.member_count,
-        first_seen_at_ingest=row.first_seen_at_ingest,
-        last_observed_at_ingest=row.last_observed_at_ingest,
-        provenance=row.provenance,
-    )
+    return GroupDetail.from_row(row)

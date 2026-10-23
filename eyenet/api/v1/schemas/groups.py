@@ -20,6 +20,7 @@ from pydantic import Field, model_validator
 
 from eyenet.contracts.candidate import GroupCandidateRow
 from eyenet.contracts.enums import CandidateState, GroupKind
+from eyenet.contracts.group import GroupRow
 from eyenet.contracts.incident import IncidentLabelRow, MessageGeoRow, ThreadSummaryRow
 from eyenet.models.group import GroupTable
 from eyenet.models.message import MessageTable
@@ -164,6 +165,33 @@ class GroupDetail(ApiSchema):
     first_seen_at_ingest: datetime
     last_observed_at_ingest: datetime
     provenance: str = "collected"
+    category: str | None = None
+
+    @classmethod
+    def from_row(cls, row: GroupRow) -> GroupDetail:
+        return cls(
+            group_id=row.id,
+            source_id=row.source_id,
+            platform_groupid=row.platform_groupid,
+            kind=row.kind,
+            title=row.current_title,
+            description=row.current_description,
+            is_public=row.is_public,
+            member_count=row.member_count,
+            first_seen_at_ingest=row.first_seen_at_ingest,
+            last_observed_at_ingest=row.last_observed_at_ingest,
+            provenance=row.provenance,
+            category=row.category,
+        )
+
+
+class SetGroupCategoryRequest(ApiSchema):
+    """Body for POST /v1/groups/{id}/category — mark a group's collection class.
+
+    ``category`` is the collection-class tag (e.g. ``stealer_logs``); ``null``
+    clears it. Gated by ``admin:stealer``."""
+
+    category: str | None = Field(default=None, max_length=64)
 
 
 class JoinGroupRequest(ApiSchema):
@@ -387,4 +415,5 @@ __all__ = [
     "JoinGroupRequest",
     "LeaveGroupRequest",
     "ScanGroupsResult",
+    "SetGroupCategoryRequest",
 ]
