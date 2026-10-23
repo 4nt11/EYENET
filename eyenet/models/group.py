@@ -27,6 +27,10 @@ class GroupTable(SQLModel, table=True):
     last_observed_at_ingest: datetime
     # "collected" (default) vs "operator_asserted". Open varchar, no DB enum.
     provenance: str = Field(default="collected", index=True)
+    # Collection class that dispatches collector/pipeline behavior (e.g. "stealer_logs"
+    # bypasses the attachment-size gate and routes to the stealer pipeline). Open
+    # varchar, no DB enum — new classes need no migration. NULL = ordinary collection.
+    category: str | None = Field(default=None, index=True)
     # Reincarnation lineage: the external platform_groupid churns when a channel/board is
     # nuked-and-recreated, so each incarnation is a distinct row. ``lineage_id`` is the
     # stable logical-group key shared by every incarnation (== ``id`` for a root), and

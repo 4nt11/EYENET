@@ -27,6 +27,7 @@ class GroupRow(DbRowBase):
     provenance: str = "collected"
     lineage_id: UUID | None = None  # stable key across reincarnations (== id for a root)
     group_iteration: int = 1  # 1-based version within the lineage
+    category: str | None = None  # collection class (e.g. "stealer_logs"); NULL = ordinary
 
 
 class GroupSnapshotRow(DbRowBase):
