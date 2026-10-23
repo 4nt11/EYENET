@@ -185,7 +185,7 @@
       </div>
       <div class="table-scroll">
       {#if rows.length}
-        <DataTable rowKey="id" columns={COLUMNS} rows={rows}
+        <DataTable rowKey="id" columns={COLUMNS} rows={rows} stickyHead stickyTop="0"
           selectedId={sel?.id} onRowClick={(r) => (selectedId = r.id)} />
       {:else}
         <p class="pnote">
@@ -257,7 +257,7 @@
 <style>
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--black); }
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-right: 20px; }
-  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(300px, 0.85fr); gap: 16px; padding: 16px 20px; overflow: hidden; }
   .table-col { min-height: 0; display: flex; flex-direction: column; gap: 10px; }
   .table-scroll { flex: 1; min-height: 0; overflow: auto; }
   .filter-bar { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
@@ -271,7 +271,7 @@
   .seg:disabled { opacity: 0.4; cursor: default; color: var(--text-secondary); border-color: var(--border-strong); }
   .pager { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; align-items: center; padding-top: 2px; }
   .pager .gap { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); padding: 0 2px; }
-  .count { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); margin-left: auto; align-self: center; }
+  .count { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); white-space: nowrap; align-self: center; }
   .detail-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow: auto; }
   .actions { display: flex; flex-direction: column; gap: 8px; }
   .actions-label { font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
