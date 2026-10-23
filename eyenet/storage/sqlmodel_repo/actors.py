@@ -32,6 +32,14 @@ def _aware_opt(dt: datetime | None) -> datetime | None:
     return None if dt is None else _aware(dt)
 
 
+def _to_group_row(table: GroupTable) -> GroupRow:
+    """GroupTable -> GroupRow, normalizing the (SQLite-naive) ingest timestamps."""
+    data = table.model_dump()
+    data["first_seen_at_ingest"] = _aware(data["first_seen_at_ingest"])
+    data["last_observed_at_ingest"] = _aware(data["last_observed_at_ingest"])
+    return GroupRow.model_validate(data)
+
+
 def _row_to_actor(row: ActorTable) -> ActorRow:
     return ActorRow(
         id=row.id,
@@ -410,14 +418,38 @@ class ActorsMixin:
         """Return one GroupRow by id, or ``None`` (used by the leave path)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             table = await session.get(GroupTable, group_id)
+            return None if table is None else _to_group_row(table)
+
+    async def set_group_category(self, group_id: UUID, category: str | None) -> bool:
+        """Set (or clear, with ``None``) a group's collection-class ``category``.
+
+        Returns ``True`` if the group existed and was updated, ``False`` if not found.
+        This is the ``admin:stealer`` marking primitive (and its inverse).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            table = await session.get(GroupTable, group_id)
             if table is None:
-                return None
-            data = table.model_dump()
-            for k in ("first_seen_at_ingest", "last_observed_at_ingest"):
-                v = data.get(k)
-                if v is not None and v.tzinfo is None:
-                    data[k] = v.replace(tzinfo=UTC)
-            return GroupRow.model_validate(data)
+                return False
+            table.category = category
+            session.add(table)
+            await session.commit()
+            return True
+
+    async def list_groups_by_category(
+        self, category: str, *, source_id: UUID | None = None
+    ) -> list[GroupRow]:
+        """Groups whose collection-class ``category`` matches, newest-observed first.
+
+        Optionally scoped to one ``source_id`` (the collector seeds its per-source
+        stealer set; the admin surface lists across sources with ``source_id=None``).
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(GroupTable).where(col(GroupTable.category) == category)
+            if source_id is not None:
+                stmt = stmt.where(GroupTable.source_id == source_id)
+            stmt = stmt.order_by(col(GroupTable.last_observed_at_ingest).desc())
+            rows = (await session.exec(stmt)).all()
+            return [_to_group_row(r) for r in rows]
 
     async def upsert_actor(
         self,

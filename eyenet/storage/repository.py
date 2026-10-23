@@ -2612,6 +2612,24 @@ class BaseRepository(ABC):
         """Return one GroupRow by id, or ``None`` (leave-group path)."""
 
     @abstractmethod
+    async def set_group_category(self, group_id: UUID, category: str | None) -> bool:
+        """Set (or clear, with ``None``) a group's collection-class ``category``.
+
+        Returns ``True`` if the group existed and was updated, else ``False``.
+        The ``admin:stealer`` marking primitive and its inverse.
+        """
+
+    @abstractmethod
+    async def list_groups_by_category(
+        self, category: str, *, source_id: UUID | None = None
+    ) -> list[GroupRow]:
+        """Groups whose collection-class ``category`` matches, newest-observed first.
+
+        ``source_id`` scopes to one source (collector seeding); ``None`` lists across
+        sources (the admin surface).
+        """
+
+    @abstractmethod
     async def ensure_candidate(
         self,
         *,
