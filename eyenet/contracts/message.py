@@ -59,6 +59,9 @@ class AttachmentRow(DbRowBase):
     # CLASSIFIED; the ClassifierService settles it (fail-closed, §0).
     classifier_tier: SensitivityTier = SensitivityTier.NORMAL
     operator_tier_override: SensitivityTier | None = None
+    # Collection class (e.g. "stealer_logs"); NULL = ordinary. The ULP processing
+    # queue marker — field-parity with AttachmentTable.category.
+    category: str | None = None
 
 
 __all__ = ["AttachmentRow", "MessageRow"]

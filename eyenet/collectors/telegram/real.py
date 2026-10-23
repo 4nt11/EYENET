@@ -1282,6 +1282,10 @@ class TelegramCollector(CollectorSkeleton):
             stored = await self._download_media_to_store(msg)
             if stored is not None:
                 sha256, storage_uri, size = stored
+        # A non-photo file on a stealer channel IS a stealer-log archive drop — tag it
+        # so the ULP processing pipeline picks it up. Photos (channel banners etc.) and
+        # ordinary channels stay NULL.
+        category = STEALER_LOG_CATEGORY if (stealer_bypass and not meta.is_photo) else None
         return AttachmentTable(
             id=aid,
             message_id=aid,  # overwritten by caller with the real message FK
@@ -1292,6 +1296,7 @@ class TelegramCollector(CollectorSkeleton):
             filename=meta.filename,
             storage_uri=storage_uri,
             source_ref=source_ref,
+            category=category,
         )
 
     async def _download_media_to_store(

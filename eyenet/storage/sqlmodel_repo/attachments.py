@@ -102,6 +102,41 @@ class AttachmentsMixin:
             session.add(row)
             await session.commit()
 
+    async def set_attachment_category(self, attachment_id: UUID, category: str | None) -> bool:
+        """Set (or clear, with None) the collection-class marker on an attachment.
+
+        Returns True if the row existed. Used to enqueue a captured blob into the
+        ULP processing pipeline (category="stealer_logs"), and to backfill-mark
+        blobs captured before the column existed. Generic ORM — no dialect leak."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(AttachmentTable, attachment_id)
+            if row is None:
+                return False
+            row.category = category
+            session.add(row)
+            await session.commit()
+            return True
+
+    async def list_attachments_by_category(
+        self,
+        category: str,
+        *,
+        stored_only: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AttachmentRow]:
+        """Attachments tagged with a collection class, newest-first (id DESC = uuid7
+        time order). ``stored_only`` restricts to blobs actually on disk
+        (``storage_uri IS NOT NULL``) — the processing pipeline only works rows it can
+        read. Generic ORM SELECT — no dialect leak."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(AttachmentTable).where(col(AttachmentTable.category) == category)
+            if stored_only:
+                stmt = stmt.where(col(AttachmentTable.storage_uri).is_not(None))
+            stmt = stmt.order_by(col(AttachmentTable.id).desc()).offset(offset).limit(limit)
+            result = await session.exec(stmt)
+            return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
+
     def _attachments_filtered_stmt(
         self, *, mime: str | None, message_id: UUID | None = None
     ) -> SelectOfScalar[AttachmentTable]:

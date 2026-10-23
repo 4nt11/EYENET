@@ -94,6 +94,10 @@ class AttachmentTable(SQLModel, table=True):
     source_ref: str | None = None
     classifier_tier: SensitivityTier = Field(default=SensitivityTier.NORMAL)
     operator_tier_override: SensitivityTier | None = None
+    # Collection class of the blob (e.g. "stealer_logs"); NULL = ordinary attachment.
+    # The processing-queue marker: the ULP extraction pipeline consumes documents
+    # tagged here. Auto-set at capture for archives on stealer-marked channels.
+    category: str | None = Field(default=None, index=True)
 
 
 __all__ = ["AttachmentTable", "MessageTable"]

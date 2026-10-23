@@ -967,6 +967,23 @@ class BaseRepository(ABC):
     async def get_attachment(self, attachment_id: UUID) -> AttachmentRow | None: ...
 
     @abstractmethod
+    async def set_attachment_category(self, attachment_id: UUID, category: str | None) -> bool:
+        """Set/clear an attachment's collection-class marker (e.g. "stealer_logs").
+        Returns True if the row existed. Enqueues a blob into the ULP pipeline."""
+
+    @abstractmethod
+    async def list_attachments_by_category(
+        self,
+        category: str,
+        *,
+        stored_only: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> list[AttachmentRow]:
+        """Attachments tagged with a collection class, newest-first. ``stored_only``
+        restricts to blobs on disk (storage_uri IS NOT NULL)."""
+
+    @abstractmethod
     async def iter_attachment_shells(
         self, source_id: UUID, *, limit: int
     ) -> list[tuple[UUID, str, str]]:
