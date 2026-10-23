@@ -177,6 +177,63 @@ The compose `collector` service (pinned `--identity=scout01`) is now redundant
 with supervisor-spawning and will double-claim — remove it from the compose stack;
 the supervisor is the launcher.
 
+## Stealer channels — recapture pre-existing over-gate attachments on mark (2026-10-23)
+
+The telegram collector now bypasses the attachment size cap on channels marked
+`stealer_logs` (category column) — `_build_attachment` (live) and
+`_fetch_store_attachment` (shell re-pull) both skip the gate for a marked group,
+and the set refreshes event-driven on the category-changed broadcast (a6cb1de).
+But the bypass is evaluated at DOWNLOAD time, and a mark can ONLY ever happen
+AFTER a join (the FE mark needs a `group_id`, which exists only once joined), so a
+marked channel's PRE-EXISTING archives are always already captured as hollow rows:
+
+1. **Mark is always post-join.** By the time you can mark a channel, its on-join
+   backfill has already run and downloaded its existing messages under the cap —
+   over-gate archives land as metadata + `source_ref` link, no blob. The mark only
+   affects FUTURE traffic; it can't reach back. (Observed live: `eyenet-test-col-2`,
+   a 750 MB RAR ingested as a shell at join 21:37, marked after — stayed hollow.)
+
+2. **No recapture path for already-processed over-gate attachments.** The
+   attachment-backfill loop only re-pulls TRUE shells (`iter_attachment_shells` =
+   `source_ref IS NULL`). An over-gate attachment the download path already handled
+   has `source_ref` SET + `storage_uri` NULL, so it's "done" and never re-pulled —
+   even once its channel is marked stealer. This is THE path for pre-existing
+   archives, not an edge case, since marking is always post-join.
+
+**Fix when we build it:** a recapture pass that selects `storage_uri IS NULL AND
+group.category = 'stealer_logs'` (over-gate, no blob, now a stealer channel) and
+re-pulls each through `_fetch_store_attachment` (which already honors the bypass).
+Either a new storage selector (`iter_stealer_uncaptured_attachments(source_id)`)
+feeding the existing attachment-backfill loop, or a one-shot
+`eyenet stealer-recapture` CLI. Throttle hard — these are multi-GB pulls on a
+covert session. Gate the whole thing behind the same `telegram.attachment_backfill_
+per_tick` HOLD so it never runs unattended. This is the piece that turns "mark a
+channel I already collect" into "and go fetch the archives I already saw."
+
+## BUG: joining a Telegram basic group leaks a raw TypeError -> FAILED (2026-10-23)
+
+Joining a candidate that is a Telegram **basic group** (`InputPeerChat`, a legacy
+small group) fails with the Telethon error surfaced verbatim as the rejection
+reason:
+
+```
+TypeError: Cannot cast InputPeerChat to any kind of InputChannel.
+```
+
+The join path fires `JoinChannelRequest`, which only accepts channels/supergroups
+(`InputChannel`); handed a basic group it throws, and the candidate lands in
+`FAILED` with the raw exception string as `rejection_reason`. Observed live on
+`test-eyenet-col` (platform_groupid 5044221904), collector tgtesting.
+
+**Fix when we polish:** detect `InputPeerChat` BEFORE the join and fail with a
+clear operator-facing reason ("basic groups aren't joinable — the group must be a
+channel or supergroup; it upgrades automatically past ~200 members or via group
+settings"), instead of leaking a Telethon stack string. Optionally, if the
+collector account is ALREADY a member of the basic group, monitor it via its
+dialog entry rather than attempting a channel join at all. Basic groups are a rare
+non-target for stealer archives (those live in channels), so this is UX/robustness,
+not a blocked use case.
+
 ## M9 HTTP API — unfinished endpoints (was the pre-incident-detection backlog)
 
 Captured from the old NEXT_SESSION handoff (2026-09-22) before it was rewritten for
