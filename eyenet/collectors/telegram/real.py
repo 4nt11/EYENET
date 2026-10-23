@@ -62,7 +62,7 @@ from eyenet.contracts.enums import (
     IdentityState,
     SourceKind,
 )
-from eyenet.contracts.group import STEALER_LOG_CATEGORY
+from eyenet.contracts.group import GROUP_CATEGORY_CHANGED_SUBJECT, STEALER_LOG_CATEGORY
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
 from eyenet.contracts.supervisor import (
@@ -194,7 +194,8 @@ class TelegramCollector(CollectorSkeleton):
         # platform_groupids of this source's groups marked `stealer_logs` (category
         # column). Membership lifts the attachment size cap so the multi-GB archive
         # drops those channels post are captured instead of guillotined. Seeded in
-        # on_subscribe, refreshed each tick() so a mid-session mark takes effect.
+        # on_subscribe, refreshed on the category-changed broadcast so a mid-session
+        # mark takes effect at once (tick() never runs for this event-driven collector).
         self._stealer_platform_ids: set[str] = set()
 
     async def on_subscribe(self) -> None:  # noqa: PLR0915 — cohesive boot sequence
@@ -256,6 +257,21 @@ class TelegramCollector(CollectorSkeleton):
             await self.shutdown()
 
         await self._bus.subscribe("eyenet.control.global.panic", _on_panic)
+
+        # Event-driven stealer-set refresh: the mark endpoint broadcasts on category
+        # change; we re-read OUR source's marked channels so a mid-session mark takes
+        # effect immediately (tick() never runs here, and polling is the wrong tool).
+        async def _on_category_changed(
+            _subject: str, _payload: bytes, _headers: dict[str, str]
+        ) -> None:
+            await self._refresh_stealer_ids()
+            _log.info(
+                "collector.stealer_set_refreshed",
+                identity=self._identity_name,
+                stealer_channels=len(self._stealer_platform_ids),
+            )
+
+        await self._bus.subscribe(GROUP_CATEGORY_CHANGED_SUBJECT, _on_category_changed)
 
         # E5 discovery recursion: resolve our own collector row + wire the join
         # core, then subscribe to the command channel keyed by our instance_id
@@ -535,8 +551,8 @@ class TelegramCollector(CollectorSkeleton):
         """Rebuild the set of this source's stealer-marked platform_groupids.
 
         Cheap single-source query; the stealer set is tiny (a handful of channels
-        an operator hand-marks), so re-reading it each tick keeps a mid-session
-        mark honored without a bus signal or restart."""
+        an operator hand-marks). Called at boot (seed) and on the category-changed
+        broadcast, so a mid-session mark is honored at once without polling."""
         if self._source_uuid is None:
             return
         groups = await self._storage.list_groups_by_category(
@@ -600,7 +616,6 @@ class TelegramCollector(CollectorSkeleton):
         low-cadence dead-group liveness sweep so a group nuked mid-run is retired
         without waiting for the next (re)subscribe."""
         await self._refresh_requested_match_forms()
-        await self._refresh_stealer_ids()
         await self._probe_requested_memberships()
         await self._sweep_dead_groups()
 

@@ -17,6 +17,12 @@ from .enums import GroupKind
 # source of truth shared by the API and the collector so the two can't drift.
 STEALER_LOG_CATEGORY = "stealer_logs"
 
+# Broadcast fired when a group's category changes (the mark endpoint publishes it;
+# collectors subscribe and re-read their source's marked set). Event-driven refresh
+# so a mid-session mark takes effect at once — no polling. Mirrors the global panic
+# broadcast. Payload is empty; each collector re-reads its OWN source.
+GROUP_CATEGORY_CHANGED_SUBJECT = "eyenet.control.global.group_category_changed"
+
 
 class GroupRow(DbRowBase):
     """Persisted Group row (MODELS §1.3)."""
