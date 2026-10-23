@@ -7,6 +7,11 @@ runtime config changes. Grant-only scopes (read:restricted,
 read:classified, admin:reclassify, admin:case, admin:clearance,
 write:panic, admin:sources, read:collectors_config, admin:collectors,
 admin:candidates) are NEVER in any baseline.
+
+Permanent CAPABILITY scopes that gate a whole subsystem (``GRANT_ONLY_CAPABILITIES``,
+e.g. write:stealer) are likewise never in a baseline, but unlike clearance scopes
+they do not expire — they persist until revoked, for service/operator identities
+whose access cannot ride a bounded clearance grant (the 24/7 collector).
 """
 
 from __future__ import annotations
@@ -104,6 +109,15 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
 }
 
 
+# Permanent capability scopes gating a whole subsystem. Granted via
+# SystemUserScopeTable (CLI `user scopes grant`) like baseline scopes, but NEVER in
+# any baseline — no role auto-holds them; access is always an explicit, audited
+# grant. Distinct from ClearanceScope (sensitive reads, EXPIRING): these gate
+# service/operator CAPABILITY and PERSIST (the 24/7 collector's write:stealer cannot
+# ride a 90-day clearance grant).
+GRANT_ONLY_CAPABILITIES: frozenset[str] = frozenset({"write:stealer"})
+
+
 def resolve_effective_scopes(
     user: SystemUserRow,
     explicit_grants: Iterable[SystemUserScopeRow],
@@ -122,4 +136,4 @@ def resolve_effective_scopes(
     return frozenset(baseline | explicit | clearance)
 
 
-__all__ = ["ROLE_BASELINE", "resolve_effective_scopes"]
+__all__ = ["GRANT_ONLY_CAPABILITIES", "ROLE_BASELINE", "resolve_effective_scopes"]

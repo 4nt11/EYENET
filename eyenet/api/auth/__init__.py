@@ -31,11 +31,12 @@ from ._mfa import generate_secret, provisioning_uri, verify_code
 from ._mfa_key import MfaKeyError, decrypt_secret, encrypt_secret, load_mfa_key
 from ._passwords import hash_password, verify_password
 from ._pat import hash_pat, is_pat, load_pat_pepper, mint_pat, parse_pat
-from ._permissions import ROLE_BASELINE, resolve_effective_scopes
+from ._permissions import GRANT_ONLY_CAPABILITIES, ROLE_BASELINE, resolve_effective_scopes
 
 __all__ = [
     "ACCESS_TTL",
     "REFRESH_TTL",
+    "GRANT_ONLY_CAPABILITIES",
     "ROLE_BASELINE",
     "STREAM_TTL",
     "AccessClaims",

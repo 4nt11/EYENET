@@ -72,7 +72,7 @@ def test_write_documents_in_admin_and_analyst_not_viewer() -> None:
 
 @pytest.mark.parametrize(
     "scope",
-    ["read:restricted", "read:classified", "admin:reclassify", "admin:case", "admin:clearance", "read:stealer"],
+    ["read:restricted", "read:classified", "admin:reclassify", "admin:case", "admin:clearance", "read:stealer", "write:stealer"],
 )
 @pytest.mark.unit
 def test_grant_only_scopes_never_in_any_baseline(scope: str) -> None:

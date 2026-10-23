@@ -39,6 +39,7 @@ import typer
 from nats import errors as nats_errors
 
 from eyenet.api.auth import (
+    GRANT_ONLY_CAPABILITIES,
     ROLE_BASELINE,
     MfaKeyError,
     decrypt_secret,
@@ -76,10 +77,11 @@ _UNLOCK_WINDOW = timedelta(minutes=15)
 _ADMIN_USERS_SCOPE: Final[str] = "admin:users"
 _SCOPES_CHANGED_SUBJECT: Final[str] = "eyenet.auth.scopes_changed"
 
-# Explicitly grantable via the CLI: every scope that appears in some role
-# baseline. The grant-only clearance scopes are deliberately NOT here — they
-# flow through the time-bound clearance-grant path (bounded expiry + reason).
-_GRANTABLE: Final[frozenset[str]] = frozenset().union(*ROLE_BASELINE.values())
+# Explicitly grantable via the CLI: every scope in some role baseline, plus the
+# permanent grant-only capability scopes (never in a baseline, but still granted
+# here, e.g. write:stealer). The grant-only CLEARANCE scopes are deliberately NOT
+# here — they flow through the time-bound clearance-grant path (bounded expiry + reason).
+_GRANTABLE: Final[frozenset[str]] = frozenset().union(*ROLE_BASELINE.values()) | GRANT_ONLY_CAPABILITIES
 _CLEARANCE: Final[frozenset[str]] = frozenset(s.value for s in ClearanceScope)
 
 _EXIT_USAGE: Final[int] = 2
