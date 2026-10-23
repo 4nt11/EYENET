@@ -116,6 +116,44 @@ export async function leaveGroup(candidateId, reason) {
   }
 }
 
+// --- stealer-channel collection class (category == 'stealer_logs') ---------
+// GET /v1/stealer/channels (read:stealer) is the set of group ids marked as
+// stealer-log drop sources; marking POSTs /v1/groups/{id}/category (admin:stealer).
+// Marking lifts the channel past the collector's attachment size cap so the
+// multi-GB archive drops are captured. Kept as a flat id list the page tests
+// membership against — the GET /v1/groups candidate view carries no category.
+export const stealerCtx = $state({ ids: [], loaded: false });
+
+export async function loadStealerChannels() {
+  try {
+    const rows = await apiGet('/v1/stealer/channels', { auth: true });
+    stealerCtx.ids = rows.map((r) => r.group_id);
+  } catch {
+    // 403 (no read:stealer) or error — just show nothing marked, don't break the page.
+    stealerCtx.ids = [];
+  } finally {
+    stealerCtx.loaded = true;
+  }
+}
+
+export async function markStealer(groupId, on) {
+  groupView.submitting = true;
+  groupView.submitMsg = null;
+  try {
+    await apiPost(`/v1/groups/${groupId}/category`, { category: on ? 'stealer_logs' : null }, { auth: true });
+    stealerCtx.ids = on
+      ? [...new Set([...stealerCtx.ids, groupId])]
+      : stealerCtx.ids.filter((id) => id !== groupId);
+    groupView.submitMsg = on
+      ? 'Marked as stealer channel — the collector bypasses the attachment size cap here.'
+      : 'Unmarked — the attachment size cap re-applies.';
+  } catch (e) {
+    groupView.submitMsg = `Failed: ${e.message ?? e}`;
+  } finally {
+    groupView.submitting = false;
+  }
+}
+
 export async function scanGroups() {
   groupView.submitting = true;
   groupView.submitMsg = null;

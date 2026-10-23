@@ -6,8 +6,10 @@
   import Button from '$lib/components/Button.svelte';
   import Dropdown from '$lib/components/Dropdown.svelte';
   import {
-    groupCtx, groupView, groupStatusTone, isJoinable, loadGroups, joinGroup, leaveGroup, scanGroups, short
+    groupCtx, groupView, groupStatusTone, isJoinable, loadGroups, joinGroup, leaveGroup, scanGroups, short,
+    stealerCtx, loadStealerChannels, markStealer
   } from '$lib/group.svelte.js';
+  import { auth } from '$lib/auth.svelte.js';
   import { collectorCtx, loadCollectors } from '$lib/collector.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
   import { PLATFORMS } from '$lib/discovery-shape.js';
@@ -42,7 +44,9 @@
   // a forum is a telegram lead), so it can't be a server param — filter here.
   let member = $state('all'); // 'all' | 'member' | 'discovered'
   let platformFilter = $state(''); // '' | forum | telegram | matrix | discord
+  let monitoredOnly = $state(false); // declutter: show only joined-and-monitored groups
   let memberCount = $derived(groupCtx.list.filter((g) => g.memberDialog).length);
+  let monitoredCount = $derived(groupCtx.list.filter((g) => g.status === 'monitored').length);
   // Platform shows the candidate's REAL platform (its shape), EXCEPT Discord, whose
   // CHANNEL kind is shape-ambiguous with Telegram — resolve those from the source kind
   // (authoritative for a monitored group, which is never a cross-platform lead).
@@ -50,6 +54,7 @@
   const rows = $derived(
     groupCtx.list
       .filter((g) => member === 'all' || (member === 'member' ? g.memberDialog : !g.memberDialog))
+      .filter((g) => !monitoredOnly || g.status === 'monitored')
       .filter((g) => !platformFilter || rowPlatform(g) === platformFilter)
       .map((g) => ({ ...g, platform: rowPlatform(g), forum: forumHostOf(g.sourceId) || '—' }))
   );
@@ -103,9 +108,15 @@
   onMount(() => {
     loadCollectors();
     loadSources();
+    loadStealerChannels();
   });
 
   let backfillOnJoin = $state(true);
+
+  // Stealer-channel marking: admin:stealer to mark, read:stealer to see the set.
+  // Only a real (joined) group has a groupId to POST the category to.
+  const canMarkStealer = $derived(auth.user?.scopes?.includes('admin:stealer') ?? false);
+  const isStealer = $derived(!!sel?.groupId && stealerCtx.ids.includes(sel.groupId));
 
   async function join() {
     if (!sel || !collectorId) return;
@@ -137,6 +148,8 @@
           <button class="seg" class:on={member === 'discovered'} onclick={() => (member = 'discovered')}>Discovered · {groupCtx.list.length - memberCount}</button>
           <button class="seg" class:on={member === 'member'} onclick={() => (member = 'member')}>Already a member · {memberCount}</button>
         </div>
+        <button class="seg" class:on={monitoredOnly} onclick={() => (monitoredOnly = !monitoredOnly)}
+          title="Show only joined-and-monitored groups">Monitored only · {monitoredCount}</button>
       </div>
       <div class="table-scroll">
       {#if rows.length}
@@ -171,6 +184,16 @@
             <Button variant="destructive" size="sm" disabled={groupView.submitting} onclick={leave}>Leave group</Button>
           {:else}
             <span class="hint">This group is {sel.status}; no action.</span>
+          {/if}
+          {#if canMarkStealer && sel.groupId}
+            <label class="backfill-opt">
+              <input type="checkbox" checked={isStealer} disabled={groupView.submitting}
+                onchange={(e) => markStealer(sel.groupId, e.currentTarget.checked)} />
+              Stealer-log channel
+              <span class="sub">bypasses the attachment size cap — captures the multi-GB archive drops</span>
+            </label>
+          {:else if canMarkStealer}
+            <span class="hint">Join this group first to mark it a stealer channel.</span>
           {/if}
           {#if groupView.submitMsg}<p class="hint">{groupView.submitMsg}</p>{/if}
         </div>
