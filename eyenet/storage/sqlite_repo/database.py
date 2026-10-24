@@ -137,6 +137,8 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         # GLOBAL_SEARCH.md §10.4 — operator-asserted graph edges (post-baseline,
         # created by migration 0008).
         "asserted_edge",
+        # stealer-log ULP processing state (post-baseline, migration 0022)
+        "stealer_processing",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset(
@@ -647,6 +649,30 @@ def _drop_app_setting_schema(conn: Any) -> None:
     import eyenet.models  # noqa: F401, PLC0415
 
     tables = _filtered_tables(_APP_SETTING_TABLES)
+    if tables:
+        SQLModel.metadata.drop_all(conn, tables=tables)
+
+
+_STEALER_PROCESSING_TABLES = frozenset({"stealer_processing"})
+
+
+def _apply_stealer_processing_schema(conn: Any) -> None:
+    """Create ``stealer_processing`` (pg-0022). Created from the model for index/
+    constraint parity with the no-drift test. Main DB only."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_STEALER_PROCESSING_TABLES)
+    if tables:
+        SQLModel.metadata.create_all(conn, tables=tables)
+
+
+def _drop_stealer_processing_schema(conn: Any) -> None:
+    """Reverse :func:`_apply_stealer_processing_schema`."""
+
+    import eyenet.models  # noqa: F401, PLC0415
+
+    tables = _filtered_tables(_STEALER_PROCESSING_TABLES)
     if tables:
         SQLModel.metadata.drop_all(conn, tables=tables)
 

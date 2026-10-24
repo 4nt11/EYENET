@@ -94,6 +94,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.mfa import MfaChallengeRow
     from eyenet.contracts.source import SourceBridgeSummary, SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
+    from eyenet.contracts.stealer import StealerProcessingRow
     from eyenet.contracts.system_user import SystemUserRow
     from eyenet.storage.reclassify import ReclassifyOutcome
 
@@ -982,6 +983,32 @@ class BaseRepository(ABC):
     ) -> list[AttachmentRow]:
         """Attachments tagged with a collection class, newest-first. ``stored_only``
         restricts to blobs on disk (storage_uri IS NOT NULL)."""
+
+    # --- stealer-log ULP processing state ---
+
+    @abstractmethod
+    async def get_stealer_processing(
+        self, attachment_id: UUID
+    ) -> StealerProcessingRow | None:
+        """The ULP processing state for an attachment, or None if never handled."""
+
+    @abstractmethod
+    async def set_stealer_processing(
+        self,
+        attachment_id: UUID,
+        *,
+        state: str,
+        creds_extracted: int = 0,
+        error: str | None = None,
+    ) -> None:
+        """Upsert the ULP processing state (running/done/failed), bumping attempts."""
+
+    @abstractmethod
+    async def list_unprocessed_stealer_attachments(
+        self, category: str, *, limit: int
+    ) -> list[AttachmentRow]:
+        """Stealer-marked attachments with a blob that still need processing (not
+        done) — the processor's startup replay work-list."""
 
     @abstractmethod
     async def iter_attachment_shells(

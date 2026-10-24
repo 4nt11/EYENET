@@ -54,6 +54,7 @@ from .saved_graphs import SavedGraphsMixin
 from .search import SearchMixin
 from .settings import SettingsMixin
 from .sources import SourcesMixin
+from .stealer import StealerMixin
 from .syslog import SyslogMixin
 from .users import UsersMixin
 from .vectors import VectorsMixin
@@ -104,6 +105,7 @@ class SQLModelRepository(
     SearchMixin,
     SettingsMixin,
     SourcesMixin,
+    StealerMixin,
     SyslogMixin,
     UsersMixin,
     VectorsMixin,

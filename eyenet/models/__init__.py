@@ -85,6 +85,7 @@ from .search import SearchDocumentTable
 from .social_graph import MembershipTable
 from .source import SourceTable
 from .source_domain import SourceDomainTable
+from .stealer import StealerProcessingTable
 from .syslog import SystemLogTable
 from .system_user import SystemUserTable
 from .thread_summary import ThreadSummaryTable
@@ -164,6 +165,7 @@ __all__ = [
     "SigningKeyChallengeTable",
     "SourceDomainTable",
     "SourceTable",
+    "StealerProcessingTable",
     "SystemLogTable",
     "SystemUserClearanceGrantTable",
     "SystemUserCredentialTable",
