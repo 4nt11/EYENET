@@ -353,6 +353,10 @@ ignore = [
 # Multilingual classifier tests deliberately embed Cyrillic / CJK / Arabic
 # banner strings — the "ambiguous unicode" lints are the whole point of the test.
 "tests/unit/classifier/ruleset/test_engine.py" = ["RUF001", "RUF002", "RUF003"]
+# The stealer password parser's homoglyph defang map (and its test) embed the
+# Cyrillic/Greek confusables on purpose — folding them IS the feature.
+"eyenet/stealer/password.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/unit/stealer/test_password.py" = ["RUF001", "RUF002", "RUF003"]
 # Pydantic / SQLModel evaluate annotations at runtime, so TC0xx (move to
 # TYPE_CHECKING) is wrong for these layers — the imports ARE runtime imports.
 "eyenet/contracts/**/*.py" = ["TC001", "TC002", "TC003"]
