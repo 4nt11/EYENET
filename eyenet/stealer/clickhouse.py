@@ -44,24 +44,33 @@ ORDER BY (host, login, password)
 """
 
 
+def clickhouse_db() -> str:
+    return os.environ.get("EYENET_CLICKHOUSE_DB", "stealer")
+
+
+def get_clickhouse_client() -> Client:
+    """A clickhouse-connect client from EYENET_CLICKHOUSE_* env. Shared by the creds
+    sink (processor) and the read API (search/stats)."""
+    import clickhouse_connect  # noqa: PLC0415 — dep present in core + stealer images
+
+    return clickhouse_connect.get_client(
+        host=os.environ.get("EYENET_CLICKHOUSE_HOST", "clickhouse"),
+        port=int(os.environ.get("EYENET_CLICKHOUSE_PORT", "8123")),
+        username=os.environ.get("EYENET_CLICKHOUSE_USER", "default"),
+        password=os.environ.get("EYENET_CLICKHOUSE_PASSWORD", ""),
+    )
+
+
 class ClickHouseCredsSink:
     """Connection + schema + batched credential insert for ``<db>.creds``."""
 
     def __init__(self) -> None:
-        self._db = os.environ.get("EYENET_CLICKHOUSE_DB", "stealer")
+        self._db = clickhouse_db()
         self._client: Client | None = None
 
     def _connect(self) -> Client:
-        if self._client is not None:
-            return self._client
-        import clickhouse_connect  # noqa: PLC0415 — optional dep, stealer profile only
-
-        self._client = clickhouse_connect.get_client(
-            host=os.environ.get("EYENET_CLICKHOUSE_HOST", "clickhouse"),
-            port=int(os.environ.get("EYENET_CLICKHOUSE_PORT", "8123")),
-            username=os.environ.get("EYENET_CLICKHOUSE_USER", "default"),
-            password=os.environ.get("EYENET_CLICKHOUSE_PASSWORD", ""),
-        )
+        if self._client is None:
+            self._client = get_clickhouse_client()
         return self._client
 
     def ensure_schema(self) -> None:
@@ -85,4 +94,4 @@ class ClickHouseCredsSink:
             self._client = None
 
 
-__all__ = ["ClickHouseCredsSink"]
+__all__ = ["ClickHouseCredsSink", "clickhouse_db", "get_clickhouse_client"]

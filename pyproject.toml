@@ -115,6 +115,11 @@ dependencies = [
   # keccak-256 for Ethereum EIP-55 + Monero checksums (NOT hashlib's NIST SHA-3).
   # Already transitive; declared direct because eyenet imports it (mirrors psutil).
   "pycryptodome>=3.23",
+  # stealer ULP — ClickHouse HTTP client. Core (not just the stealer profile image)
+  # because the API serves the read:stealer search/stats endpoints off the creds
+  # corpus. Lightweight pure-python HTTP client; the heavy extraction toolchain
+  # (unar/ulpextract) stays in the opt-in Dockerfile.stealer.
+  "clickhouse-connect>=0.8",
 ]
 
 [project.optional-dependencies]

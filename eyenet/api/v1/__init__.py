@@ -163,6 +163,8 @@ from eyenet.api.v1.groups.api_list_stealer_channels import router as stealer_cha
 from eyenet.api.v1.groups.api_mark_group_category import router as groups_mark_category_router
 from eyenet.api.v1.groups.api_reply_group import router as groups_reply_router
 from eyenet.api.v1.groups.api_scan_groups import router as groups_scan_router
+from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
+from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
 
 # === health / metrics ===
 from eyenet.api.v1.health.api_healthz import router as health_live_router
@@ -483,6 +485,8 @@ v1_router.include_router(groups_leave_router)
 v1_router.include_router(groups_scan_router)
 v1_router.include_router(stealer_channels_router)  # GET /stealer/channels (read:stealer)
 v1_router.include_router(groups_mark_category_router)  # POST /groups/{id}/category (admin:stealer)
+v1_router.include_router(stealer_stats_router)  # GET /stealer/stats (read:stealer)
+v1_router.include_router(stealer_search_router)  # GET /stealer/search (read:stealer)
 v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /groups/* routes
 
 # identities + panic
