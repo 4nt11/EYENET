@@ -143,7 +143,7 @@
         <input type="text" bind:value={fReason} minlength="16" required placeholder="e.g. ULP review — case #42" />
       </label>
       <div class="actions">
-        <Button variant="primary" size="sm" disabled={submitting || fReason.trim().length < 16}>Grant</Button>
+        <Button variant="primary" size="sm" disabled={submitting || fReason.trim().length < 16} onclick={grant}>Grant</Button>
         <button type="button" class="cancel" onclick={() => (showForm = false)}>Cancel</button>
       </div>
     </form>
