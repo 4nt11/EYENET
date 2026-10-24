@@ -46,6 +46,29 @@
     <p class="note">Loading corpus…</p>
   {:else if statsCtx.stats}
     {@const s = statsCtx.stats}
+    <section class="search">
+      <div class="search-bar">
+        <input class="in" type="search" placeholder="Search credentials by host (substring, e.g. google.com)…"
+          bind:value={host} onkeydown={(e) => e.key === 'Enter' && runSearch()} aria-label="Search credentials by host" />
+        <Button variant="primary" size="sm" disabled={searchCtx.loading} onclick={runSearch}>Search</Button>
+      </div>
+      {#if searchCtx.error}
+        <p class="note err">{searchCtx.error}</p>
+      {:else if searchCtx.loading}
+        <p class="note">Searching…</p>
+      {:else if searchCtx.ran}
+        {#if searchCtx.items.length}
+          <p class="count">{searchCtx.items.length} result{searchCtx.items.length === 1 ? '' : 's'}{searchCtx.items.length === 200 ? ' (capped)' : ''}</p>
+          <div class="table-scroll">
+            <DataTable rowKey="host" columns={COLUMNS} rows={searchCtx.items} stickyHead stickyTop="0" />
+          </div>
+        {:else}
+          <p class="note">No credentials match.</p>
+        {/if}
+      {/if}
+    </section>
+
+    <div class="overview-label">Corpus overview</div>
     <section class="tiles">
       <StatTile label="Total credentials" value={fmt(s.total_creds)} tone="accent" />
       <StatTile label="Unique (host·login·pass)" value={fmt(s.unique_creds)} />
@@ -73,28 +96,6 @@
         {/each}
       </div>
     </section>
-
-    <section class="search">
-      <div class="search-bar">
-        <input class="in" type="search" placeholder="Search by host (substring, e.g. google.com)…"
-          bind:value={host} onkeydown={(e) => e.key === 'Enter' && runSearch()} aria-label="Search credentials by host" />
-        <Button variant="primary" size="sm" disabled={searchCtx.loading} onclick={runSearch}>Search</Button>
-      </div>
-      {#if searchCtx.error}
-        <p class="note err">{searchCtx.error}</p>
-      {:else if searchCtx.loading}
-        <p class="note">Searching…</p>
-      {:else if searchCtx.ran}
-        {#if searchCtx.items.length}
-          <p class="count">{searchCtx.items.length} result{searchCtx.items.length === 1 ? '' : 's'}{searchCtx.items.length === 200 ? ' (capped)' : ''}</p>
-          <div class="table-scroll">
-            <DataTable rowKey="host" columns={COLUMNS} rows={searchCtx.items} stickyHead stickyTop="0" />
-          </div>
-        {:else}
-          <p class="note">No credentials match.</p>
-        {/if}
-      {/if}
-    </section>
   {/if}
 </main>
 
@@ -121,9 +122,11 @@
   .fill.alt { background: var(--accent-text); opacity: 0.7; }
   .n { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); text-align: right; }
   .hint { font-family: var(--font-sans); font-size: var(--fs-11); color: var(--text-faint); }
-  .search { padding: 8px 20px 0; display: flex; flex-direction: column; gap: 10px; }
+  /* Search is the headline feature — sits at the top, right under the header. */
+  .search { padding: 16px 20px 4px; display: flex; flex-direction: column; gap: 10px; }
   .search-bar { display: flex; gap: 8px; align-items: center; }
-  .in { flex: 1 1 320px; min-width: 200px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 7px 10px; }
+  .overview-label { padding: 12px 20px 0; font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .in { flex: 1 1 320px; min-width: 200px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-14); padding: 9px 12px; }
   .in:focus { outline: none; border-color: var(--accent); }
   .count { margin: 0; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .table-scroll { max-height: 55vh; overflow: auto; }
