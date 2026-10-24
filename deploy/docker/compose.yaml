@@ -299,6 +299,8 @@ services:
     restart: unless-stopped
     environment:
       CLICKHOUSE_DB: stealer
+      CLICKHOUSE_USER: eyenet
+      CLICKHOUSE_PASSWORD: ${EYENET_CLICKHOUSE_PASSWORD:?set EYENET_CLICKHOUSE_PASSWORD in deploy/docker/.env}
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     volumes:
@@ -317,6 +319,8 @@ services:
       <<: *eyenet-env
       EYENET_CLICKHOUSE_HOST: clickhouse
       EYENET_CLICKHOUSE_DB: stealer
+      EYENET_CLICKHOUSE_USER: eyenet
+      EYENET_CLICKHOUSE_PASSWORD: ${EYENET_CLICKHOUSE_PASSWORD:?set EYENET_CLICKHOUSE_PASSWORD in deploy/docker/.env}
       EYENET_STEALER_WORK_DIR: /var/lib/eyenet/stealer-work
     volumes:
       - eyenet-data:/var/lib/eyenet  # read captured blobs + scratch extraction space
