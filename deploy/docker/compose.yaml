@@ -289,6 +289,43 @@ services:
           devices:
             - { driver: nvidia, count: 1, capabilities: [gpu] }
 
+  # ---- opt-in: stealer-log ULP subsystem. --profile stealer ------------------
+  # ClickHouse (creds OLAP) + the processor that turns captured stealer archives
+  # into queryable creds. Heavy (ClickHouse RAM + multi-GB extractions), so it's
+  # off by default:  docker compose --profile stealer up -d clickhouse stealer-processor
+  clickhouse:
+    profiles: ["stealer"]
+    image: clickhouse/clickhouse-server:24.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: stealer
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    # No published ports: reachable only in-network by the processor (service name).
+
+  stealer-processor:
+    profiles: ["stealer"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.stealer
+    image: eyenet:stealer
+    restart: unless-stopped
+    command: ["stealer-processor"]
+    environment:
+      <<: *eyenet-env
+      EYENET_CLICKHOUSE_HOST: clickhouse
+      EYENET_CLICKHOUSE_DB: stealer
+      EYENET_STEALER_WORK_DIR: /var/lib/eyenet/stealer-work
+    volumes:
+      - eyenet-data:/var/lib/eyenet  # read captured blobs + scratch extraction space
+    depends_on:
+      api:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+
   # ---- opt-in: observability backend (metrics). --profile observability -------
   # Prometheus scrapes the auth-gated /v1/metrics with a read:metrics-only PAT
   # (mint it from the console Auth & tokens page, paste into ./observability/
@@ -368,6 +405,7 @@ services:
 volumes:
   eyenet-data:
   postgres-data:
+  clickhouse-data:
   prometheus-data:
   grafana-data:
   tempo-data:

@@ -1,0 +1,31 @@
+# EYENET stealer-log ULP processor image — extends the base with the archive +
+# extraction toolchain for eyenet/stealer/. Opt-in (compose `stealer` profile); the
+# core stack ships without it.
+#
+#   docker build -f deploy/docker/Dockerfile.stealer -t eyenet:stealer ../..
+#
+# - ulpextract: the prod Go extractor, built from the in-package source (wheels-in)
+#   into /usr/local/bin and pointed at via EYENET_ULPEXTRACT_BIN.
+# - unrar (non-free): RAR5 archives with encrypted file data — 7z cannot open this
+#   variant; unrar (RARLab) is the proven tool.
+# - clickhouse-connect: the creds sink (optional dep, stealer profile only).
+
+FROM golang:1.22-bookworm AS gobuild
+WORKDIR /src
+COPY eyenet/stealer/ulpextract/ ./
+RUN CGO_ENABLED=0 go build -o /ulpextract ./ulpextract.go
+
+FROM eyenet:base
+
+USER root
+# unrar lives in Debian's non-free component. The slim image uses deb822 sources
+# (with Signed-By), so add the component there rather than a conflicting .list.
+RUN sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' \
+      /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends unrar \
+ && rm -rf /var/lib/apt/lists/*
+RUN /opt/venv/bin/pip install --no-cache-dir 'clickhouse-connect>=0.8'
+COPY --from=gobuild /ulpextract /usr/local/bin/ulpextract
+ENV EYENET_ULPEXTRACT_BIN=/usr/local/bin/ulpextract
+USER eyenet

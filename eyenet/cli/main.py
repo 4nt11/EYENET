@@ -781,6 +781,25 @@ def search_indexer_run(  # pragma: no cover
     _run(lambda bus, storage: SearchIndexerService(bus=bus, storage=storage), cfg)
 
 
+@app.command("stealer-processor")
+def stealer_processor_run(  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    nats_url: str | None = typer.Option(None, "--nats-url"),
+    memory_bus: bool = typer.Option(False, "--memory-bus"),
+) -> None:
+    """Run the stealer-log ULP processor: captured archives -> creds in ClickHouse.
+
+    Event-driven (no tick): consumes stealer.attachment.captured and replays
+    unprocessed stealer-marked attachments at boot, then decrypt -> extract ->
+    ulpextract -> ClickHouse. Needs the stealer-profile image (unrar + ulpextract +
+    clickhouse-connect) and a reachable ClickHouse (EYENET_CLICKHOUSE_*).
+    """
+    from eyenet.stealer.service import StealerProcessorService  # noqa: PLC0415
+
+    cfg = RuntimeConfig.from_env(data_dir=data_dir, nats_url=nats_url, use_memory_bus=memory_bus)
+    _run(lambda bus, storage: StealerProcessorService(bus=bus, storage=storage), cfg)
+
+
 @app.command("engine")
 def engine_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
