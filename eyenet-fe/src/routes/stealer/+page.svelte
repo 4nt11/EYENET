@@ -12,8 +12,11 @@
     const max = Math.max(1, ...(buckets ?? []).map((b) => b.count));
     return (buckets ?? []).map((b) => ({ ...b, pct: Math.round((b.count / max) * 100) }));
   };
-  const byTld = $derived(bars(statsCtx.stats?.by_tld));
-  const byScheme = $derived(bars(statsCtx.stats?.by_scheme));
+  // Cap the two side-by-side panels to the same row count so they're equal height
+  // (symmetry) — the long tail isn't worth the dead space.
+  const PANEL_ROWS = 12;
+  const byTld = $derived(bars((statsCtx.stats?.by_tld ?? []).slice(0, PANEL_ROWS)));
+  const byScheme = $derived(bars((statsCtx.stats?.by_scheme ?? []).slice(0, PANEL_ROWS)));
   const topHosts = $derived(bars(statsCtx.stats?.top_hosts));
 
   let host = $state('');
@@ -51,7 +54,7 @@
 
     <section class="charts">
       <div class="chart">
-        <h3>By country <span class="hint">(service ccTLD)</span></h3>
+        <h3>By TLD <span class="hint">(of the service host)</span></h3>
         {#each byTld as b}
           <div class="row"><span class="k">{b.key}</span><span class="track"><span class="fill" style="width:{b.pct}%"></span></span><span class="n">{fmt(b.count)}</span></div>
         {/each}
@@ -102,9 +105,12 @@
   .note.err { color: var(--red-text); }
   .note code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; padding: 0 20px 4px; }
-  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; padding: 16px 20px; }
+  /* Two equal panels on top (TLD | scheme), full-width hosts below. Explicit 1fr 1fr
+     (not auto-fit) so they fill the row 50/50 with no stranded empty column. */
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; align-items: start; }
   .chart { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 12px 14px; min-width: 0; }
   .chart.wide { grid-column: 1 / -1; }
+  @media (max-width: 760px) { .charts { grid-template-columns: 1fr; } }
   .chart h3 { margin: 0 0 10px; font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
   .chart h3 .hint { text-transform: none; font-weight: var(--fw-regular); color: var(--text-faint); }
   .row { display: grid; grid-template-columns: 120px 1fr 72px; align-items: center; gap: 10px; padding: 3px 0; }
