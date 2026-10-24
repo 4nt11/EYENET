@@ -1,9 +1,56 @@
 <script>
+  import { invalidateAll } from '$app/navigation';
   import DataTable from '$lib/components/DataTable.svelte';
   import Button from '$lib/components/Button.svelte';
   import { auth } from '$lib/auth.svelte.js';
+  import { apiPost } from '$lib/api.js';
 
   let { data } = $props();
+
+  // Grantable clearance scopes (ClearanceScope enum). Time-bounded, reason-required.
+  const SCOPES = [
+    { v: 'read:stealer', l: 'read:stealer — ULP credential corpus' },
+    { v: 'read:restricted', l: 'read:restricted — restricted evidence' },
+    { v: 'read:classified', l: 'read:classified — classified evidence' },
+    { v: 'admin:reclassify', l: 'admin:reclassify — promote sensitivity tier' },
+    { v: 'admin:case', l: 'admin:case — case administration' }
+  ];
+  // Granting is admin:clearance-gated (server enforces too; this just hides a dead form).
+  const canGrant = $derived(auth.user?.scopes?.includes('admin:clearance') ?? false);
+
+  let showForm = $state(false);
+  let fScope = $state('read:stealer');
+  let fUser = $state(''); // blank = self
+  let fDays = $state(30); // server caps at 90
+  let fReason = $state('');
+  let submitting = $state(false);
+  let submitMsg = $state(null);
+
+  async function grant() {
+    submitting = true;
+    submitMsg = null;
+    try {
+      const expires = new Date(Date.now() + fDays * 86400_000).toISOString();
+      await apiPost(
+        '/v1/clearance/grants',
+        {
+          user_id: fUser.trim() || auth.user?.user_id,
+          scope: fScope,
+          reason: fReason.trim(),
+          expires_at: expires
+        },
+        { auth: true }
+      );
+      submitMsg = `Granted ${fScope} (expires in ${fDays}d).`;
+      fReason = '';
+      showForm = false;
+      await invalidateAll(); // refresh the grants list
+    } catch (e) {
+      submitMsg = `Failed: ${e.status === 403 ? 'you need admin:clearance' : (e.message ?? e)}`;
+    } finally {
+      submitting = false;
+    }
+  }
 
   // No sensitivity/tier column: the grant carries no tier field (a grant is a
   // scope grant, not a classified row). Wired from ClearanceGrantSummary only.
@@ -74,10 +121,34 @@
       <div class="crumb"><span class="group">System</span><span class="sep">/</span><span class="slug">clearance</span></div>
       <h1>Clearance grants</h1>
     </div>
-    <!-- Grant/revoke writes (admin:clearance) are a follow-up; button is a
-         placeholder until the form + revoke row-action land. -->
-    <Button variant="primary" size="sm" disabled>Grant clearance</Button>
+    <Button variant="primary" size="sm" disabled={!canGrant}
+      title={canGrant ? '' : 'needs admin:clearance'}
+      onclick={() => (showForm = !showForm)}>Grant clearance</Button>
   </div>
+
+  {#if showForm && canGrant}
+    <form class="grant" onsubmit={(e) => { e.preventDefault(); grant(); }}>
+      <label>Scope
+        <select bind:value={fScope}>
+          {#each SCOPES as s}<option value={s.v}>{s.l}</option>{/each}
+        </select>
+      </label>
+      <label>User id <span class="h">(blank = you)</span>
+        <input type="text" bind:value={fUser} placeholder={auth.user?.user_id ?? ''} />
+      </label>
+      <label>Expires in
+        <span class="daywrap"><input type="number" min="1" max="90" bind:value={fDays} /> days</span>
+      </label>
+      <label class="wide">Reason <span class="h">(≥16 chars — case / incident / review ref)</span>
+        <input type="text" bind:value={fReason} minlength="16" required placeholder="e.g. ULP review — case #42" />
+      </label>
+      <div class="actions">
+        <Button variant="primary" size="sm" disabled={submitting || fReason.trim().length < 16}>Grant</Button>
+        <button type="button" class="cancel" onclick={() => (showForm = false)}>Cancel</button>
+      </div>
+    </form>
+  {/if}
+  {#if submitMsg}<p class="msg" class:err={submitMsg.startsWith('Failed')}>{submitMsg}</p>{/if}
 
   <div class="body">
     {#if data.items && rows.length}
@@ -108,4 +179,17 @@
   .body { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; }
   .note { margin: 12px 0 0; padding: 12px; border: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); }
   .note code { color: var(--accent-text); }
+  .grant { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .grant label { display: flex; flex-direction: column; gap: 5px; font-family: var(--font-sans); font-size: var(--fs-11); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-faint); }
+  .grant label.wide { grid-column: 1 / -1; text-transform: none; letter-spacing: normal; }
+  .grant .h { text-transform: none; letter-spacing: normal; color: var(--text-faint); }
+  .grant select, .grant input { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-sans); font-size: var(--fs-13); padding: 6px 9px; }
+  .grant select:focus, .grant input:focus { outline: none; border-color: var(--accent); }
+  .daywrap { display: flex; align-items: center; gap: 6px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-secondary); }
+  .daywrap input { width: 70px; }
+  .grant .actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+  .cancel { background: none; border: none; color: var(--text-faint); font-family: var(--font-sans); font-size: var(--fs-12); cursor: pointer; }
+  .cancel:hover { color: var(--text-body); }
+  .msg { margin: 10px 20px 0; font-family: var(--font-mono); font-size: var(--fs-12); color: var(--accent-text); }
+  .msg.err { color: var(--red-text); }
 </style>
