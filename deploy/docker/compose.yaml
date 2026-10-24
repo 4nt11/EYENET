@@ -148,6 +148,12 @@ services:
       # CORS is env-gated (never config.toml). Set to your FE origin(s).
       EYENET_API_CORS_ORIGINS: ${EYENET_CORS_ORIGINS:-}
       EYENET_API_METRICS_ENABLED: ${EYENET_METRICS_ENABLED:-1}
+      # read:stealer corpus queries (stats/search) hit ClickHouse. Harmless when the
+      # stealer profile is down — those endpoints just return 503.
+      EYENET_CLICKHOUSE_HOST: clickhouse
+      EYENET_CLICKHOUSE_DB: stealer
+      EYENET_CLICKHOUSE_USER: eyenet
+      EYENET_CLICKHOUSE_PASSWORD: ${EYENET_CLICKHOUSE_PASSWORD:-}
     volumes:
       - eyenet-data:/var/lib/eyenet
       # :Z relabels the bind mount for SELinux (Fedora/RHEL). Harmless on other
