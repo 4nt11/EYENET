@@ -107,17 +107,20 @@ kind=file|webhook|email, destination, retry/backoff). Delivery is best-effort +
 durable-retry; a sink failure must never block the emitter. Consider a
 delivery-receipt log so the operator can prove an anchor reached witness X.
 
-## Clearance bootstrap — admin must self-grant `admin:clearance`
+## Clearance bootstrap — admin must self-grant `admin:clearance` — FIXED 2026-10-24
 
-**Not a bug, a §4.8 design consequence worth surfacing:** `admin:clearance` is a
-grant-only scope, in NO role baseline. So the clearance page (and the 4 grant
-handlers) return **403** until an operator explicitly grants themselves the
-scope via `eyenet user scopes`. First-run UX gap: a fresh admin sees "forbidden"
-with no in-product hint.
+**WAS A BUG, now fixed:** `admin:clearance` gates POST /v1/clearance/grants but was
+grantable NOWHERE — not in any role baseline, not a ClearanceScope, and not in
+GRANT_ONLY_CAPABILITIES. So `user scopes grant ... admin:clearance` returned
+"unknown scope" and the ENTIRE clearance system was un-bootstrappable (no one could
+grant read:stealer / read:restricted / read:classified / …). Fix: added
+`admin:clearance` to GRANT_ONLY_CAPABILITIES (it's the permanent authority to manage
+clearances), so a fresh admin self-grants it once via
+`eyenet user scopes grant <admin> admin:clearance --as <admin>`, then can issue
+clearance grants. Caught live trying to grant read:stealer for the ULP dashboard.
 
-**Options when we polish:** document the `eyenet user scopes ... admin:clearance`
-bootstrap step in the operator guide; and/or have the FE render a clear "you need
-an admin:clearance grant" affordance on 403 instead of a generic error.
+**Still worth polishing:** FE affordance on 403 ("you need a read:stealer / admin:clearance
+grant") instead of a generic error, + document the bootstrap in the operator guide.
 
 ## Classifier Docker image — finish the REQUIRES-TUNING scaffold
 

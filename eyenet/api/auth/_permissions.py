@@ -115,7 +115,14 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
 # grant. Distinct from ClearanceScope (sensitive reads, EXPIRING): these gate
 # service/operator CAPABILITY and PERSIST (the 24/7 collector's write:stealer cannot
 # ride a 90-day clearance grant).
-GRANT_ONLY_CAPABILITIES: frozenset[str] = frozenset({"write:stealer", "admin:stealer"})
+#
+# `admin:clearance` is here (not a ClearanceScope) because it's the permanent authority
+# to grant/revoke clearances — it must be CLI-grantable or the whole clearance system is
+# un-bootstrappable (it gates POST /v1/clearance/grants, so a fresh admin self-grants it
+# once via `user scopes grant`, then can issue read:stealer / read:restricted / … grants).
+GRANT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
+    {"write:stealer", "admin:stealer", "admin:clearance"}
+)
 
 
 def resolve_effective_scopes(
