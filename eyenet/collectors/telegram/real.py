@@ -68,6 +68,10 @@ from eyenet.contracts.enums import (
 from eyenet.contracts.group import GROUP_CATEGORY_CHANGED_SUBJECT, STEALER_LOG_CATEGORY
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
+from eyenet.contracts.stealer_events import (
+    SUBJECT_STEALER_ATTACHMENT_CAPTURED,
+    StealerAttachmentCapturedEnvelope,
+)
 from eyenet.contracts.supervisor import (
     BackfillCommand,
     JoinGroupCommand,
@@ -1179,6 +1183,12 @@ class TelegramCollector(CollectorSkeleton):
 
         written = await self._storage.put_message(msg_row, attachments)
 
+        # Stealer archive captured -> kick the ULP processor (event-driven; one event
+        # per stored blob on a stealer-marked channel). Only on a fresh insert, so a
+        # re-ingested duplicate doesn't re-enqueue an already-processed archive.
+        if written:
+            await self._publish_stealer_captures(attachments)
+
         # Always publish to the bus — sensor uses corpus cursors for deduplication,
         # not bus delivery. This ensures backfill re-publishes already-stored messages
         # to a sensor that wasn't running during the original ingest.
@@ -1298,6 +1308,22 @@ class TelegramCollector(CollectorSkeleton):
             source_ref=source_ref,
             category=category,
         )
+
+    async def _publish_stealer_captures(self, attachments: list[AttachmentTable]) -> None:
+        """Emit stealer.attachment.captured for each stored stealer-log blob, kicking
+        the ULP processor (event-driven; the service reads the blob + body from
+        storage)."""
+        for att in attachments:
+            if att.category == STEALER_LOG_CATEGORY and att.storage_uri:
+                await self.publisher.publish(
+                    SUBJECT_STEALER_ATTACHMENT_CAPTURED,
+                    StealerAttachmentCapturedEnvelope(
+                        attachment_id=att.id,
+                        trace_context=TraceContext(
+                            traceparent=current_traceparent() or _zero_traceparent()
+                        ),
+                    ),
+                )
 
     async def _download_media_to_store(
         self, msg: TLMessage
