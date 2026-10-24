@@ -210,6 +210,42 @@ covert session. Gate the whole thing behind the same `telegram.attachment_backfi
 per_tick` HOLD so it never runs unattended. This is the piece that turns "mark a
 channel I already collect" into "and go fetch the archives I already saw."
 
+## Stealer-dump STRUCTURAL fingerprinting — identify the dump family (2026-10-24)
+
+A different problem from cred extraction: how do we RECOGNISE and CLASSIFY a stealer
+dump by its STRUCTURE / naming / conventions, before (or instead of) parsing content?
+Dumps vary wildly between channels/builders, and the layout itself is a strong CTI
+signal — arguably stronger than the creds, because it attributes the dump to a
+builder/operator family and survives re-distribution.
+
+**What tipped this off (CloudHesoyam, observed live):** a dump structure neither of us
+had seen — **one folder per VICTIM machine** (`[CC]_<ip>_<date>_<id>-[@handle]/` or
+`[CC][HWID][ts]-[@handle]/`), each containing the per-browser cred/cookie/autofill set,
+AND a per-folder **watermark file** named in Unicode math-Fraktur (`ℌ𝔈𝔖𝔒𝔜𝔄𝔐 ℭ𝔏𝔒𝔘𝔇.txt`)
+whose body is just the channel's promo (`usrlnk.io/<slug>` reserve link + `t.me/<handle>`
+x3). The `passwords.txt` are block-format (Soft/Host/Login/Password) with a promo banner;
+the archive password is the channel handle WITH `@`; names unencrypted, data encrypted.
+
+**The problem to solve (NOT today):** build a dump-family FINGERPRINT from the archive
+MANIFEST (the file tree + naming), not the file contents —
+- per-victim-folder vs flat-ULP-combolist vs single-big-file layouts;
+- folder-name grammar (`[CC]`, HWID, date, embedded `@handle`);
+- signature marker files (the Fraktur watermark, `InstalledSoftware.txt`, build-id files)
+  and their presence/format;
+- the per-machine file SET (which browsers, Wallets/, Telegram/, etc.) — this maps to the
+  stealer BUILDER (RedLine / Lumma / StealC / …), each with a signature layout.
+
+**Why it's good CTI:** attributes a dump to a builder + a channel/operator family;
+clusters dumps across channels; the watermark + reserve-link (`usrlnk.io/<slug>`) are
+provenance anchors that trace a re-hosted dump back to its origin. Pairs with the
+artifact-harvest idea (channel handle + shortener as infrastructure_artifacts).
+
+**Shape when we build it:** a lightweight manifest classifier that runs on the extracted
+tree (or even the `unar`/`lsar` LISTING, no full extraction) and emits a `dump_family` /
+`builder` label + confidence + the markers it matched — a structural sibling of the
+incident classifier, over file trees instead of message text. Deferred; captured because
+the structure is the insight.
+
 ## BUG (stealer): cap-bypass downloads buffer the WHOLE file in RAM — FIXED 2026-10-23
 
 **FIXED:** telegram downloads now stream to a temp file on the blob-store
