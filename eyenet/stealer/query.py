@@ -89,11 +89,27 @@ class StealerCredsReader:
             ),
         )
 
-    def search(self, *, host: str | None, limit: int, offset: int = 0) -> list[CredRow]:
+    def count_host(self, host: str) -> int:
+        """Exact count of creds for one host — the enrichment degree."""
+        return int(
+            self._c()
+            .query(
+                "SELECT count() FROM {db:Identifier}.creds WHERE host = {host:String}",
+                parameters={"db": self._db, "host": host},
+            )
+            .result_rows[0][0]
+        )
+
+    def search(
+        self, *, host: str | None, limit: int, offset: int = 0, exact: bool = False
+    ) -> list[CredRow]:
         where = ""
         params: dict[str, object] = {"db": self._db, "lim": int(limit), "off": int(offset)}
-        if host:
-            where = "WHERE host ILIKE {pat:String}"
+        if host and exact:
+            where = "WHERE host = {host:String}"  # graph enrichment: exact host
+            params["host"] = host
+        elif host:
+            where = "WHERE host ILIKE {pat:String}"  # dashboard: substring
             params["pat"] = f"%{host}%"
         rows = self._c().query(
             # `where` is a code constant (not user input); the search term + db + limits

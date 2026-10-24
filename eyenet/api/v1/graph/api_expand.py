@@ -14,13 +14,20 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from eyenet.api.deps import CurrentUser, RequireScope, UnprocessableError, get_storage
+from eyenet.api.deps import (
+    CurrentUser,
+    RequireScope,
+    ScopeForbidden,
+    UnprocessableError,
+    get_storage,
+)
 from eyenet.api.deps_paging import CursorParams, cursor_params, encode_cursor
 from eyenet.api.v1._clearance import enforce_entity_tier_clearance, required_clearance_scope
 from eyenet.api.v1.schemas.enums import EntityType
 from eyenet.api.v1.schemas.search import GraphExpandResult, SearchGraphEdge, SearchGraphNode
 from eyenet.contracts.enums import SensitivityTier
 from eyenet.enrichments.base import ExpandNode
+from eyenet.enrichments.registry import REGISTRY, discover
 from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["graph"])
@@ -73,6 +80,16 @@ async def graph_expand(
     page: Annotated[CursorParams, Depends(cursor_params)],
 ) -> GraphExpandResult:
     await enforce_entity_tier_clearance(storage, current_user, node_type, node_id)
+    # Per-enrichment scope gate: an enrichment must not surface via the graph what the
+    # caller couldn't read directly — each carries the read scope of its output domain
+    # (read:actors, read:observations, …), and the creds enrichments require read:stealer.
+    # Unknown (src_type, enrichment) is left to graph_expand's 422.
+    discover()
+    enr = REGISTRY.get((node_type, enrichment))
+    if enr is not None and enr.effective_scope and (
+        enr.effective_scope not in current_user.effective_scopes
+    ):
+        raise ScopeForbidden(enr.effective_scope)
     try:
         rows, edges, total, has_more = await storage.graph_expand(
             src_type=node_type,

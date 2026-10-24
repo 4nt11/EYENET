@@ -163,8 +163,6 @@ from eyenet.api.v1.groups.api_list_stealer_channels import router as stealer_cha
 from eyenet.api.v1.groups.api_mark_group_category import router as groups_mark_category_router
 from eyenet.api.v1.groups.api_reply_group import router as groups_reply_router
 from eyenet.api.v1.groups.api_scan_groups import router as groups_scan_router
-from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
-from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
 
 # === health / metrics ===
 from eyenet.api.v1.health.api_healthz import router as health_live_router
@@ -265,6 +263,8 @@ from eyenet.api.v1.sources.api_list_sources import router as sources_list_router
 from eyenet.api.v1.sources.api_remove_source_domain import router as sources_remove_domain_router
 from eyenet.api.v1.sources.api_update_source import router as sources_update_router
 from eyenet.api.v1.sources.api_update_source_domain import router as sources_update_domain_router
+from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
+from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
 
 # === stream ===
 from eyenet.api.v1.stream.api_stream_all import router as stream_all_router

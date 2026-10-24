@@ -95,6 +95,20 @@ class ExpandContext:
         return out
 
 
+# Read scope for each output node type an enrichment can surface. An enrichment must not
+# reveal via the graph an entity the caller lacks the scope to read directly. artifact /
+# attachment / document are covered by the expand baseline (read:search) + per-node tier
+# gating, so they carry no extra scope here.
+_OUTPUT_READ_SCOPE: dict[str, str] = {
+    "message": "read:observations",
+    "actor": "read:actors",
+    "persona": "read:personas",
+    "incident": "read:incidents",
+    "source": "read:sources",
+    "group": "read:groups",
+}
+
+
 class Enrichment(ABC):
     """One named enrichment for one source entity type.
 
@@ -109,10 +123,22 @@ class Enrichment(ABC):
     edge_kind: str
     single: bool = False
     tier_gated: bool = False
+    # An EXPLICIT scope the caller must hold for this enrichment, overriding the
+    # per-output-type default (``_OUTPUT_READ_SCOPE``) — e.g. the infostealer-creds
+    # enrichments set read:stealer because they surface the gated corpus as node content.
+    # None = use the output-type default. Tier gating (fields.tier) is a separate gate.
+    required_scope: str | None = None
     # Whether a cheap degree count exists. Local SQL enrichments count via COUNT();
     # a remote enrichment has no cheap count (counting == fetching), so the degree
     # preview shows it as "available, count unknown" (None) instead of a bogus 0.
     countable: bool = True
+
+    @property
+    def effective_scope(self) -> str | None:
+        """The scope the expand handler enforces: the explicit ``required_scope`` if set,
+        else the read scope for this enrichment's output node type (defense-in-depth —
+        an enrichment must not surface an entity the caller couldn't read directly)."""
+        return self.required_scope or _OUTPUT_READ_SCOPE.get(self.output_type)
 
     async def applicable(self, ctx: ExpandContext, src_id: UUID) -> bool:  # noqa: ARG002
         """Whether this enrichment applies to this specific source (the counts

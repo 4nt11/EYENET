@@ -35,8 +35,8 @@ from ._permissions import GRANT_ONLY_CAPABILITIES, ROLE_BASELINE, resolve_effect
 
 __all__ = [
     "ACCESS_TTL",
-    "REFRESH_TTL",
     "GRANT_ONLY_CAPABILITIES",
+    "REFRESH_TTL",
     "ROLE_BASELINE",
     "STREAM_TTL",
     "AccessClaims",
