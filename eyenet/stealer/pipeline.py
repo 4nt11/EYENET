@@ -29,13 +29,17 @@ if TYPE_CHECKING:
 _log = get_logger()
 _ULPEXTRACT_COLUMNS = 8  # host,url,login,password,scheme,tld,source,ip_class
 
-# Password-file names inside a stealer log tree (the ULP creds). Case-insensitive match
-# on the basename; the tree is <channel>/<machine>/.../passwords.txt etc.
-_PW_GLOBS = ("*password*.txt", "Passwords.txt")
+# Password-file glob inside a stealer log tree (the ULP creds). Matched case-INSENSITIVE
+# (3.12 rglob) because dumps mix casings: passwords.txt, Passwords.txt, All Passwords.txt,
+# <soft>_passwords.txt, passwords_unique.txt. The tree is <channel>/<machine>/.../*.txt.
+_PW_GLOB = "*password*.txt"
 # Rows per ClickHouse INSERT — bounds memory + keeps ReplacingMergeTree merges sane.
 _INSERT_BATCH = 50_000
-# unrar: -o+ overwrite, -inul suppress output, -p<pw> password (or -p- = none, never prompt).
-_UNRAR = "unrar"
+# ONE extractor for every container format a dump ships in — rar/rar5, 7z, zip, tar,
+# tar.gz/.xz, gz. unar (The Unarchiver, Debian main) auto-detects the format and takes a
+# password; unlike unrar it's not rar-only, and unlike 7z it opens the RAR5-encrypted-data
+# variant these channels use. -q quiet, -f overwrite, -D no enclosing dir, -o dest.
+_UNAR = "unar"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,30 +51,40 @@ class ProcessResult:
 
 
 def _find_password_files(root: Path) -> list[Path]:
-    out: list[Path] = []
-    for pat in _PW_GLOBS:
-        out.extend(root.rglob(pat))
-    # dedup (a name can match two globs) + stable order
-    return sorted(set(out))
+    # case_sensitive=False (Python 3.12) so one glob catches every casing.
+    return sorted(root.rglob(_PW_GLOB, case_sensitive=False))
+
+
+def _any_nonempty_file(root: Path) -> bool:
+    """True if any extracted file has content. The success signal for a password:
+    a WRONG password on an encrypted archive still writes the (unencrypted) names as
+    0-byte stubs, so file COUNT is a false positive — only decrypted data is nonempty."""
+    return any(f.is_file() and f.stat().st_size > 0 for f in root.rglob("*"))
 
 
 def _extract(blob_path: Path, candidates: list[str], dest: Path) -> str | None:
-    """Try each password candidate (then no-password) until the archive extracts.
-    Returns the working password ("" = none), or None if nothing opened it."""
-    attempts = [*candidates, ""]  # "" => -p- (unencrypted / watermark-only)
+    """Try each password candidate (then no-password) until the archive extracts with
+    real content. Returns the working password ("" = none), or None if nothing opened it.
+    Candidates are ordered best-first, so the usual case extracts exactly once."""
+    attempts = [*candidates, ""]  # "" => no -p (unencrypted / watermark-only)
     for pw in attempts:
         dest.mkdir(parents=True, exist_ok=True)
-        pw_arg = f"-p{pw}" if pw else "-p-"
-        proc = subprocess.run(  # noqa: S603  # nosec B603 — fixed tool, list argv, no shell
-            [_UNRAR, "x", "-o+", "-inul", pw_arg, str(blob_path), f"{dest}/"],
+        cmd = [_UNAR, "-q", "-f", "-D", "-o", str(dest)]
+        if pw:
+            cmd += ["-p", pw]
+        cmd.append(str(blob_path))
+        subprocess.run(  # noqa: S603  # nosec B603 — fixed tool, list argv, no shell
+            cmd,
             capture_output=True,
             check=False,
             timeout=3600,
+            stdin=subprocess.DEVNULL,  # never block on a password prompt
         )
-        if proc.returncode == 0 and any(dest.iterdir()):
+        # unar returns 0 even when every file "Failed! (wrong password)", so the real
+        # signal is decrypted content on disk, not the exit code.
+        if _any_nonempty_file(dest):
             return pw
-        # wrong password / not this one — clear the partial tree and try the next
-        shutil.rmtree(dest, ignore_errors=True)
+        shutil.rmtree(dest, ignore_errors=True)  # wrong password — clear stubs, try next
     return None
 
 
