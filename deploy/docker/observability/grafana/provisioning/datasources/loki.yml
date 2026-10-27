@@ -1,0 +1,22 @@
+# Auto-provisioned Loki datasource (logs) for the EYENET Grafana.
+#
+# Log path: service stdout (single-line JSON, telemetry/logging.py) -> docker
+# json-file -> otel-collector filelog receiver -> OTLP -> Loki. This is the
+# datasource you open to debug prod instead of SSHing in and running `docker logs`.
+apiVersion: 1
+datasources:
+  - name: Loki
+    type: loki
+    uid: eyenet-loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      # Pull trace_id out of the JSON log line and deep-link it to the Tempo trace,
+      # so a log -> its full distributed trace is one click. Escaped $$ because
+      # Grafana provisioning interpolates $vars (same as the Tempo datasource).
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":\s*"([0-9a-f]+)"'
+          url: '$${__value.raw}'
+          datasourceUid: eyenet-tempo

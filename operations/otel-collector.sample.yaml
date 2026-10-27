@@ -12,6 +12,40 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
+  # Tail every container's json-file logs and ship them to Loki. Precondition:
+  # services emit SINGLE-LINE JSON (eyenet/telemetry/logging.py) so each line is
+  # one clean record. Needs /var/lib/docker/containers mounted + the collector
+  # running as root (see compose.yaml otel-collector). start_at:end avoids
+  # re-reading history on first boot; a restart may re-ship the open file's tail
+  # (no persistent checkpoint, deliberately — minor dup beats another volume).
+  filelog:
+    include: [/var/lib/docker/containers/*/*-json.log]
+    start_at: end
+    operators:
+      # 1. The `container` operator parses the Docker json-file wrapper, moves the
+      #    message into `body`, sets the timestamp, and recombines Docker's 16KB
+      #    line-splits. Doing this by hand with json_parser chokes on the split
+      #    continuation lines (invalid '\' / unexpected end of JSON).
+      - type: container
+        format: docker
+        # Single host, no k8s — skip pod/namespace extraction from the file path
+        # (it needs include_file_path and otherwise fails with a nil path field).
+        add_metadata_from_filepath: false
+      # 2. Our app lines are single-line JSON (telemetry/logging.py) — parse them.
+      #    Non-JSON infra lines (postgres/nats/caddy) fail the guard and pass through
+      #    untouched as a plain body.
+      - type: json_parser
+        parse_from: body
+        if: 'body matches "^\\s*[{]"'
+      # 3. structlog `event` text becomes the log body.
+      - type: move
+        from: attributes.event
+        to: body
+        if: 'attributes.event != nil'
+      # 4. structlog `level` -> OTel severity.
+      - type: severity_parser
+        parse_from: attributes.level
+        if: 'attributes.level != nil'
 
 processors:
   # tail_sampling buffers each trace until decision_wait, then applies policies
@@ -60,6 +94,13 @@ processors:
         type: probabilistic
         probabilistic:
           sampling_percentage: 10
+  # Promote the structlog `service` attribute to a resource attribute so Loki
+  # turns it into a stream label (query `{service_name="linker"}` in Grafana).
+  transform/logs:
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["service.name"], attributes["service"]) where attributes["service"] != nil
   batch: {}
 
 exporters:
@@ -78,6 +119,11 @@ exporters:
     # template by service; don't let the exporter drop them.
     resource_to_telemetry_conversion:
       enabled: true
+  # Logs → Loki's native OTLP endpoint. Loki promotes service.name to a stream
+  # label; trace_id/span_id ride as structured metadata (Grafana derived field
+  # links them to Tempo). See deploy/docker/observability/loki.yaml.
+  otlphttp/logs:
+    logs_endpoint: http://loki:3100/otlp/v1/logs
 
 # Connectors turn the trace stream into metrics. They are fed from a PRE-sampling
 # traces branch (see service.pipelines) so RED/service-graph counts reflect ALL
@@ -117,3 +163,9 @@ service:
       receivers: [otlp, spanmetrics, servicegraph]
       processors: [batch]
       exporters: [prometheus]
+    # Container logs → Loki. The pipeline you open Grafana to read instead of SSHing
+    # in. filelog tails json-file logs; transform labels them by service.
+    logs:
+      receivers: [filelog]
+      processors: [transform/logs, batch]
+      exporters: [otlphttp/logs]

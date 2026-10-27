@@ -34,12 +34,25 @@ x-eyenet-env: &eyenet-env
   # observability profile is down the OTLP exporter just retries/drops, harmlessly.
   EYENET_OTEL_ENDPOINT: ${EYENET_OTEL_ENDPOINT:-http://otel-collector:4317}
 
+# Container-log rotation. Docker's json-file driver is UNBOUNDED by default, so
+# without this, logs grow until they eat the NVMe the ClickHouse cache tier needs.
+# This is the LOCAL fallback (`docker logs <svc>`); the 14-day TIME retention lives
+# in Loki. Applied to the worker anchor below; for host-wide coverage of infra
+# containers (postgres/nats/loki/collector) set the same defaults in the Docker
+# daemon (see daemon.json.example).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 # Shared config for the bus workers (everything except api/nats): reuse the built
 # image, wait for the API (which owns first-boot schema creation) to be healthy.
 x-eyenet-worker: &eyenet-worker
   image: eyenet:base
   restart: unless-stopped
   environment: *eyenet-env
+  logging: *default-logging
   volumes:
     - eyenet-data:/var/lib/eyenet
   depends_on:
@@ -389,11 +402,17 @@ services:
     profiles: ["observability"]
     image: otel/opentelemetry-collector-contrib:0.109.0
     restart: unless-stopped
+    # root: the filelog receiver tails /var/lib/docker/containers/*/*-json.log, which
+    # are root-owned 0600. Required to ship every container's logs to Loki.
+    user: "0:0"
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ../../operations/otel-collector.sample.yaml:/etc/otelcol/config.yaml:ro,Z
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
     depends_on:
       - tempo
+      - loki
+    logging: *default-logging
 
   tempo:
     profiles: ["observability"]
@@ -403,6 +422,22 @@ services:
     volumes:
       - ./observability/tempo.yaml:/etc/tempo/tempo.yaml:ro,Z
       - tempo-data:/var/tempo
+    logging: *default-logging
+
+  # Loki — the log store for Grafana (the observability LOG pipeline). The
+  # otel-collector tails container json-file logs and pushes them here via OTLP;
+  # Grafana queries Loki next to Prometheus + Tempo, and a log line's trace_id
+  # deep-links into the trace. 14-day retention enforced by Loki's compactor
+  # (observability/loki.yaml). OTLP ingest is on by default at /otlp/v1/logs.
+  loki:
+    profiles: ["observability"]
+    image: grafana/loki:3.2.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:ro,Z
+      - loki-data:/loki
+    logging: *default-logging
 
   # ---- collectors (the data plane) -------------------------------------------
   # NOT a static compose service. The CollectorSupervisor spawns one collector
@@ -419,3 +454,4 @@ volumes:
   prometheus-data:
   grafana-data:
   tempo-data:
+  loki-data:

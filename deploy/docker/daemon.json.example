@@ -1,0 +1,12 @@
+// EYENET - host Docker daemon defaults. Copy to /etc/docker/daemon.json on the
+// prod host and `systemctl restart docker`. This caps EVERY container's json-file
+// logs host-wide (postgres, nats, loki, the collector itself, and anything added
+// later), so the per-service `logging:` anchor in compose.yaml becomes a belt on
+// top of these suspenders. Host-level, like fail2ban and the EDR exclusion.
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "20m",
+    "max-file": "5"
+  }
+}

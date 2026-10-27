@@ -69,9 +69,14 @@ def _add_static(service: str, instance_id: str) -> Any:
 
 
 def configure_logging(*, service: str, instance_id: str, pretty: bool | None = None) -> None:
-    """Configure structlog process-wide.
+    """Configure structlog + stdlib logging process-wide, unified on ONE renderer.
 
-    pretty defaults to sys.stdout.isatty() — human-readable on TTY, JSON when piped.
+    pretty defaults to sys.stdout.isatty() — human-readable on TTY, single-line
+    JSON when piped (prod). Foreign stdlib loggers (uvicorn, nio, sqlalchemy, the
+    OTel SDK) are bridged through the SAME renderer via `ProcessorFormatter`, so
+    the stream carries exactly ONE log shape. No interleaved multi-line
+    tracebacks: `dict_tracebacks` renders every exception as a single structured
+    JSON field, which is also what makes each line cleanly shippable to Loki.
     """
     if pretty is None:
         pretty = sys.stdout.isatty()
@@ -80,17 +85,38 @@ def configure_logging(*, service: str, instance_id: str, pretty: bool | None = N
         if pretty
         else structlog.processors.JSONRenderer()
     )
+    # Pre-chain shared by BOTH structlog-native and foreign (stdlib) records, so a
+    # uvicorn error and a `log.info(...)` come out with the same service/ts/trace keys.
+    shared_processors: list[Any] = [
+        _add_static(service, instance_id),
+        _add_trace_ids,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso", utc=True, key="ts"),
+    ]
     structlog.configure(
         processors=[
-            _add_static(service, instance_id),
-            _add_trace_ids,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True, key="ts"),
-            renderer,
+            *shared_processors,
+            # Hand the event to the stdlib ProcessorFormatter instead of rendering
+            # here — one handler, one renderer, for structlog and stdlib alike.
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
         cache_logger_on_first_use=True,
     )
+    formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=shared_processors,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.dict_tracebacks,
+            renderer,
+        ],
+    )
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(logging.INFO)
     for name in _NOISY_STDLIB_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
     # Attach the BadEvent content filter on the specific child logger that
