@@ -105,3 +105,6 @@ tests/fixtures/corpora/*.real.jsonl
 # CTI data
 investigations/
 eyenet/stealer/ulpextract/ulpextract
+
+# generated prod provenance stamp (regenerated on deploy by stamp-commit.sh)
+deploy/docker/commit.json
