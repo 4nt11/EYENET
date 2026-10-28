@@ -108,3 +108,7 @@ eyenet/stealer/ulpextract/ulpextract
 
 # generated prod provenance stamp (regenerated on deploy by stamp-commit.sh)
 deploy/docker/commit.json
+
+# private deployment topology diagrams (not public, never commit)
+development/deploy-single-host.*
+development/deploy-multi-host.*
