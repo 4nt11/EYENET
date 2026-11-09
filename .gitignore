@@ -112,3 +112,6 @@ deploy/docker/commit.json
 # private deployment topology diagrams (not public, never commit)
 development/deploy-single-host.*
 development/deploy-multi-host.*
+
+# model weights live on HuggingFace (4nt11/eyenet-incident), never commit
+*.safetensors
