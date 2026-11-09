@@ -1,0 +1,38 @@
+# EYENET prod LITE override - the modest box: 6 cores / 16 GB / 320 GB SSD + Wasabi.
+#
+# The reduced "lite" deployment: CORE services + the ULP extractors (stealer
+# profile) only. No observability tier, no classifier, no incidents (torch would
+# OOM). This box is operator-only, never client-facing, so sluggish-but-correct
+# is the accepted trade. Drop this override on bigger boxes for the full stack.
+#
+# Run it:
+#   docker compose -f compose.yaml -f compose.prod.lite.yaml --profile stealer up -d
+#
+# HOST PREREQ: put the stateful data dirs on the SSD, not wherever Docker's
+# default root lives. Either mount the SSD at /var/lib/docker, OR bind-mount the
+# two data dirs to an SSD path (edit the volumes to driver_opts binds).
+# Postgres (the irreplaceable corpus) + ClickHouse local cache MUST be on SSD.
+#
+# RAM budget @ 16 GB (core + stealer): postgres ~2G, clickhouse capped 4G,
+# 12 python workers ~2.5G, nats/tor/flaresolverr ~0.7G, OS ~0.7G, so ~10G total.
+# ~6 G headroom for query/spacy/verifier spikes. Comfortable.
+services:
+  # ClickHouse is Wasabi-primary (local disk = cache). Cap it hard so a big
+  # query can't balloon and swap the box. CH 24.8 reads the cgroup limit and
+  # auto-sets max_server_memory_usage to ~0.9x it, so mem_limit IS the cap,
+  # no config.d xml needed.
+  # ponytail: cgroup-aware cap, add an explicit max_server_memory_usage xml only
+  # if CH ever ignores the cgroup limit (it does not on 24.8).
+  clickhouse:
+    mem_limit: 4g
+
+  # flaresolverr runs headless Chromium, it balloons. Leash it. If no active
+  # collector needs Cloudflare-solving, just do not scale it / drop it entirely.
+  flaresolverr:
+    mem_limit: 768m
+
+  # Postgres stays on SSD so synchronous_commit stays ON (full durability, this
+  # is a forensic corpus with a hash-chained audit log). No HDD escape hatches
+  # needed. Left otherwise at image defaults; bump shared_buffers to ~2G here
+  # only if you measure it starved, not before.
+  # ponytail: default config is fine on SSD @ 16G, tune when a real slow query says so.
