@@ -26,6 +26,14 @@ _COLUMNS = ["host", "url", "login", "password", "scheme", "tld", "source", "ip_c
 _CREATE_DB = "CREATE DATABASE IF NOT EXISTS {db}"
 # ReplacingMergeTree collapses rows with identical (host, login, password) on merge,
 # keeping max(ingested). url/scheme/tld/source/ip_class are payload, not identity.
+#
+# `storage_policy` is injected by _storage_policy_clause() from the
+# EYENET_CLICKHOUSE_STORAGE_POLICY env var: on prod lite this is
+# 'wasabi_primary' (see clickhouse/config.d/wasabi-storage.xml) so the corpus
+# lives on Wasabi with a local SSD cache; on dev the var is unset and CH
+# uses the implicit `default` local policy. Changing the policy of an
+# existing table is a separate `ALTER TABLE creds MODIFY SETTING
+# storage_policy=...` + data move, not a redeploy.
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS {db}.creds
 (
@@ -41,7 +49,25 @@ CREATE TABLE IF NOT EXISTS {db}.creds
 )
 ENGINE = ReplacingMergeTree(ingested)
 ORDER BY (host, login, password)
+{storage_policy_clause}
 """
+
+
+def _storage_policy_clause() -> str:
+    """`SETTINGS storage_policy='<name>'` when EYENET_CLICKHOUSE_STORAGE_POLICY
+    is set, empty string otherwise. Kept dumb on purpose: CH itself validates
+    the name at CREATE TABLE and fails loud if the policy does not exist."""
+    policy = os.environ.get("EYENET_CLICKHOUSE_STORAGE_POLICY", "").strip()
+    if not policy:
+        return ""
+    # CH policy names are identifiers (letters/digits/underscore); reject
+    # anything else so an operator typo can never land as SQL.
+    if not all(c.isalnum() or c == "_" for c in policy):
+        raise ValueError(
+            f"EYENET_CLICKHOUSE_STORAGE_POLICY={policy!r} is not a valid policy name "
+            "(alphanumeric + underscore only)"
+        )
+    return f"SETTINGS storage_policy = '{policy}'"
 
 
 def clickhouse_db() -> str:
@@ -77,7 +103,12 @@ class ClickHouseCredsSink:
         """Create the database + creds table if absent (idempotent)."""
         client = self._connect()
         client.command(_CREATE_DB.format(db=self._db))
-        client.command(_CREATE_TABLE.format(db=self._db))
+        client.command(
+            _CREATE_TABLE.format(
+                db=self._db,
+                storage_policy_clause=_storage_policy_clause(),
+            )
+        )
 
     def insert_rows(self, rows: Iterable[list[str]]) -> int:
         """Insert cred rows (each an 8-value list matching ulpextract's columns).

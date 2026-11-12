@@ -25,11 +25,37 @@ services:
   # if CH ever ignores the cgroup limit (it does not on 24.8).
   clickhouse:
     mem_limit: 4g
+    # Wasabi-primary tiered storage: the stealer ULP corpus lives in a Wasabi
+    # bucket, with a local SSD cache in front (see clickhouse/config.d/
+    # wasabi-storage.xml). Credentials are injected via env vars (from_env in
+    # the XML) so no secrets touch the image. Set all four EYENET_WASABI_* in
+    # deploy/docker/.env on the prod host before first boot, or CH will boot
+    # fine but any table declaring `storage_policy='wasabi_primary'` will
+    # fail on first write.
+    environment:
+      EYENET_WASABI_ENDPOINT: "${EYENET_WASABI_ENDPOINT:-}"
+      EYENET_WASABI_ACCESS_KEY_ID: "${EYENET_WASABI_ACCESS_KEY_ID:-}"
+      EYENET_WASABI_SECRET_ACCESS_KEY: "${EYENET_WASABI_SECRET_ACCESS_KEY:-}"
+      EYENET_WASABI_REGION: "${EYENET_WASABI_REGION:-us-east-1}"
+    volumes:
+      # Mount the storage config into /etc/clickhouse-server/config.d/. CH
+      # auto-loads every *.xml there on boot.
+      - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
 
   # flaresolverr runs headless Chromium, it balloons. Leash it. If no active
   # collector needs Cloudflare-solving, just do not scale it / drop it entirely.
   flaresolverr:
     mem_limit: 768m
+
+  # stealer-processor opts the `creds` ReplacingMergeTree into the Wasabi
+  # tiered policy defined in clickhouse/config.d/wasabi-storage.xml. On dev
+  # this env var is unset and CH uses the implicit `default` local policy;
+  # here we flip it so new tables land on Wasabi with the local SSD cache.
+  # Existing tables are not migrated by setting this -- that is a separate
+  # ALTER + data move.
+  stealer-processor:
+    environment:
+      EYENET_CLICKHOUSE_STORAGE_POLICY: "wasabi_primary"
 
   # Postgres stays on SSD so synchronous_commit stays ON (full durability, this
   # is a forensic corpus with a hash-chained audit log). No HDD escape hatches
