@@ -3,14 +3,20 @@
 // read:stealer-gated (a 403 => the operator lacks the clearance grant). Svelte 5 runes.
 import { apiGet } from './api.js';
 
-export const statsCtx = $state({ stats: null, loading: false, error: null, denied: false, loaded: false });
+// `uninitialized` = the backend returned 200 with initialized:false, meaning the
+// ClickHouse `stealer.creds` table does not exist yet (no stealer channel has
+// been ingested). Distinct from `error` (CH actually unreachable) so the page
+// can render a "set up a stealer channel" shortcut instead of an outage banner.
+export const statsCtx = $state({ stats: null, loading: false, error: null, denied: false, loaded: false, uninitialized: false });
 
 export async function loadStealerStats() {
   statsCtx.loading = true;
   statsCtx.error = null;
   statsCtx.denied = false;
+  statsCtx.uninitialized = false;
   try {
     statsCtx.stats = await apiGet('/v1/stealer/stats', { auth: true });
+    statsCtx.uninitialized = statsCtx.stats?.initialized === false;
   } catch (e) {
     if (e.status === 403) statsCtx.denied = true;
     else if (e.status === 503) statsCtx.error = 'Corpus offline (the stealer pipeline is not running).';

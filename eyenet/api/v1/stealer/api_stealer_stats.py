@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from eyenet.api.deps import CurrentUser, RequireScope
 from eyenet.api.v1.schemas.stealer import StealerBucket, StealerStatsResponse
-from eyenet.stealer.query import Bucket, StealerCredsReader
+from eyenet.stealer.query import Bucket, StealerCorpusUninitializedError, StealerCredsReader
 
 router = APIRouter(tags=["stealer"])
 _reader = StealerCredsReader()
@@ -37,6 +37,15 @@ async def stealer_stats(
 ) -> StealerStatsResponse:
     try:
         s = await asyncio.to_thread(_reader.stats)
+    except StealerCorpusUninitializedError:
+        # CH is up, the corpus just does not exist yet (no stealer channel ever
+        # ingested). Return the zeroed response with initialized=False so the
+        # dashboard can render an operator hint instead of a 503.
+        return StealerStatsResponse(
+            initialized=False,
+            total_creds=0, unique_creds=0, distinct_hosts=0,
+            by_scheme=[], by_tld=[], top_hosts=[],
+        )
     except Exception as exc:  # CH unreachable / stealer profile down
         raise HTTPException(status_code=503, detail=f"stealer corpus unavailable: {exc}") from exc
     return StealerStatsResponse(

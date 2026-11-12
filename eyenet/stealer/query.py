@@ -16,6 +16,24 @@ if TYPE_CHECKING:
     from clickhouse_connect.driver.client import Client
 
 
+# ClickHouse's error code for "table does not exist". Used to distinguish
+# "corpus not initialized yet" (no stealer channels collected from, so
+# ensure_schema() has never run) from "CH is unreachable". The former is a
+# normal operational state -- empty UI, operator hint -- not a 503.
+_CH_UNKNOWN_TABLE = 60
+
+
+class StealerCorpusUninitializedError(Exception):
+    """Raised when the corpus table does not exist yet.
+
+    Semantics: CH is reachable, the DDL just has not been created because
+    the stealer-processor has not yet seen a message that triggers
+    ``ClickHouseCredsSink.ensure_schema()``. The API layer turns this into
+    an empty-but-successful response with an ``initialized=False`` marker
+    the dashboard can render as a "add a stealer channel" nudge.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class Bucket:
     key: str
@@ -30,6 +48,19 @@ class StealerStats:
     by_scheme: list[Bucket] = field(default_factory=list)
     by_tld: list[Bucket] = field(default_factory=list)  # ccTLD of the service host (country-ish)
     top_hosts: list[Bucket] = field(default_factory=list)
+
+
+def _is_unknown_table(exc: BaseException) -> bool:
+    """True iff `exc` is clickhouse-connect raising for a missing table.
+
+    clickhouse-connect bundles the CH server error code in the exception
+    message (e.g. ``Code: 60. DB::Exception: Unknown table ...``) and does
+    not expose it as a structured attribute, so we match on the code number
+    at the start. We require BOTH the code AND the keyword to avoid
+    collisions with other code-60-flavoured errors in future CH versions.
+    """
+    msg = str(exc)
+    return f"Code: {_CH_UNKNOWN_TABLE}." in msg and "UNKNOWN_TABLE" in msg
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,15 +90,22 @@ class StealerCredsReader:
         return [Bucket(key=str(r[0]), count=int(r[1])) for r in rows]
 
     def stats(self, *, top: int = 20) -> StealerStats:
-        # Fully parameterized: the db is a bound {Identifier}, the limit a bound UInt32 —
+        # Fully parameterized: the db is a bound {Identifier}, the limit a bound UInt32,
         # no string interpolation, so no injection surface even on the (trusted) db name.
         db: dict[str, object] = {"db": self._db}
         db_top: dict[str, object] = {"db": self._db, "top": int(top)}
-        scalars = self._c().query(
-            "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
-            "FROM {db:Identifier}.creds",
-            parameters=db,
-        ).result_rows[0]
+        try:
+            scalars = self._c().query(
+                "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
+                "FROM {db:Identifier}.creds",
+                parameters=db,
+            ).result_rows[0]
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError(
+                    "stealer.creds table does not exist yet"
+                ) from exc
+            raise
         return StealerStats(
             total_creds=int(scalars[0]),
             unique_creds=int(scalars[1]),
@@ -90,7 +128,7 @@ class StealerCredsReader:
         )
 
     def count_host(self, host: str) -> int:
-        """Exact count of creds for one host — the enrichment degree."""
+        """Exact count of creds for one host (the enrichment degree)."""
         return int(
             self._c()
             .query(
@@ -111,13 +149,20 @@ class StealerCredsReader:
         elif host:
             where = "WHERE host ILIKE {pat:String}"  # dashboard: substring
             params["pat"] = f"%{host}%"
-        rows = self._c().query(
-            # `where` is a code constant (not user input); the search term + db + limits
-            # are all bound params — the f-string only splices our own literal.
-            "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608
-            f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
-            parameters=params,
-        ).result_rows
+        try:
+            rows = self._c().query(
+                # `where` is a code constant (not user input); the search term + db + limits
+                # are all bound params, so the f-string only splices our own literal.
+                "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608
+                f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
+                parameters=params,
+            ).result_rows
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError(
+                    "stealer.creds table does not exist yet"
+                ) from exc
+            raise
         return [
             CredRow(host=r[0], url=r[1], login=r[2], password=r[3], scheme=r[4], tld=r[5])
             for r in rows

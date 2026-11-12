@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import SectionHeader from '$lib/components/SectionHeader.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
   import DataTable from '$lib/components/DataTable.svelte';
@@ -44,6 +45,24 @@
     <p class="note err">{statsCtx.error}</p>
   {:else if !statsCtx.loaded}
     <p class="note">Loading corpus…</p>
+  {:else if statsCtx.uninitialized}
+    <!-- 200 with initialized:false: CH is up, table does not exist yet. Guide the operator
+         straight to the right page instead of showing zero-charts or an outage error. -->
+    <section class="empty">
+      <div class="empty-card">
+        <h2>No stealer corpus yet</h2>
+        <p>
+          Mark a Telegram channel as a stealer source in Monitored Groups. The
+          processor picks up new attachments, extracts ULP credentials, and this
+          dashboard lights up as the corpus grows.
+        </p>
+        <div class="empty-actions">
+          <Button variant="primary" size="md" onclick={() => goto('/monitored-groups')}>
+            Open Monitored Groups →
+          </Button>
+        </div>
+      </div>
+    </section>
   {:else if statsCtx.stats}
     {@const s = statsCtx.stats}
     <section class="search">
@@ -130,4 +149,11 @@
   .in:focus { outline: none; border-color: var(--accent); }
   .count { margin: 0; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
   .table-scroll { max-height: 55vh; overflow: auto; }
+  /* Empty state when the corpus has not been initialized (no stealer channel ingested yet).
+     Matches the .chart panel styling so it reads as "a module of the dashboard", not an error. */
+  .empty { padding: 40px 20px; display: flex; justify-content: center; }
+  .empty-card { max-width: 520px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 28px 32px; text-align: center; }
+  .empty-card h2 { margin: 0 0 10px; font-family: var(--font-sans); font-size: var(--fs-16); font-weight: var(--fw-semibold); color: var(--text-body); }
+  .empty-card p { margin: 0 0 20px; font-family: var(--font-sans); font-size: var(--fs-13); line-height: 1.5; color: var(--text-secondary); }
+  .empty-actions { display: flex; justify-content: center; }
 </style>

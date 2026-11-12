@@ -148,8 +148,13 @@ until docker compose exec -T postgres pg_isready -U eyenet -q; do sleep 1; done
 
 # Restore the volume BEFORE anything boots. The volume name is project-prefixed
 # (confirm with `docker volume ls | grep eyenet-data`).
+# NOTE: the --files-from keep-list on step 6 only names FILES, so tar recreates
+# the parent dirs (identities/, jwt/) with the extracting process's defaults
+# (root:root inside rootless alpine). The eyenet container runs as uid 10001
+# and cannot write to a root-owned dir -> api 500s on tdata upload. Chown
+# everything in one go here so the next identity provisioning works.
 docker run --rm -v docker_eyenet-data:/v -v /tmp/migrate:/in alpine \
-  sh -c 'cd /v && tar xzf /in/eyenet-data.tgz'
+  sh -c 'cd /v && tar xzf /in/eyenet-data.tgz && chown -R 10001:10001 /v'
 
 # Restore both DBs. The dumps carry schema@head, so compose's boot
 # upgrade_to_head is a no-op.

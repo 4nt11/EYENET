@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope
 from eyenet.api.v1.schemas.stealer import StealerCred, StealerSearchResponse
-from eyenet.stealer.query import StealerCredsReader
+from eyenet.stealer.query import StealerCorpusUninitializedError, StealerCredsReader
 
 router = APIRouter(tags=["stealer"])
 _reader = StealerCredsReader()
@@ -39,6 +39,10 @@ async def stealer_search(
         rows = await asyncio.to_thread(
             lambda: _reader.search(host=host, limit=limit, offset=offset)
         )
+    except StealerCorpusUninitializedError:
+        # Same semantics as the stats endpoint: CH is up, the table does not
+        # exist yet. Empty page + initialized=False beats a 503.
+        return StealerSearchResponse(initialized=False, items=[])
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"stealer corpus unavailable: {exc}") from exc
     return StealerSearchResponse(
