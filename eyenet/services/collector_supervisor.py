@@ -463,12 +463,19 @@ class CollectorSupervisor(ServiceBase):
         if candidate.assigned_collector_id is None:
             return
         inputs = await self._storage.compute_eligibility_inputs(candidate.id)
-        if not inputs.mentions:
-            # Operator candidate: (re)dispatch only when its collector is alive.
+        # Operator-chosen join bypasses the auto-discovery eligibility gate (scout
+        # lease + mention-root reachability): either a mention-less /monitored-groups
+        # candidate, OR a discovered candidate an operator explicitly approved +
+        # assigned (reviewed_by carries the "operator:<user>" prefix). The operator's
+        # choice IS the authorization, and the assigned collector joins with its own
+        # identity, so no scout or reachable root is needed.
+        reviewed_by = candidate.reviewed_by or ""
+        if not inputs.mentions or reviewed_by.startswith("operator:"):
+            # (re)dispatch only when its collector is alive.
             if self._collector_alive(candidate.assigned_collector_id):
                 await self._dispatch_operator_join(candidate)
             return
-        # Discovery candidate: only dispatch out of APPROVED.
+        # Auto-discovery candidate: only dispatch out of APPROVED.
         if state is not CandidateState.APPROVED:
             return
         verdict = await collector_eligibility(

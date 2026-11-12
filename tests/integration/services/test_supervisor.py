@@ -378,6 +378,48 @@ async def test_operator_join_bypasses_eligibility_and_scout(storage: BaseReposit
     assert cmd.scout_identity_id is not None  # dispatched with the collector's own identity
 
 
+async def test_operator_approved_discovered_candidate_bypasses_scout(
+    storage: BaseRepository,
+) -> None:
+    """A DISCOVERED candidate (has mention lineage) that an operator explicitly
+    approved + assigned dispatches to its collector's own channel, bypassing the
+    auto-discovery scout/seed-root gate (the @zfoleak case) instead of wedging in
+    APPROVED forever. Without the operator-routing fix it would stay APPROVED (no
+    scout), looping join_skipped every tick."""
+    src = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM, display_name="telegram:s", created_at=_NOW
+    )
+    coll = await _collector(storage, src, "a")  # NO scout identity exists
+    root = uuid4()
+    cand, _ = await storage.record_candidate_mention(
+        source_id=src,
+        platform_groupid="@zf",
+        observed_by_collector_id=coll,
+        observed_in_group_id=root,
+        seed_root_id=root,
+        depth_from_root=1,
+        mention_evidence_ref="e1",
+        mention_kind=MentionKind.USERNAME_MENTION,
+        mentioned_at_source=_NOW,
+        mentioned_at_ingest=_NOW,
+        mentioning_actor_id=_ACTOR,
+        kind_hint=GroupKind.CHANNEL,
+    )
+    await storage.transition_candidate(candidate_id=cand.id, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=cand.id,
+        to_state=CandidateState.APPROVED,
+        assigned_collector_id=coll,
+        reviewed_by="operator:00000000-0000-0000-0000-0000000000ff",
+    )
+    sup = CollectorSupervisor(bus=MemoryBus(), storage=storage)
+    sup._procs[coll] = _FakeProc()  # the assigned collector is a live child
+    await sup.dispatch_approved()
+    # Dispatched despite no scout + an unreachable seed root: operator approval bypasses
+    # the auto-discovery gate.
+    assert (await storage.get_candidate(cand.id)).state is CandidateState.JOINING
+
+
 async def test_operator_join_skipped_when_collector_not_alive(storage: BaseRepository) -> None:
     """No live child for the assigned collector → don't dispatch (the command would
     be lost); the candidate stays APPROVED until the collector is running."""
