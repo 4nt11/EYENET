@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.exceptions import RequestValidationError
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_audit, get_storage
 from eyenet.api.v1.schemas.collectors import CollectorDetail, CreateCollectorRequest
@@ -32,6 +33,29 @@ async def collectors_create(
     storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
 ) -> CollectorDetail:
+    # A collector may only run an identity of its OWN source. A cross-source pair
+    # desyncs attribution: discovery/scan file candidates under the identity's
+    # source while join files under the collector's, so the same collector produces
+    # groups under two sources that can never be cross-joined. Fail loud here.
+    identity = await storage.get_identity(body.identity_id)
+    if identity is None:
+        raise RequestValidationError(
+            [{"loc": ("body", "identity_id"), "msg": "identity not found", "type": "value_error"}]
+        )
+    if identity.source_id != body.source_id:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "identity_id"),
+                    "msg": (
+                        f"identity belongs to source {identity.source_id}, not the "
+                        f"collector's source {body.source_id}; they must match"
+                    ),
+                    "type": "value_error",
+                }
+            ]
+        )
+
     # May raise IntegrityError (identity reuse / instance_name collision) → 409.
     row = await storage.create_collector(
         instance_name=body.instance_name,

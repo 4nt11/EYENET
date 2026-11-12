@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi.exceptions import RequestValidationError
 
 from eyenet.api.deps import ConflictError, CurrentUser, ResourceNotFound
 from eyenet.api.deps_paging import CursorParams
@@ -125,6 +126,33 @@ async def test_get_exposes_config_with_grant(
 async def test_get_unknown_404(storage: BaseRepository, mkuser: Callable[..., CurrentUser]) -> None:
     with pytest.raises(ResourceNotFound):
         await collectors_get(uuid4(), mkuser("read:collectors"), storage)
+
+
+async def test_create_rejects_cross_source_identity(
+    storage: BaseRepository, audit: AuditEmitter, mkuser: Callable[..., CurrentUser]
+) -> None:
+    # A collector may only run an identity of its OWN source; pairing one from a
+    # different source desyncs candidate attribution and must be refused (422).
+    src_a = await _source(storage)
+    src_b = await storage.upsert_source(
+        kind=SourceKind.TELEGRAM,
+        display_name="telegram:other",
+        created_at=datetime(2026, 5, 27, tzinfo=UTC),
+    )
+    ident_b = await _identity(storage, src_b, "cross")
+    with pytest.raises(RequestValidationError, match="must match"):
+        await collectors_create(
+            CreateCollectorRequest(
+                instance_name="collector_cross",
+                kind=SourceKind.TELEGRAM,
+                source_id=src_a,
+                identity_id=ident_b,
+                config=dict(_SECRET_CONFIG),
+            ),
+            mkuser("write:collectors"),
+            storage,
+            audit,
+        )
 
 
 async def test_list_collectors_paginates(
