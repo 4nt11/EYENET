@@ -39,6 +39,13 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 
+# Classic builder for ALL builds here. The derived images do `FROM eyenet:base`, a tag that
+# lives ONLY on this host (no registry); BuildKit tries to RESOLVE such a FROM from a
+# registry and fails, while the classic builder uses the local image. It also sidesteps a
+# flaky-DNS registry HEAD on the public bases. Drop this the day there is a registry.
+export DOCKER_BUILDKIT=0
+export COMPOSE_BAKE=0
+
 # The deploy composition = base compose + the lite prod override + the stealer profile
 # (core services + ULP extractors; no observability/classifier/incidents). This is the
 # documented prod-lite deploy; change here if the box ever runs more.
@@ -49,11 +56,11 @@ componer() {
 		--profile stealer "$@"
 }
 
-# The image ROLES this repo builds and that therefore get versioned + pruned. Both ride
+# The image ROLES this repo builds and that therefore get versioned + pruned. They ride
 # the version the build bakes. `base` is first and is the one versions are read from (api
-# + every worker share it, so it always exists). tor/classifier/incidents are out of the
-# release set here, like MLAB left db/backup out.
-ROLES="base stealer"
+# + every worker share it, so it always exists); `edge` is the Caddy+SPA image.
+# tor/classifier/incidents are out of the release set here, like MLAB left db/backup out.
+ROLES="base stealer edge"
 
 # Witness service: runs eyenet:base, does the boot migration, and (unlike a migrate job)
 # stays alive for `exec`. The source of truth for "what is running".
@@ -127,7 +134,18 @@ check() {
 		sleep 3
 		elapsed=$((elapsed + 3))
 	done
-	log "running $want, stable"
+	# The witness is `api`, but a crash-looping edge/worker would otherwise pass silently
+	# (the edge Caddy misconfig did exactly that). No service in the composition may be
+	# anything but `running`.
+	bad=$(componer ps --format '{{.Name}} {{.State}}' | awk '$2 != "running" {print}')
+	if [ -n "$bad" ]; then
+		log "BROKEN: service(s) not running after $want came up:"
+		printf '%s\n' "$bad" | while IFS= read -r line; do
+			[ -n "$line" ] && log "  $line"
+		done
+		return 1
+	fi
+	log "running $want, stable; all services up"
 }
 
 # ---- can the target image continue from where the DBs are? -----------------------------
@@ -154,8 +172,12 @@ rollback_crosses_a_migration() {
 	missing=""
 	for rev in $revs; do
 		if ! docker run --rm --entrypoint python "eyenet:base-$target" -c "
-import os, sys, eyenet.storage.postgres_repo.migrations as m
-v = os.path.join(os.path.dirname(m.__file__), 'versions', '$rev.py')
+import os, sys, eyenet
+# Build the path off eyenet.__file__: the migrations dir is a namespace package (no
+# __init__.py), so its own __file__ is None ~ dirname(None) would throw and be misread
+# as 'revision missing', falsely refusing a safe rollback.
+v = os.path.join(os.path.dirname(eyenet.__file__),
+                 'storage', 'postgres_repo', 'migrations', 'versions', '$rev.py')
 sys.exit(0 if os.path.exists(v) else 1)
 " >/dev/null 2>&1; then
 			missing="$missing $rev"
@@ -185,6 +207,38 @@ prune() {
 	done
 }
 
+# ---- the images actually have their RUNTIME deps, not just "api starts" -----------------
+# check() watches `api`, which never touches spaCy / ulpextract ~ a build where the spaCy
+# model download (from spaCy's release server, not pip) or a system lib silently failed
+# passes check() and THEN crash-loops `sensor` or `stealer-processor`. preflight exercises
+# the real deps in the freshly built images BEFORE they go up. Run after build.
+preflight() {
+	log "preflight: eyenet:base runtime deps (spaCy model, tdata chain, core)"
+	docker run --rm --entrypoint python eyenet:base -c "
+import spacy; spacy.load('es_core_news_sm')   # baked model, else the sensor crash-loops
+import eyenet.identity_pool._tdata             # opentele + PyQt5/glib (tdata import path)
+import telethon, nats, sqlmodel
+print('base OK')
+" || {
+		log "preflight FAILED: eyenet:base is missing a runtime dependency. NOT deploying."
+		return 1
+	}
+	log "preflight: eyenet:stealer runtime deps (ulpextract, clickhouse-connect)"
+	docker run --rm --entrypoint sh eyenet:stealer -c \
+		'test -x /usr/local/bin/ulpextract && python -c "import clickhouse_connect"' || {
+		log "preflight FAILED: eyenet:stealer missing ulpextract / clickhouse-connect."
+		return 1
+	}
+	log "preflight: eyenet:edge (built SPA + valid Caddyfile)"
+	docker run --rm --entrypoint sh eyenet:edge -c \
+		'test -f /srv/index.html && caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile' \
+		>/dev/null 2>&1 || {
+		log "preflight FAILED: eyenet:edge has no built SPA or an invalid Caddyfile."
+		return 1
+	}
+	log "preflight OK"
+}
+
 # ---- verbs -----------------------------------------------------------------------------
 
 deploy() {
@@ -207,10 +261,21 @@ deploy() {
 		log "working tree is dirty: \`$tag\` does not describe the build; marking -dirty"
 	fi
 
+	# A live deploy needs the DNS domain so Caddy can provision Let's Encrypt TLS for it. A
+	# dev deploy (localhost, Caddy's internal self-signed CA) must opt in explicitly, so prod
+	# never silently ships without a real cert.
+	if [ -z "${EYENET_DOMAIN:-}" ] && [ "${EYENET_DEV:-}" != "1" ]; then
+		log "EYENET_DOMAIN is not set. A live deploy needs the domain for TLS."
+		log "Set EYENET_DOMAIN=your.domain (+ EYENET_ACME_EMAIL), or EYENET_DEV=1 for a dev"
+		log "deploy (localhost, Caddy internal CA)."
+		exit 78
+	fi
+
 	version="$stamp-$tag$dirty"
 	export EYENET_VERSION="$version" # consumed as a build arg -> the OCI label
 	log "building $version"
 	componer build
+	preflight || exit 1
 	componer up -d
 	check "$version"
 
