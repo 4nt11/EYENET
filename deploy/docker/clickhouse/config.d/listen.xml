@@ -1,0 +1,17 @@
+<!-- Bind ClickHouse's HTTP + native listeners on all IPv4 interfaces so the
+     api + stealer-processor containers can reach it over the docker bridge.
+
+     Why we need this at all: the base image ships a docker_related_config.xml
+     in /etc/clickhouse-server/config.d/ that sets <listen_host>::</listen_host>
+     by default. Our compose override bind-mounts THIS directory over that one,
+     which removes docker_related_config.xml from the effective config tree,
+     and CH falls back to config.xml's default (127.0.0.1 + ::1 only). Without
+     this file, every internal client gets ECONNREFUSED on 172.18.x:8123.
+
+     Why 0.0.0.0 and not ::: rootless Docker commonly disables IPv6 in the
+     container netns, which makes `::` crash at bind() with no useful error.
+     All our in-network peers reach CH by IPv4 anyway. -->
+<clickhouse>
+    <listen_host>0.0.0.0</listen_host>
+    <listen_try>1</listen_try>
+</clickhouse>
