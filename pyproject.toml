@@ -34,6 +34,10 @@ dependencies = [
   "telethon>=1.36",
   "tgcrypto>=1.2",          # MTProto AES-IGE acceleration for telethon
   "PySocks>=1.7",            # socks proxy support; transitive from telethon, imported directly
+  # tdata import: convert a bought Telegram Desktop tdata folder to a Telethon
+  # .session OFFLINE (reuse the auth key, no login). Lazy-imported only on the
+  # tdata provisioning path. Pulls pyrogram transitively (opentele's other target).
+  "opentele>=1.15",
   # Matrix collector. [e2e] pulls python-olm (libolm bindings) for Megolm
   # decryption + persistent device store. Operator must have libolm
   # installed system-wide (apt: libolm-dev, dnf: libolm-devel, brew: libolm).
@@ -440,6 +444,7 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = [
   "telethon.*",
+  "opentele.*",
   "sqlite_vec.*",
   "uuid7.*",
   "uuid_extensions.*",

@@ -233,14 +233,16 @@ async function restartCollector(collectorId) {
 // Provision-a-new-identity form state (POST /v1/identities, admin-only).
 export const provisionCtx = $state({ submitting: false, error: null, ok: null });
 
-// `formData` is a FormData carrying the .session file + metadata fields.
+// `formData` is a FormData carrying the credential file + metadata fields.
+// `path` routes it: '/v1/identities' for a .session/cookies/json blob, or
+// '/v1/identities/tdata' for a Telegram tdata archive (the page sniffs which).
 // Returns the created identity_id on success, null on failure.
-export async function provisionIdentity(formData) {
+export async function provisionIdentity(formData, path = '/v1/identities') {
   provisionCtx.submitting = true;
   provisionCtx.error = null;
   provisionCtx.ok = null;
   try {
-    const created = await apiPostForm('/v1/identities', formData, {
+    const created = await apiPostForm(path, formData, {
       auth: true,
       headers: { 'Idempotency-Key': crypto.randomUUID() }
     });

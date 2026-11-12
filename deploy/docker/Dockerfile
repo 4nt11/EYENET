@@ -37,9 +37,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 # libmagic1: python-magic byte-sniffing (classifier). libolm3: matrix-nio[e2e]
 # runtime bindings (the matrix collector imports python-olm on load).
-# ca-certificates: outbound TLS.
+# ca-certificates: outbound TLS. libglib2.0-0: PyQt5.QtCore needs libgthread/glib,
+# and opentele parses a bought-account tdata via Qt's QDataStream on the tdata
+# import path (eyenet.identity_pool._tdata). QtCore only, so no GUI/X11 libs.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libmagic1 libolm3 ca-certificates \
+ && apt-get install -y --no-install-recommends libmagic1 libolm3 ca-certificates libglib2.0-0 \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -r -u 10001 -m -d /home/eyenet -s /usr/sbin/nologin eyenet

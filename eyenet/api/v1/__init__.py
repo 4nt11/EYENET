@@ -170,6 +170,9 @@ from eyenet.api.v1.health.api_readyz import router as health_ready_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
+from eyenet.api.v1.identities.api_create_identity_tdata import (
+    router as identities_create_tdata_router,
+)
 from eyenet.api.v1.identities.api_delete_identity import router as identities_delete_router
 from eyenet.api.v1.identities.api_freeze_all import router as identities_freeze_all_router
 from eyenet.api.v1.identities.api_freeze_identity import router as identities_freeze_router
@@ -492,6 +495,7 @@ v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /g
 # identities + panic
 v1_router.include_router(identities_list_router)
 v1_router.include_router(identities_create_router)
+v1_router.include_router(identities_create_tdata_router)
 v1_router.include_router(identities_replace_session_router)
 v1_router.include_router(identities_qr_start_router)
 v1_router.include_router(identities_qr_relogin_router)

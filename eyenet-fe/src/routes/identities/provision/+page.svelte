@@ -86,6 +86,30 @@
   let notes = $state('');
   let files = $state(null);
 
+  // Telegram credential auto-routing. A .session is a SQLite blob (POST /identities);
+  // a tdata folder arrives as a zip/tar/gz archive and goes to POST /identities/tdata,
+  // which converts it server-side. We sniff MAGIC BYTES on select (the extension lies)
+  // and set tgCredKind, which drives both the required-fields gate and the route. For a
+  // tdata the api_id/api_hash ride inside the session, so they become optional.
+  let tgCredKind = $state(null); // 'session' | 'tdata' | null
+
+  async function sniffTelegramCred(file) {
+    const h = new Uint8Array(await file.slice(0, 265).arrayBuffer());
+    const at = (off, s) => [...s].every((c, i) => h[off + i] === c.charCodeAt(0));
+    if (at(0, 'SQLite format 3')) return 'session';
+    if (h[0] === 0x50 && h[1] === 0x4b) return 'tdata'; // zip  (PK)
+    if (h[0] === 0x1f && h[1] === 0x8b) return 'tdata'; // gzip
+    if (h[0] === 0x42 && h[1] === 0x5a && h[2] === 0x68) return 'tdata'; // bzip2 (BZh)
+    if (h[0] === 0xfd && at(1, '7zXZ')) return 'tdata'; // xz
+    if (at(257, 'ustar')) return 'tdata'; // plain tar
+    return 'session'; // unknown -> try the .session path; the backend validates
+  }
+
+  async function onTelegramFile(e) {
+    files = e.currentTarget.files;
+    tgCredKind = files && files.length ? await sniffTelegramCred(files[0]) : null;
+  }
+
   // The stack's self-contained Tor SOCKS proxy (eyenet:tor service). An .onion
   // board is only reachable through it, so default to it automatically — until
   // the operator edits the proxy field, after which we never touch it again.
@@ -114,7 +138,7 @@
       !!sourceId &&
       !provisionCtx.submitting &&
       (kind === 'telegram'
-        ? hasFile && apiId.trim() !== '' && apiHash.trim() !== ''
+        ? hasFile && (tgCredKind === 'tdata' || (apiId.trim() !== '' && apiHash.trim() !== ''))
         : kind === 'forum'
           ? hasCookies && forumBaseUrl.trim() !== ''
           : kind === 'discord'
@@ -131,10 +155,23 @@
     fd.append('name', name.trim());
     fd.append('source_id', sourceId);
 
+    // Default target; the telegram branch flips it to the tdata route when the
+    // sniffed credential is an archive. Everything else stays on /v1/identities.
+    let targetPath = '/v1/identities';
+
     if (kind === 'telegram') {
-      fd.append('session', files[0]);
-      fd.append('telegram_api_id', apiId.trim());
-      fd.append('telegram_api_hash', apiHash.trim());
+      if (tgCredKind === 'tdata') {
+        // tdata archive -> the converter endpoint. api creds are OPTIONAL (the
+        // session carries them); only send them to override a custom-api batch.
+        targetPath = '/v1/identities/tdata';
+        fd.append('tdata', files[0]);
+        if (apiId.trim()) fd.append('telegram_api_id', apiId.trim());
+        if (apiHash.trim()) fd.append('telegram_api_hash', apiHash.trim());
+      } else {
+        fd.append('session', files[0]);
+        fd.append('telegram_api_id', apiId.trim());
+        fd.append('telegram_api_hash', apiHash.trim());
+      }
       if (monitorGroups.trim()) fd.append('monitor_groups', monitorGroups.trim());
     } else if (kind === 'forum') {
       // Pasted text wins; else the uploaded cookies.txt. Either way it goes up as
@@ -183,12 +220,13 @@
     if (proxyUri.trim()) fd.append('proxy_uri', proxyUri.trim());
     if (notes.trim()) fd.append('notes', notes.trim());
 
-    const id = await provisionIdentity(fd);
+    const id = await provisionIdentity(fd, targetPath);
     if (id) {
       name = '';
       apiId = '';
       apiHash = '';
       monitorGroups = '';
+      tgCredKind = null;
       forumBaseUrl = '';
       forumThreadUrls = '';
       forumUserAgent = '';
@@ -241,14 +279,21 @@
       <input class="fin" type="text" bind:value={name} placeholder="alpha" /></label>
 
     {#if kind === 'telegram'}
-      <label class="fld"><span class="flabel">Session file (.session)</span>
-        <input class="fin file" type="file" accept=".session" onchange={(e) => (files = e.currentTarget.files)} />
+      <label class="fld"><span class="flabel">Session file (.session) or tdata archive</span>
+        <input class="fin file" type="file" accept=".session,.zip,.gz,.tgz,.bz2,.xz,.tar" onchange={onTelegramFile} />
+        {#if hasFile && tgCredKind === 'tdata'}
+          <span class="hint ok">✓ tdata archive detected. Converted server-side offline; API credentials optional (read from the account).</span>
+        {:else if hasFile && tgCredKind === 'session'}
+          <span class="hint ok">✓ .session detected. Enter the API ID/hash it was created with.</span>
+        {:else}
+          <span class="hint">A Telethon <code>.session</code>, or a bought Telegram Desktop <code>tdata</code> folder as a .zip/.tar.gz. The right path is picked automatically from the file.</span>
+        {/if}
       </label>
 
       <div class="two">
-        <label class="fld"><span class="flabel">Telegram API ID</span>
+        <label class="fld"><span class="flabel">Telegram API ID{tgCredKind === 'tdata' ? ' (optional)' : ''}</span>
           <input class="fin" type="number" bind:value={apiId} placeholder="123456" /></label>
-        <label class="fld"><span class="flabel">Telegram API hash</span>
+        <label class="fld"><span class="flabel">Telegram API hash{tgCredKind === 'tdata' ? ' (optional)' : ''}</span>
           <input class="fin" type="text" bind:value={apiHash} placeholder="0123abcd…" /></label>
       </div>
 
