@@ -36,3 +36,37 @@ services:
   # needed. Left otherwise at image defaults; bump shared_buffers to ~2G here
   # only if you measure it starved, not before.
   # ponytail: default config is fine on SSD @ 16G, tune when a real slow query says so.
+
+  # Caddy edge: the ONLY published surface. Serves the static SPA + reverse-proxies /v1 to
+  # the h2-only API, terminates public TLS (Let's Encrypt for EYENET_DOMAIN, Caddy's internal
+  # CA for localhost in dev) and offers h1/h2/h3. Not in the base compose on purpose: dev
+  # uses `vite dev`, prod uses this.
+  edge:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.edge
+      args:
+        EYENET_VERSION: "${EYENET_VERSION:-dev}"
+    image: eyenet:edge
+    restart: unless-stopped
+    environment:
+      EYENET_DOMAIN: "${EYENET_DOMAIN:-localhost}"
+      # Must be NON-EMPTY: Caddy's {$VAR:default} only falls back when the var is UNSET,
+      # not empty, so an empty value makes the `email` directive fail to parse. The
+      # placeholder is unused in dev (localhost = internal CA, no ACME); set a real address
+      # for prod so Let's Encrypt can send expiry notices.
+      EYENET_ACME_EMAIL: "${EYENET_ACME_EMAIL:-admin@example.com}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - caddy-data:/data # Let's Encrypt certs + state; persists across restarts
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

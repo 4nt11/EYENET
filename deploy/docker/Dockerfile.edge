@@ -1,0 +1,24 @@
+# EYENET edge: Caddy serving the static SPA and reverse-proxying the API. The ONLY
+# published surface in prod (TLS + HTTP/3). The API is HTTP/2-only (it refuses h1), so a
+# vanilla h1 proxy cannot front it ~ Caddy speaks h2 upstream over TLS, terminates public
+# TLS (auto Let's Encrypt for EYENET_DOMAIN, or its internal CA for localhost in dev), and
+# offers h1/h2/h3 to clients. Build context is the repo root.
+
+# ---- build the SPA (bun) ----------------------------------------------------
+FROM oven/bun:1-alpine AS fe
+WORKDIR /fe
+# DEPS LAYER: cached until bun.lock changes. Skip the Playwright browser download (only the
+# smoke test pulls it; the build does not), so install stays fast + small.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+COPY eyenet-fe/package.json eyenet-fe/bun.lock ./
+RUN bun install --frozen-lockfile
+# SOURCE LAYER: build the static site (adapter-static -> /fe/build, SPA fallback).
+COPY eyenet-fe/ ./
+RUN bun run build
+
+# ---- caddy edge -------------------------------------------------------------
+FROM caddy:2-alpine
+ARG EYENET_VERSION=dev
+LABEL org.opencontainers.image.version=$EYENET_VERSION
+COPY deploy/docker/Caddyfile /etc/caddy/Caddyfile
+COPY --from=fe /fe/build /srv

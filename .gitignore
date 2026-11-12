@@ -115,3 +115,6 @@ development/deploy-multi-host.*
 
 # model weights live on HuggingFace (4nt11/eyenet-incident), never commit
 *.safetensors
+
+# bun is the package manager here; npm cruft must never come back
+package-lock.json

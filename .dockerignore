@@ -11,7 +11,11 @@ venv
 .ruff_cache
 .pytest_cache
 node_modules
-eyenet-fe
+# eyenet-fe: the edge image builds the SPA from its source, so keep it IN context ~
+# only the heavy/generated dirs stay out.
+eyenet-fe/node_modules
+eyenet-fe/build
+eyenet-fe/.svelte-kit
 tests
 development
 data

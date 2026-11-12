@@ -1,0 +1,33 @@
+# EYENET edge. Site address IS the dev toggle:
+#   EYENET_DOMAIN set   -> real domain, automatic Let's Encrypt TLS + HTTP/3
+#   EYENET_DOMAIN unset -> localhost, Caddy's internal self-signed CA (dev)
+# Caddy offers h1/h2/h3 to clients by default on any HTTPS site (publish 443/udp for h3).
+{
+	# ACME contact for Let's Encrypt (prod). Ignored for the localhost internal CA.
+	email {$EYENET_ACME_EMAIL:admin@example.com}
+}
+
+{$EYENET_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# API: /v1/* to the HTTP/2-ONLY backend over its self-signed in-process TLS. `versions 2`
+	# forces h2 (the API refuses h1, so a default h1 upstream would fail the handshake);
+	# tls_insecure_skip_verify because the internal cert is self-signed. Same origin as the
+	# SPA, so the UI's BASE='' needs no CORS.
+	handle /v1/* {
+		reverse_proxy https://api:8443 {
+			transport http {
+				versions 2
+				tls_insecure_skip_verify
+			}
+		}
+	}
+
+	# Everything else: the static SPA, with the adapter-static SPA fallback so client-side
+	# routes (/graph/:id, /identities/provision, ...) resolve to index.html.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
