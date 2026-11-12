@@ -21,12 +21,20 @@ RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 
 WORKDIR /app
-# Only what hatchling needs to build the wheel; readme = PLAN.md (pyproject).
-COPY pyproject.toml PLAN.md ./
-COPY eyenet/ ./eyenet/
-RUN pip install .
-# Pre-bake the Spanish spaCy model so the sensor's first run needs no network.
+# DEPS LAYER: install dependencies + the spaCy model from pyproject ALONE, so a source
+# edit does not reinstall the world (the slow part: telethon/spacy wheels + the ~13MB
+# model). A stub eyenet/ package satisfies hatchling (packages=["eyenet"]) enough to build
+# the wheel; the real source replaces it below. Cached until pyproject changes.
+COPY pyproject.toml README.md ./
+RUN mkdir -p eyenet && : > eyenet/__init__.py && pip install . && rm -rf eyenet
+# Pre-bake the Spanish spaCy model so the sensor's first run needs no network. In the deps
+# layer so it is cached across source edits (depends only on spacy, installed above).
 RUN python -m spacy download es_core_news_sm
+
+# SOURCE LAYER: the real package, deps already present. --no-deps + --force-reinstall
+# rebuilds just eyenet from source in seconds (no downloads, no dependency resolution).
+COPY eyenet/ ./eyenet/
+RUN pip install --no-deps --force-reinstall .
 
 # ---- runtime: slim, no compilers -------------------------------------------
 FROM python:3.12-slim-bookworm
