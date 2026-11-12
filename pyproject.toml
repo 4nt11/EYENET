@@ -1,8 +1,8 @@
 [project]
 name = "eyenet"
-version = "0.0.0"
+version = "1.0.0"
 description = "Observation framework for forensic analysis of threat actors. Sibling of DECNET, consumer of BEHAVE-TEXT."
-readme = "PLAN.md"
+readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "ANTI" }]
 license = { text = "Proprietary" }
