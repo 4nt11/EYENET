@@ -7005,15 +7005,17 @@ components:
         state:      { type: string }
     JoinGroupRequest:
       description: |
-        Join-at-will target: either an existing candidate_id, or an undiscovered
-        group by source_id + platform_groupid. A collector is assigned.
+        Join-at-will target: exactly one of an existing candidate_id, an
+        undiscovered public group by platform_groupid, or a private group by
+        invite_link (Telegram). The group's source is the assigned collector's
+        own source, so no source_id is accepted.
       type: object
       required: [collector_id]
       properties:
         collector_id:     { type: string, format: uuid }
         candidate_id:     { type: string, format: uuid, nullable: true }
-        source_id:        { type: string, format: uuid, nullable: true }
         platform_groupid: { type: string, maxLength: 512, nullable: true }
+        invite_link:      { type: string, maxLength: 512, nullable: true }
         kind:             { $ref: '#/components/schemas/GroupKind' }
     LeaveGroupRequest:
       description: Stop monitoring a joined group (targets the group's candidate).

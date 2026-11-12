@@ -5,7 +5,7 @@
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
   import CollectorCreateDialog from '$lib/components/CollectorCreateDialog.svelte';
-  import { collectorCtx, collectorView, observedTone, loadCollectors, loadCollectorDetail, collectorAction, createCollector, requestBackfill, rediscover } from '$lib/collector.svelte.js';
+  import { collectorCtx, collectorView, observedTone, loadCollectors, loadCollectorDetail, collectorAction, createCollector, requestBackfill, rediscover, joinChannel, joinCtx } from '$lib/collector.svelte.js';
   import { loadSources } from '$lib/source.svelte.js';
   import { loadIdentities } from '$lib/identity.svelte.js';
 
@@ -47,6 +47,14 @@
   });
 
   let createOpen = $state(false);
+
+  // Join-at-will (Telegram): type an @handle or a t.me invite link; the store
+  // classifies public vs invite and routes to POST /v1/groups/join.
+  let joinTarget = $state('');
+  let joinBackfill = $state(true);
+  async function doJoin() {
+    if (await joinChannel(joinTarget, { backfill: joinBackfill })) joinTarget = '';
+  }
 
   // The create dialog needs the source + identity pools for its selects.
   onMount(() => {
@@ -100,6 +108,23 @@
           {/if}
           {#if collectorView.submitMsg}<p class="submitmsg">{collectorView.submitMsg}</p>{/if}
         </div>
+
+        {#if sel.kind === 'telegram'}
+          <div class="actions">
+            <div class="actions-label">Join a channel</div>
+            <div class="join-row">
+              <input class="join-in" type="text" bind:value={joinTarget}
+                placeholder="@channel or https://t.me/+inviteHash"
+                onkeydown={(e) => e.key === 'Enter' && doJoin()} />
+              <Button variant="primary" size="sm" disabled={joinCtx.submitting || !joinTarget.trim()} onclick={doJoin}>Join</Button>
+            </div>
+            <label class="check"><input type="checkbox" bind:checked={joinBackfill} /> backfill history on join</label>
+            {#if sel.observed !== 'running'}
+              <p class="hint">Queues the join; the collector must be running to execute it.</p>
+            {/if}
+            {#if joinCtx.msg}<p class="submitmsg" class:err={joinCtx.tone === 'err'}>{joinCtx.msg}</p>{/if}
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
@@ -122,6 +147,12 @@
   .hint { margin: 0; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-faint); line-height: var(--lh-normal); }
   .hint.err { color: var(--red-text); }
   .submitmsg { margin: 0; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--accent-text); }
+  .submitmsg.err { color: var(--red-text); }
+  .join-row { display: flex; gap: 8px; align-items: center; }
+  .join-in { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text-body); font-family: var(--font-mono); font-size: var(--fs-12); padding: 6px 9px; }
+  .join-in:focus { outline: none; border-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; font-family: var(--font-sans); font-size: var(--fs-12); color: var(--text-secondary); cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 14px; height: 14px; }
 
   @media (max-width: 900px) { .body { grid-template-columns: 1fr; overflow: auto; } }
 </style>

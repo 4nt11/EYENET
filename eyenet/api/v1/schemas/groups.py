@@ -195,16 +195,20 @@ class SetGroupCategoryRequest(ApiSchema):
 
 
 class JoinGroupRequest(ApiSchema):
-    """Body for POST /v1/groups/join — operator-initiated join.
+    """Body for POST /v1/groups/join - operator-initiated join.
 
-    Target is either an existing candidate (``candidate_id``) or an undiscovered
-    group by ``source_id`` + ``platform_groupid`` (a candidate is created). A
-    collector is assigned; the supervisor executes the join off-path."""
+    Target is exactly one of: an existing candidate (``candidate_id``); an
+    undiscovered PUBLIC group by ``platform_groupid`` (an ``@username`` the
+    collector resolves live); or a PRIVATE group by ``invite_link``
+    (``t.me/+...`` / ``t.me/joinchat/...``, Telegram only, joined via
+    ImportChatInvite). The group's source is always the assigned collector's own
+    source (a collector only ever joins its own source's groups), so no
+    ``source_id`` is accepted. The supervisor executes the join off-path."""
 
     collector_id: UUID
     candidate_id: UUID | None = None
-    source_id: UUID | None = None
     platform_groupid: str | None = Field(default=None, max_length=512)
+    invite_link: str | None = Field(default=None, max_length=512)
     kind: GroupKind | None = None
     backfill: bool = Field(
         default=True,
@@ -217,10 +221,15 @@ class JoinGroupRequest(ApiSchema):
 
     @model_validator(mode="after")
     def _exactly_one_target(self) -> Self:
-        by_id = self.candidate_id is not None
-        by_ref = self.source_id is not None and self.platform_groupid is not None
-        if by_id == by_ref:
-            raise ValueError("provide either candidate_id, or both source_id and platform_groupid")
+        targets = (
+            (self.candidate_id is not None)
+            + (self.platform_groupid is not None)
+            + (self.invite_link is not None)
+        )
+        if targets != 1:
+            raise ValueError(
+                "provide exactly one target: candidate_id, platform_groupid, or invite_link"
+            )
         return self
 
 

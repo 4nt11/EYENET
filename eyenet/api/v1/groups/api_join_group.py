@@ -26,8 +26,16 @@ from eyenet.api.deps import (
     get_storage,
 )
 from eyenet.api.v1.schemas.groups import GroupSummary, JoinGroupRequest
+from eyenet.collectors.telegram._join import parse_invite_hash
 from eyenet.contracts.candidate import GroupCandidateRow
-from eyenet.contracts.enums import CandidateState, GroupKind, JoinedVia, SourceKind
+from eyenet.contracts.enums import (
+    ArtifactSubjectKind,
+    CandidateState,
+    GroupAccessKind,
+    GroupKind,
+    JoinedVia,
+    SourceKind,
+)
 from eyenet.storage.repository import BaseRepository
 from eyenet.telemetry.audit import AuditEmitter
 
@@ -75,12 +83,26 @@ async def groups_join(
             [{"loc": ("body", "collector_id"), "msg": "collector not found", "type": "value_error"}]
         )
 
-    row = await _resolve_target(storage, body)
+    # Invite-link joins are a Telegram-only access vector (ImportChatInvite). Fail
+    # loud rather than create a candidate no collector can act on.
+    if body.invite_link is not None and collector.kind is not SourceKind.TELEGRAM:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "invite_link"),
+                    "msg": "invite-link joins are Telegram-only",
+                    "type": "value_error",
+                }
+            ]
+        )
 
-    # A collector only ever crawls its OWN source's board. Assigning it a group
-    # from a different source produces an inert cross-source membership (the slug
-    # is swept against the wrong board) — the exact bug that stranded a forum
-    # category whose name collides across two boards. Fail loud instead.
+    row = await _resolve_target(storage, body, collector.source_id)
+
+    # A collector only ever crawls its OWN source's board. Ensure-created targets
+    # are keyed on the collector's source, so this only bites the candidate_id
+    # path: joining a candidate that belongs to a different source produces an
+    # inert cross-source membership (the slug is swept against the wrong board,
+    # the bug that stranded a slug-colliding forum category). Fail loud instead.
     if collector.source_id != row.source_id:
         raise RequestValidationError(
             [
@@ -206,18 +228,68 @@ async def _monitor_internal(
     return GroupSummary.from_domain(final)
 
 
-async def _resolve_target(storage: BaseRepository, body: JoinGroupRequest) -> GroupCandidateRow:
-    """Return the candidate to join — by id, or ensure-created from source+groupid."""
+async def _resolve_target(
+    storage: BaseRepository, body: JoinGroupRequest, collector_source_id: UUID
+) -> GroupCandidateRow:
+    """Return the candidate to join: an existing candidate by id, or one
+    ensure-created for a public handle / invite link under the COLLECTOR's source
+    (a collector only ever joins its own source's groups)."""
     if body.candidate_id is not None:
         row = await storage.get_candidate(body.candidate_id)
         if row is None:
             raise ResourceNotFound("group")
         return row
-    if body.source_id is None or body.platform_groupid is None:  # validator-guaranteed; typed guard
+    if body.invite_link is not None:
+        return await _ensure_invite_candidate(storage, body, collector_source_id)
+    if body.platform_groupid is None:  # validator-guaranteed; typed guard
         raise ResourceNotFound("group")
     return await storage.ensure_candidate(
-        source_id=body.source_id,
+        source_id=collector_source_id,
         platform_groupid=body.platform_groupid,
         seen_at=datetime.now(tz=UTC),
         kind=body.kind,
     )
+
+
+async def _ensure_invite_candidate(
+    storage: BaseRepository, body: JoinGroupRequest, source_id: UUID
+) -> GroupCandidateRow:
+    """Ensure a candidate for a private invite link under ``source_id`` (the
+    collector's source) and attach the invite as an access artifact, so the
+    supervisor selects it and the collector joins via ImportChatInvite.
+
+    The invite hash is not a stable group id, so the candidate is keyed on a
+    synthetic ``joinchat:<hash>`` platform_groupid (the same shape the live join
+    writes back). Idempotent: a re-submit of the same link reuses the candidate and
+    does not pile up duplicate artifacts."""
+    invite_hash = parse_invite_hash(body.invite_link)
+    if invite_hash is None:
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "invite_link"),
+                    "msg": "not a Telegram invite link (expected t.me/+... or t.me/joinchat/...)",
+                    "type": "value_error",
+                }
+            ]
+        )
+    now = datetime.now(tz=UTC)
+    candidate = await storage.ensure_candidate(
+        source_id=source_id,
+        platform_groupid=f"joinchat:{invite_hash}",
+        seen_at=now,
+        kind=body.kind or GroupKind.CHANNEL,
+    )
+    existing = await storage.list_group_access_artifacts_for_candidate(candidate.id)
+    if not any(
+        a.kind is GroupAccessKind.INVITE_LINK and a.value == body.invite_link for a in existing
+    ):
+        await storage.add_group_access_artifact(
+            subject_kind=ArtifactSubjectKind.CANDIDATE,
+            group_id=None,
+            candidate_id=candidate.id,
+            kind=GroupAccessKind.INVITE_LINK,
+            value=body.invite_link,
+            discovered_at_ingest=now,
+        )
+    return candidate

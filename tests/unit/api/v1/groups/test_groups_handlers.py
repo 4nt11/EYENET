@@ -10,7 +10,7 @@ import pytest
 from fastapi.exceptions import RequestValidationError
 
 from eyenet.api.deps import ConflictError, CurrentUser, ResourceNotFound
-from eyenet.api.v1.groups.api_join_group import groups_join
+from eyenet.api.v1.groups.api_join_group import _ensure_invite_candidate, groups_join
 from eyenet.api.v1.groups.api_leave_group import groups_leave
 from eyenet.api.v1.groups.api_list_groups import groups_list
 from eyenet.api.v1.groups.api_scan_groups import groups_scan
@@ -20,6 +20,7 @@ from eyenet.bus.publisher import BusEnvelopePublisher
 from eyenet.contracts.enums import (
     CandidateState,
     CollectorObservedState,
+    GroupAccessKind,
     GroupKind,
     JoinedVia,
     SourceKind,
@@ -135,13 +136,75 @@ async def test_join_by_ref_creates_candidate(storage: BaseRepository) -> None:
     sid = await _source(storage)
     coll = await _seed_collector(storage, sid)
     result = await groups_join(
-        body=JoinGroupRequest(collector_id=coll.id, source_id=sid, platform_groupid="@brand_new"),
+        body=JoinGroupRequest(collector_id=coll.id, platform_groupid="@brand_new"),
         current_user=_user(),
         storage=storage,
         audit=_audit(storage),
     )
     assert result.platform_groupid == "@brand_new"
     assert result.status == "approving"
+
+
+@pytest.mark.unit
+async def test_join_by_invite_link_creates_candidate_and_artifact(storage: BaseRepository) -> None:
+    sid = await _source(storage)
+    coll = await _seed_collector(storage, sid)
+    link = "https://t.me/+AbCdEf123_"
+    result = await groups_join(
+        body=JoinGroupRequest(collector_id=coll.id, invite_link=link),
+        current_user=_user(),
+        storage=storage,
+        audit=_audit(storage),
+    )
+    # Keyed on the synthetic joinchat:<hash> id and walked to APPROVED like any join.
+    assert result.platform_groupid == "joinchat:AbCdEf123_"
+    # The source is derived from the collector, not supplied by the caller.
+    assert result.source_id == sid
+    assert result.status == "approving"
+    # The invite rides as an INVITE_LINK access artifact the supervisor will select.
+    arts = await storage.list_group_access_artifacts_for_candidate(result.candidate_id)
+    assert [a.kind for a in arts] == [GroupAccessKind.INVITE_LINK]
+    assert arts[0].value == link
+
+
+@pytest.mark.unit
+async def test_invite_candidate_dedups_artifact(storage: BaseRepository) -> None:
+    # Resolving the same invite twice reuses the candidate and adds no duplicate
+    # artifact (the operator clicking twice, or a link already discovered via mention).
+    sid = await _source(storage)
+    body = JoinGroupRequest(collector_id=uuid4(), invite_link="https://t.me/+Dup1")
+    c1 = await _ensure_invite_candidate(storage, body, sid)
+    c2 = await _ensure_invite_candidate(storage, body, sid)
+    assert c1.id == c2.id
+    arts = await storage.list_group_access_artifacts_for_candidate(c1.id)
+    assert len(arts) == 1
+
+
+@pytest.mark.unit
+async def test_join_invite_rejects_public_handle_422(storage: BaseRepository) -> None:
+    sid = await _source(storage)
+    coll = await _seed_collector(storage, sid)
+    # A public t.me handle carries no invite token -> not an invite link.
+    with pytest.raises(RequestValidationError):
+        await groups_join(
+            body=JoinGroupRequest(
+                collector_id=coll.id, invite_link="https://t.me/publichandle"
+            ),
+            current_user=_user(),
+            storage=storage,
+            audit=_audit(storage),
+        )
+
+
+@pytest.mark.unit
+async def test_join_request_rejects_two_targets() -> None:
+    # The validator allows exactly one target form; groupid + invite together is invalid.
+    with pytest.raises(ValueError, match="exactly one target"):
+        JoinGroupRequest(
+            collector_id=uuid4(),
+            platform_groupid="@x",
+            invite_link="https://t.me/+y",
+        )
 
 
 @pytest.mark.unit

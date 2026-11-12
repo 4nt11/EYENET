@@ -88,6 +88,50 @@ export async function loadCollectorDetail(id) {
   }
 }
 
+// Join-at-will state (POST /v1/groups/join via the selected collector).
+export const joinCtx = $state({ submitting: false, msg: null, tone: null });
+
+// Classify a pasted target: a t.me/+... / joinchat/ / invite= link is a PRIVATE
+// invite (invite_link, Telegram only); anything else is a PUBLIC handle, normalized
+// to @name for platform_groupid. The backend/collector resolve it live.
+function _classifyTarget(raw) {
+  const t = raw.trim();
+  if (/(?:joinchat\/|invite=|\/\+)/.test(t) || /^\+/.test(t)) return { invite_link: t };
+  const handle = t
+    .replace(/^https?:\/\//i, '')
+    .replace(/^t\.me\//i, '')
+    .replace(/^@/, '')
+    .replace(/\/.*$/, '');
+  return { platform_groupid: '@' + handle };
+}
+
+// Tell the selected collector to join a channel by @handle or invite link. Needs a
+// loaded collector detail (id + sourceId). Returns true on queued.
+export async function joinChannel(target, { backfill = true } = {}) {
+  if (!collectorView.id || !target.trim()) return false;
+  joinCtx.submitting = true;
+  joinCtx.msg = null;
+  joinCtx.tone = null;
+  try {
+    // No source_id: the backend derives the group's source from the collector.
+    const res = await apiPost(
+      '/v1/groups/join',
+      { collector_id: collectorView.id, backfill, ..._classifyTarget(target) },
+      { auth: true, headers: { 'Idempotency-Key': crypto.randomUUID() } }
+    );
+    await loadCollectorDetail(collectorView.id); // refresh membership count
+    joinCtx.msg = `✓ Queued join to ${res.platform_groupid}. The collector joins on its next dispatch.`;
+    joinCtx.tone = 'ok';
+    return true;
+  } catch (e) {
+    joinCtx.msg = `✗ Join failed: ${e.message ?? e}`;
+    joinCtx.tone = 'err';
+    return false;
+  } finally {
+    joinCtx.submitting = false;
+  }
+}
+
 // Create-collector form state. Sources/identities feed the two selects; the
 // create leases the chosen identity (one collector per identity), so a reused
 // identity or a duplicate instance_name comes back 409 and is surfaced.
