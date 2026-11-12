@@ -487,8 +487,21 @@ class TelegramCollector(CollectorSkeleton):
 
         try:
             if action is JoinAction.INVITE_HASH:
-                updates = await self._client(ImportChatInviteRequest(invite_hash))
-                entity = updates.chats[0]
+                result = await self._client(ImportChatInviteRequest(invite_hash))
+                # Telethon returns one of two shapes depending on which TL
+                # layer the server speaks: the legacy Updates (with .chats
+                # directly) or a newer ChatInviteJoinResultOk wrapper that
+                # pushes the Updates one level down (.updates.chats). Walk
+                # both; either way the joined channel is chats[0].
+                chats = getattr(result, "chats", None) or getattr(
+                    getattr(result, "updates", None), "chats", None
+                )
+                if not chats:
+                    raise RuntimeError(
+                        f"ImportChatInviteRequest returned no chats "
+                        f"(result type: {type(result).__name__})"
+                    )
+                entity = chats[0]
             else:
                 entity = await self._resolve_public_entity(cmd.platform_groupid)
                 await self._client(JoinChannelRequest(entity))
