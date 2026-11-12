@@ -268,13 +268,22 @@ class MatrixCollector(CollectorSkeleton):
             if resolved is not None:
                 self._monitor_room_ids.add(resolved)
 
-        self._source_uuid = await self._storage.upsert_source(
-            kind=SourceKind.MATRIX,
-            display_name=f"matrix:{entry.name}",
-            created_at=datetime.now(tz=UTC),
-        )
-        # Bind our row to the source we actually ingest into (the placeholder
-        # source it was registered against has zero of our messages).
+        # Use the identity's source_id directly (see the parallel notes in
+        # telegram/real.py and forum/real.py). The old upsert_source-then-
+        # realign pattern was the SYMPTOM of the same bug: creating a
+        # placeholder source in the collector, then patching the collector
+        # row to point back to the right one. Both go away if we just read
+        # the source off the identity row in the first place.
+        identity_row = await self._storage.get_identity_by_name(entry.name)
+        if identity_row is None:
+            raise RuntimeError(
+                f"identity {entry.name!r} was claimed from the pool but has "
+                "no DB row; identity pool and storage are out of sync"
+            )
+        self._source_uuid = identity_row.source_id
+        # Still rebind the collector row explicitly: a collector that was
+        # created before this change may have been registered against the
+        # old placeholder. Idempotent when already aligned.
         collector = await self._storage.resolve_collector_by_instance_id(self.instance_id)
         await self._bind_collector_row_source(collector, self._source_uuid)
 

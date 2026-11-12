@@ -254,11 +254,20 @@ class TelegramCollector(CollectorSkeleton):
                         _log.warning("collector.group_resolve_failed", group=g, error=str(exc))
             self._monitor_raw_ids.update(resolved)
 
-        self._source_uuid = await self._storage.upsert_source(
-            kind=SourceKind.TELEGRAM,
-            display_name=f"telegram:{entry.name}",
-            created_at=datetime.now(tz=UTC),
-        )
+        # The identity row carries the source_id it was bound to at
+        # provisioning. Trust that over synthesizing a `telegram:<name>`
+        # source here: when the operator binds an identity to a
+        # non-conventionally-named source (e.g. one created via the
+        # /v1/sources API), the old upsert_source(f"telegram:{entry.name}")
+        # would auto-create a parallel source and strand every candidate
+        # and message on it, breaking the collector <-> identity invariant.
+        identity_row = await self._storage.get_identity_by_name(entry.name)
+        if identity_row is None:
+            raise RuntimeError(
+                f"identity {entry.name!r} was claimed from the pool but has "
+                "no DB row; identity pool and storage are out of sync"
+            )
+        self._source_uuid = identity_row.source_id
 
         # Subscribe to panic kill-switch (PLAN §6.2).
         async def _on_panic(_subject: str, _payload: bytes, _headers: dict[str, str]) -> None:

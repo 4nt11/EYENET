@@ -396,11 +396,19 @@ class ForumCollector(CollectorSkeleton):
         if collector is not None:
             self._source_uuid = collector.source_id
         else:
-            self._source_uuid = await self._storage.upsert_source(
-                kind=SourceKind.FORUM,
-                display_name=f"forum:{entry.name}",
-                created_at=datetime.now(tz=UTC),
-            )
+            # Standalone / tests path: no collector row, so fall back to the
+            # identity's source_id. Do NOT upsert a `forum:{entry.name}`
+            # source here, which would silently create a parallel source if
+            # the operator bound this identity to a non-conventionally-named
+            # source (same bug the comment above describes, in a different
+            # flavour).
+            identity_row = await self._storage.get_identity_by_name(entry.name)
+            if identity_row is None:
+                raise RuntimeError(
+                    f"identity {entry.name!r} was claimed from the pool but has "
+                    "no DB row; identity pool and storage are out of sync"
+                )
+            self._source_uuid = identity_row.source_id
 
         # Listen for an operator-triggered rediscovery (POST /v1/collectors/{id}/
         # rediscover or /v1/groups/scan). This is the ONLY way discovery re-runs
