@@ -1098,7 +1098,7 @@ def api_run(  # pragma: no cover
     certfile: str | None = typer.Option(None, "--certfile"),
     keyfile: str | None = typer.Option(None, "--keyfile"),
     enable_h3: bool = typer.Option(
-        False, "--h3/--no-h3", help="offer HTTP/3 (QUIC); requires TLS (§12.1.1)"
+        True, "--h3/--no-h3", help="offer HTTP/3 (QUIC); default on, requires TLS (§12.1.1)"
     ),
     allow_insecure_bind: bool = typer.Option(
         False, "--allow-insecure-bind", help="non-loopback bind with TLS terminated upstream"

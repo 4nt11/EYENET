@@ -176,6 +176,7 @@ services:
       - ./tls:/etc/eyenet/tls:ro,Z
     ports:
       - "${EYENET_API_PORT:-8443}:8443"
+      - "${EYENET_API_PORT:-8443}:8443/udp" # HTTP/3 (QUIC), for a direct (edgeless) bind
     depends_on:
       nats:
         condition: service_healthy
