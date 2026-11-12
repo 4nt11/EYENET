@@ -56,5 +56,9 @@ RUN install -d -o eyenet -g eyenet /var/lib/eyenet
 # Neutral runtime cwd (no ./eyenet source to shadow the installed package).
 WORKDIR /home/eyenet
 USER eyenet
+# Version baked as a standard OCI label. deploy/docker/deploy.sh reads it off the running
+# container as the source of truth for "what is running". `dev` for a plain hand build.
+ARG EYENET_VERSION=dev
+LABEL org.opencontainers.image.version=$EYENET_VERSION
 ENTRYPOINT ["eyenet"]
 CMD ["version"]

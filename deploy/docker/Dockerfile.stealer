@@ -25,4 +25,8 @@ RUN apt-get update \
 RUN /opt/venv/bin/pip install --no-cache-dir 'clickhouse-connect>=0.8'
 COPY --from=gobuild /ulpextract /usr/local/bin/ulpextract
 ENV EYENET_ULPEXTRACT_BIN=/usr/local/bin/ulpextract
+# Re-stamp the version label: FROM eyenet:base carries base's value, baked at base-build
+# time; re-declaring here stamps the stealer image with THIS deploy's version.
+ARG EYENET_VERSION=dev
+LABEL org.opencontainers.image.version=$EYENET_VERSION
 USER eyenet

@@ -148,6 +148,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
+      args:
+        EYENET_VERSION: "${EYENET_VERSION:-dev}"
     image: eyenet:base
     restart: unless-stopped
     command:
@@ -331,6 +333,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.stealer
+      args:
+        EYENET_VERSION: "${EYENET_VERSION:-dev}"
     image: eyenet:stealer
     restart: unless-stopped
     command: ["stealer-processor"]
