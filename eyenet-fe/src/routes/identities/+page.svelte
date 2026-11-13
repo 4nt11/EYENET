@@ -3,6 +3,7 @@
   import DataTable from '$lib/components/DataTable.svelte';
   import EvidencePanel from '$lib/components/EvidencePanel.svelte';
   import Button from '$lib/components/Button.svelte';
+  import Dropdown from '$lib/components/Dropdown.svelte';
   import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll, replaceSession, saveIdentityConfig } from '$lib/identity.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
   import { poolCtx, loadPools, bindIdentityToPool } from '$lib/proxies.svelte.js';
@@ -398,15 +399,20 @@
         <div class="actions">
           <div class="actions-label">Proxy</div>
           <div class="actions-row">
-            <select class="field" bind:value={proxyPoolDraft} disabled={proxySaving}>
-              <option value="">(no pool, direct connection)</option>
-              {#each poolCtx.list as p}<option value={p.id}>{p.name}</option>{/each}
-            </select>
-            <select class="field" bind:value={proxyStickyDraft} disabled={proxySaving}>
-              <option value="default">sticky: default for source</option>
-              <option value="yes">sticky: yes (pin one proxy)</option>
-              <option value="no">sticky: no (rotate per op)</option>
-            </select>
+            <Dropdown
+              minWidth="220px"
+              options={[{ v: '', l: '(no pool, direct connection)' }, ...poolCtx.list.map((p) => ({ v: p.id, l: p.name }))]}
+              bind:value={proxyPoolDraft}
+            />
+            <Dropdown
+              minWidth="220px"
+              options={[
+                { v: 'default', l: 'sticky: default for source' },
+                { v: 'yes',     l: 'sticky: yes (pin one proxy)' },
+                { v: 'no',      l: 'sticky: no (rotate per op)' }
+              ]}
+              bind:value={proxyStickyDraft}
+            />
             <Button variant="primary" size="sm" disabled={proxySaving} onclick={saveProxyBinding}>Save</Button>
             {#if proxyMsg}<span class="hint">{proxyMsg}</span>{/if}
           </div>

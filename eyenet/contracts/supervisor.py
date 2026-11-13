@@ -5,7 +5,7 @@ M9.E3 the supervisor records the command in the ``candidate.joining`` audit
 payload as the record of intent and writes ``approved → joining``; in M9.E5 it
 *also* publishes the command (via :func:`command_subject_for`) and the collector
 process running the leased scout identity executes the platform join. The
-``access_artifact_id`` selection (MODELS §2.24) also lands with E5 — it is
+``access_artifact_id`` selection (MODELS §2.24) also lands with E5 - it is
 optional here.
 """
 
@@ -58,13 +58,31 @@ class ScanVisibleGroupsCommand(BaseModel):
 
 class BackfillCommand(BaseModel):
     """Tell a running collector to replay historical messages for its MONITORED
-    groups (``_run_backfill``). Scoped to the monitor set by construction — it
+    groups (``_run_backfill``). Scoped to the monitor set by construction - it
     never touches groups the account is merely visible in, so it can't mass-scrape
     into a ban. The API form of the boot-time ``--backfill`` flag."""
 
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["backfill"] = "backfill"
+
+
+class RebindProxyCommand(BaseModel):
+    """Tell a running collector to re-lease its upstream proxy and rebuild its
+    HTTP/wire client in place (v1.2.0).
+
+    Emitted by ``PATCH /v1/identities/{id}/proxy`` after a pool binding
+    changes. The receiving collector calls ``lease_proxy_for_identity``
+    with the identity it runs and rebuilds its httpx / Telethon client
+    against the new proxy, no process restart. A collector that happens not
+    to own the identity named in the command drops it on the floor (the
+    bus delivers to every collector sub'd on the channel; filter by id).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["rebind_proxy"] = "rebind_proxy"
+    identity_id: UUID
 
 
 def command_subject_for(scout_instance_id: str) -> str:
@@ -82,6 +100,7 @@ __all__ = [
     "BackfillCommand",
     "JoinGroupCommand",
     "LeaveGroupCommand",
+    "RebindProxyCommand",
     "ScanVisibleGroupsCommand",
     "command_subject_for",
 ]

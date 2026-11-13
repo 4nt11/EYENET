@@ -307,7 +307,11 @@ class ProxiesMixin:
             if row is None:
                 return None
             row.proxy_pool_id = pool_id
-            row.proxy_sticky = sticky
+            # Detaching clears both fields: an orphaned ``proxy_sticky=true``
+            # with ``pool_id=null`` is a nonsense state that reads as "sticky
+            # to what?" and would mislead any future handler that only looked
+            # at the sticky flag. Force the pair to be internally consistent.
+            row.proxy_sticky = None if pool_id is None else sticky
             session.add(row)
             # Release stale sticky bindings when detaching or switching pools.
             bound_result = await session.exec(

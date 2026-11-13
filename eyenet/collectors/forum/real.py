@@ -69,7 +69,11 @@ from eyenet.contracts.enums import (
 )
 from eyenet.contracts.identity_pool import IdentityPool
 from eyenet.contracts.raw_message import RawMessageEnvelope, subject_for
-from eyenet.contracts.supervisor import ScanVisibleGroupsCommand, command_subject_for
+from eyenet.contracts.supervisor import (
+    RebindProxyCommand,
+    ScanVisibleGroupsCommand,
+    command_subject_for,
+)
 from eyenet.models import MessageTable
 from eyenet.models._base import new_uuid7
 from eyenet.search_indexer.events import publish_entity_changed
@@ -309,6 +313,10 @@ class ForumCollector(CollectorSkeleton):
         # curl-cffi AsyncSession instead (duck-compatible: .get/.post ->
         # .status_code/.headers/.text). Tests still inject an httpx client.
         self._client: Any = http_client
+        # v1.2.0: stashed in on_subscribe for the rebind_proxy command path.
+        # None until the first claim completes; the command handler short-
+        # circuits on None (nothing to rebuild yet).
+        self._entry: IdentityFileEntry | None = None
         self._owns_client = http_client is None
         self._source_uuid: UUID | None = None
         self._collector_id: UUID | None = None
@@ -380,6 +388,10 @@ class ForumCollector(CollectorSkeleton):
 
         if self._client is None:
             self._client = await self._build_forum_client(entry)
+        # v1.2.0: stash the claimed entry so the rebind_proxy command handler
+        # can rebuild the http client against a freshly leased proxy without
+        # having to re-run on_subscribe (which also kicks off discovery).
+        self._entry = entry
 
         # Our own collector row: the operator's monitored-category memberships are
         # keyed to it (list_active_memberships). Without it the monitor set stays
@@ -417,10 +429,36 @@ class ForumCollector(CollectorSkeleton):
         # collector still responds to the command.
         async def _on_command(_subject: str, payload: bytes, _headers: dict[str, str]) -> None:
             try:
-                if json.loads(payload).get("kind") == "scan_visible_groups":
+                kind = json.loads(payload).get("kind")
+                if kind == "scan_visible_groups":
                     ScanVisibleGroupsCommand.model_validate_json(payload)
                     if self._source_uuid is not None:
                         await self.scan_visible_groups(source_id=self._source_uuid)
+                elif kind == "rebind_proxy":
+                    cmd = RebindProxyCommand.model_validate_json(payload)
+                    # Identity-match gate: the command channel is keyed by
+                    # instance_id (identity+source hash), so this is usually
+                    # one-to-one, but belt-and-suspenders in case two
+                    # collectors ever share a subject by coincidence.
+                    if self._entry is None:
+                        return
+                    my_row = await self._storage.get_identity_by_name(self._entry.name)
+                    if my_row is None or cmd.identity_id != my_row.id:
+                        return
+                    old = self._client
+                    self._client = await self._build_forum_client(self._entry)
+                    await self.syslog(
+                        level=SystemLogLevel.NOTICE,
+                        event="forum.proxy_rebound",
+                        message=f"{self._identity_name}: rebuilt http client against new pool binding",
+                    )
+                    # Close the old client in the background; a concurrent
+                    # request on it would get a short exception at worst.
+                    if old is not None and hasattr(old, "aclose"):
+                        try:
+                            await old.aclose()
+                        except Exception as exc:  # noqa: BLE001 - defensive, log-only
+                            _log.warning("forum.old_client_close_failed", error=str(exc))
             except (RateLimited, OperationalError, httpx.HTTPError) as exc:
                 await self.syslog(
                     level=SystemLogLevel.WARN,

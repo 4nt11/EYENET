@@ -42,6 +42,11 @@ SYSLOG_ALLOWLIST: frozenset[str] = frozenset(
         "collector.cooldown_hit",
         "collector.rate_limited",
         "collector.degraded",
+        # Proxy rebind (v1.2.0)
+        "forum.proxy_rebound",
+        "forum.waf_bypass_enabled",
+        "forum.tls_impersonate_ignored_on_proxy",
+        "forum.rediscover_incomplete",
         # Contract handling
         "contract.version_mismatch_handled",
         # Operator-tier

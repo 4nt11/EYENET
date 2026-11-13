@@ -37,6 +37,11 @@ class IdentitySummary(ApiSchema):
     role: IdentityRole
     state: IdentityState
     last_used_at: datetime | None = None
+    # v1.2.0: proxy-pool attachment + sticky flag. Surfaced on the summary so
+    # the identities list can show "which pool is this identity on" without a
+    # per-row detail fetch. Secret credentials still never cross this surface.
+    proxy_pool_id: UUID | None = None
+    proxy_sticky: bool | None = None
 
     @classmethod
     def from_domain(cls, row: IdentityRow) -> IdentitySummary:
@@ -47,6 +52,8 @@ class IdentitySummary(ApiSchema):
             role=row.role,
             state=row.state,
             last_used_at=row.last_used_at,
+            proxy_pool_id=row.proxy_pool_id,
+            proxy_sticky=row.proxy_sticky,
         )
 
 
