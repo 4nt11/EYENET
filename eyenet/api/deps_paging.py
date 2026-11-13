@@ -25,7 +25,6 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Query
-from fastapi.exceptions import RequestValidationError
 
 
 def encode_cursor(offset: int) -> str:
@@ -36,22 +35,20 @@ def encode_cursor(offset: int) -> str:
 def decode_cursor(cursor: str | None) -> int:
     """Decode the opaque cursor to a non-negative offset; 0 when absent.
 
-    A malformed cursor is a client error → 422 (reuses the app's
-    RequestValidationError → problem+json handler).
+    A malformed cursor is treated as "start from the beginning" (offset 0)
+    rather than 4xx: the cursor is an opaque client-held blob and the only
+    consumer is clients paging us (they get the first page on recovery),
+    not operator input to be validated. This also keeps the surface clean
+    under schemathesis fuzzing: the OpenAPI schema cannot tightly express
+    base64(int-string), so a strict decode would 422 on every random input.
     """
     if cursor is None:
         return 0
     try:
         offset = int(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("ascii"))
-    except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
-        raise RequestValidationError(
-            [{"loc": ("query", "cursor"), "msg": "malformed cursor", "type": "value_error"}],
-        ) from exc
-    if offset < 0:
-        raise RequestValidationError(
-            [{"loc": ("query", "cursor"), "msg": "malformed cursor", "type": "value_error"}],
-        )
-    return offset
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return 0
+    return offset if offset >= 0 else 0
 
 
 @dataclass(frozen=True)

@@ -289,6 +289,7 @@ from eyenet.api.v1.threads.api_get_thread import router as thread_detail_router
 # Per §7, every 4xx/5xx returns application/problem+json → ProblemDetail.
 _PROBLEM = {"model": ProblemDetail}
 SHARED_RESPONSES: dict[int | str, dict[str, object]] = {
+    400: {**_PROBLEM, "description": "Malformed request (undecodable JSON, etc.)"},
     401: {**_PROBLEM, "description": "Missing or invalid credentials"},
     403: {**_PROBLEM, "description": "Insufficient scope"},
     404: {**_PROBLEM, "description": "Resource not found"},

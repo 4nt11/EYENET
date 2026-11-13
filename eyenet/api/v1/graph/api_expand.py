@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query
 from eyenet.api.deps import (
     CurrentUser,
     RequireScope,
+    ResourceNotFound,
     ScopeForbidden,
     UnprocessableError,
     get_storage,
@@ -100,6 +101,11 @@ async def graph_expand(
             want_total=page.include_total,
         )
     except ValueError as exc:
+        # Unknown (src_type, enrichment) is an "address me a thing that doesn't
+        # exist": return 404 ResourceNotFound rather than 422, so the client
+        # distinguishes "no such enrichment" from a payload-shape error.
+        if "unknown enrichment" in str(exc):
+            raise ResourceNotFound("enrichment") from exc
         raise UnprocessableError(str(exc)) from exc
     # Per-node clearance: enrichments that synthesize tier-gated neighbours (attachments,
     # future documents) stamp fields.tier. The src gate above only covers the source, so

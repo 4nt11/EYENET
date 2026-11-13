@@ -27,6 +27,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -72,11 +73,16 @@ def _request_id(request: Request) -> str:
     return request.headers.get("x-request-id") or uuid4().hex
 
 
-def _problem_response(problem: ProblemDetail, status_code: int) -> JSONResponse:
+def _problem_response(
+    problem: ProblemDetail,
+    status_code: int,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         content=problem.model_dump(mode="json", exclude_none=True),
         status_code=status_code,
         media_type=PROBLEM_JSON,
+        headers=headers,
     )
 
 
@@ -162,6 +168,26 @@ def create_app(  # noqa: PLR0915 - boot wiring plus every §7 exception handler 
             request_id=_request_id(request),
         )
         return _problem_response(problem, 501)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        # FastAPI itself raises HTTPException(400, "There was an error parsing
+        # the body") when the raw body can't be decoded as JSON, and 405s carry
+        # the default plain {"detail": "..."} body. Route both through
+        # ProblemDetail so every 4xx/5xx is problem+json.
+        title = {
+            400: "Bad Request",
+            405: "Method Not Allowed",
+        }.get(exc.status_code, "HTTP Error")
+        problem = ProblemDetail(
+            type="about:blank",
+            title=title,
+            status=exc.status_code,
+            detail=str(exc.detail) if exc.detail else None,
+            instance=request.url.path,
+            request_id=_request_id(request),
+        )
+        return _problem_response(problem, exc.status_code, headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

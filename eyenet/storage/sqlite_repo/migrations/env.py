@@ -106,15 +106,21 @@ SQLite-only and Postgres handles proxy tables via its own 0023."""
 
 def run_migrations_online() -> None:
     for name, engine in _engines().items():
+        if name == "main":
+            pre_tables = [
+                SQLModel.metadata.tables[t]
+                for t in _PRE_MIGRATION_MAIN_TABLES
+                if t in SQLModel.metadata.tables
+            ]
+            if pre_tables:
+                # Separate begin() block: commits the pre-create DDL before the
+                # Alembic migration chain opens its own connection. Doing it on
+                # the migration connection poisoned Alembic's own transaction
+                # state (DDL inside migrations 0008, 0010-0014 silently rolled
+                # back even though UPDATE alembic_version persisted).
+                with engine.begin() as pre_conn:  # type: ignore[attr-defined]
+                    SQLModel.metadata.create_all(pre_conn, tables=pre_tables)
         with engine.connect() as connection:  # type: ignore[attr-defined]
-            if name == "main":
-                pre_tables = [
-                    SQLModel.metadata.tables[t]
-                    for t in _PRE_MIGRATION_MAIN_TABLES
-                    if t in SQLModel.metadata.tables
-                ]
-                if pre_tables:
-                    SQLModel.metadata.create_all(connection, tables=pre_tables)
             # SQLite enforces FK on DROP TABLE, which breaks the batch table-rewrite
             # (copy → DROP old → RENAME) for any table with INBOUND FKs — e.g.
             # group_candidate, referenced by membership / access_artifact /

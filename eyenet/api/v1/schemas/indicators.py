@@ -43,7 +43,12 @@ class IndicatorRuleOut(ApiSchema):
 
 
 class IndicatorRuleCreate(ApiSchema):
-    kind: str = Field(description="InfrastructureKind value the match is stored under")
+    kind: str = Field(
+        min_length=2,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_]{1,63}$",
+        description="InfrastructureKind value the match is stored under",
+    )
     pattern: str = Field(min_length=1, max_length=512)
     fold_case: bool = True
     description: str = ""
