@@ -62,6 +62,7 @@ export const NAV = [
         ] },
       { slug: 'clearance',  label: 'Clearance',     href: '/clearance', built: true, desc: 'Sensitivity-clearance grants' },
       { slug: 'collector-settings', label: 'Collector Settings', href: '/collector-settings', built: true, desc: 'Runtime collector knobs · attachment download gate and backfill rate (admin)' },
+      { slug: 'proxies', label: 'Proxy pools', href: '/proxies', built: true, desc: 'Pooled SOCKS5/HTTP/MTProxy upstream for collectors · sticky per-identity or rotating (proxy:read / proxy:write / proxy:admin)' },
       { slug: 'control',    label: 'Control',       href: '/control', built: true, desc: 'System-wide operator actions (panic)' },
       { slug: 'health',     label: 'Health',        href: '/health', built: true, desc: 'Liveness, readiness, and Prometheus metrics' }
     ]

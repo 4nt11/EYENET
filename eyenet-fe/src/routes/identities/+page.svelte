@@ -5,6 +5,7 @@
   import Button from '$lib/components/Button.svelte';
   import { identityCtx, identityView, identityTone, loadIdentities, loadIdentityDetail, identityAction, deleteIdentity, freezeAll, replaceSession, saveIdentityConfig } from '$lib/identity.svelte.js';
   import { sourceCtx, loadSources } from '$lib/source.svelte.js';
+  import { poolCtx, loadPools, bindIdentityToPool } from '$lib/proxies.svelte.js';
   import { curlToNetscape, extractCookieString, hostFromUrl } from '$lib/curl-cookies.js';
 
   // Columns are the fields /v1/identities returns. No `platform` or `claimed by`
@@ -135,7 +136,44 @@
   onMount(() => {
     loadIdentities();
     loadSources(); // resolve the source kind + forum host for the replace control
+    loadPools();   // for the proxy-pool dropdown below
   });
+
+  // v1.2.0 proxy binding state. Local draft, saved via bindIdentityToPool.
+  let proxyPoolDraft = $state('');
+  let proxyStickyDraft = $state('default');
+  let proxySaving = $state(false);
+  let proxyMsg = $state('');
+
+  // Sync the draft to the selected identity's current binding whenever
+  // selection moves (or the identity list refreshes).
+  $effect(() => {
+    if (sel) {
+      proxyPoolDraft = sel.proxyPoolId ?? '';
+      proxyStickyDraft = sel.proxySticky === null || sel.proxySticky === undefined
+        ? 'default'
+        : (sel.proxySticky ? 'yes' : 'no');
+      proxyMsg = '';
+    }
+  });
+
+  async function saveProxyBinding() {
+    if (!sel) return;
+    proxySaving = true;
+    proxyMsg = '';
+    try {
+      await bindIdentityToPool(sel.id, {
+        poolId: proxyPoolDraft || null,
+        sticky: proxyStickyDraft === 'default' ? null : proxyStickyDraft === 'yes'
+      });
+      await loadIdentities();  // refresh list so sel picks up the new values
+      proxyMsg = 'Saved.';
+    } catch (e) {
+      proxyMsg = `Error: ${e.message ?? e}`;
+    } finally {
+      proxySaving = false;
+    }
+  }
 
   async function doReplaceSession() {
     if (!sel) return;
@@ -357,6 +395,22 @@
     {#if sel}
       <div class="detail-col">
         <EvidencePanel title={`Identity · ${sel.name}`} items={detail} labelWidth={100} />
+        <div class="actions">
+          <div class="actions-label">Proxy</div>
+          <div class="actions-row">
+            <select class="field" bind:value={proxyPoolDraft} disabled={proxySaving}>
+              <option value="">(no pool, direct connection)</option>
+              {#each poolCtx.list as p}<option value={p.id}>{p.name}</option>{/each}
+            </select>
+            <select class="field" bind:value={proxyStickyDraft} disabled={proxySaving}>
+              <option value="default">sticky: default for source</option>
+              <option value="yes">sticky: yes (pin one proxy)</option>
+              <option value="no">sticky: no (rotate per op)</option>
+            </select>
+            <Button variant="primary" size="sm" disabled={proxySaving} onclick={saveProxyBinding}>Save</Button>
+            {#if proxyMsg}<span class="hint">{proxyMsg}</span>{/if}
+          </div>
+        </div>
         <div class="actions">
           <div class="actions-label">Lifecycle</div>
           {#if sel.state !== 'burned'}

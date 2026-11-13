@@ -19,7 +19,11 @@ function mapIdentity(i) {
     sourceId: i.source_id,
     role: i.role,
     state: i.state,
-    lastUsed: shortTs(i.last_used_at)
+    lastUsed: shortTs(i.last_used_at),
+    // v1.2.0: proxy-pool attachment + sticky flag. Both may be null when the
+    // identity has not been bound to a pool yet.
+    proxyPoolId: i.proxy_pool_id ?? null,
+    proxySticky: i.proxy_sticky ?? null
   };
 }
 
