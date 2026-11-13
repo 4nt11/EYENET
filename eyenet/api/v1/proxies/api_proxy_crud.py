@@ -57,7 +57,7 @@ async def proxy_create(
         secret_encrypted=ciphertext,
         source=body.source,
         notes=body.notes,
-        created_at=datetime.now(tz=UTC).replace(tzinfo=None),
+        created_at=datetime.now(tz=UTC),
     )
     return to_proxy_response(row)
 

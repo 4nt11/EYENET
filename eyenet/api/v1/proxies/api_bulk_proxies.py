@@ -68,7 +68,7 @@ async def proxy_bulk_create(
         result = await storage.bulk_create_proxies(
             pool_id=pool_id,
             entries=entries,
-            created_at=datetime.now(tz=UTC).replace(tzinfo=None),
+            created_at=datetime.now(tz=UTC),
         )
         # Surface duplicates to the operator in the rejection stream too so
         # the UI can render one unified list.

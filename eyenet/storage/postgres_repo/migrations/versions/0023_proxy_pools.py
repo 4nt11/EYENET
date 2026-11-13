@@ -69,7 +69,10 @@ def upgrade_main() -> None:
             kind_hint             varchar(32),
             description           varchar(1024),
             created_at            timestamp NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-            created_by_user_id    uuid REFERENCES system_user (id)
+            -- "system_user" must be double-quoted: PG 15+ promoted SYSTEM_USER
+            -- to a reserved SQL-standard function (returns the login name), so
+            -- the bare identifier parses as a function call in a REFERENCES.
+            created_by_user_id    uuid REFERENCES "system_user" (id)
         )
         """
     )

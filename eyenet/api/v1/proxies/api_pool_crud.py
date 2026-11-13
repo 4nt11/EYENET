@@ -42,7 +42,7 @@ async def proxy_pool_create(
         name=body.name,
         kind_hint=body.kind_hint,
         description=body.description,
-        created_at=datetime.now(tz=UTC).replace(tzinfo=None),
+        created_at=datetime.now(tz=UTC),
         created_by_user_id=current_user.user_id,
     )
 

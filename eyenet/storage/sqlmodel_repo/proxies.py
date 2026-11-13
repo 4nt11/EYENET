@@ -351,7 +351,7 @@ class ProxiesMixin:
             if sticky is None:
                 sticky = _STICKY_BY_SOURCE_KIND.get(source_kind, True)
 
-            now = datetime.now(tz=UTC).replace(tzinfo=None)
+            now = datetime.now(tz=UTC)
 
             if sticky:
                 # Reuse existing binding if alive.
