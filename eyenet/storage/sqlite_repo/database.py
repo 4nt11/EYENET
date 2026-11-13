@@ -139,6 +139,9 @@ _MAIN_TABLES: frozenset[str] = frozenset(
         "asserted_edge",
         # stealer-log ULP processing state (post-baseline, migration 0022)
         "stealer_processing",
+        # operator-managed proxy pool (post-baseline, migration 0016)
+        "proxy_pool",
+        "proxy",
     }
 )
 _AUDIT_TABLES: frozenset[str] = frozenset(

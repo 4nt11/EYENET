@@ -93,9 +93,28 @@ def _make_include_object(
     return include_object
 
 
+_PRE_MIGRATION_MAIN_TABLES: frozenset[str] = frozenset({"proxy_pool", "proxy"})
+"""Tables created by model-metadata BEFORE the Alembic chain runs on the main
+engine. Reason: migration 0009's ``batch_alter_table("group_candidate")`` reflects
+that table's FK chain (group_candidate -> ... -> identity -> proxy_pool). If
+proxy_pool does not yet exist in the live DB, SQLAlchemy's recursive FK autoload
+raises ``NoSuchTableError``. Pre-creating these from the live model (CREATE
+TABLE IF NOT EXISTS via create_all checkfirst) satisfies the reflection chain
+without touching the frozen baseline. Postgres is unaffected: this env.py is
+SQLite-only and Postgres handles proxy tables via its own 0023."""
+
+
 def run_migrations_online() -> None:
     for name, engine in _engines().items():
         with engine.connect() as connection:  # type: ignore[attr-defined]
+            if name == "main":
+                pre_tables = [
+                    SQLModel.metadata.tables[t]
+                    for t in _PRE_MIGRATION_MAIN_TABLES
+                    if t in SQLModel.metadata.tables
+                ]
+                if pre_tables:
+                    SQLModel.metadata.create_all(connection, tables=pre_tables)
             # SQLite enforces FK on DROP TABLE, which breaks the batch table-rewrite
             # (copy → DROP old → RENAME) for any table with INBOUND FKs — e.g.
             # group_candidate, referenced by membership / access_artifact /
