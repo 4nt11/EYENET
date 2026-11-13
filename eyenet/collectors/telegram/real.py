@@ -220,7 +220,30 @@ class TelegramCollector(CollectorSkeleton):
                 "in identities.toml"
             )
 
-        proxy = _parse_proxy(entry.proxy_uri)
+        # v1.2.0: look up the identity row once up front so we can (1) lease
+        # a proxy from its attached pool and (2) read its source_id later for
+        # the ingest attribution. Pre-v1.1.5 this lookup was later; the
+        # source-of-truth rule in [[project_collector_source_from_identity_row]]
+        # keeps us from re-synthesizing a source.
+        identity_row = await self._storage.get_identity_by_name(entry.name)
+        if identity_row is None:
+            raise RuntimeError(
+                f"identity {entry.name!r} was claimed from the pool but has "
+                "no DB row; identity pool and storage are out of sync"
+            )
+
+        # Prefer a pool-leased proxy; fall back to the legacy proxy_uri when
+        # no pool is attached. ``None`` means "direct connection".
+        from eyenet.collectors._proxy import lease_telethon_proxy  # noqa: PLC0415
+
+        proxy = await lease_telethon_proxy(
+            self._storage,
+            identity_row.id,
+            source_kind=SourceKind.TELEGRAM,
+            fernet=self._session_key,
+        )
+        if proxy is None:
+            proxy = _parse_proxy(entry.proxy_uri)
 
         # Decrypt-on-boot: the blob at session_path is Fernet-encrypted; this
         # yields an in-memory StringSession (DB pool) or the plaintext path
@@ -254,19 +277,10 @@ class TelegramCollector(CollectorSkeleton):
                         _log.warning("collector.group_resolve_failed", group=g, error=str(exc))
             self._monitor_raw_ids.update(resolved)
 
-        # The identity row carries the source_id it was bound to at
-        # provisioning. Trust that over synthesizing a `telegram:<name>`
-        # source here: when the operator binds an identity to a
-        # non-conventionally-named source (e.g. one created via the
-        # /v1/sources API), the old upsert_source(f"telegram:{entry.name}")
-        # would auto-create a parallel source and strand every candidate
-        # and message on it, breaking the collector <-> identity invariant.
-        identity_row = await self._storage.get_identity_by_name(entry.name)
-        if identity_row is None:
-            raise RuntimeError(
-                f"identity {entry.name!r} was claimed from the pool but has "
-                "no DB row; identity pool and storage are out of sync"
-            )
+        # The identity row (looked up above for the proxy lease) carries the
+        # source_id it was bound to at provisioning. See
+        # [[project_collector_source_from_identity_row]] for why we do not
+        # synthesize a ``telegram:<name>`` source here.
         self._source_uuid = identity_row.source_id
 
         # Subscribe to panic kill-switch (PLAN §6.2).

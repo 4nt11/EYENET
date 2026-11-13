@@ -477,7 +477,24 @@ class ForumCollector(CollectorSkeleton):
         routes the crawl via Tor, which wraps the TLS so impersonation is moot).
         See CLAUDE.md "4a. load-bearing TLS/evasion defaults"."""
         cookies = materialize_forum_session(entry, self._session_key)
-        proxy = getattr(entry, "proxy_uri", None) or None
+        # v1.2.0: use the identity's attached proxy pool when set, else fall
+        # back to the legacy ``proxy_uri`` (``socks5h://tor:9050`` on the
+        # Tor-everywhere path, or empty for direct). The lookup also runs at
+        # line 405 for source_id; a repeat here keeps _build_forum_client a
+        # pure function of its arguments.
+        from eyenet.collectors._proxy import lease_httpx_proxy_url  # noqa: PLC0415
+
+        proxy: str | None = None
+        identity_row = await self._storage.get_identity_by_name(entry.name)
+        if identity_row is not None:
+            proxy = await lease_httpx_proxy_url(
+                self._storage,
+                identity_row.id,
+                source_kind=SourceKind.FORUM,
+                fernet=self._session_key,
+            )
+        if proxy is None:
+            proxy = getattr(entry, "proxy_uri", None) or None
         # WAF-bypass path: a clearnet board stacking a Cloudflare JS/behavioural
         # challenge + Anubis PoW can only be cleared by a real browser. Route every
         # request through the FlareSolverr sidecar, which drives that browser and
