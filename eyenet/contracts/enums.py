@@ -238,6 +238,35 @@ class ClearanceScope(StrEnum):
     READ_STEALER = "read:stealer"
 
 
+class ProxyKind(StrEnum):
+    """Supported proxy wire protocols (API_PLAN proxy pool addendum).
+
+    SOCKS5 + HTTP/HTTPS cover forum crawls and generic HTTP ingress.
+    MTPROXY is Telegram-native (Telethon's ``ConnectionTcpMTProxy*``) and
+    uses a hex ``secret`` instead of a user/pass.
+    """
+
+    SOCKS5 = "socks5"
+    HTTP = "http"
+    HTTPS = "https"
+    MTPROXY = "mtproxy"
+
+
+class ProxyState(StrEnum):
+    """Lifecycle state of one proxy row in a pool.
+
+    ACTIVE   - eligible to be leased.
+    COOLING  - a transient error happened; back off before re-leasing.
+    BURNED   - permanent failure (auth banned, dead endpoint, operator kill).
+    DISABLED - operator paused; manual rehab required (not auto-leased).
+    """
+
+    ACTIVE = "active"
+    COOLING = "cooling"
+    BURNED = "burned"
+    DISABLED = "disabled"
+
+
 class ReclassificationSubjectKind(StrEnum):
     """What kind of row is being reclassified (§4.9)."""
 

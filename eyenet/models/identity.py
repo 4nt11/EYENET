@@ -58,6 +58,15 @@ class IdentityTable(SQLModel, table=True):
     # Fernet blob at session_path, never here. One generic column so a new
     # source is a new key set, not a schema change.
     source_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Proxy pool attachment (v1.2.0). When set, the collector leases a proxy
+    # from this pool at claim time instead of using the legacy ``proxy_uri``
+    # override. ``proxy_sticky`` controls lease shape: True pins one proxy
+    # for the identity's lifetime (Telegram requirement: TG checks auth_key
+    # x IP consistency), False allows per-operation rotation (forum).
+    # NULL ``proxy_sticky`` means "use the source-kind default": telegram and
+    # matrix default sticky, forum defaults non-sticky.
+    proxy_pool_id: UUID | None = Field(default=None, foreign_key="proxy_pool.id", index=True)
+    proxy_sticky: bool | None = None
 
 
 class IdentityLabelTable(SQLModel, table=True):

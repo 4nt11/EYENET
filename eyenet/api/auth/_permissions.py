@@ -62,6 +62,8 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "admin:users",
             "admin:tokens",
             "admin:settings",
+            "proxy:read",
+            "proxy:write",
         },
     ),
     SystemUserRole.ANALYST: frozenset(
@@ -94,6 +96,8 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
             "read:incidents",
             "write:incidents",
             "stream:incidents",
+            "proxy:read",
+            "proxy:write",
         },
     ),
     SystemUserRole.VIEWER: frozenset(
@@ -121,7 +125,7 @@ ROLE_BASELINE: Mapping[SystemUserRole, frozenset[str]] = {
 # un-bootstrappable (it gates POST /v1/clearance/grants, so a fresh admin self-grants it
 # once via `user scopes grant`, then can issue read:stealer / read:restricted / … grants).
 GRANT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
-    {"write:stealer", "admin:stealer", "admin:clearance"}
+    {"write:stealer", "admin:stealer", "admin:clearance", "proxy:admin"}
 )
 
 

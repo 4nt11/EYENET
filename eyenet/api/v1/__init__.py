@@ -182,11 +182,17 @@ from eyenet.api.v1.identities.api_qr_password import router as identities_qr_pas
 from eyenet.api.v1.identities.api_qr_relogin import router as identities_qr_relogin_router
 from eyenet.api.v1.identities.api_qr_start import router as identities_qr_start_router
 from eyenet.api.v1.identities.api_qr_status import router as identities_qr_status_router
+from eyenet.api.v1.identities.api_bind_identity_proxy import router as identities_bind_proxy_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
 from eyenet.api.v1.identities.api_replace_identity_session import (
     router as identities_replace_session_router,
 )
 from eyenet.api.v1.identities.api_update_config import router as identities_update_config_router
+
+# === proxy pools (v1.2.0) ===
+from eyenet.api.v1.proxies.api_bulk_proxies import router as proxies_bulk_router
+from eyenet.api.v1.proxies.api_pool_crud import router as proxy_pool_router
+from eyenet.api.v1.proxies.api_proxy_crud import router as proxies_router
 
 # === identities ===
 from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
@@ -509,6 +515,10 @@ v1_router.include_router(identities_freeze_router)
 v1_router.include_router(identities_burn_router)
 v1_router.include_router(identities_delete_router)
 v1_router.include_router(identities_freeze_all_router)
+v1_router.include_router(identities_bind_proxy_router)
+v1_router.include_router(proxy_pool_router)
+v1_router.include_router(proxies_router)
+v1_router.include_router(proxies_bulk_router)
 v1_router.include_router(control_panic_router)
 
 # stream

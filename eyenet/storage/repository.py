@@ -3786,6 +3786,127 @@ class BaseRepository(ABC):
         """Delete expired idempotency rows; return the count (housekeeping)."""
 
     # =================================================================
+    # PROXY POOLS (v1.2.0)
+    # =================================================================
+
+    @abstractmethod
+    async def create_proxy_pool(
+        self,
+        *,
+        name: str,
+        kind_hint: str | None,
+        description: str | None,
+        created_at: datetime,
+        created_by_user_id: UUID | None,
+    ) -> Any:
+        """Create a proxy pool row. Returns the persisted :class:`ProxyPoolRow`."""
+
+    @abstractmethod
+    async def get_proxy_pool(self, pool_id: UUID) -> Any:
+        """Return one pool row, or ``None``."""
+
+    @abstractmethod
+    async def get_proxy_pool_by_name(self, name: str) -> Any:
+        """Lookup by unique name (operator CLI + duplicate checks). ``None`` if absent."""
+
+    @abstractmethod
+    async def list_proxy_pools(self) -> list[Any]:
+        """All pools, ordered by name."""
+
+    @abstractmethod
+    async def update_proxy_pool(
+        self,
+        pool_id: UUID,
+        *,
+        name: str | None = None,
+        kind_hint: str | None = None,
+        description: str | None = None,
+    ) -> Any:
+        """Apply a patch. Only non-None fields are written. Returns the row or ``None``."""
+
+    @abstractmethod
+    async def delete_proxy_pool(self, pool_id: UUID) -> bool:
+        """Delete a pool. Raises :class:`ValueError` if the pool is non-empty.
+
+        Returns True on delete, False if the pool was already absent.
+        """
+
+    @abstractmethod
+    async def create_proxy(
+        self,
+        *,
+        pool_id: UUID,
+        kind: Any,
+        host: str,
+        port: int,
+        secret_encrypted: bytes | None,
+        source: str | None,
+        notes: str | None,
+        created_at: datetime,
+    ) -> Any:
+        """Insert one proxy. The (host, port, kind) uniqueness is DB-enforced."""
+
+    @abstractmethod
+    async def get_proxy(self, proxy_id: UUID) -> Any:
+        """Return one proxy row, or ``None``."""
+
+    @abstractmethod
+    async def list_proxies(
+        self,
+        *,
+        pool_id: UUID | None = None,
+        state: Any = None,
+    ) -> list[Any]:
+        """List proxies, optionally filtered by pool and state."""
+
+    @abstractmethod
+    async def update_proxy_state(
+        self,
+        proxy_id: UUID,
+        *,
+        state: Any,
+        last_error: str | None = None,
+    ) -> Any:
+        """Operator-triggered state flip (mark burned/active/disabled). BURNED and
+        DISABLED also release any sticky binding."""
+
+    @abstractmethod
+    async def delete_proxy(self, proxy_id: UUID) -> bool:
+        """Delete one proxy row. Returns True on delete, False if absent."""
+
+    @abstractmethod
+    async def bulk_create_proxies(
+        self,
+        *,
+        pool_id: UUID,
+        entries: list[dict[str, object]],
+        created_at: datetime,
+    ) -> dict[str, object]:
+        """Insert many proxies. Entries that collide on (host, port, kind) are
+        skipped. Returns ``{"inserted": N, "skipped_duplicate": M, "skipped_keys": [...]}``."""
+
+    @abstractmethod
+    async def bind_identity_proxy_pool(
+        self,
+        identity_id: UUID,
+        *,
+        pool_id: UUID | None,
+        sticky: bool | None,
+    ) -> Any:
+        """Attach / detach a pool to an identity + flip sticky. Returns the
+        :class:`IdentityRow` or ``None``. Detach releases any sticky bindings."""
+
+    @abstractmethod
+    async def lease_proxy_for_identity(
+        self,
+        identity_id: UUID,
+        *,
+        source_kind: Any,
+    ) -> Any:
+        """Lease (or reuse) a proxy for a collector claim. ``None`` when the
+        identity has no pool attached, or the pool has no eligible proxy."""
+
+    # =================================================================
     # LIFECYCLE
     # =================================================================
 

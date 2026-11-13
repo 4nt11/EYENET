@@ -64,6 +64,12 @@ class IdentityRow(DbRowBase):
     # monitor_groups, matrix homeserver/user/device/rooms, ...). The secret
     # stays in the Fernet blob at session_path. Never rides the bus.
     source_config: dict[str, Any] = Field(default_factory=dict)
+    # Proxy pool attachment (v1.2.0). When set, the collector leases from
+    # this pool at claim time instead of using the legacy ``proxy_uri`` override.
+    # ``proxy_sticky=None`` means "use the source-kind default" (TG/matrix
+    # sticky, forum non-sticky).
+    proxy_pool_id: UUID | None = None
+    proxy_sticky: bool | None = None
 
 
 # -- Identity labels (ground truth) ------------------------------------------

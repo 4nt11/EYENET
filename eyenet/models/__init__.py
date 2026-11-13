@@ -79,6 +79,7 @@ from .mfa import MfaChallengeTable
 from .observation import ObservationTable
 from .persona import PersonaMembershipTable, PersonaTable
 from .profile import ProfileTable
+from .proxy import ProxyPoolTable, ProxyTable
 from .reaction import ReactionTable
 from .relation import ActorRelationTable
 from .search import SearchDocumentTable
@@ -158,6 +159,8 @@ __all__ = [
     "PersonaTable",
     "PersonalAccessTokenTable",
     "ProfileTable",
+    "ProxyPoolTable",
+    "ProxyTable",
     "ReactionTable",
     "RefreshTokenTable",
     "SQLModel",
