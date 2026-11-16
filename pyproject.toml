@@ -1,6 +1,6 @@
 [project]
 name = "eyenet"
-version = "1.2.5"
+version = "1.2.6"
 description = "Observation framework for forensic analysis of threat actors. Sibling of DECNET, consumer of BEHAVE-TEXT."
 readme = "README.md"
 requires-python = ">=3.12"

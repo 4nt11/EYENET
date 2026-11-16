@@ -24,7 +24,7 @@ from eyenet.contracts.stealer_events import (
 )
 from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED
 from eyenet.service import ServiceBase
-from eyenet.stealer.clickhouse import ClickHouseCredsSink
+from eyenet.stealer.clickhouse import ClickHouseCredsSink, FileAuditSink
 from eyenet.stealer.password import parse_password, password_candidates
 from eyenet.stealer.pipeline import process_archive
 from eyenet.telemetry.logging import get_logger
@@ -50,6 +50,11 @@ class StealerProcessorService(ServiceBase):
         super().__init__(bus=bus, storage=storage)
         self._instance_id = instance_id
         self._sink = ClickHouseCredsSink()
+        # v1.2.6 observability side channel. One row per file per archive into
+        # stealer.file_audit so operators can SQL-query "what files do we see
+        # that we are not parsing". Separate sink so a schema hiccup on it
+        # cannot break the primary creds insert path.
+        self._audit_sink = FileAuditSink()
         # Scratch space for the (large) archive extraction; cleaned per-archive.
         self._work_root = Path(
             os.environ.get("EYENET_STEALER_WORK_DIR", "/var/lib/eyenet/stealer-work")
@@ -120,6 +125,7 @@ class StealerProcessorService(ServiceBase):
             work_root=self._work_root,
             sink=self._sink,
             source_label=f"attachment:{attachment_id}",
+            audit_sink=self._audit_sink,
         )
         if result.ok:
             await self._storage.set_stealer_processing(
@@ -136,6 +142,7 @@ class StealerProcessorService(ServiceBase):
 
     async def shutdown(self) -> None:
         self._sink.close()
+        self._audit_sink.close()
         await super().shutdown()
 
 

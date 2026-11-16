@@ -147,4 +147,92 @@ class ClickHouseCredsSink:
             self._client = None
 
 
-__all__ = ["ClickHouseCredsSink", "clickhouse_db", "get_clickhouse_client"]
+# v1.2.6 observability side channel. One row per file in every per-victim folder
+# of every archive, so operators can answer "what files do we SEE that we are
+# not parsing" from a SQL query instead of spelunking blobs by hand. The table
+# is intentionally thin (no per-line counts; v1.3.0 adds those when the Go
+# extractor is touched for the rule engine). ReplacingMergeTree collapses
+# re-scans of the same file in the same archive on dedup.
+_FILE_AUDIT_CREATE = """
+CREATE TABLE IF NOT EXISTS {db}.file_audit
+(
+    archive_sha256      FixedString(64),
+    rel_path            String,
+    filename            String,
+    size_bytes          UInt64,
+    file_sha256         FixedString(64),
+    heuristic_kind      LowCardinality(String),
+    extractor_touched   UInt8    DEFAULT 0,
+    rows_emitted        UInt32   DEFAULT 0,
+    approx_banner_hits  UInt32   DEFAULT 0,
+    approx_null_pw_hits UInt32   DEFAULT 0,
+    sample_head         String,
+    parsed_at           DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(parsed_at)
+ORDER BY (archive_sha256, rel_path)
+{storage_policy_clause}
+"""
+
+_FILE_AUDIT_COLUMNS = [
+    "archive_sha256",
+    "rel_path",
+    "filename",
+    "size_bytes",
+    "file_sha256",
+    "heuristic_kind",
+    "extractor_touched",
+    "rows_emitted",
+    "approx_banner_hits",
+    "approx_null_pw_hits",
+    "sample_head",
+]
+
+
+class FileAuditSink:
+    """CH sink for the file_audit observability table. Mirrors
+    ``ClickHouseCredsSink`` shape so the pipeline can init + call insert_rows
+    the same way. Separate class so a CH misconfig on file_audit never breaks
+    the credential insert path."""
+
+    def __init__(self) -> None:
+        self._db = clickhouse_db()
+        self._client: Client | None = None
+
+    def _connect(self) -> Client:
+        if self._client is None:
+            self._client = get_clickhouse_client()
+        return self._client
+
+    def ensure_schema(self) -> None:
+        """Create database + file_audit table if absent. Idempotent."""
+        client = self._connect()
+        client.command(_CREATE_DB.format(db=self._db))
+        client.command(
+            _FILE_AUDIT_CREATE.format(
+                db=self._db,
+                storage_policy_clause=_storage_policy_clause(),
+            )
+        )
+
+    def insert_rows(self, rows: Iterable[list[Any]]) -> int:
+        batch: list[list[Any]] = list(rows)
+        if not batch:
+            return 0
+        self._connect().insert(
+            f"{self._db}.file_audit", batch, column_names=_FILE_AUDIT_COLUMNS
+        )
+        return len(batch)
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
+__all__ = [
+    "ClickHouseCredsSink",
+    "FileAuditSink",
+    "clickhouse_db",
+    "get_clickhouse_client",
+]

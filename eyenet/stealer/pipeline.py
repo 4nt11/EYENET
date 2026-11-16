@@ -24,7 +24,7 @@ from eyenet.telemetry.logging import get_logger
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from eyenet.stealer.clickhouse import ClickHouseCredsSink
+    from eyenet.stealer.clickhouse import ClickHouseCredsSink, FileAuditSink
 
 _log = get_logger()
 _ULPEXTRACT_COLUMNS = 9  # host,url,login,password,scheme,tld,source,ip_class,source_file
@@ -138,9 +138,16 @@ def process_archive(
     work_root: Path,
     sink: ClickHouseCredsSink,
     source_label: str,
+    audit_sink: FileAuditSink | None = None,
 ) -> ProcessResult:
     """Decrypt + extract the archive, ulpextract its password files, stream creds into
-    ClickHouse. Cleans up the temp extraction tree. Synchronous — call via to_thread."""
+    ClickHouse. Cleans up the temp extraction tree. Synchronous: call via to_thread.
+
+    ``audit_sink`` is the v1.2.6 side channel for the file_audit observability
+    table. When present, every file in the decrypted work dir is classified +
+    sampled into a row AFTER the credential extraction runs (so an audit sink
+    misconfig cannot break the primary creds path). None keeps the pre-v1.2.6
+    behaviour (no audit rows written)."""
     work_root.mkdir(parents=True, exist_ok=True)
     dest = Path(tempfile.mkdtemp(dir=work_root, prefix="ulp-"))
     try:
@@ -163,9 +170,53 @@ def process_archive(
         total += sink.insert_rows(batch)
         _log.info("stealer.archive_processed", creds=total, files=len(pw_files),
                   blob=blob_path.name)
+        if audit_sink is not None:
+            _write_file_audit(audit_sink, dest, blob_path, pw_files)
         return ProcessResult(ok=True, creds_inserted=total, password_used=pw)
     finally:
         shutil.rmtree(dest, ignore_errors=True)  # never leave a 2 GB tree behind
+
+
+def _write_file_audit(
+    audit_sink: FileAuditSink, dest: Path, blob_path: Path, pw_files: list[Path]
+) -> None:
+    """Walk the decrypted work dir, scan every file, write rows to file_audit.
+
+    Failures land as a WARN log, never raised: an audit-side DB hiccup must
+    not propagate out to stealer_processor.done. ``archive_sha256`` is taken
+    from the blob's filename (``<sha256>.bin``) so audit rows join back to the
+    attachment row in PG by sha."""
+    try:
+        from eyenet.stealer.file_scan import walk_audit  # noqa: PLC0415
+
+        audit_sink.ensure_schema()
+        pw_rel = {str(p.relative_to(dest)) for p in pw_files}
+        archive_sha = blob_path.stem  # <sha256>.bin -> <sha256>
+        batch: list[list[object]] = []
+        count = 0
+        for a in walk_audit(dest):
+            batch.append(
+                [
+                    archive_sha,
+                    a.rel_path,
+                    a.filename,
+                    a.size_bytes,
+                    a.file_sha256,
+                    a.heuristic_kind,
+                    1 if a.rel_path in pw_rel else 0,
+                    0,  # rows_emitted: v1.2.6 cannot count per-file yet; v1.3.0 fills it
+                    a.approx_banner_hits,
+                    a.approx_null_pw_hits,
+                    a.sample_head,
+                ]
+            )
+            if len(batch) >= _INSERT_BATCH:
+                count += audit_sink.insert_rows(batch)
+                batch = []
+        count += audit_sink.insert_rows(batch)
+        _log.info("stealer.file_audit_written", archive=archive_sha, rows=count)
+    except Exception as exc:  # noqa: BLE001 - audit side channel; never fail the pipeline
+        _log.warning("stealer.file_audit_failed", error=str(exc), error_type=type(exc).__name__)
 
 
 __all__ = ["ProcessResult", "process_archive"]
