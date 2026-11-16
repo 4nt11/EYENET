@@ -38,7 +38,35 @@ var (
 	leadingSchm  = regexp.MustCompile(`(?i)^([a-z][a-z0-9+-]*)://`) // captures the scheme token (no dots: a host fragment is not a scheme)
 	corrupt      = regexp.MustCompile(`(?i)ht[0-9]ps://`)           // byte-corrupted https -> whole line is garbage, drop
 	cleaner      = strings.NewReplacer("\t", "", "\r", "", "\n", "") // TSV-safe (concurrent-safe)
+
+	// Seller banner / ad text that stealer-log archive packagers interleave with
+	// real credential records. Without filtering, the ML accumulator picks these
+	// up as login values and pairs them with whatever password label (or placeholder
+	// like "Null") follows. Observed shapes on the Khazan Cloud corpus (v1.2.4):
+	//   TG t.me/+<hash>
+	//   TELEGRAM - t.me/+<hash>
+	//   Cloud Channel - t.me/+<hash>
+	//   OUR CHANNEL ...
+	// Any login that leads with one of these markers, or contains " t.me/" at
+	// word-boundary distance from the start, is rejected.
+	bannerLogin = regexp.MustCompile(`(?i)^(tg|telegram|channel|our\s+channel|cloud\s+channel|subscribe|join)\b[\s:|-]|\st\.me/`)
 )
+
+// Chrome/Firefox password exports and stealer dump templates emit literal
+// placeholders when the stored password slot is empty. These are not credentials;
+// dropping them stops both the junk rows and the dedup collision where N URLs
+// collapse onto one bogus (login, "Null") pair.
+func isNullPassword(p string) bool {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "", "null", "none", "unknown", "n/a", "na", "(null)", "(none)", "(empty)", "nil":
+		return true
+	}
+	return false
+}
+
+func isBannerLogin(l string) bool {
+	return bannerLogin.MatchString(l)
+}
 
 const trim = " \t:;|,"
 
@@ -383,7 +411,14 @@ func processFile(path string, out *bufio.Writer, mu *sync.Mutex) (kept, dropped 
 	peek, _ := br.Peek(256)
 	enc := detectEncoding(peek)
 
-	src := cleaner.Replace(filepath.Base(path)) // provenance: the source dump (later: channel id -> actor)
+	// Two-level provenance: ``src`` is the dump name (the archive package
+	// channel/actor; later overridden by the Python pipeline with a stable
+	// source_label), ``innerFile`` is the per-record file inside the archive
+	// (bookmarks.txt, passwords.txt, autofills.txt, etc). The pipeline passes
+	// innerFile through unchanged as column 9 so operators can trace a bad
+	// cred back to the file it was extracted from.
+	src := cleaner.Replace(filepath.Base(path))
+	innerFile := cleaner.Replace(path)
 	buf := bytes.Buffer{}
 	flush := func() {
 		if buf.Len() == 0 {
@@ -395,6 +430,15 @@ func processFile(path string, out *bufio.Writer, mu *sync.Mutex) (kept, dropped 
 		buf.Reset()
 	}
 	emitRow := func(sch, h, url, login, pw string) {
+		// v1.2.5 noise filters: reject rows where the login field is a seller
+		// banner (TG/TELEGRAM/Channel/t.me/...), or the password is a literal
+		// placeholder (Null/None/Unknown/...). Both patterns surface on real
+		// stealer-log corpora and collapse via ReplacingMergeTree into a huge
+		// clump of (banner, Null) false rows that dominate dedup keys.
+		if isBannerLogin(login) || isNullPassword(pw) {
+			dropped++
+			return
+		}
 		buf.WriteString(cleaner.Replace(h))
 		buf.WriteByte('\t')
 		buf.WriteString(cleaner.Replace(url))
@@ -410,6 +454,8 @@ func processFile(path string, out *bufio.Writer, mu *sync.Mutex) (kept, dropped 
 		buf.WriteString(src)
 		buf.WriteByte('\t')
 		buf.WriteString(ipClass(h))
+		buf.WriteByte('\t')
+		buf.WriteString(innerFile)
 		buf.WriteByte('\n')
 		kept++
 		if buf.Len() > 1<<20 {

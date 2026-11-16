@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from clickhouse_connect.driver.client import Client
 
 # ulpextract emits these columns, tab-separated, in this order.
-_COLUMNS = ["host", "url", "login", "password", "scheme", "tld", "source", "ip_class"]
+_COLUMNS = [
+    "host", "url", "login", "password", "scheme", "tld", "source", "ip_class", "source_file"
+]
 
 _CREATE_DB = "CREATE DATABASE IF NOT EXISTS {db}"
 # ReplacingMergeTree collapses rows with identical (host, login, password) on merge,
@@ -37,20 +39,36 @@ _CREATE_DB = "CREATE DATABASE IF NOT EXISTS {db}"
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS {db}.creds
 (
-    host     String,
-    url      String,
-    login    String,
-    password String,
-    scheme   LowCardinality(String) DEFAULT '',
-    tld      LowCardinality(String) DEFAULT '',
-    source   LowCardinality(String) DEFAULT '',
-    ip_class LowCardinality(String) DEFAULT '',
-    ingested DateTime               DEFAULT now()
+    host        String,
+    url         String,
+    login       String,
+    password    String,
+    scheme      LowCardinality(String) DEFAULT '',
+    tld         LowCardinality(String) DEFAULT '',
+    source      LowCardinality(String) DEFAULT '',
+    ip_class    LowCardinality(String) DEFAULT '',
+    source_file String                 DEFAULT '',
+    ingested    DateTime               DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(ingested)
 ORDER BY (host, login, password)
 {storage_policy_clause}
 """
+
+# Schema-upgrade DDL idempotently applied after _CREATE_TABLE on every
+# ``ensure_schema`` call. Each statement must be an ``ALTER TABLE ... IF
+# NOT EXISTS`` (or MODIFY-COLUMN-safe equivalent) so re-running against an
+# already-upgraded table is a no-op. CH 24.x supports IF NOT EXISTS on
+# ADD COLUMN. Keep oldest-first; never remove a line, even after it has
+# been in every running cluster for a release, so a long-skipped operator
+# upgrading across multiple versions still catches it.
+_ALTER_TABLE = (
+    # v1.2.5 - per-record source file (the ulpextract inner path). Earlier
+    # releases dropped this on the floor via fields[6] overwrite; now kept
+    # as its own column so a bad row traces back to the file that produced
+    # it, and the v1.3.0 infections join has a key to attach on.
+    "ALTER TABLE {db}.creds ADD COLUMN IF NOT EXISTS source_file String DEFAULT ''",
+)
 
 
 def _storage_policy_clause() -> str:
@@ -100,7 +118,9 @@ class ClickHouseCredsSink:
         return self._client
 
     def ensure_schema(self) -> None:
-        """Create the database + creds table if absent (idempotent)."""
+        """Create the database + creds table if absent AND apply the idempotent
+        ALTER chain (``_ALTER_TABLE``) so an older cluster upgrades in place
+        without an operator action."""
         client = self._connect()
         client.command(_CREATE_DB.format(db=self._db))
         client.command(
@@ -109,10 +129,12 @@ class ClickHouseCredsSink:
                 storage_policy_clause=_storage_policy_clause(),
             )
         )
+        for alter in _ALTER_TABLE:
+            client.command(alter.format(db=self._db))
 
     def insert_rows(self, rows: Iterable[list[str]]) -> int:
-        """Insert cred rows (each an 8-value list matching ulpextract's columns).
-        Returns the number inserted. Caller batches; this is one INSERT per call."""
+        """Insert cred rows (each a value list matching ``_COLUMNS``). Returns
+        the number inserted. Caller batches; this is one INSERT per call."""
         batch: list[list[Any]] = list(rows)
         if not batch:
             return 0

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from eyenet.stealer.clickhouse import ClickHouseCredsSink
 
 _log = get_logger()
-_ULPEXTRACT_COLUMNS = 8  # host,url,login,password,scheme,tld,source,ip_class
+_ULPEXTRACT_COLUMNS = 9  # host,url,login,password,scheme,tld,source,ip_class,source_file
 
 # Password-file glob inside a stealer log tree (the ULP creds). Matched case-INSENSITIVE
 # (3.12 rglob) because dumps mix casings: passwords.txt, Passwords.txt, All Passwords.txt,
@@ -113,8 +113,17 @@ def _ulpextract_rows(files: list[Path], source_label: str) -> Iterator[list[str]
         for line in proc.stdout:
             fields = line.rstrip("\n").split("\t")
             if len(fields) == _ULPEXTRACT_COLUMNS:
-                # ulpextract's source column is the file path; override with a stable
-                # provenance label (the channel/archive) for the corpus.
+                # Columns 6 and 8 are the two levels of provenance:
+                #   fields[6] "source": the dump bucket (archive basename);
+                #   fields[8] "source_file": the per-record file path inside
+                #     the decrypted archive (``.../<victim-folder>/passwords.txt``)
+                # We overwrite column 6 with ``source_label`` (the stealer
+                # channel + archive marker) so corpus queries have a stable
+                # outside-the-archive identity; we leave column 8 as-is so
+                # operators can trace a bad row back to the exact inner file
+                # that produced it (prerequisite for the v1.3.0 infection
+                # metadata join, and the only way to debug a future extractor
+                # bug without re-running ulpextract by hand).
                 fields[6] = source_label
                 yield fields
     finally:
