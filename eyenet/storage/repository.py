@@ -2676,6 +2676,20 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def absorb_invite_ghost(
+        self,
+        *,
+        ghost_group_id: UUID,
+        resolved_group_id: UUID,
+        at: datetime,
+    ) -> str | None:
+        """Clean up invite-link ghost references after canonical row creation.
+        Closes active ghost memberships (superseded_by_resolved_group), retargets
+        ``group_candidate.resulting_group_id`` onto the resolved row, and returns
+        the ghost's ``category`` so the caller can port it. One transaction.
+        """
+
+    @abstractmethod
     async def list_groups_by_category(
         self, category: str, *, source_id: UUID | None = None
     ) -> list[GroupRow]:

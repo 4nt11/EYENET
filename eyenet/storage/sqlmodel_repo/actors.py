@@ -17,6 +17,8 @@ from eyenet.contracts.group import GroupRow
 from eyenet.contracts.source import SourceRow
 from eyenet.models import ActorTable, GroupTable, MembershipTable, SourceTable
 from eyenet.models.actor import ActorAliasHistoryTable
+from eyenet.models.candidates import GroupCandidateTable
+from eyenet.models.membership import CollectorGroupMembershipTable
 from eyenet.models.message import MessageTable
 from eyenet.models.observation import ObservationTable
 
@@ -435,6 +437,55 @@ class ActorsMixin:
             )
             row = result.first()
             return None if row is None else _to_group_row(row)
+
+    async def absorb_invite_ghost(
+        self,
+        *,
+        ghost_group_id: UUID,
+        resolved_group_id: UUID,
+        at: datetime,
+    ) -> str | None:
+        """Clean up references to an invite-link ghost group after its canonical
+        chat_id row is created. One transaction. Returns the ghost's
+        ``category`` (``None`` if unset) so the caller can port it onto the
+        resolved row.
+
+        Cleaned up:
+          * active ``collector_group_membership`` rows on the ghost get
+            ``left_at`` / ``left_reason='superseded_by_resolved_group'``: the
+            ghost is about to be marked ``channel_deleted`` by the liveness
+            probe anyway, and the caller is opening a fresh membership on the
+            resolved row. Closing (not retargeting) avoids a duplicate active
+            row at the (collector, resolved_group) key.
+          * ``group_candidate.resulting_group_id`` retargets to the resolved
+            row: the candidate history otherwise still names the ghost as its
+            outcome.
+
+        No-op when the ghost has no rows pointing at it.
+        """
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            memberships = await session.exec(
+                select(CollectorGroupMembershipTable).where(
+                    CollectorGroupMembershipTable.group_id == ghost_group_id,
+                    col(CollectorGroupMembershipTable.left_at) == None,  # noqa: E711
+                )
+            )
+            for m in list(memberships):
+                m.left_at = at
+                m.left_reason = "superseded_by_resolved_group"
+                session.add(m)
+            candidates = await session.exec(
+                select(GroupCandidateTable).where(
+                    GroupCandidateTable.resulting_group_id == ghost_group_id
+                )
+            )
+            for c in list(candidates):
+                c.resulting_group_id = resolved_group_id
+                session.add(c)
+            ghost = await session.get(GroupTable, ghost_group_id)
+            category = ghost.category if ghost is not None else None
+            await session.commit()
+            return category
 
     async def set_group_category(self, group_id: UUID, category: str | None) -> bool:
         """Set (or clear, with ``None``) a group's collection-class ``category``.

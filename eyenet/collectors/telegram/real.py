@@ -532,12 +532,26 @@ class TelegramCollector(CollectorSkeleton):
             await self._handle_join_error(cmd, exc)
             return
 
+        # For an invite-link join the command's platform_groupid is the
+        # unresolvable ``joinchat:<hash>`` form; pass the resolved canonical
+        # chat_id Telethon just handed us so finalize_joined opens the
+        # membership + group row against the SAME platform_groupid the live
+        # ingest path keys on. Without this, two group rows diverge: a ghost
+        # on the invite-link form (what the operator pre-marked and what the
+        # monitor set seeds against) and a canonical on the chat_id (what the
+        # collector actually ingests into).
+        resolved_platform_groupid: str | None = None
+        if action is JoinAction.INVITE_HASH:
+            entity_id = getattr(entity, "id", None)
+            if isinstance(entity_id, int):
+                resolved_platform_groupid = str(entity_id)
         group_id = await self._join.finalize_joined(
             cmd,
             source_uuid=self._source_uuid,
             collector_id=self._collector_id,
             kind=_chat_kind(entity),
             title=getattr(entity, "title", None),
+            resolved_platform_groupid=resolved_platform_groupid,
         )
         # Observe the freshly joined group on the live session (else the 7-day
         # graduation window sees no traffic). None => we already watch all.

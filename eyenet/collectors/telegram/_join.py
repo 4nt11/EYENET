@@ -209,6 +209,7 @@ class CollectorJoinHandler:
         collector_id: UUID,
         kind: GroupKind,
         title: str | None,
+        resolved_platform_groupid: str | None = None,
         now: datetime | None = None,
     ) -> UUID | None:
         """Record a confirmed platform join (candidate joining→joined).
@@ -218,13 +219,24 @@ class CollectorJoinHandler:
         ``joined_via=candidate`` membership carrying the originating
         ``candidate_id``, sets ``resulting_group_id``, and emits
         ``candidate.joined``. Returns the Group id, or ``None`` if the candidate
-        was no longer ``joining`` (lost the race / already settled)."""
+        was no longer ``joining`` (lost the race / already settled).
+
+        ``resolved_platform_groupid`` overrides the command's platform_groupid
+        when the caller has resolved an invite-link (``joinchat:<hash>``) to a
+        canonical chat_id via ImportChatInviteRequest. Without it, the membership
+        + group row open against the unresolvable invite-link form and the live
+        ingest path (keyed by resolved chat_id) silently diverges into a second
+        group row."""
         return await self._open_joined_membership(
             candidate_id=cmd.candidate_id,
             from_state=CandidateState.JOINING,
             source_uuid=source_uuid,
             collector_id=collector_id,
-            platform_groupid=cmd.platform_groupid,
+            platform_groupid=(
+                resolved_platform_groupid
+                if resolved_platform_groupid is not None
+                else cmd.platform_groupid
+            ),
             kind=kind,
             title=title,
             scout_identity_id=cmd.scout_identity_id,
@@ -269,11 +281,14 @@ class CollectorJoinHandler:
         )
         # Invite-link ghost cleanup: a candidate reached via ``joinchat:<hash>``
         # upserted a placeholder group row BEFORE Telethon resolved the invite to
-        # the canonical chat_id. Any collection-class marker set pre-join
-        # (``category=stealer_logs``) lives on that ghost, not on the row the
-        # collector will actually ingest into, and the ULP pipeline silently
-        # queues nothing. Port the marker across once, here, so the single
-        # operator action lands on the right row regardless of order.
+        # the canonical chat_id. Anything that referenced the ghost (the
+        # ``category`` marker the operator set pre-join, the membership that
+        # populates the collector's monitor set, the candidate's recorded
+        # outcome) silently points at a row the resolver is about to kill, and
+        # the resolved row gets neither. Retarget everything onto the resolved
+        # group in one transaction so the single operator action lands on the
+        # right row regardless of order (category, membership, candidate
+        # outcome). Safe to no-op when there is no ghost or no refs.
         candidate = await self._storage.get_candidate(candidate_id)
         if (
             candidate is not None
@@ -283,14 +298,20 @@ class CollectorJoinHandler:
             ghost = await self._storage.get_group_by_platform_id(
                 source_id=source_uuid, platform_groupid=candidate.platform_groupid
             )
-            if ghost is not None and ghost.category and ghost.id != group_id:
-                await self._storage.set_group_category(group_id, ghost.category)
-                await self._storage.set_group_category(ghost.id, None)
+            if ghost is not None and ghost.id != group_id:
+                ported_category = await self._storage.absorb_invite_ghost(
+                    ghost_group_id=ghost.id,
+                    resolved_group_id=group_id,
+                    at=at,
+                )
+                if ported_category:
+                    await self._storage.set_group_category(group_id, ported_category)
+                    await self._storage.set_group_category(ghost.id, None)
                 _log.info(
-                    "collector.category_ported_from_invite_ghost",
+                    "collector.invite_ghost_absorbed",
                     ghost_group_id=str(ghost.id),
                     resolved_group_id=str(group_id),
-                    category=ghost.category,
+                    category=ported_category,
                 )
         won = await self._storage.claim_candidate_transition(
             candidate_id,

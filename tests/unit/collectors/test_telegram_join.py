@@ -428,13 +428,15 @@ async def test_confirm_requested_is_idempotent(storage: BaseRepository) -> None:
     assert len(joined_events) == 1
 
 
-async def test_confirm_requested_ports_category_from_invite_ghost(
+async def test_confirm_requested_absorbs_invite_ghost(
     storage: BaseRepository,
 ) -> None:
-    """Invite-link candidate marked ``stealer_logs`` pre-join has the marker
-    ported to the resolved canonical group row when Telethon resolves the
-    invite to a real chat_id. Without this, the marker sits on a ghost row the
-    collector never ingests into and the ULP pipeline silently queues nothing."""
+    """An invite-link candidate (``joinchat:<hash>``) resolves to a canonical
+    chat_id row; every DB reference on the ghost (category marker, active
+    membership, candidate.resulting_group_id) must retarget to the resolved
+    row. Without this, the collector's monitor set keeps pointing at a ghost
+    the liveness probe is about to kill, the operator's category mark is
+    stranded, and the ULP pipeline silently queues nothing."""
     src = await _source(storage)
     coll = await _collector(storage, src)
     cand_row = await storage.ensure_candidate(
@@ -453,9 +455,10 @@ async def test_confirm_requested_ports_category_from_invite_ghost(
         to_state=CandidateState.REQUESTED,
         rejection_reason="join_request_sent",
     )
-    # Simulate the ghost row that got upserted against the invite-link form at
-    # join-dispatch time, then operator-marked `stealer_logs` before the actual
-    # join confirmed.
+    # Simulate the two ghost-side artifacts the pre-fix flow left behind:
+    # a GroupTable row on the invite-link form, operator-marked stealer_logs
+    # pre-join, plus an active ghost membership (the collector seeded its
+    # monitor set off the ghost when the original flow lacked a resolved id).
     ghost_id, _ = await storage.upsert_group(
         source_id=src,
         platform_groupid="joinchat:ABCDEF0123",
@@ -464,6 +467,13 @@ async def test_confirm_requested_ports_category_from_invite_ghost(
         seen_at=_NOW,
     )
     await storage.set_group_category(ghost_id, "stealer_logs")
+    await storage.open_membership(
+        collector_id=coll,
+        group_id=ghost_id,
+        joined_at=_NOW,
+        joined_via=JoinedVia.CANDIDATE,
+        joined_via_candidate_id=cand,
+    )
 
     handler = _handler(storage, _FakePool())
     confirmed = await handler.confirm_requested_membership(
@@ -475,6 +485,7 @@ async def test_confirm_requested_ports_category_from_invite_ghost(
     assert row.resulting_group_id is not None
     assert row.resulting_group_id != ghost_id
 
+    # Category ported onto the resolved row; ghost cleared.
     resolved = await storage.get_group(row.resulting_group_id)
     assert resolved is not None
     assert resolved.category == "stealer_logs"
@@ -482,6 +493,16 @@ async def test_confirm_requested_ports_category_from_invite_ghost(
     ghost = await storage.get_group(ghost_id)
     assert ghost is not None
     assert ghost.category is None
+
+    # Ghost membership closed (not retargeted) so open_membership on the
+    # resolved group does not collide; collector sees exactly one active
+    # membership and its monitor set points at the resolved row.
+    assert await storage.list_active_memberships(group_id=ghost_id) == []
+    resolved_memberships = await storage.list_active_memberships(
+        group_id=row.resulting_group_id
+    )
+    assert len(resolved_memberships) == 1
+    assert resolved_memberships[0].joined_via_candidate_id == cand
 
 
 @pytest.mark.parametrize(
