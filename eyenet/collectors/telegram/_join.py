@@ -267,6 +267,31 @@ class CollectorJoinHandler:
             title=title,
             seen_at=at,
         )
+        # Invite-link ghost cleanup: a candidate reached via ``joinchat:<hash>``
+        # upserted a placeholder group row BEFORE Telethon resolved the invite to
+        # the canonical chat_id. Any collection-class marker set pre-join
+        # (``category=stealer_logs``) lives on that ghost, not on the row the
+        # collector will actually ingest into, and the ULP pipeline silently
+        # queues nothing. Port the marker across once, here, so the single
+        # operator action lands on the right row regardless of order.
+        candidate = await self._storage.get_candidate(candidate_id)
+        if (
+            candidate is not None
+            and candidate.platform_groupid != platform_groupid
+            and candidate.platform_groupid.startswith("joinchat:")
+        ):
+            ghost = await self._storage.get_group_by_platform_id(
+                source_id=source_uuid, platform_groupid=candidate.platform_groupid
+            )
+            if ghost is not None and ghost.category and ghost.id != group_id:
+                await self._storage.set_group_category(group_id, ghost.category)
+                await self._storage.set_group_category(ghost.id, None)
+                _log.info(
+                    "collector.category_ported_from_invite_ghost",
+                    ghost_group_id=str(ghost.id),
+                    resolved_group_id=str(group_id),
+                    category=ghost.category,
+                )
         won = await self._storage.claim_candidate_transition(
             candidate_id,
             from_state=from_state,

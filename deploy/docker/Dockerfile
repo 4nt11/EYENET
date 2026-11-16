@@ -58,8 +58,18 @@ RUN useradd -r -u 10001 -m -d /home/eyenet -s /usr/sbin/nologin eyenet
 COPY --from=builder /opt/venv /opt/venv
 
 # Data volume mount point, owned by the service account BEFORE it becomes a named
-# volume so the first `compose up` inherits eyenet ownership (not root).
-RUN install -d -o eyenet -g eyenet /var/lib/eyenet
+# volume so the first `compose up` inherits eyenet ownership (not root). Subdirs
+# are pre-created with the right owner so a later `chown root /var/lib/eyenet`
+# (e.g. an operator exec, or a rootless-to-root migration) does not leave the
+# collector unable to `mkdir attachments/` on first media download. The missing
+# attachments/ was a silent `backfill_error [Errno 13] Permission denied` seen
+# on prod v1.1.x; identities/jwt/stealer-work already existed from earlier
+# deploys where the top dir was still eyenet-owned.
+RUN install -d -o eyenet -g eyenet /var/lib/eyenet \
+    && install -d -o eyenet -g eyenet /var/lib/eyenet/attachments \
+    && install -d -o eyenet -g eyenet /var/lib/eyenet/identities \
+    && install -d -o eyenet -g eyenet /var/lib/eyenet/jwt \
+    && install -d -o eyenet -g eyenet /var/lib/eyenet/stealer-work
 
 # Neutral runtime cwd (no ./eyenet source to shadow the installed package).
 WORKDIR /home/eyenet

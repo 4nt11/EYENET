@@ -420,6 +420,22 @@ class ActorsMixin:
             table = await session.get(GroupTable, group_id)
             return None if table is None else _to_group_row(table)
 
+    async def get_group_by_platform_id(
+        self, *, source_id: UUID, platform_groupid: str
+    ) -> GroupRow | None:
+        """Look up one group by (source, platform_groupid). The join path uses this
+        to find an invite-link ghost (``joinchat:<hash>``) before the resolved row
+        is created, so a pre-join ``category`` mark can be ported."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            result = await session.exec(
+                select(GroupTable).where(
+                    GroupTable.source_id == source_id,
+                    GroupTable.platform_groupid == platform_groupid,
+                )
+            )
+            row = result.first()
+            return None if row is None else _to_group_row(row)
+
     async def set_group_category(self, group_id: UUID, category: str | None) -> bool:
         """Set (or clear, with ``None``) a group's collection-class ``category``.
 

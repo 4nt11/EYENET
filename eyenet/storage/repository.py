@@ -2664,6 +2664,18 @@ class BaseRepository(ABC):
         """
 
     @abstractmethod
+    async def get_group_by_platform_id(
+        self, *, source_id: UUID, platform_groupid: str
+    ) -> GroupRow | None:
+        """Look up one group by its (source, platform_groupid) uniqueness key.
+
+        Used by the join path to detect an invite-link ghost (platform_groupid
+        of the form ``joinchat:<hash>``) that carries a pre-join ``category``
+        marker, so the marker can be ported onto the resolved canonical row.
+        Returns ``None`` when no match. Dialect-neutral.
+        """
+
+    @abstractmethod
     async def list_groups_by_category(
         self, category: str, *, source_id: UUID | None = None
     ) -> list[GroupRow]:

@@ -428,6 +428,62 @@ async def test_confirm_requested_is_idempotent(storage: BaseRepository) -> None:
     assert len(joined_events) == 1
 
 
+async def test_confirm_requested_ports_category_from_invite_ghost(
+    storage: BaseRepository,
+) -> None:
+    """Invite-link candidate marked ``stealer_logs`` pre-join has the marker
+    ported to the resolved canonical group row when Telethon resolves the
+    invite to a real chat_id. Without this, the marker sits on a ghost row the
+    collector never ingests into and the ULP pipeline silently queues nothing."""
+    src = await _source(storage)
+    coll = await _collector(storage, src)
+    cand_row = await storage.ensure_candidate(
+        source_id=src, platform_groupid="joinchat:ABCDEF0123", seen_at=_NOW
+    )
+    cand = cand_row.id
+    await storage.transition_candidate(candidate_id=cand, to_state=CandidateState.QUEUED)
+    await storage.transition_candidate(
+        candidate_id=cand,
+        to_state=CandidateState.APPROVED,
+        assigned_collector_id=coll,
+    )
+    await storage.transition_candidate(candidate_id=cand, to_state=CandidateState.JOINING)
+    await storage.transition_candidate(
+        candidate_id=cand,
+        to_state=CandidateState.REQUESTED,
+        rejection_reason="join_request_sent",
+    )
+    # Simulate the ghost row that got upserted against the invite-link form at
+    # join-dispatch time, then operator-marked `stealer_logs` before the actual
+    # join confirmed.
+    ghost_id, _ = await storage.upsert_group(
+        source_id=src,
+        platform_groupid="joinchat:ABCDEF0123",
+        kind=GroupKind.CHANNEL,
+        title="Khazan-ghost",
+        seen_at=_NOW,
+    )
+    await storage.set_group_category(ghost_id, "stealer_logs")
+
+    handler = _handler(storage, _FakePool())
+    confirmed = await handler.confirm_requested_membership(
+        cand, resolved_platform_groupid="100200300", now=_NOW
+    )
+
+    assert confirmed is True
+    row = await storage.get_candidate(cand)
+    assert row.resulting_group_id is not None
+    assert row.resulting_group_id != ghost_id
+
+    resolved = await storage.get_group(row.resulting_group_id)
+    assert resolved is not None
+    assert resolved.category == "stealer_logs"
+
+    ghost = await storage.get_group(ghost_id)
+    assert ghost is not None
+    assert ghost.category is None
+
+
 @pytest.mark.parametrize(
     "terminal",
     [CandidateState.FAILED, CandidateState.PARKED],
