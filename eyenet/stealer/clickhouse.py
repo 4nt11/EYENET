@@ -236,10 +236,13 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
     # The unknown_files predicate mirrors the /audit/unknown endpoint: files the
     # extractor did NOT touch, excluding empty/binary (operator cannot write a
     # rule for those). Keep in sync with FileAuditReader.unknown()'s WHERE.
+    # CH 24.x refuses TO [target] + POPULATE together (code 62 SYNTAX_ERROR).
+    # Create the MV without POPULATE, then backfill historical rows via an
+    # idempotent INSERT guarded by "target is empty" (below). New rows are
+    # handled by the MV going forward.
     """
     CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.file_audit_per_archive_mv
-    TO {db}.file_audit_per_archive
-    POPULATE AS
+    TO {db}.file_audit_per_archive AS
     SELECT
         archive_sha256,
         toUInt64(1) AS total_files,
@@ -249,6 +252,25 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
         parsed_at AS first_seen_at,
         parsed_at AS last_seen_at
     FROM {db}.file_audit
+    """,
+    # One-shot backfill for the per-archive roll-up. The nested EXISTS gate makes
+    # this a no-op once the target has any row -- safe to re-run on every
+    # ensure_schema() call. Runs AFTER the MV CREATE above so there's no race
+    # window where the MV is live but history is missing: either the target is
+    # empty and we fill it, or it has at least one row (from either backfill or
+    # a prior insert) and we skip.
+    """
+    INSERT INTO {db}.file_audit_per_archive
+    SELECT
+        archive_sha256,
+        toUInt64(1) AS total_files,
+        toUInt64(extractor_touched) AS parsed_files,
+        toUInt64(extractor_touched = 0
+                 AND heuristic_kind NOT IN ('empty','binary')) AS unknown_files,
+        parsed_at AS first_seen_at,
+        parsed_at AS last_seen_at
+    FROM {db}.file_audit
+    WHERE NOT EXISTS (SELECT 1 FROM {db}.file_audit_per_archive)
     """,
     # Per (filename, heuristic_kind) aggregation for the unknown-files workbench.
     # archive_count + sample_head need stateful aggregates (uniqExact + any), so
@@ -265,10 +287,10 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
     ENGINE = AggregatingMergeTree
     ORDER BY (filename, heuristic_kind)
     """,
+    # Same POPULATE-vs-TO constraint as the per_archive MV above.
     """
     CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.file_audit_per_unknown_file_mv
-    TO {db}.file_audit_per_unknown_file
-    POPULATE AS
+    TO {db}.file_audit_per_unknown_file AS
     SELECT
         filename,
         heuristic_kind,
@@ -277,6 +299,20 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
         anyState(sample_head) AS sample_head_state
     FROM {db}.file_audit
     WHERE extractor_touched = 0 AND heuristic_kind NOT IN ('empty','binary')
+    GROUP BY filename, heuristic_kind
+    """,
+    # Idempotent backfill for the per-unknown-file roll-up (same gate pattern).
+    """
+    INSERT INTO {db}.file_audit_per_unknown_file
+    SELECT
+        filename,
+        heuristic_kind,
+        toUInt64(1) AS occurrences,
+        uniqExactState(archive_sha256) AS archive_count_state,
+        anyState(sample_head) AS sample_head_state
+    FROM {db}.file_audit
+    WHERE extractor_touched = 0 AND heuristic_kind NOT IN ('empty','binary')
+      AND NOT EXISTS (SELECT 1 FROM {db}.file_audit_per_unknown_file)
     GROUP BY filename, heuristic_kind
     """,
     # Skip indexes for /audit/search. 4-gram over sample_head covers short
