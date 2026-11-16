@@ -188,6 +188,108 @@ _FILE_AUDIT_COLUMNS = [
     "sample_head",
 ]
 
+# v1.2.7 schema evolution for file_audit: pre-aggregated roll-up tables + the
+# materialized views that keep them current on every INSERT into file_audit, plus
+# the skip indexes that accelerate /audit/search substring queries. Taking the
+# migrate pill now so the API endpoints stay sub-second regardless of corpus size.
+#
+# Rationale (per scope discussion with operator, v1.2.7 cut):
+#   * /coverage and /unknown are GROUP BY queries whose cost scales with the full
+#     file_audit row count, not the number of distinct groups. Pre-aggregating
+#     into AggregatingMergeTree tables flips the query cost from O(rows in
+#     file_audit) to O(rows in the roll-up), typically 2-4 orders of magnitude
+#     smaller.
+#   * SimpleAggregateFunction is used for the commutative + associative aggregates
+#     (sum/min/max) so the Python reader selects values directly, no *Merge()
+#     wrappers; AggregateFunction is used for uniqExact + any which need state.
+#   * POPULATE on the first MATERIALIZED VIEW creation backfills the existing
+#     ~32k rows on prod (one-shot, blocks file_audit INSERTs briefly, acceptable).
+#   * Skip indexes on sample_head (ngram) + rel_path (token) make /audit/search
+#     prune granules that provably don't contain the substring term.
+#
+# Every statement is CREATE ... IF NOT EXISTS / ALTER ... ADD INDEX IF NOT EXISTS
+# so ensure_schema() can be called on every archive processed without side
+# effects beyond the first invocation.
+_FILE_AUDIT_V127: tuple[str, ...] = (
+    # Per-archive coverage: one row per (archive_sha256), autosums on merge.
+    # Numeric counters are SimpleAggregateFunction(sum, ...) so a SELECT
+    # against this table does not need *Merge() wrappers for them. first/last
+    # timestamps use SimpleAggregateFunction(min|max, DateTime) which also
+    # expose the stored value directly.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.file_audit_per_archive
+    (
+        archive_sha256 FixedString(64),
+        total_files    SimpleAggregateFunction(sum, UInt64),
+        parsed_files   SimpleAggregateFunction(sum, UInt64),
+        unknown_files  SimpleAggregateFunction(sum, UInt64),
+        first_seen_at  SimpleAggregateFunction(min, DateTime),
+        last_seen_at   SimpleAggregateFunction(max, DateTime)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY archive_sha256
+    """,
+    # Write-through MV. POPULATE runs the SELECT against existing rows at CREATE
+    # time; from then on every new INSERT into file_audit fires this SELECT and
+    # writes a one-row delta into file_audit_per_archive (merged by CH later).
+    #
+    # The unknown_files predicate mirrors the /audit/unknown endpoint: files the
+    # extractor did NOT touch, excluding empty/binary (operator cannot write a
+    # rule for those). Keep in sync with FileAuditReader.unknown()'s WHERE.
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.file_audit_per_archive_mv
+    TO {db}.file_audit_per_archive
+    POPULATE AS
+    SELECT
+        archive_sha256,
+        toUInt64(1) AS total_files,
+        toUInt64(extractor_touched) AS parsed_files,
+        toUInt64(extractor_touched = 0
+                 AND heuristic_kind NOT IN ('empty','binary')) AS unknown_files,
+        parsed_at AS first_seen_at,
+        parsed_at AS last_seen_at
+    FROM {db}.file_audit
+    """,
+    # Per (filename, heuristic_kind) aggregation for the unknown-files workbench.
+    # archive_count + sample_head need stateful aggregates (uniqExact + any), so
+    # we use AggregateFunction with *State/*Merge rather than SimpleAggregateFunction.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.file_audit_per_unknown_file
+    (
+        filename             String,
+        heuristic_kind       LowCardinality(String),
+        occurrences          SimpleAggregateFunction(sum, UInt64),
+        archive_count_state  AggregateFunction(uniqExact, FixedString(64)),
+        sample_head_state    AggregateFunction(any, String)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY (filename, heuristic_kind)
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.file_audit_per_unknown_file_mv
+    TO {db}.file_audit_per_unknown_file
+    POPULATE AS
+    SELECT
+        filename,
+        heuristic_kind,
+        toUInt64(1) AS occurrences,
+        uniqExactState(archive_sha256) AS archive_count_state,
+        anyState(sample_head) AS sample_head_state
+    FROM {db}.file_audit
+    WHERE extractor_touched = 0 AND heuristic_kind NOT IN ('empty','binary')
+    GROUP BY filename, heuristic_kind
+    """,
+    # Skip indexes for /audit/search. 4-gram over sample_head covers short
+    # identifier searches (hostnames, UUIDs, usernames); tokenbf on rel_path
+    # accelerates "which files live under /path/foo/..." style substring hits.
+    # ngrambf_v1(n, size_bytes, hashes, seed) -- 4-gram, 64 KiB bloom filter per
+    # granule, 3 hashes, default seed. tokenbf_v1(size_bytes, hashes, seed).
+    "ALTER TABLE {db}.file_audit ADD INDEX IF NOT EXISTS "
+    "sample_head_ngram sample_head TYPE ngrambf_v1(4, 65536, 3, 0) GRANULARITY 1",
+    "ALTER TABLE {db}.file_audit ADD INDEX IF NOT EXISTS "
+    "rel_path_tokens rel_path TYPE tokenbf_v1(16384, 3, 0) GRANULARITY 1",
+)
+
 
 class FileAuditSink:
     """CH sink for the file_audit observability table. Mirrors
@@ -205,7 +307,10 @@ class FileAuditSink:
         return self._client
 
     def ensure_schema(self) -> None:
-        """Create database + file_audit table if absent. Idempotent."""
+        """Create database + file_audit table + the v1.2.7 pre-aggregated
+        tables + their materialized views + the search skip indexes. All
+        statements are idempotent so an upgrade from v1.2.6 is a no-op on
+        existing clusters and a one-shot create on fresh ones."""
         client = self._connect()
         client.command(_CREATE_DB.format(db=self._db))
         client.command(
@@ -214,6 +319,8 @@ class FileAuditSink:
                 storage_policy_clause=_storage_policy_clause(),
             )
         )
+        for stmt in _FILE_AUDIT_V127:
+            client.command(stmt.format(db=self._db))
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)

@@ -272,6 +272,10 @@ from eyenet.api.v1.sources.api_list_sources import router as sources_list_router
 from eyenet.api.v1.sources.api_remove_source_domain import router as sources_remove_domain_router
 from eyenet.api.v1.sources.api_update_source import router as sources_update_router
 from eyenet.api.v1.sources.api_update_source_domain import router as sources_update_domain_router
+from eyenet.api.v1.stealer.api_audit_coverage import router as stealer_audit_coverage_router
+from eyenet.api.v1.stealer.api_audit_samples import router as stealer_audit_samples_router
+from eyenet.api.v1.stealer.api_audit_search import router as stealer_audit_search_router
+from eyenet.api.v1.stealer.api_audit_unknown import router as stealer_audit_unknown_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
 from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
 
@@ -497,6 +501,10 @@ v1_router.include_router(stealer_channels_router)  # GET /stealer/channels (read
 v1_router.include_router(groups_mark_category_router)  # POST /groups/{id}/category (admin:stealer)
 v1_router.include_router(stealer_stats_router)  # GET /stealer/stats (read:stealer)
 v1_router.include_router(stealer_search_router)  # GET /stealer/search (read:stealer)
+v1_router.include_router(stealer_audit_coverage_router)  # GET /stealer/audit/coverage
+v1_router.include_router(stealer_audit_unknown_router)   # GET /stealer/audit/unknown
+v1_router.include_router(stealer_audit_samples_router)   # GET /stealer/audit/samples
+v1_router.include_router(stealer_audit_search_router)    # GET /stealer/audit/search
 v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /groups/* routes
 
 # identities + panic
