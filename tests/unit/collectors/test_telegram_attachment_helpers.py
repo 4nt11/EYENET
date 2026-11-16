@@ -7,7 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from eyenet.collectors.telegram.real import _mime_to_kind, _tme_link
+from eyenet.collectors.telegram.real import (
+    _ATT_FETCH_TIMEOUT_CEILING_S,
+    _ATT_FETCH_TIMEOUT_FLOOR_S,
+    _att_fetch_timeout_for,
+    _mime_to_kind,
+    _tme_link,
+)
 from eyenet.contracts.enums import AttachmentKind
 
 pytestmark = pytest.mark.unit
@@ -36,3 +42,19 @@ def test_tme_link_username_is_public_form() -> None:
 )
 def test_mime_to_kind(mime: str, kind: AttachmentKind) -> None:
     assert _mime_to_kind(mime) == kind
+
+
+@pytest.mark.parametrize(
+    "size_bytes,expected",
+    [
+        (None, _ATT_FETCH_TIMEOUT_FLOOR_S),  # unknown falls back to floor
+        (0, _ATT_FETCH_TIMEOUT_FLOOR_S),  # zero falls back to floor
+        (1024, _ATT_FETCH_TIMEOUT_FLOOR_S),  # tiny blob: computed < floor, clamped up
+        # 1 GiB at 512 KiB/s = 2048s (well above floor, well below ceiling)
+        (1 * 1024 * 1024 * 1024, 2048.0),
+        # 5 GiB at 512 KiB/s = 10240s (above ceiling, clamped down)
+        (5 * 1024 * 1024 * 1024, _ATT_FETCH_TIMEOUT_CEILING_S),
+    ],
+)
+def test_att_fetch_timeout_scales_with_size(size_bytes: int | None, expected: float) -> None:
+    assert _att_fetch_timeout_for(size_bytes) == expected

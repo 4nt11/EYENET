@@ -72,7 +72,7 @@ async def _seed_shell(storage: BaseRepository) -> tuple[object, str, str]:
 async def test_shell_listed_then_blob_fill_removes_it(storage: BaseRepository) -> None:
     src, att_id, groupid = await _seed_shell(storage)
     shells = await storage.iter_attachment_shells(src, limit=10)
-    assert shells == [(att_id, groupid, "777")]
+    assert shells == [(att_id, groupid, "777", 0)]
 
     await storage.set_attachment_blob(
         att_id,

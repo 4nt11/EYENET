@@ -110,7 +110,26 @@ _ATT_BACKFILL_INTERVAL_S = 5.0
 # Hard cap on one shell's network work (resolve + get_messages + download). A single
 # stuck/flood-limited fetch must not freeze the serial backfill — on timeout we record
 # the link only and move on, so a pathological shell can't head-of-line block the rest.
-_ATT_FETCH_TIMEOUT_S = 60.0
+_ATT_FETCH_TIMEOUT_FLOOR_S = 60.0
+# Effective-rate assumption for sizing the timeout to the declared blob size. Telegram
+# over Tor on a single serial puller measures in the single-digit MB/s range; sizing
+# the timeout at 0.5 MB/s leaves enough slack for a transient slowdown on a multi-GB
+# stealer-log archive without inviting one truly hung fetch to block for hours.
+_ATT_FETCH_MIN_RATE_BYTES_PER_S = 512 * 1024
+# Ceiling regardless of declared size: a shell that cannot complete in this much
+# wall-clock time is almost certainly stuck on the wire, not slow. A per-shell stall
+# watchdog (progress-based kill) is the follow-up (v1.2.3).
+_ATT_FETCH_TIMEOUT_CEILING_S = 2 * 3600.0
+
+
+def _att_fetch_timeout_for(size_bytes: int | None) -> float:
+    """Scale the per-shell download timeout to the declared blob size, bounded by
+    ``[_ATT_FETCH_TIMEOUT_FLOOR_S, _ATT_FETCH_TIMEOUT_CEILING_S]``. Unknown or zero
+    size falls back to the floor."""
+    if not size_bytes or size_bytes <= 0:
+        return _ATT_FETCH_TIMEOUT_FLOOR_S
+    budget = size_bytes / _ATT_FETCH_MIN_RATE_BYTES_PER_S
+    return max(_ATT_FETCH_TIMEOUT_FLOOR_S, min(budget, _ATT_FETCH_TIMEOUT_CEILING_S))
 _tracer = trace.get_tracer("eyenet.collector.telegram")
 
 # max subscriptions returned in health()
@@ -1477,9 +1496,11 @@ class TelegramCollector(CollectorSkeleton):
         if per_tick <= 0:
             return
         shells = await self._storage.iter_attachment_shells(self._source_uuid, limit=per_tick)
-        for att_id, platform_groupid, platform_msgid in shells:
+        for att_id, platform_groupid, platform_msgid, size_bytes in shells:
             try:
-                await self._backfill_one_attachment(att_id, platform_groupid, platform_msgid)
+                await self._backfill_one_attachment(
+                    att_id, platform_groupid, platform_msgid, size_bytes
+                )
             except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
                 _log.warning(
                     "collector.attachment_backfill_failed",
@@ -1489,24 +1510,29 @@ class TelegramCollector(CollectorSkeleton):
                 )
 
     async def _backfill_one_attachment(
-        self, att_id: UUID, platform_groupid: str, platform_msgid: str
+        self, att_id: UUID, platform_groupid: str, platform_msgid: str, size_bytes: int
     ) -> None:
         """Re-fetch one shell's message and store its blob (or just the link if still over
-        the gate). The network work is bounded by a hard timeout so one stuck/flood-limited
-        fetch can't freeze the serial backfill; a timeout records the link only, dropping the
-        row out of the shell set so it never head-of-line blocks the rest. Either way the row
-        is marked processed (source_ref stamped)."""
+        the gate). The per-shell timeout is sized to the declared blob so a legitimate
+        multi-GB stealer archive gets enough wall-clock time to complete, bounded by a
+        2h ceiling so one truly hung fetch cannot freeze the serial backfill. A timeout
+        records the link only, dropping the row out of the shell set so it never
+        head-of-line blocks the rest. Either way the row is marked processed
+        (source_ref stamped)."""
         source_ref = _tme_link(platform_groupid, int(platform_msgid))
+        timeout = _att_fetch_timeout_for(size_bytes)
         try:
             stored = await asyncio.wait_for(
                 self._fetch_store_attachment(att_id, platform_groupid, platform_msgid, source_ref),
-                timeout=_ATT_FETCH_TIMEOUT_S,
+                timeout=timeout,
             )
         except TimeoutError:
             _log.warning(
                 "collector.attachment_backfill_timeout",
                 att_id=str(att_id),
                 platform_groupid=platform_groupid,
+                size_bytes=size_bytes,
+                timeout_s=timeout,
             )
             await self._storage.set_attachment_source_ref(att_id, source_ref)
             return

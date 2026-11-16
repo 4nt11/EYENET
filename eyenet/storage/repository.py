@@ -1013,9 +1013,10 @@ class BaseRepository(ABC):
     @abstractmethod
     async def iter_attachment_shells(
         self, source_id: UUID, *, limit: int
-    ) -> list[tuple[UUID, str, str]]:
+    ) -> list[tuple[UUID, str, str, int]]:
         """Metadata-only attachments for a source + their (platform_groupid,
-        platform_msgid), for backfill re-fetch."""
+        platform_msgid, size_bytes), for backfill re-fetch. ``size_bytes`` lets
+        the caller size the per-shell download timeout to the blob."""
 
     @abstractmethod
     async def set_attachment_blob(

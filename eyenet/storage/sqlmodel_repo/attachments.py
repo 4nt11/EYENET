@@ -44,19 +44,22 @@ class AttachmentsMixin:
 
     async def iter_attachment_shells(
         self, source_id: UUID, *, limit: int
-    ) -> list[tuple[UUID, str, str]]:
+    ) -> list[tuple[UUID, str, str, int]]:
         """Legacy metadata-only attachments for one source + their Telegram coordinates,
-        for backfill re-fetch. Returns ``(attachment_id, platform_groupid, platform_msgid)``
-        ordered by id. ``source_ref IS NULL`` is the "not yet processed by the download
-        path" marker (new code always stamps source_ref), so a shell drops out of this
-        query once backfill touches it — whether it stored the blob or only the link. No
-        cursor needed."""
+        for backfill re-fetch. Returns ``(attachment_id, platform_groupid, platform_msgid,
+        size_bytes)`` ordered by id. ``source_ref IS NULL`` is the "not yet processed by
+        the download path" marker (new code always stamps source_ref), so a shell drops
+        out of this query once backfill touches it (whether it stored the blob or only
+        the link). ``size_bytes`` is the declared media size from the original ingest and
+        lets the caller size the per-shell download timeout to the blob (a multi-GB
+        stealer archive legitimately needs minutes, not a one-size-fits-all cap)."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(
                     AttachmentTable.id,
                     GroupTable.platform_groupid,
                     MessageTable.platform_msgid,
+                    AttachmentTable.size_bytes,
                 )
                 .join(MessageTable, col(AttachmentTable.message_id) == col(MessageTable.id))
                 .join(GroupTable, col(MessageTable.group_id) == col(GroupTable.id))
@@ -66,7 +69,7 @@ class AttachmentsMixin:
                 .limit(limit)
             )
             rows = await session.exec(stmt)
-            return [(r[0], r[1], r[2]) for r in rows]
+            return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     async def set_attachment_blob(
         self,
