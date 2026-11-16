@@ -96,6 +96,16 @@ def _ulpextract_rows(files: list[Path], source_label: str) -> Iterator[list[str]
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
+        encoding="utf-8",
+        # Stealer archives frequently carry legacy Windows codepage bytes
+        # (cp1252 or cp1251 Cyrillic) in passwords and paths scooped from
+        # non-English user machines. Strict decode would raise
+        # UnicodeDecodeError on the first such byte and kill the whole
+        # archive; "replace" is lossy for that single byte but keeps the
+        # surrounding credential intact. Dedup identity is (host, login,
+        # password), so a single '?' in a password does not meaningfully
+        # change what the row collapses onto.
+        errors="replace",
     )
     if proc.stdout is None:  # Popen(stdout=PIPE) guarantees a pipe; guard, don't assert
         raise RuntimeError("ulpextract subprocess has no stdout pipe")

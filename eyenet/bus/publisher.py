@@ -20,6 +20,16 @@ _tracer = trace.get_tracer("eyenet.bus.publisher")
 # Allowed subject patterns documented in PLAN §3. Acceptance is permissive
 # enough to allow rendered subjects ("raw.message.telegram.abcd1234") AND
 # the bus subject patterns ("eyenet.audit.>", "actor.observation.text.>").
+# Subject allowlist (PLAN §3). Publishing to a subject NOT listed here raises
+# ValueError at publish time; callers that wrap publish in a broad except (every
+# one in the collector / supervisor / service bg loops does) silently swallow
+# that and the event never reaches NATS. If you are adding a new
+# ``SUBJECT_*`` constant in a contracts module, you MUST add either the exact
+# subject string or a covering prefix here in the SAME patch, or the publish
+# will fail silently in production (v1.2.4 lost 15 stealer-archive emits this
+# way: the ``stealer.attachment.captured`` subject existed as a constant since
+# v1.1.0 but was missing from this tuple). A semgrep rule to catch this at
+# commit time is on the backlog.
 _ALLOWED_PREFIXES: tuple[str, ...] = (
     "raw.message.",
     "actor.observation.text.",
@@ -38,6 +48,7 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "classify.document.uploaded",
     "classify.attachment.stored",
     "incident.detected",
+    "stealer.attachment.captured",
     "entity.",
     "eyenet.audit.",
     "eyenet.control.",
