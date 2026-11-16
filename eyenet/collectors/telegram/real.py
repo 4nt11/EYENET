@@ -117,9 +117,19 @@ _ATT_FETCH_TIMEOUT_FLOOR_S = 60.0
 # stealer-log archive without inviting one truly hung fetch to block for hours.
 _ATT_FETCH_MIN_RATE_BYTES_PER_S = 512 * 1024
 # Ceiling regardless of declared size: a shell that cannot complete in this much
-# wall-clock time is almost certainly stuck on the wire, not slow. A per-shell stall
-# watchdog (progress-based kill) is the follow-up (v1.2.3).
+# wall-clock time is almost certainly stuck on the wire, not slow. Kept as a hard
+# upper bound on the size-aware timeout; the primary kill switch is the stall
+# watchdog below (v1.2.3) which catches hung downloads minutes after they stop
+# making progress, not hours after they fail to complete.
 _ATT_FETCH_TIMEOUT_CEILING_S = 2 * 3600.0
+# How long since the LAST progress callback counts as "the download has stopped
+# making progress". Telethon's progress_callback fires roughly once per chunk
+# received, so 120s of silence is genuinely stalled (network stuck, flood wait
+# converted to an indefinite stall, etc.), not merely slow.
+_ATT_DOWNLOAD_STALL_THRESHOLD_S = 120.0
+# Watchdog polling interval. Smaller means faster stall detection, bigger means
+# fewer wakeups; 10s is a reasonable tradeoff against the 120s threshold.
+_ATT_DOWNLOAD_STALL_POLL_S = 10.0
 
 
 def _att_fetch_timeout_for(size_bytes: int | None) -> float:
@@ -1400,12 +1410,19 @@ class TelegramCollector(CollectorSkeleton):
         """Stream a message's media to disk and store it content-addressed.
 
         Downloads to a temp file on the blob store's filesystem (NOT a RAM `bytes`
-        buffer — stealer archives are multi-GB and would OOM the collector), hashes
+        buffer; stealer archives are multi-GB and would OOM the collector), hashes
         it in chunks, and moves it into place. Logs download progress at 10% steps
         for large blobs. The blocking FS work (hashing a multi-GB file, the move) runs
-        in a worker thread so it never stalls the event loop. Returns ``(sha256,
-        storage_uri, size_bytes)``, or ``None`` when there is no media / the download
-        failed / produced nothing.
+        in a worker thread so it never stalls the event loop.
+
+        A stall watchdog cancels the download if the ``progress_callback`` has not
+        been invoked for ``_ATT_DOWNLOAD_STALL_THRESHOLD_S`` seconds. This replaces
+        the pre-v1.2.3 wall-clock timeout as the primary kill switch: a legitimately
+        slow 5 GiB stealer archive that keeps dripping bytes is NOT a bug, but a
+        download whose bytes have simply stopped arriving is.
+
+        Returns ``(sha256, storage_uri, size_bytes)``, or ``None`` when there is no
+        media / the download failed, stalled, or produced nothing.
         """
         data_dir = self._storage.data_dir
         if data_dir is None:
@@ -1416,9 +1433,13 @@ class TelegramCollector(CollectorSkeleton):
         tmp_path = Path(tmp_name)
 
         last_bucket = 0  # 10% progress buckets already logged (0 => log from 10% up)
+        last_progress_at = _time.monotonic()
+        last_received = 0
 
         def _progress(received: int, total: int) -> None:
-            nonlocal last_bucket
+            nonlocal last_bucket, last_progress_at, last_received
+            last_progress_at = _time.monotonic()
+            last_received = received
             if total <= _DOWNLOAD_PROGRESS_MIN_BYTES:
                 return  # don't spam the log for small (normal-cap) downloads
             bucket = int(received * 10 // total)
@@ -1432,11 +1453,39 @@ class TelegramCollector(CollectorSkeleton):
                     total=total,
                 )
 
+        async def _watchdog(download_task: asyncio.Task[Any]) -> None:
+            while not download_task.done():
+                await asyncio.sleep(_ATT_DOWNLOAD_STALL_POLL_S)
+                stalled_for = _time.monotonic() - last_progress_at
+                if stalled_for >= _ATT_DOWNLOAD_STALL_THRESHOLD_S:
+                    _log.warning(
+                        "collector.attachment_download_stalled",
+                        msgid=msg.id,
+                        received=last_received,
+                        stalled_for_s=round(stalled_for, 1),
+                    )
+                    download_task.cancel()
+                    return
+
         try:
             with os.fdopen(fd, "wb") as fh:
-                result = await self._client.download_media(  # type: ignore[union-attr]
-                    msg, file=fh, progress_callback=_progress
+                download_task = asyncio.create_task(
+                    self._client.download_media(  # type: ignore[union-attr]
+                        msg, file=fh, progress_callback=_progress
+                    )
                 )
+                watchdog_task = asyncio.create_task(_watchdog(download_task))
+                try:
+                    result = await download_task
+                finally:
+                    watchdog_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await watchdog_task
+        except asyncio.CancelledError:
+            # The stall watchdog cancelled the download. Not a crash of the loop
+            # itself, just this one shell; discard the partial temp and move on.
+            await asyncio.to_thread(_discard_download_temp, tmp_path)
+            return None
         except (errors.RPCError, OSError, ValueError, TimeoutError) as exc:
             _log.warning("collector.attachment_download_failed", msgid=msg.id, error=str(exc))
             await asyncio.to_thread(_discard_download_temp, tmp_path)
@@ -1563,6 +1612,23 @@ class TelegramCollector(CollectorSkeleton):
                     storage_uri=storage_uri,
                     source_ref=source_ref,
                 )
+                # Kick the ULP processor the same way the live ingest path does
+                # on a stealer-marked channel. Without this, a backfill-fetched
+                # stealer-log blob sits on disk with an attachment row pointing
+                # at it and the processor never sees a `stealer.attachment.captured`
+                # event for it, so it never runs. (Live ingest emits from
+                # `_ingest_msg_inner` via `_publish_stealer_captures`, which only
+                # the live code path hits.)
+                if stealer_bypass and not meta.is_photo:
+                    await self.publisher.publish(
+                        SUBJECT_STEALER_ATTACHMENT_CAPTURED,
+                        StealerAttachmentCapturedEnvelope(
+                            attachment_id=att_id,
+                            trace_context=TraceContext(
+                                traceparent=current_traceparent() or _zero_traceparent()
+                            ),
+                        ),
+                    )
                 return True
         return False
 
