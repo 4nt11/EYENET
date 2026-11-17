@@ -1,0 +1,4 @@
+1//03_SyntheticTokenAlpha_NotARealGrantJustFixtureBytes_AAA:114000000000000000001
+invalid_refresh_token:103000000000000000002
+fake-00000000-0000-4000-8000-000000000000:dead0000beef0000
+1//03_SyntheticTokenBeta_NotARealGrantJustFixtureBytes_BBB:102000000000000000003

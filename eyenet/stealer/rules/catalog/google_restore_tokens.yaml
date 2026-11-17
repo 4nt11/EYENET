@@ -1,0 +1,33 @@
+id: google_restore_tokens
+version: 1
+layer: content
+family: google_oauth_tokens
+priority: 90
+path_glob: "**estore*.txt"
+description: >
+  Chromium-family 'Restore_<Browser>_<Profile>.txt' files. One line per
+  signed-in Google account: '<refresh_token>:<gaia_id>'.
+
+  Refresh tokens have the universal '1//0' prefix; GAIA IDs are 20+
+  digit integers. Both are stable: the refresh token mints access
+  tokens against Google OAuth2 endpoints until the victim revokes or
+  changes their password; the GAIA ID uniquely identifies the account
+  independent of email aliases. Per-victim multi-account files are
+  common (up to 7 accounts per Chrome profile observed in Khazan).
+
+  Stealers also emit two non-recovery sentinel lines that must be
+  rejected as noise:
+    fake-<uuid>:<hex>        empty-slot placeholder
+    invalid_refresh_token:N  Google-rotated token; GAIA still identifies
+                             the compromised account, but the token is
+                             dead so we only keep the gaia_id.
+
+  We reject the 'fake-' rows outright (zero intel). We keep the
+  invalid_refresh_token rows because the gaia_id itself is CTI.
+match:
+  type: regex
+  pattern: '(?m)^(?P<refresh_token>[^\n:]+):(?P<gaia_id>\d+)$'
+reject_patterns:
+  - "^fake-"
+extract:
+  fields: [refresh_token, gaia_id]

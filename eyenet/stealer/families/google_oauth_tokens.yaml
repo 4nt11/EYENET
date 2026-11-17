@@ -1,0 +1,41 @@
+slug: google_oauth_tokens
+name: Google OAuth refresh tokens (Restore_*.txt)
+status: active
+first_seen_year: 2020
+aliases: [gaia-tokens, chromium-restore, chrome-restore]
+signature_files:
+  - Restore_Chrome_Default.txt
+  - Restore_Chrome_Profile*.txt
+  - Restore_Edge_Default.txt
+  - Google Accounts/Restore_*.txt
+loaders: []
+distribution_channels:
+  - Chromium-family stealers (RedLine, Lumma, Vidar, StealC, Khazan)
+    grab the Chrome / Edge / Opera sign-in slot
+references:
+  - title: Google OAuth 2.0 refresh-token flow
+    url: https://developers.google.com/identity/protocols/oauth2
+notes: >
+  Restore_<Browser>_<Profile>.txt holds one line per signed-in Google
+  account in the format '<refresh_token>:<gaia_id>'.
+
+  The refresh token (prefix '1//0', URL-safe base64, no colon) mints
+  fresh access tokens against the Google OAuth2 token endpoint until
+  the user explicitly revokes, changes their password, or Google
+  rotates the token for abuse. Replay targets scale with the scopes
+  the sign-in originally granted: Gmail, Drive, Photos, YouTube,
+  Calendar, Workspace admin - potentially the whole Google identity.
+
+  The GAIA ID (20+ digit integer) uniquely identifies the Google
+  account independent of email aliases - two seemingly-unrelated
+  victim emails that share a GAIA are the same person.
+
+  Stealers also emit two sentinel rows:
+    fake-<uuid>:<hex>        empty-slot placeholder, no intel
+    invalid_refresh_token:N  Google-rotated token, dead. GAIA is still
+                             CTI for 'this account was compromised'.
+
+  Khazan sample observation: 52 live refresh tokens across one
+  archive, up to 7 accounts per Chrome profile. Expect duplicate
+  copies between 'Google Accounts/Restore_*' and '<Browser>/Dfat/
+  Restore.txt' - de-dupe downstream on (refresh_token, gaia_id).

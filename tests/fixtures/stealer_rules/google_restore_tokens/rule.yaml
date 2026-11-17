@@ -1,0 +1,18 @@
+id: google_restore_tokens
+version: 1
+layer: content
+family: google_oauth_tokens
+priority: 90
+path_glob: Restore_Chrome_Default.txt
+description: >
+  Chromium refresh-token ledger. Regex matcher single-shot in
+  run_rules (first record), bulkParse walks every line. Verifies:
+  real tokens pass, invalid_refresh_token sentinel passes (gaia_id
+  is CTI even when token is dead), fake- placeholder is rejected.
+match:
+  type: regex
+  pattern: '(?m)^(?P<refresh_token>[^\n:]+):(?P<gaia_id>\d+)$'
+reject_patterns:
+  - "^fake-"
+extract:
+  fields: [refresh_token, gaia_id]
