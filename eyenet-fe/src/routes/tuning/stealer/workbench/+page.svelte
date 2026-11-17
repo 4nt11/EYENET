@@ -57,6 +57,8 @@
   // extracts first and picks the folder.
   const MAX_BYTES_PER_FILE = 10 * 1024 * 1024;
 
+  const PREVIEW_BYTES = 16 * 1024;
+
   async function onFolderPick(ev) {
     ingestErr = null;
     const picked = Array.from(ev.currentTarget.files ?? []);
@@ -73,32 +75,48 @@
         const rel = f.webkitRelativePath ?? f.name;
         const pathInsideRoot = rel.startsWith(rootName + '/') ? rel.slice(rootName.length + 1) : rel;
         if (!pathInsideRoot) continue;
-        if (f.size > MAX_BYTES_PER_FILE) {
-          out.push({ path: pathInsideRoot, size: f.size, text: '', binary: true, reason: 'too big' });
-          continue;
-        }
-        try {
-          const text = await f.text();
-          // Heuristic: if the decoded text contains a nontrivial run of NULs
-          // or REPLACEMENT CHARACTERs, treat as binary for match purposes.
-          // (RE2 and keyvalue still TECHNICALLY work on it; we just skip the
-          // noise.)
-          const binary = looksBinary(text, f.size);
-          out.push({ path: pathInsideRoot, size: f.size, text, binary });
-        } catch (e) {
-          out.push({ path: pathInsideRoot, size: f.size, text: '', binary: true, reason: String(e?.message ?? e) });
-        }
+        out.push(await readOneFile(f, pathInsideRoot));
       }
-      // Stable path ordering so the rendered tree is deterministic.
       out.sort((a, b) => a.path.localeCompare(b.path));
       files = out;
-      result = null; // clear old run
+      expandedPath = null;
+      result = null;
     } catch (e) {
       ingestErr = String(e?.message ?? e);
     } finally {
       loadingFiles = false;
     }
   }
+
+  // Read one file into the ingest record. We always keep a <= 16 KB preview
+  // slice so the operator can eyeball the raw bytes while writing rules,
+  // even for files the matcher skipped (too big OR binary-looking).
+  async function readOneFile(f, path) {
+    const base = { path, size: f.size, text: '', binary: false, reason: null, preview: '' };
+    try {
+      // Always read the head slice as preview text (UTF-8 w/ replacement).
+      base.preview = await f.slice(0, PREVIEW_BYTES).text();
+    } catch (e) {
+      base.preview = '';
+      base.reason = String(e?.message ?? e);
+    }
+    if (f.size > MAX_BYTES_PER_FILE) {
+      return { ...base, binary: true, reason: base.reason ?? 'size > 10 MB; preview only' };
+    }
+    try {
+      const text = await f.text();
+      const binary = looksBinary(text, f.size);
+      // On binary classification, clear text (matchers skip it) but keep the
+      // preview; operator can still inspect what it looked like.
+      return { ...base, text: binary ? '' : text, binary };
+    } catch (e) {
+      return { ...base, binary: true, reason: base.reason ?? String(e?.message ?? e) };
+    }
+  }
+
+  // Click-to-expand: one file open at a time.
+  let expandedPath = $state(null);
+  function togglePreview(p) { expandedPath = expandedPath === p ? null : p; }
 
   function looksBinary(text, size) {
     if (!text) return size > 0;
@@ -202,23 +220,48 @@
         <ol class="filelist mono">
           {#each files as f}
             {@const pf = perFile.get(f.path)}
+            {@const open = expandedPath === f.path}
             <li
               class:binary={f.binary}
               class:hit={pf && pf.matched > 0}
               class:scanned={pf && pf.matched === 0 && pf.evaluated > 0}
               class:unscanned={result && !pf && !f.binary}
-              title={pf && pf.matchedRules.length ? pf.matchedRules.join(', ') : (f.reason ?? '')}
+              class:open
             >
-              <span class="path">{f.path}</span>
-              <span class="size">{fmtBytes(f.size)}</span>
-              {#if f.binary}
-                <span class="tag">binary</span>
-              {:else if pf && pf.matched > 0}
-                <span class="tag ok">{pf.matched}/{pf.evaluated} hit</span>
-              {:else if pf}
-                <span class="tag muted">0/{pf.evaluated}</span>
-              {:else if result}
-                <span class="tag muted">no rule</span>
+              <button class="filerow" type="button" onclick={() => togglePreview(f.path)} title={pf && pf.matchedRules.length ? pf.matchedRules.join(', ') : (f.reason ?? '')}>
+                <span class="chev">{open ? 'v' : '>'}</span>
+                <span class="path">{f.path}</span>
+                <span class="size">{fmtBytes(f.size)}</span>
+                {#if f.binary}
+                  <span class="tag">binary</span>
+                {:else if pf && pf.matched > 0}
+                  <span class="tag ok">{pf.matched}/{pf.evaluated} hit</span>
+                {:else if pf}
+                  <span class="tag muted">0/{pf.evaluated}</span>
+                {:else if result}
+                  <span class="tag muted">no rule</span>
+                {/if}
+              </button>
+              {#if open}
+                <div class="preview">
+                  <div class="pmeta">
+                    <span>{f.size.toLocaleString()} B</span>
+                    <span class="sep"></span>
+                    {#if f.binary}
+                      <span>binary · matcher skipped</span>
+                      <span class="sep"></span>
+                    {/if}
+                    {#if f.reason}
+                      <span>{f.reason}</span>
+                      <span class="sep"></span>
+                    {/if}
+                    <span>preview {Math.min(f.text.length || f.preview.length, PREVIEW_BYTES).toLocaleString()} chars</span>
+                  </div>
+                  <pre class="pbody">{(f.text || f.preview || '').slice(0, PREVIEW_BYTES) || '(empty)'}</pre>
+                  {#if (f.text && f.text.length > PREVIEW_BYTES) || f.size > PREVIEW_BYTES}
+                    <div class="ptail">Showing first {PREVIEW_BYTES.toLocaleString()} chars of {f.size.toLocaleString()} bytes.</div>
+                  {/if}
+                </div>
               {/if}
             </li>
           {/each}
@@ -360,24 +403,49 @@
   .placeholder strong { color: var(--accent-text); font-weight: var(--fw-regular); }
 
   .filelist { margin: 0; padding: 0; list-style: none; max-height: 640px; overflow: auto; }
-  .filelist li {
+  .filelist li { border-bottom: 1px solid var(--border); }
+  .filelist li:last-child { border-bottom: none; }
+  .filelist li.hit > .filerow { border-left: 2px solid var(--accent-text); background: var(--accent-fill); }
+  .filelist li.hit > .filerow .path { color: var(--accent-text); }
+  .filelist li.scanned > .filerow { border-left: 2px solid var(--border-strong); }
+  .filelist li.unscanned > .filerow { color: var(--text-faint); }
+  .filelist li.binary > .filerow { color: var(--text-faint); }
+  .filelist li.open > .filerow { background: var(--panel-2); }
+
+  .filerow {
+    width: 100%;
     display: flex; align-items: center; gap: 10px;
     padding: 5px 14px;
-    font-size: var(--fs-12); letter-spacing: var(--tracking-data);
-    color: var(--text);
-    border-bottom: 1px solid var(--border);
+    background: transparent; border: none; border-left: 2px solid transparent;
+    color: inherit; font-family: var(--font-mono); font-size: var(--fs-12);
+    letter-spacing: var(--tracking-data);
+    text-align: left; cursor: pointer;
+    transition: background 120ms ease;
   }
-  .filelist li:last-child { border-bottom: none; }
-  .filelist li.binary { color: var(--text-faint); }
-  .filelist li.hit { border-left: 2px solid var(--accent-text); background: var(--accent-fill); }
-  .filelist li.hit .path { color: var(--accent-text); }
-  .filelist li.scanned { border-left: 2px solid var(--border-strong); }
-  .filelist li.unscanned { color: var(--text-faint); }
-  .filelist .path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .filelist .size { color: var(--text-faint); font-size: var(--fs-11); }
-  .filelist .tag { font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-  .filelist .tag.ok { color: var(--accent-text); border-color: var(--accent); background: var(--accent-fill); }
-  .filelist .tag.muted { color: var(--text-faint); }
+  .filerow:hover { background: var(--panel-2); }
+  .filerow .chev { width: 10px; color: var(--text-faint); font-size: var(--fs-11); }
+  .filerow .path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .filerow .size { color: var(--text-faint); font-size: var(--fs-11); }
+  .filerow .tag { font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .filerow .tag.ok { color: var(--accent-text); border-color: var(--accent); background: var(--accent-fill); }
+  .filerow .tag.muted { color: var(--text-faint); }
+
+  .preview {
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .pmeta { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-faint); }
+  .pmeta .sep { width: 1px; height: 10px; background: var(--border); }
+  .pbody {
+    margin: 0; padding: 10px;
+    background: var(--black); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data);
+    max-height: 400px; overflow: auto;
+    white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+  }
+  .ptail { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); letter-spacing: var(--tracking-data); }
 
   .result-body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 
