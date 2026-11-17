@@ -11,20 +11,26 @@ out of the service's address space.
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
-import subprocess  # nosec B404 — fixed tools (unrar/ulpextract), list argv, never a shell
+import subprocess  # nosec B404: fixed tools (unrar/ulpextract/gotractor), list argv, never a shell
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from eyenet.stealer.extractor import ulpextract_path
+from eyenet.stealer.extractor import gotractor_path, ulpextract_path
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from eyenet.stealer.clickhouse import ClickHouseCredsSink, FileAuditSink
+    from eyenet.stealer.clickhouse import (
+        ClickHouseCredsSink,
+        ClickHouseRecordsSink,
+        FileAuditSink,
+    )
 
 _log = get_logger()
 _ULPEXTRACT_COLUMNS = 9  # host,url,login,password,scheme,tld,source,ip_class,source_file
@@ -48,6 +54,12 @@ class ProcessResult:
     creds_inserted: int
     password_used: str | None  # the candidate that opened it ("" = none/unencrypted)
     error: str | None = None
+    # v1.3.1: gotractor side ran in parallel with ulpextract; count tracks how
+    # many records the DSL engine emitted from this same archive. During the
+    # cutover we dual-write and reconcile; once gotractor is authoritative the
+    # ulpextract count stays at 0.
+    records_inserted: int = 0
+    gotractor_families: list[str] = field(default_factory=list)
 
 
 def _find_password_files(root: Path) -> list[Path]:
@@ -139,15 +151,24 @@ def process_archive(
     sink: ClickHouseCredsSink,
     source_label: str,
     audit_sink: FileAuditSink | None = None,
+    records_sink: ClickHouseRecordsSink | None = None,
+    rules_dir: Path | str | None = None,
+    families_dir: Path | str | None = None,
 ) -> ProcessResult:
-    """Decrypt + extract the archive, ulpextract its password files, stream creds into
-    ClickHouse. Cleans up the temp extraction tree. Synchronous: call via to_thread.
+    """Decrypt + extract the archive, run BOTH extractors (ulpextract for the
+    legacy TSV creds table, gotractor for the new rule-driven records table),
+    stream into ClickHouse. Cleans up the temp extraction tree. Synchronous:
+    call via to_thread.
 
     ``audit_sink`` is the v1.2.6 side channel for the file_audit observability
-    table. When present, every file in the decrypted work dir is classified +
-    sampled into a row AFTER the credential extraction runs (so an audit sink
-    misconfig cannot break the primary creds path). None keeps the pre-v1.2.6
-    behaviour (no audit rows written)."""
+    table.
+
+    ``records_sink`` (v1.3.1) is the gotractor landing sink for the new
+    ``stealer.extracted_records`` table. When present, gotractor runs after
+    the ulpextract pass and streams one record per rule match into the
+    Map(String, String) fields column. When None, the gotractor leg is
+    skipped entirely, preserving pre-cutover behaviour.
+    """
     work_root.mkdir(parents=True, exist_ok=True)
     dest = Path(tempfile.mkdtemp(dir=work_root, prefix="ulp-"))
     try:
@@ -156,25 +177,127 @@ def process_archive(
             return ProcessResult(ok=False, creds_inserted=0, password_used=None,
                                  error="no password opened the archive")
         pw_files = _find_password_files(dest)
-        if not pw_files:
-            return ProcessResult(ok=True, creds_inserted=0, password_used=pw,
-                                 error="no password files in archive")
-        sink.ensure_schema()
         total = 0
-        batch: list[list[str]] = []
-        for row in _ulpextract_rows(pw_files, source_label):
-            batch.append(row)
-            if len(batch) >= _INSERT_BATCH:
-                total += sink.insert_rows(batch)
-                batch = []
-        total += sink.insert_rows(batch)
-        _log.info("stealer.archive_processed", creds=total, files=len(pw_files),
-                  blob=blob_path.name)
+        if pw_files:
+            sink.ensure_schema()
+            batch: list[list[str]] = []
+            for row in _ulpextract_rows(pw_files, source_label):
+                batch.append(row)
+                if len(batch) >= _INSERT_BATCH:
+                    total += sink.insert_rows(batch)
+                    batch = []
+            total += sink.insert_rows(batch)
+            _log.info("stealer.archive_processed", creds=total, files=len(pw_files),
+                      blob=blob_path.name)
+        # v1.3.1 gotractor dual-write. Runs on the ENTIRE extracted tree
+        # (not just pw files) because the DSL rules fire on cookies,
+        # autofills, bookmarks, credentials_windows, json_v2 metadata,
+        # etc., not only passwords.txt.
+        records = 0
+        families: list[str] = []
+        if records_sink is not None:
+            try:
+                records, families = _gotractor_insert(
+                    records_sink, dest, blob_path, source_label, rules_dir, families_dir,
+                )
+            except Exception as exc:  # noqa: BLE001 - never fail pipeline on gotractor side
+                _log.warning("stealer.gotractor_failed", error=str(exc),
+                             error_type=type(exc).__name__)
         if audit_sink is not None:
             _write_file_audit(audit_sink, dest, blob_path, pw_files)
-        return ProcessResult(ok=True, creds_inserted=total, password_used=pw)
+        if not pw_files and records == 0:
+            return ProcessResult(ok=True, creds_inserted=0, password_used=pw,
+                                 error="no password files in archive",
+                                 records_inserted=0, gotractor_families=[])
+        return ProcessResult(
+            ok=True, creds_inserted=total, password_used=pw,
+            records_inserted=records, gotractor_families=families,
+        )
     finally:
         shutil.rmtree(dest, ignore_errors=True)  # never leave a 2 GB tree behind
+
+
+def _gotractor_insert(
+    sink: ClickHouseRecordsSink,
+    dest: Path,
+    blob_path: Path,
+    source_label: str,
+    rules_dir: Path | str | None,
+    families_dir: Path | str | None,
+) -> tuple[int, list[str]]:
+    """Spawn gotractor on the extracted tree, stream JSON records into
+    ``stealer.extracted_records``. Returns ``(rows_inserted, family_tags)``.
+
+    The Python process is the batcher; the Go process is the parser.
+    Records-mode output on gotractor's stdout is one JSON object per line
+    of three kinds: ``verdict`` (container tag), ``record`` (the data),
+    ``truncated`` (soft limit notice, logged). We batch every record
+    into an INSERT every ``_INSERT_BATCH`` rows."""
+    sink.ensure_schema()
+    archive_sha = blob_path.stem  # <sha256>.bin
+    victim_folder = dest.name
+    env = {**os.environ}
+    if rules_dir:
+        env["EYENET_STEALER_RULES_DIR"] = str(rules_dir)
+    if families_dir:
+        env["EYENET_STEALER_FAMILIES_DIR"] = str(families_dir)
+    if not env.get("EYENET_STEALER_RULES_DIR") or not env.get("EYENET_STEALER_FAMILIES_DIR"):
+        raise RuntimeError(
+            "gotractor needs EYENET_STEALER_RULES_DIR + EYENET_STEALER_FAMILIES_DIR "
+            "(or pass rules_dir / families_dir to process_archive)"
+        )
+    proc = subprocess.Popen(  # noqa: S603  # nosec B603 - fixed tool, list argv, no shell
+        [gotractor_path(), "--mode=records", "--input", str(dest)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    assert proc.stdout is not None  # noqa: S101 - documented API of Popen(stdout=PIPE)
+    total = 0
+    families: list[str] = []
+    batch: list[list[object]] = []
+    try:
+        for line in proc.stdout:
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            kind = d.get("kind")
+            if kind == "verdict":
+                fam = d.get("family")
+                if fam:
+                    families.append(fam)
+            elif kind == "record":
+                batch.append(
+                    [
+                        archive_sha,
+                        source_label,
+                        victim_folder,
+                        d.get("file_path", ""),
+                        d.get("rule_id", ""),
+                        d.get("family", ""),
+                        {k: str(v) for k, v in (d.get("fields") or {}).items()},
+                    ]
+                )
+                if len(batch) >= _INSERT_BATCH:
+                    total += sink.insert_rows(batch)
+                    batch = []
+            elif kind == "truncated":
+                _log.warning(
+                    "stealer.gotractor_truncated",
+                    rule_id=d.get("rule_id"), file_path=d.get("file_path"),
+                    emitted=d.get("emitted"), total_seen=d.get("total_seen"),
+                )
+        total += sink.insert_rows(batch)
+    finally:
+        proc.stdout.close()
+        proc.wait()
+    _log.info("stealer.gotractor_run", archive=archive_sha, records=total,
+              families=families)
+    return total, families
 
 
 def _write_file_audit(

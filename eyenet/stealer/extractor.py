@@ -19,6 +19,7 @@ import shutil
 from pathlib import Path
 
 _PKG_BIN = Path(__file__).parent / "ulpextract" / "ulpextract"
+_GOTRACTOR_PKG_BIN = Path(__file__).parent / "gotractor" / "gotractor"
 
 
 def ulpextract_path() -> str:
@@ -34,10 +35,34 @@ def ulpextract_path() -> str:
     if on_path:
         return on_path
     raise FileNotFoundError(
-        "ulpextract binary not found — build it from eyenet/stealer/ulpextract "
+        "ulpextract binary not found: build it from eyenet/stealer/ulpextract "
         "(go build -o ulpextract ./ulpextract.go), set EYENET_ULPEXTRACT_BIN, or "
         "put it on PATH"
     )
 
 
-__all__ = ["ulpextract_path"]
+def gotractor_path() -> str:
+    """Absolute path to the gotractor binary (DSL rule engine replacement
+    for ulpextract). Resolution order mirrors ulpextract_path():
+    ``EYENET_GOTRACTOR_BIN`` env override, then the binary built next to
+    the in-package Go source (``eyenet/stealer/gotractor/gotractor``),
+    then ``gotractor`` on PATH.
+    """
+    override = os.environ.get("EYENET_GOTRACTOR_BIN")
+    if override:
+        if not Path(override).is_file():
+            raise FileNotFoundError(f"EYENET_GOTRACTOR_BIN points at a missing file: {override}")
+        return override
+    if _GOTRACTOR_PKG_BIN.is_file():
+        return str(_GOTRACTOR_PKG_BIN)
+    on_path = shutil.which("gotractor")
+    if on_path:
+        return on_path
+    raise FileNotFoundError(
+        "gotractor binary not found: build it from eyenet/stealer/gotractor "
+        "(go build -o gotractor .), set EYENET_GOTRACTOR_BIN, or "
+        "put it on PATH"
+    )
+
+
+__all__ = ["gotractor_path", "ulpextract_path"]

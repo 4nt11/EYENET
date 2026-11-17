@@ -147,6 +147,89 @@ class ClickHouseCredsSink:
             self._client = None
 
 
+# v1.3.1 gotractor landing table. One row per EXTRACTED RECORD from the
+# new Go DSL engine (replaces ulpextract's fixed 8-col TSV with a
+# rule-driven schema). Key invariants:
+#
+#   - `fields` is a Map(String, String) so any rule's extract map lands
+#     here without a migration per field (if a column ends up load-
+#     bearing enough to warrant promotion, we materialize it with a
+#     dedicated column later; MergeTree supports ADD COLUMN cheaply).
+#   - The dedup key is (archive_sha256, rule_id, file_path, hash of
+#     fields) via a MATERIALIZED version column, so re-running the
+#     pipeline on the same archive collapses duplicates on merge
+#     instead of leaving them in the table.
+#   - LowCardinality on family + rule_id because both are enum-shaped
+#     (dozens of distinct values, millions of rows).
+_RECORDS_CREATE = """
+CREATE TABLE IF NOT EXISTS {db}.extracted_records
+(
+    archive_sha256  FixedString(64),
+    source          LowCardinality(String),
+    victim_folder   String,
+    file_path       String,
+    rule_id         LowCardinality(String),
+    family          LowCardinality(String),
+    fields          Map(String, String),
+    ingested_at     DateTime DEFAULT now(),
+    INDEX idx_family family TYPE set(0) GRANULARITY 1,
+    INDEX idx_rule_id rule_id TYPE set(0) GRANULARITY 1
+)
+ENGINE = ReplacingMergeTree(ingested_at)
+ORDER BY (archive_sha256, rule_id, file_path, cityHash64(toString(fields)))
+{storage_policy_clause}
+"""
+
+
+_RECORDS_COLUMNS = [
+    "archive_sha256", "source", "victim_folder", "file_path",
+    "rule_id", "family", "fields",
+]
+
+
+class ClickHouseRecordsSink:
+    """Connection + schema + batched insert for ``<db>.extracted_records``.
+
+    Same shape as ``ClickHouseCredsSink`` so the pipeline can init +
+    insert_rows symmetrically. Rows are tuples positional with
+    ``_RECORDS_COLUMNS`` (fields being a Python ``dict[str, str]`` which
+    clickhouse-connect serialises as a Map on insert).
+    """
+
+    def __init__(self) -> None:
+        self._db = clickhouse_db()
+        self._client: Client | None = None
+
+    def _connect(self) -> Client:
+        if self._client is None:
+            self._client = get_clickhouse_client()
+        return self._client
+
+    def ensure_schema(self) -> None:
+        client = self._connect()
+        client.command(_CREATE_DB.format(db=self._db))
+        client.command(
+            _RECORDS_CREATE.format(
+                db=self._db,
+                storage_policy_clause=_storage_policy_clause(),
+            )
+        )
+
+    def insert_rows(self, rows: Iterable[list[Any]]) -> int:
+        batch: list[list[Any]] = list(rows)
+        if not batch:
+            return 0
+        self._connect().insert(
+            f"{self._db}.extracted_records", batch, column_names=_RECORDS_COLUMNS,
+        )
+        return len(batch)
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
 # v1.2.6 observability side channel. One row per file in every per-victim folder
 # of every archive, so operators can answer "what files do we SEE that we are
 # not parsing" from a SQL query instead of spelunking blobs by hand. The table

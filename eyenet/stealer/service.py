@@ -24,7 +24,7 @@ from eyenet.contracts.stealer_events import (
 )
 from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED
 from eyenet.service import ServiceBase
-from eyenet.stealer.clickhouse import ClickHouseCredsSink, FileAuditSink
+from eyenet.stealer.clickhouse import ClickHouseCredsSink, ClickHouseRecordsSink, FileAuditSink
 from eyenet.stealer.password import parse_password, password_candidates
 from eyenet.stealer.pipeline import process_archive
 from eyenet.telemetry.logging import get_logger
@@ -55,6 +55,25 @@ class StealerProcessorService(ServiceBase):
         # that we are not parsing". Separate sink so a schema hiccup on it
         # cannot break the primary creds insert path.
         self._audit_sink = FileAuditSink()
+        # v1.3.1 gotractor landing sink. One row per EXTRACTED RECORD into
+        # stealer.extracted_records (rule-driven, Map(String,String) fields).
+        # Wired in parallel with the ulpextract creds path; set to None to
+        # disable the DSL leg entirely (ulpextract-only legacy mode) via
+        # EYENET_STEALER_DISABLE_GOTRACTOR=1. Rules + families dirs default
+        # to the vendored catalog paths; prod overrides via
+        # EYENET_STEALER_RULES_DIR / _FAMILIES_DIR.
+        self._records_sink: ClickHouseRecordsSink | None = (
+            None if os.environ.get("EYENET_STEALER_DISABLE_GOTRACTOR") == "1"
+            else ClickHouseRecordsSink()
+        )
+        _vendored = Path(__file__).parent / "rules" / "catalog"
+        _vendored_families = Path(__file__).parent / "families"
+        self._rules_dir = Path(
+            os.environ.get("EYENET_STEALER_RULES_DIR", str(_vendored))
+        )
+        self._families_dir = Path(
+            os.environ.get("EYENET_STEALER_FAMILIES_DIR", str(_vendored_families))
+        )
         # Scratch space for the (large) archive extraction; cleaned per-archive.
         self._work_root = Path(
             os.environ.get("EYENET_STEALER_WORK_DIR", "/var/lib/eyenet/stealer-work")
@@ -126,13 +145,19 @@ class StealerProcessorService(ServiceBase):
             sink=self._sink,
             source_label=f"attachment:{attachment_id}",
             audit_sink=self._audit_sink,
+            records_sink=self._records_sink,
+            rules_dir=self._rules_dir,
+            families_dir=self._families_dir,
         )
         if result.ok:
             await self._storage.set_stealer_processing(
                 attachment_id, state=STEALER_DONE, creds_extracted=result.creds_inserted
             )
             _log.info("stealer_processor.done", attachment=str(attachment_id),
-                      creds=result.creds_inserted, password_used=bool(result.password_used))
+                      creds=result.creds_inserted,
+                      records=result.records_inserted,
+                      gotractor_families=result.gotractor_families,
+                      password_used=bool(result.password_used))
         else:
             await self._storage.set_stealer_processing(
                 attachment_id, state=STEALER_FAILED, error=result.error
@@ -143,6 +168,8 @@ class StealerProcessorService(ServiceBase):
     async def shutdown(self) -> None:
         self._sink.close()
         self._audit_sink.close()
+        if self._records_sink is not None:
+            self._records_sink.close()
         await super().shutdown()
 
 
