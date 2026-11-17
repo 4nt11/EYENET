@@ -57,6 +57,10 @@ dependencies = [
   "sqlglot>=25,<31",
   # http api (graph query + operator surface)
   "fastapi>=0.115",
+  # Starlette is imported directly for StarletteHTTPException translation in
+  # eyenet/api/app.py exception handlers. Declared explicitly so deptry does
+  # not flag it as a transitive-via-fastapi dependency (brittle on bumps).
+  "starlette>=0.40",
   # ASGI server: Hypercorn, not uvicorn (API_PLAN §12.1). uvicorn is h11-only
   # and we forbid HTTP/1.1; Hypercorn speaks h2 natively and h3 via aioquic
   # (the [h3] extra). See eyenet/api/_serve.py.
