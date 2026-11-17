@@ -209,6 +209,27 @@
     }
   },
   {
+    "id": "gabb_grabber_sidecar",
+    "version": 1,
+    "layer": "container",
+    "family": "gabb_grabber",
+    "priority": 50,
+    "description": "Sidecar probe: tags a drop as carrying the Gabb file-grabber component. Priority 50, lower than the real family containers (100+), so the containing family (json_v2 etc.) still wins the family verdict; this rule shows up as a matched entry in the trace so an analyst sees the grabber is present without having to eyeball the folder listing. requires: Gabb/ dir + at least one of the four known profile buckets.\n",
+    "match": {
+      "type": "folder",
+      "requires": [
+        "Gabb/"
+      ],
+      "optional": [
+        "Gabb/Dstp/",
+        "Gabb/Dmts/",
+        "Gabb/Dwas/",
+        "Gabb/Rt/"
+      ],
+      "min_score": 2
+    }
+  },
+  {
     "id": "json_v2_container",
     "version": 1,
     "layer": "container",

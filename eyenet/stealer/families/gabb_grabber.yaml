@@ -1,0 +1,40 @@
+slug: gabb_grabber
+name: Gabb file-grabber (sidecar)
+status: new
+first_seen_year: 2026
+aliases: [Gabb, gabb/]
+signature_files:
+  - Gabb/
+  - Gabb/Dstp/
+  - Gabb/Dmts/
+  - Gabb/Dwas/
+  - Gabb/Rt/
+loaders: []
+distribution_channels:
+  - sidecar module inside json_v2 drops (StealC v2 / Acreed / Stealerium)
+  - observed in Khazan Cloud intake 2026-11
+references: []
+notes: >
+  Sidecar FILE-GRABBER module shipped inside json_v2 drops (seen
+  alongside pc_info.json + log_info.json + passwords.tsv). Walks the
+  Windows user profile and buckets grabbed files into vowel-stripped
+  directories.
+
+  Top-level profile buckets observed:
+    Dstp = Desktop
+    Dmts = Documents
+    Dwas = Downloads
+    Rt   = (undetermined; CVs + text files + TV-series notes seen,
+            possibly Recent or a catch-all)
+
+  Nested type buckets (inside each profile dir):
+    Cmpss   = Compressed (.zip / .rar / .7z)
+    Pgams   = Programs (installers, scripts)
+    V       = Videos
+    Ptabs   = Portables (portable apps, filenames carry .P / .Ptab suffix)
+    Fma Eta = Firma Electrónica (p12 certs; Spanish-locale giveaway)
+    hha     = banking docs (seen with 'DATOS BANCARIOS.docx')
+
+  Filenames inside buckets are also vowel-stripped as light obfuscation.
+  Zero public reporting as of 2026-11; name coined from the folder.
+  Expand this family entry as more variants surface.

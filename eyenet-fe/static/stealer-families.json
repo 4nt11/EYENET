@@ -75,6 +75,30 @@
     "notes": "Meta-family for the de-facto cookie.txt format. Tab-separated with seven columns: domain, include_subdomains, path, secure, expires, name, value. Lines starting with # are comments and blank lines are skipped. Every stealer family ships cookies in this format somewhere under Browsers/ or Cookies/; our Netscape probe rule classifies the file shape regardless of which stealer produced it.\n"
   },
   {
+    "slug": "gabb_grabber",
+    "name": "Gabb file-grabber (sidecar)",
+    "status": "new",
+    "first_seen_year": 2026,
+    "aliases": [
+      "Gabb",
+      "gabb/"
+    ],
+    "signature_files": [
+      "Gabb/",
+      "Gabb/Dstp/",
+      "Gabb/Dmts/",
+      "Gabb/Dwas/",
+      "Gabb/Rt/"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "sidecar module inside json_v2 drops (StealC v2 / Acreed / Stealerium)",
+      "observed in Khazan Cloud intake 2026-11"
+    ],
+    "references": [],
+    "notes": "Sidecar FILE-GRABBER module shipped inside json_v2 drops (seen alongside pc_info.json + log_info.json + passwords.tsv). Walks the Windows user profile and buckets grabbed files into vowel-stripped directories.\nTop-level profile buckets observed:\n  Dstp = Desktop\n  Dmts = Documents\n  Dwas = Downloads\n  Rt   = (undetermined; CVs + text files + TV-series notes seen,\n          possibly Recent or a catch-all)\n\nNested type buckets (inside each profile dir):\n  Cmpss   = Compressed (.zip / .rar / .7z)\n  Pgams   = Programs (installers, scripts)\n  V       = Videos\n  Ptabs   = Portables (portable apps, filenames carry .P / .Ptab suffix)\n  Fma Eta = Firma Electrónica (p12 certs; Spanish-locale giveaway)\n  hha     = banking docs (seen with 'DATOS BANCARIOS.docx')\n\nFilenames inside buckets are also vowel-stripped as light obfuscation. Zero public reporting as of 2026-11; name coined from the folder. Expand this family entry as more variants surface.\n"
+  },
+  {
     "slug": "json_v2",
     "name": "JSON-first cluster (StealC v2 / Acreed / Stealerium)",
     "status": "active",
