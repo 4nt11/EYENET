@@ -209,7 +209,12 @@ _RECORDS_COLUMNS = [
 #     For a Khazan archive (~200k records across ~450 victims) that is many
 #     MV firings per archive. Each MV firing produces one row per
 #     (archive, victim) touched in the batch.
-#   - SAF(sum, UInt32) on counts: batches add together on background merge.
+#   - SAF(sum, UInt64) on counts: batches add together on background merge.
+#     Widened from UInt32 in v1.3.4.1: a 110k-cred archive overflows the Int32
+#     range when the MV re-materializes against a historical backfill, and
+#     ClickHouse 24 refuses the INSERT with "Incompatible data types between
+#     aggregate function 'sum' which returns UInt64 and column storage type
+#     UInt32."
 #   - SAF(max, String) on identity fields: lexicographic max selects a
 #     non-empty value over an empty one. '' < 'BR' so 'BR' wins. Non-empty
 #     always beats empty. Behaves correctly even if only some batches had
@@ -238,18 +243,18 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         build_version          SimpleAggregateFunction(max, LowCardinality(String)),
         payload_md5            SimpleAggregateFunction(max, String),
         work_dir               SimpleAggregateFunction(max, String),
-        creds_count            SimpleAggregateFunction(sum, UInt32),
-        cookies_count          SimpleAggregateFunction(sum, UInt32),
-        autofills_count        SimpleAggregateFunction(sum, UInt32),
-        history_count          SimpleAggregateFunction(sum, UInt32),
-        downloads_count        SimpleAggregateFunction(sum, UInt32),
-        processes_count        SimpleAggregateFunction(sum, UInt32),
-        software_count         SimpleAggregateFunction(sum, UInt32),
-        discord_tokens_count   SimpleAggregateFunction(sum, UInt32),
-        steam_tokens_count     SimpleAggregateFunction(sum, UInt32),
-        google_refresh_count   SimpleAggregateFunction(sum, UInt32),
-        localstorage_jwt_count SimpleAggregateFunction(sum, UInt32),
-        wallet_vaults_count    SimpleAggregateFunction(sum, UInt32),
+        creds_count            SimpleAggregateFunction(sum, UInt64),
+        cookies_count          SimpleAggregateFunction(sum, UInt64),
+        autofills_count        SimpleAggregateFunction(sum, UInt64),
+        history_count          SimpleAggregateFunction(sum, UInt64),
+        downloads_count        SimpleAggregateFunction(sum, UInt64),
+        processes_count        SimpleAggregateFunction(sum, UInt64),
+        software_count         SimpleAggregateFunction(sum, UInt64),
+        discord_tokens_count   SimpleAggregateFunction(sum, UInt64),
+        steam_tokens_count     SimpleAggregateFunction(sum, UInt64),
+        google_refresh_count   SimpleAggregateFunction(sum, UInt64),
+        localstorage_jwt_count SimpleAggregateFunction(sum, UInt64),
+        wallet_vaults_count    SimpleAggregateFunction(sum, UInt64),
         has_corporate_marker   SimpleAggregateFunction(max, UInt8),
         has_webmail_leak       SimpleAggregateFunction(max, UInt8),
         has_wallet             SimpleAggregateFunction(max, UInt8),
@@ -288,18 +293,18 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
         max(fields['ui_payload_md5']) AS payload_md5,
         max(fields['ui_work_dir']) AS work_dir,
-        toUInt32(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
-        toUInt32(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
-        toUInt32(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
-        toUInt32(countIf(rule_id = 'history_url_title_block')) AS history_count,
-        toUInt32(countIf(rule_id = 'download_history_block')) AS downloads_count,
-        toUInt32(countIf(rule_id LIKE 'processes_%')) AS processes_count,
-        toUInt32(countIf(rule_id = 'software_installed_list')) AS software_count,
-        toUInt32(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
-        toUInt32(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
-        toUInt32(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
-        toUInt32(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
-        toUInt32(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
+        toUInt64(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
+        toUInt64(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
+        toUInt64(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
+        toUInt64(countIf(rule_id = 'history_url_title_block')) AS history_count,
+        toUInt64(countIf(rule_id = 'download_history_block')) AS downloads_count,
+        toUInt64(countIf(rule_id LIKE 'processes_%')) AS processes_count,
+        toUInt64(countIf(rule_id = 'software_installed_list')) AS software_count,
+        toUInt64(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
+        toUInt64(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
+        toUInt64(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
+        toUInt64(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
+        toUInt64(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
         maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
         maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
         maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
@@ -329,18 +334,18 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
         max(fields['ui_payload_md5']) AS payload_md5,
         max(fields['ui_work_dir']) AS work_dir,
-        toUInt32(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
-        toUInt32(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
-        toUInt32(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
-        toUInt32(countIf(rule_id = 'history_url_title_block')) AS history_count,
-        toUInt32(countIf(rule_id = 'download_history_block')) AS downloads_count,
-        toUInt32(countIf(rule_id LIKE 'processes_%')) AS processes_count,
-        toUInt32(countIf(rule_id = 'software_installed_list')) AS software_count,
-        toUInt32(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
-        toUInt32(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
-        toUInt32(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
-        toUInt32(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
-        toUInt32(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
+        toUInt64(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
+        toUInt64(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
+        toUInt64(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
+        toUInt64(countIf(rule_id = 'history_url_title_block')) AS history_count,
+        toUInt64(countIf(rule_id = 'download_history_block')) AS downloads_count,
+        toUInt64(countIf(rule_id LIKE 'processes_%')) AS processes_count,
+        toUInt64(countIf(rule_id = 'software_installed_list')) AS software_count,
+        toUInt64(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
+        toUInt64(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
+        toUInt64(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
+        toUInt64(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
+        toUInt64(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
         maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
         maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
         maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
@@ -374,7 +379,7 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 #
 # Six MVs feed this table from six distinct source rule categories. Each MV
 # fires on every INSERT into extracted_records and writes partial counts;
-# SimpleAggregateFunction(sum, UInt32) adds them on background merge.
+# SimpleAggregateFunction(sum, UInt64) adds them on background merge.
 _VICTIM_DOMAINS: tuple[str, ...] = (
     """
     CREATE TABLE IF NOT EXISTS {db}.victim_domains
@@ -383,7 +388,7 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         victim_folder  String,
         domain         String,
         source_kind    LowCardinality(String),
-        count          SimpleAggregateFunction(sum, UInt32),
+        count          SimpleAggregateFunction(sum, UInt64),
         INDEX idx_domain_bf domain TYPE bloom_filter() GRANULARITY 1
     )
     ENGINE = AggregatingMergeTree
