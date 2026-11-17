@@ -1,0 +1,47 @@
+id: history_url_title_block
+version: 1
+layer: content
+family: victim_history
+priority: 75
+path_glob: "**History*.txt"
+description: >
+  Chromium / Edge browser history dump: three-line records
+  'URL: <url>' / 'TITLE: <page title>' / 'TIME: <ISO-8601>'
+  separated by blank lines. One record per history entry.
+
+  CTI payload per record:
+
+    infection vector      href.li / bit.ly / is.gd / goo.gl
+                          redirects into *.rar / *.exe / *.msi /
+                          *.iso / *.scr downloads == this is HOW
+                          the victim got infected. The row BEFORE
+                          the one where the stealer phoned home
+                          is often the exact malicious landing.
+
+    webmail account ID    titles like 'Inbox - alice@example.com -
+                          Gmail' leak the signed-in email in
+                          cleartext. A separate rule extracts it
+                          structured; this one captures the raw.
+
+    social-media handle   titles like 'LinkedIn | @handle' leak the
+                          handle from the browser tab.
+
+    sensitive doc preview Google Drive viewer URLs, DocuSign review
+                          links, SharePoint preview tokens - clicking
+                          them with the right cookie replays the doc.
+
+    interest / lifestyle  video history, game forums, political
+                          sites, adult content - profiles the human
+                          for social-engineering tailoring.
+
+  Khazan branding banners mid-file do not break the stream: the
+  regex uses finditer and skips non-matching blocks.
+match:
+  type: regex
+  pattern: '(?m)^URL:\s*(?P<visit_url>[^\n]+)\nTITLE:\s*(?P<visit_title>[^\n]+)\nTIME:\s*(?P<visit_time>[^\n]+)$'
+extract:
+  fields: [visit_url, visit_title, visit_time]
+normalize:
+  - field: visit_time
+    verb: date_parse
+    format: iso8601

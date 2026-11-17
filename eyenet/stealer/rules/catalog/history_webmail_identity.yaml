@@ -1,0 +1,29 @@
+id: history_webmail_identity
+version: 1
+layer: content
+family: victim_history
+priority: 85
+path_glob: "**History*.txt"
+description: >
+  The 'Chrome leaks your email in the tab title' tell. When a victim
+  is signed into Gmail / Outlook / Yahoo Mail, the page title always
+  carries the email address verbatim:
+
+    'Inbox (12) - alice@example.com - Gmail'
+    'Mail - alice@contoso.com - Outlook'
+    'Yahoo Mail - alice@yahoo.com'
+
+  History.txt preserves these titles, so even when the stealer did
+  not grab Gmail cookies directly, the victim's primary webmail
+  address is exposed. That email is the account-recovery kingpin for
+  dozens of downstream services.
+
+  Rule is a sibling of history_url_title_block. Same source file,
+  narrower extraction: only the webmail identity row. Priority 85
+  so it fires first on history files; the broader URL-title rule
+  still captures the raw row alongside it.
+match:
+  type: regex
+  pattern: '(?im)^TITLE:\s*.*?-\s*(?P<webmail_email>[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*-\s*(?P<webmail_provider>Gmail|Outlook|Yahoo! Mail|Yahoo Mail)\s*$'
+extract:
+  fields: [webmail_email, webmail_provider]

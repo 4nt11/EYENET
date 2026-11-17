@@ -1,0 +1,53 @@
+slug: victim_history
+name: Browser history dump (History - *.txt)
+status: active
+first_seen_year: 2019
+aliases: [history, browsing, visits]
+signature_files:
+  - History.txt
+  - History - *.txt
+loaders: []
+distribution_channels:
+  - Chromium-family stealers walk the History SQLite db and
+    serialize the visits table
+references:
+  - title: Chromium History schema (visits + urls tables)
+    url: https://chromium.googlesource.com/chromium/src/+/HEAD/components/history/core/browser/url_database.cc
+notes: >
+  Browser visit history as three-line records 'URL:' / 'TITLE:' /
+  'TIME:' (ISO-8601) separated by blank lines.
+
+  CTI payloads worth promoting downstream:
+
+    infection vector      href.li / bit.ly / is.gd / goo.gl /
+                          cutt.ly / t.co / tinyurl redirects into
+                          *.rar / *.exe / *.msi / *.iso / *.scr /
+                          *.cab downloads. The row just before the
+                          stealer phoned home is often the EXACT
+                          malicious landing. In khazan2 that is
+                          276 rows across the corpus; 1-2 per
+                          infected victim.
+
+    webmail identity leak Gmail / Yahoo tab titles always carry
+                          the signed-in email address verbatim
+                          ('Inbox - alice@gmail.com - Gmail'). A
+                          sibling rule extracts the email + provider
+                          structured; even when stealer did not
+                          grab the Gmail cookie directly, the email
+                          is exposed. Outlook titles carry the
+                          DISPLAY NAME, not the email, so they
+                          don't fire the identity rule but still
+                          land in the raw history.
+
+    sensitive doc preview Google Drive viewer URLs, DocuSign review
+                          links, SharePoint preview tokens - replay
+                          with the right cookie and the doc opens.
+
+    interest profile      video history, game forums, political
+                          sites, adult content - shapes the social
+                          engineering lure that gets the victim to
+                          click round two.
+
+  Khazan2 corpus sweep: 227,816 history rows across 260 files.
+  110 victims (~42%) had their primary webmail identity leaked
+  through tab titles alone; 131 unique emails total.

@@ -1,0 +1,15 @@
+id: history_webmail_identity
+version: 1
+layer: content
+family: victim_history
+priority: 85
+path_glob: History.txt
+description: >
+  Webmail-identity-from-title parity fixture. Verifies the regex
+  pulls the email out of a Gmail tab title but skips over an Outlook
+  title that carries a display name (no @) instead of an email.
+match:
+  type: regex
+  pattern: '(?im)^TITLE:\s*.*?-\s*(?P<webmail_email>[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*-\s*(?P<webmail_provider>Gmail|Outlook|Yahoo! Mail|Yahoo Mail)\s*$'
+extract:
+  fields: [webmail_email, webmail_provider]

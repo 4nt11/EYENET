@@ -1,0 +1,7 @@
+URL: https://outlook.live.com/mail/0/
+TITLE: Mail - Kyle Anderson - Outlook
+TIME: 2026-08-07T09:40:00
+
+URL: https://mail.google.com/mail/u/0/?tab=rm&ogbl#inbox
+TITLE: Inbox (12) - lorenzo.papa@gmail.com - Gmail
+TIME: 2026-08-07T09:41:29
