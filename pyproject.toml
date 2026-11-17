@@ -12,6 +12,13 @@ dependencies = [
   "pydantic>=2.7",
   "sqlmodel>=0.0.22",
   "sqlalchemy>=2.0",
+  # YAML: runtime dep since the stealer rule catalog, families catalog, and
+  # MITRE TTPs catalog are all YAML-driven and imported at module scope
+  # (eyenet/stealer/families, /rules/catalog, /ttps, /rules/matchers).
+  # Lived in optional-dependencies before v1.3.5; the API container only
+  # booted because a transitive dep (uvicorn, httpx, ...) pulled pyyaml in
+  # as a sidecar. A dep-tree shuffle in the latest build broke that.
+  "pyyaml>=6",
   # storage — async SQLite is the mandated engine (sqlite+aiosqlite, CLAUDE.md
   # §2.5). aiosqlite is the DBAPI driver; greenlet is SQLAlchemy's async bridge
   # (only auto-installed on some platforms, so pin it explicitly).
@@ -148,7 +155,6 @@ dev = [
   "freezegun>=1.5",
   "respx>=0.21",
   "testcontainers[nats]>=4.7",
-  "pyyaml>=6",  # M9.6: validate operations/ alert + collector YAML artifacts
 
   # load
   "locust>=2.31",
