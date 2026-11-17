@@ -416,6 +416,33 @@
     ]
   },
   {
+    "id": "netscape_cookies",
+    "version": 1,
+    "layer": "content",
+    "family": "cookies",
+    "priority": 70,
+    "path_glob": "**ookies**",
+    "description": "Netscape cookie file format. Tab-separated, 7 columns: domain, include_subdomains (TRUE/FALSE), path, secure (TRUE/FALSE), expires (unix epoch), name, value. Lines starting with '#' are comments; blank lines are skipped. Glob `**ookies**` catches both `Cookies*` and `cookies*` variants at any depth via the common `ookies` substring (our glob treats `**` as `.*`, so bookending it around a substring makes the pattern cross path separators); stealer families emit this file under Browsers/, Cookies/, or similar sibling dirs. One sample row extracted as a probe (DELIMITER matcher is first-row-only by design); bulk cookie ingest is a pipeline-side job.\n",
+    "match": {
+      "type": "delimiter",
+      "separator": "\t",
+      "min_columns": 7,
+      "skip_blank": true,
+      "skip_comment_prefix": "#"
+    },
+    "extract": {
+      "columns": {
+        "0": "cookie_domain",
+        "1": "include_subdomains",
+        "2": "cookie_path",
+        "3": "secure",
+        "4": "expires_epoch",
+        "5": "cookie_name",
+        "6": "cookie_value"
+      }
+    }
+  },
+  {
     "id": "opus_container",
     "version": 1,
     "layer": "container",

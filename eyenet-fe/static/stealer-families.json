@@ -52,6 +52,29 @@
     "notes": "Meta-family, not a stealer. Flat url:user:pass (or ;/|-separated) files that aggregate credentials from many sources and campaigns. Our combolist_container rule fires as the L1 fallback when no stealer family matches; the per-shape probes (combolist_ulp_colon, _semicolon, _pipe, _any_scheme, _schemeless, _email_colon, _android, _ulpextract_tsv) classify the row format. ulpextract remains the authoritative per-row credential ingester.\n"
   },
   {
+    "slug": "cookies",
+    "name": "Browser cookies (Netscape format)",
+    "status": "active",
+    "first_seen_year": 1994,
+    "aliases": [
+      "netscape-cookies",
+      "cookies.txt"
+    ],
+    "signature_files": [],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealer-log drops (every family exports browser cookies)",
+      "standalone cookie dumps on forum marketplaces"
+    ],
+    "references": [
+      {
+        "title": "Netscape cookie file format (via curl.se)",
+        "url": "https://curl.se/docs/http-cookies.html"
+      }
+    ],
+    "notes": "Meta-family for the de-facto cookie.txt format. Tab-separated with seven columns: domain, include_subdomains, path, secure, expires, name, value. Lines starting with # are comments and blank lines are skipped. Every stealer family ships cookies in this format somewhere under Browsers/ or Cookies/; our Netscape probe rule classifies the file shape regardless of which stealer produced it.\n"
+  },
+  {
     "slug": "json_v2",
     "name": "JSON-first cluster (StealC v2 / Acreed / Stealerium)",
     "status": "active",
