@@ -1,0 +1,15 @@
+id: software_corporate_marker
+version: 1
+layer: content
+family: victim_software
+priority: 85
+path_glob: Software.txt
+description: >
+  Corporate-pwn tell parity fixture. Verifies the enterprise-license
+  pattern anchors on the LTSC row and skips over legit personal-use
+  software above it.
+match:
+  type: regex
+  pattern: '(?im)^(?P<corporate_marker>.*\b(Microsoft Office LTSC|Microsoft 365 Apps for [Ee]nterprise|Office Professional Plus|Visual Studio Enterprise|Visio Professional|Project Professional|SAP GUI|SAP Logon|AutoCAD|SolidWorks|Adobe Creative Cloud (?:Enterprise|for Teams)|Citrix Workspace|Citrix Receiver|Cisco AnyConnect|GlobalProtect|FortiClient|OpenVPN Connect|Microsoft Intune|Company Portal|ServiceNow|Atlassian Jira|Atlassian Confluence)\b.*)$'
+extract:
+  fields: [corporate_marker]

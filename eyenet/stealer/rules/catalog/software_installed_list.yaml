@@ -1,0 +1,40 @@
+id: software_installed_list
+version: 1
+layer: content
+family: victim_software
+priority: 70
+path_glob: "**Software.txt"
+description: >
+  Installed-app inventory: one display name per line from the
+  Windows uninstall registry (plus some MSI driver-package rows).
+  Dupes are common and left in; dedupe downstream.
+
+  Per-line capture; the Workbench iterates the full list. CTI uses:
+
+    profession profile      Antares Auto-Tune + PreSonus Studio One
+                            == music producer. Ross-Tech VAG-COM +
+                            FTDI serial drivers == automotive
+                            diagnostic tech. SolidWorks + AutoCAD
+                            == mechanical engineer. Combines with
+                            Info.txt hostname to pin the person.
+    locale leak             French 'Package de pilotes Windows' and
+                            Spanish 'Microsoft Office ... - es-es'
+                            locales appear verbatim and sometimes
+                            diverge from Info.txt (user set EN but
+                            installed OS was localized).
+    attack-surface map      BetterNet TAP + Z-Library + Driver Easy
+                            flags unmanaged, high-risk host. Cheat
+                            Engine + random Launcher + cracked
+                            game tells a game-cheater profile.
+    cred-reuse inference    installed password manager vs no
+                            password manager changes how much the
+                            Brute.txt wordlist is worth.
+
+  We intentionally skip reject_patterns here; even Khazan banner
+  lines in branded Software.txt dumps are useful as the stealer
+  signature. The downstream classifier earns its keep.
+match:
+  type: regex
+  pattern: '(?m)^(?P<software_name>\S.{2,})$'
+extract:
+  fields: [software_name]

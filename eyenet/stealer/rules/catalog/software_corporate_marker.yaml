@@ -1,0 +1,49 @@
+id: software_corporate_marker
+version: 1
+layer: content
+family: victim_software
+priority: 85
+path_glob: "**Software.txt"
+description: >
+  The 'corporate pwn' tell. Flags installed-app rows that carry
+  enterprise-grade license strings or vendor-admin tooling. When
+  this anchors, the victim is a corporate endpoint (or a SOHO
+  running volume-licensed software), which multiplies triage
+  priority by an order of magnitude: corporate credentials unlock
+  payrolls, M365 tenants, VPN beachheads, and supply-chain pivots.
+
+  Signatures hit on the first match in the file; the Workbench
+  walks every match so an operator can confirm the whole posture
+  (one corporate tool can be noise, five is an endpoint on a
+  managed domain).
+
+  Markers covered:
+
+    Microsoft Office LTSC         long-term servicing channel SKU,
+                                  enterprise volume licence.
+    Microsoft 365 Apps for Enterprise
+    Office Professional Plus      the KMS-activated Pro Plus SKU.
+    Visual Studio Enterprise      per-dev-seat enterprise IDE.
+    Visio|Project (Pro|Premium)   per-seat enterprise add-ons.
+    SAP GUI / SAP Logon           SAP front-end, almost always
+                                  corporate ERP.
+    AutoCAD / SolidWorks          per-seat engineering CAD
+                                  (expensive, rarely pirated at
+                                  home).
+    Adobe Creative Cloud (Enterprise|for Teams)
+                                  enterprise CC licence, not CC
+                                  for individuals.
+    Citrix (Workspace|Receiver)   remote-desktop farm client.
+    Cisco AnyConnect              corporate VPN.
+    GlobalProtect / FortiClient / OpenVPN Connect
+                                  corporate VPN clients.
+    Intune / Company Portal       Microsoft Endpoint Manager -
+                                  this host is MDM-enrolled.
+    ServiceNow / Jira / Confluence
+                                  enterprise collaboration /
+                                  ticketing.
+match:
+  type: regex
+  pattern: '(?im)^(?P<corporate_marker>.*\b(Microsoft Office LTSC|Microsoft 365 Apps for [Ee]nterprise|Office Professional Plus|Visual Studio Enterprise|Visio Professional|Project Professional|SAP GUI|SAP Logon|AutoCAD|SolidWorks|Adobe Creative Cloud (?:Enterprise|for Teams)|Citrix Workspace|Citrix Receiver|Cisco AnyConnect|GlobalProtect|FortiClient|OpenVPN Connect|Microsoft Intune|Company Portal|ServiceNow|Atlassian Jira|Atlassian Confluence)\b.*)$'
+extract:
+  fields: [corporate_marker]

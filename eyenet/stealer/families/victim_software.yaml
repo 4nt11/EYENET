@@ -1,0 +1,52 @@
+slug: victim_software
+name: Installed-software inventory (Software.txt)
+status: active
+first_seen_year: 2019
+aliases: [software, installed-apps, programs]
+signature_files:
+  - Software.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer ships it alongside Info.txt
+references:
+  - title: Windows uninstall registry (HKLM/HKCU Uninstall keys)
+    url: https://learn.microsoft.com/en-us/windows/win32/msi/uninstall-registry-key
+notes: >
+  Installed-app inventory lifted from the Windows uninstall registry
+  at stealer execution time. Display name per line; duplicates common
+  (per-user + per-machine rows). ~150 rows per victim typical.
+
+  CTI value is enormous because the list reveals the person behind
+  the credentials:
+
+    profession profile
+      Antares Auto-Tune + PreSonus Studio One  == music producer
+      Ross-Tech VAG-COM + FTDI serial drivers  == automotive tech
+      SolidWorks + AutoCAD                     == mech engineer
+      SAP GUI + SAP Logon + Citrix Workspace   == corporate ERP user
+      Cheat Engine + 7Launcher                 == game cheater
+
+    locale leak
+      French 'Package de pilotes Windows' and Spanish '... - es-es'
+      locales appear verbatim and sometimes diverge from Info.txt
+      (user set English UI on a localized OS).
+
+    attack-surface map
+      BetterNet TAP + Z-Library + Driver Easy  == unmanaged host,
+                                                  high risk
+      Microsoft Intune + Company Portal        == MDM-managed, hard
+                                                  to pivot sideways
+      Cisco AnyConnect + GlobalProtect         == VPN gateway visible
+
+    corporate pwn tell
+      Microsoft Office LTSC / M365 for Enterprise / Office Pro Plus
+      plus one of (Visual Studio Enterprise, AutoCAD, SolidWorks,
+      SAP GUI, Citrix, Cisco AnyConnect, Intune) == real corporate
+      endpoint. Credentials unlock payroll, M365 tenants, VPN
+      beachheads, supply-chain pivots.
+
+  Khazan2 corpus sweep:
+    71 Software.txt files, 10,653 total app rows.
+    18 victims (~25%) trip the corporate_marker rule. Locales
+    hit: en-us, pt-br, es-es, fr-fr - multi-geo corporate
+    footprint in one small archive.

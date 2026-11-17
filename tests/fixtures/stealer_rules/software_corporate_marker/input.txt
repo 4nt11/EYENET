@@ -1,0 +1,6 @@
+7-Zip 23.01 (x64)
+VLC media player
+Microsoft Visual C++ 2022 X64 Minimum Runtime - 14.50.35719
+Microsoft Office LTSC Professional Plus 2024 - en-us
+Cisco AnyConnect Secure Mobility Client 4.10.06090
+Python 3.12.2 Executables (64-bit)
