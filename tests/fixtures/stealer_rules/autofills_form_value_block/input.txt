@@ -1,0 +1,14 @@
+FORM: FNAME
+VALUE: Lorenzo
+
+FORM: emailUtente
+VALUE: lorenzo.papa@icstrambino.edu.it
+
+Khazan Cloud [t.me/KhazanCloud]
+t.me/KhazanCloud
+
+FORM: vat
+VALUE: IT04567890123
+
+FORM: IIdentification
+VALUE: 0682614236898

@@ -1,0 +1,55 @@
+slug: victim_autofills
+name: Chromium autofill history (Autofills - *.txt)
+status: active
+first_seen_year: 2019
+aliases: [autofill, formdata, autofills]
+signature_files:
+  - Autofills.txt
+  - Autofills - *.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer dumps the Form History table
+    alongside credential dumps
+references:
+  - title: Chromium Web Data (Autofill table) schema
+    url: https://source.chromium.org/chromium/chromium/src/+/main:components/autofill/core/browser/webdata/
+notes: >
+  Chromium stores every form field + value the victim ever let the
+  browser autofill (name, email, phone, address, tax ID, search
+  query, ecommerce quantity, custom site widgets). The stealer
+  dumps the whole table as two-line records 'FORM: <k>' / 'VALUE:
+  <v>' separated by blank lines.
+
+  Khazan2 corpus: 16,615 records across 346 files. Field-name
+  spectrum (top of distribution):
+
+    name            1,433   full names / display names
+    email             318   primary email
+    username          336   site-specific usernames
+    identifier        210   generic 'logged in as' value
+    iidentification   176   Brazilian CPF / Portuguese NIF / Spanish
+                            DNI / Chilean RUT / Aadhaar
+    vat                96   EU VAT IDs - direct company bindings
+                            for SME owners
+    login             100
+    phone / mobile    174   including Indian 10-digit mobiles
+    address / city /
+    postal / zip      334
+    q / s / input-search   585   search queries typed into the
+                                  browser - intent history
+
+  CTI uses:
+
+    identity theft     full name + email + phone + national ID in
+                       one row ships a doxx-ready profile.
+    SME attribution    EU VAT + company website + personal email on
+                       same victim == link the person to the firm.
+    behavior modeling  search queries + unitprice/videourl/quantity
+                       patterns reveal reseller / dropshipper
+                       workflows.
+    school/work bind   .edu / .edu.it / .gov email in emailUtente
+                       confirms employer.
+
+  Khazan ships branding banners mid-file in some dumps. The regex
+  uses finditer and simply skips blocks that do not look like
+  FORM/VALUE pairs - banners do not break the stream.

@@ -1,0 +1,37 @@
+id: autofills_form_value_block
+version: 1
+layer: content
+family: victim_autofills
+priority: 85
+path_glob: "**Autofill*.txt"
+description: >
+  Chromium autofill dump: two-line records 'FORM: <field>' /
+  'VALUE: <value>' separated by blank lines. Rich identity-theft
+  payload - every form a victim ever submitted with autofill
+  enabled gets replayed here in cleartext.
+
+  CTI payload per record:
+
+    name fields       FNAME, LNAME, firstname, lastname, cognome,
+                      fullname, adda-auth-name, display_name
+    contact fields    email, emailUtente, identifier, mobile, phone,
+                      telephone, adda-auth-mobile
+    address fields    ADDRESSLINE_1, address, city, postal_code, zip,
+                      street
+    identity docs     IIdentification (CPF, Aadhaar, passport, SSN),
+                      cpf, nif, rut, dni, documento
+    school/work       institutional '.edu.it' / '.edu' / '.gov'
+                      emails bind the victim to a confirmed
+                      organization
+    fingerprint       external_ip, device_id, keyboard settings,
+                      locale preferences
+
+  The rule captures ANY (form_key, form_value) pair; downstream
+  classification (phone / email / address / national_id) is a
+  normalization job. Khazan branding banners mid-file do not break
+  the regex: finditer skips non-matching blocks and keeps scanning.
+match:
+  type: regex
+  pattern: '(?m)^FORM:\s*(?P<form_key>[^\n]+)\nVALUE:\s*(?P<form_value>[^\n]+)$'
+extract:
+  fields: [form_key, form_value]

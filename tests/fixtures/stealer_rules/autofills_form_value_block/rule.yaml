@@ -1,0 +1,16 @@
+id: autofills_form_value_block
+version: 1
+layer: content
+family: victim_autofills
+priority: 85
+path_glob: Autofills.txt
+description: >
+  Autofill two-line block parity fixture. Verifies the first FORM/
+  VALUE pair populates fields; bulkParse walks every subsequent
+  record on the Workbench side. Includes a mid-file blank line +
+  banner noise block to confirm non-match segments are skipped.
+match:
+  type: regex
+  pattern: '(?m)^FORM:\s*(?P<form_key>[^\n]+)\nVALUE:\s*(?P<form_value>[^\n]+)$'
+extract:
+  fields: [form_key, form_value]
