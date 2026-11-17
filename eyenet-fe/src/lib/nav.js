@@ -25,7 +25,8 @@ export const NAV = [
       { slug: 'graph',      label: 'Graph',      href: '/graph', built: true, desc: 'Aggregate graph stats and actor search' },
       { slug: 'actor-groups', label: 'Actor groups', href: '/actor-groups', built: true, desc: 'Crews · accounts clustered by shared operational infrastructure' },
       { slug: 'reader', label: 'Reader', href: '/reader', built: true, desc: 'Reconstruct monitored conversations · forum threads and group chats, raw' },
-      { slug: 'stealer', label: 'ULP corpus', href: '/stealer', built: true, desc: 'Stealer-log credentials · search by host + distribution charts · read:stealer' }
+      { slug: 'stealer', label: 'ULP corpus', href: '/stealer', built: true, desc: 'Stealer-log credentials · search by host + distribution charts · read:stealer' },
+      { slug: 'stealer-artifacts', label: 'Stealer artifacts', href: '/stealer/artifacts', built: true, desc: 'Per-victim archive drawer · credentials, cookies, techniques, monitored-domain hits · read:stealer' }
     ]
   },
   {

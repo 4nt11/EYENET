@@ -151,3 +151,6 @@ development/deploy-multi-host.*
 
 # bun is the package manager here; npm cruft must never come back
 package-lock.json
+
+# design exports (FE drawer mockups, HTML + assets); reference only, not shipped
+development/design-*/
