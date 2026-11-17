@@ -6,35 +6,61 @@ priority: 100
 path_glob: UserInformation.txt
 requires_container_family: redline
 description: >
-  RedLine header. Plain "Key: Value" lines; no dash prefix, no INI
-  sections. Uptime, Keyboards, and LCID-tagged Language are the
-  RedLine-specific fingerprint keys (none of Lumma/Vidar/StealC emit
-  all three). RAM arrives like "16384 MB"; int_from_string strips "MB".
+  RedLine header. Covers TWO shape variants seen in the wild:
+
+    textbook  (short keys):  Computer / User / OS / CPU / RAM
+    newer     (long keys):   Computer Name / User Name /
+                             Operation System / Installed RAM / Processor
+                             (plus Traffic / Log date / Version Build /
+                             Admin Group / Integrity / TimeZone)
+
+  requires_keys gates on HWID alone (present in both). Both extract maps
+  write to the SAME output fields where they overlap (hostname/user/os/
+  cpu/ram/language), so a rule change doesn't fragment downstream
+  schemas. Only one of the two key styles is typically present per
+  file, so the overlapping extracts don't collide.
 match:
   type: keyvalue
   separator: ": "
   strip_whitespace: true
   requires_keys:
-    - Computer
-    - User
-    - IP
+    - HWID
 extract:
   keys:
-    Computer: hostname
-    User: user
+    # Universal (either variant)
+    HWID: hwid
     IP: ip
     Country: country
-    OS: os
-    CPU: cpu
-    RAM: ram
     Screen: screen
-    Language: language
     Keyboards: keyboards
     Uptime: uptime_minutes
     Path: payload_path
     AV: av
+    # Textbook (short-key) variant
+    Computer: hostname
+    User: user
+    OS: os
+    CPU: cpu
+    RAM: ram
+    Language: language
+    # Newer (long-key) variant
+    Computer Name: hostname
+    User Name: user
+    Operation System: os
+    Processor: cpu
+    Installed RAM: ram
+    System Language: language
+    Log date: log_date
+    Traffic: traffic_source
+    Version Build: build_version
+    Admin Group: admin_group
+    Integrity: integrity_level
+    TimeZone: timezone
+    Graphics card: gpu
+    Domain Name: domain
 normalize:
   - { verb: strip_whitespace, field: hostname }
+  - { verb: uppercase,        field: hwid }
   - { verb: lowercase,        field: country }
   - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
   - { verb: int_from_string,  field: ram }

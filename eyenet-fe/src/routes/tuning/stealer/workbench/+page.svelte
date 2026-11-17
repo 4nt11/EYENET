@@ -299,16 +299,28 @@
                           <span class="count mono">{bulk.records.length}{bulk.truncated ? ` / ${bulk.total}` : ''} record{bulk.records.length === 1 ? '' : 's'}</span>
                         </div>
                         <div class="records-wrap">
-                          <table class="recordstbl">
-                            <thead>
-                              <tr>{#each Object.keys(bulk.records[0]) as k}<th>{k}</th>{/each}</tr>
-                            </thead>
-                            <tbody>
-                              {#each bulk.records as rec}
-                                <tr>{#each Object.keys(bulk.records[0]) as k}<td class="mono">{rec[k] ?? ''}</td>{/each}</tr>
-                              {/each}
-                            </tbody>
-                          </table>
+                          {#if bulk.records.length === 1}
+                            <!-- One record + many fields: pivot to key/value so the data stays readable. -->
+                            <table class="recordstbl pivoted">
+                              <tbody>
+                                {#each Object.entries(bulk.records[0]) as [k, v]}
+                                  <tr><td class="mono key">{k}</td><td class="mono val">{v ?? ''}</td></tr>
+                                {/each}
+                              </tbody>
+                            </table>
+                          {:else}
+                            <!-- Many records (cookies, delimiter dumps): wide table, one row per record. -->
+                            <table class="recordstbl">
+                              <thead>
+                                <tr>{#each Object.keys(bulk.records[0]) as k}<th>{k}</th>{/each}</tr>
+                              </thead>
+                              <tbody>
+                                {#each bulk.records as rec}
+                                  <tr>{#each Object.keys(bulk.records[0]) as k}<td class="mono">{rec[k] ?? ''}</td>{/each}</tr>
+                                {/each}
+                              </tbody>
+                            </table>
+                          {/if}
                         </div>
                         {#if bulk.truncated}
                           <div class="ptail">Showing first {bulk.records.length.toLocaleString()} of {bulk.total.toLocaleString()} records (limit {BULK_LIMIT.toLocaleString()}).</div>
@@ -316,6 +328,9 @@
                       </div>
                     {/if}
                   {/each}
+                  {#if result && rulesForFile(f.path).length === 0 && !f.binary}
+                    <div class="no-hits">No content rule matched this file. Preview above shows the raw bytes for rule authoring.</div>
+                  {/if}
                 </div>
               {/if}
             </li>
@@ -528,6 +543,18 @@
     font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data);
     color: var(--text); vertical-align: top;
     word-break: break-all; max-width: 260px;
+  }
+  .recordstbl.pivoted .key { color: var(--text-faint); width: 180px; white-space: nowrap; }
+  .recordstbl.pivoted .val { color: var(--text); max-width: none; }
+
+  .no-hits {
+    margin-top: 12px;
+    padding: 8px 12px;
+    border: 1px solid var(--border); border-left: 2px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data);
   }
 
   .result-body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }

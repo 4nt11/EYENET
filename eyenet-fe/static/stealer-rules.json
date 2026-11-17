@@ -627,38 +627,55 @@
     "priority": 100,
     "path_glob": "UserInformation.txt",
     "requires_container_family": "redline",
-    "description": "RedLine header. Plain \"Key: Value\" lines; no dash prefix, no INI sections. Uptime, Keyboards, and LCID-tagged Language are the RedLine-specific fingerprint keys (none of Lumma/Vidar/StealC emit all three). RAM arrives like \"16384 MB\"; int_from_string strips \"MB\".\n",
+    "description": "RedLine header. Covers TWO shape variants seen in the wild:\n\n  textbook  (short keys):  Computer / User / OS / CPU / RAM\n  newer     (long keys):   Computer Name / User Name /\n                           Operation System / Installed RAM / Processor\n                           (plus Traffic / Log date / Version Build /\n                           Admin Group / Integrity / TimeZone)\n\nrequires_keys gates on HWID alone (present in both). Both extract maps write to the SAME output fields where they overlap (hostname/user/os/ cpu/ram/language), so a rule change doesn't fragment downstream schemas. Only one of the two key styles is typically present per file, so the overlapping extracts don't collide.\n",
     "match": {
       "type": "keyvalue",
       "separator": ": ",
       "strip_whitespace": true,
       "requires_keys": [
-        "Computer",
-        "User",
-        "IP"
+        "HWID"
       ]
     },
     "extract": {
       "keys": {
-        "Computer": "hostname",
-        "User": "user",
+        "HWID": "hwid",
         "IP": "ip",
         "Country": "country",
-        "OS": "os",
-        "CPU": "cpu",
-        "RAM": "ram",
         "Screen": "screen",
-        "Language": "language",
         "Keyboards": "keyboards",
         "Uptime": "uptime_minutes",
         "Path": "payload_path",
-        "AV": "av"
+        "AV": "av",
+        "Computer": "hostname",
+        "User": "user",
+        "OS": "os",
+        "CPU": "cpu",
+        "RAM": "ram",
+        "Language": "language",
+        "Computer Name": "hostname",
+        "User Name": "user",
+        "Operation System": "os",
+        "Processor": "cpu",
+        "Installed RAM": "ram",
+        "System Language": "language",
+        "Log date": "log_date",
+        "Traffic": "traffic_source",
+        "Version Build": "build_version",
+        "Admin Group": "admin_group",
+        "Integrity": "integrity_level",
+        "TimeZone": "timezone",
+        "Graphics card": "gpu",
+        "Domain Name": "domain"
       }
     },
     "normalize": [
       {
         "verb": "strip_whitespace",
         "field": "hostname"
+      },
+      {
+        "verb": "uppercase",
+        "field": "hwid"
       },
       {
         "verb": "lowercase",
