@@ -32,6 +32,14 @@ notes: >
   victim host; the victim's REAL plaintext seed backup at that path
   (if any) is DESTROYED by the overwrite.
 
+  CONFIRMED pipeline: Vidar packed by AWARE distributed via the
+  Khazan Cloud affiliate panel. See vidar_khazan_panel family and
+  development/FINDING_khazan_is_vidar_aware.md for the sample-level
+  attribution chain. The AWARE features observed on Khazan binaries
+  exactly match the aware-cr1.com/crypt UI options (Reflective
+  Loading, Process Hollowing, UPX pre-compress, Anti-Debug, Anti-VM,
+  Activity Check, PPID Spoof, Fake Error).
+
   CTI uses:
 
     cross-family attribution  the same banner appearing in RedLine /

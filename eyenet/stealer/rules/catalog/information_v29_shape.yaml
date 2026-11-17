@@ -9,22 +9,39 @@ description: >
   UserInformation shapes). Dominant key: MD5 of the stealer binary
   itself. 'Version: 2.9' at top is the stealer-build version.
 
-  JACKPOT FIELD - the attacker literally ships their own binary
-  hash:
+  DECOY FIELD (not what it looks like):
 
     MD5: 6669e10c960f6c2297bcd3d5a27412aa
 
-  One click away from MalwareBazaar / VirusTotal lookup. Each
-  distinct MD5 in the corpus is a distinct stealer build; same MD5
-  across victims means same binary dropped them.
+  Looks like the stealer's own hash. It is NOT. VT lookup on this
+  specific value returns 'MpDlpService.exe', Microsoft-signed, 0/71
+  detections - the real Microsoft Defender DLP service binary.
+
+  Mechanism: the malware runs reflectively in-memory (see Work Dir
+  below) then hollows into a legitimate signed system process. A
+  GetModuleFileName(NULL, ...) call from inside the hollowed shell
+  returns the HOST process's path (the Microsoft one), and the
+  MD5 of that file gets written to the field. True hash, wrong
+  binary. Deliberate telemetry misdirection.
+
+  Still-useful CTI pivot: each distinct MD5 in the corpus maps to
+  a distinct LEGITIMATE SYSTEM BINARY the Khazan build was coded to
+  hollow into. Clustering victims by MD5 clusters them by the
+  attacker's chosen masquerade target, not by their own binary. Two
+  38-victim clusters on 6669e10c... and c990672aef... == 38 Khazan
+  builds all set to hollow into the same Microsoft service.
 
   Other distinguishing fields:
 
     Work Dir      'In memory' == reflective loading (no disk
                    drop of the real payload, which pairs with the
                    AWARE Crypter Reflective Loading execution
-                   method). 'C:\\...' path == classic Temp-dir
-                   drop.
+                   method). Combined with the MD5 decoy above,
+                   this is the reflective-load + process-hollow
+                   double-pattern: run in-memory, then hollow
+                   into a trusted Microsoft process so the host
+                   PE on disk looks legitimate. 'C:\\...' path
+                   == classic Temp-dir drop (less common).
 
     GUID          short Windows UUID segment '{5c1cb694-61f1}'
     HWID          COMPOSITE host-id combining disk serial, GUID,

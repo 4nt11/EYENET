@@ -1,0 +1,111 @@
+slug: vidar_khazan_panel
+name: Vidar stealer distributed through the Khazan Cloud panel
+status: active
+first_seen_year: 2026
+aliases: [khazan, khazan-cloud, vidar-khazan]
+signature_files:
+  - Info.txt
+  - UserInformation.txt
+  - Information.txt
+  - Summary.txt
+  - Brute.txt
+  - Autofills.txt
+  - Autofills - *.txt
+  - Cookies.txt
+  - History.txt
+  - Download History - *.txt
+  - LocalStorage.txt
+  - Environment.txt
+  - Clipboard.txt
+  - Processes.txt
+  - ProcessList.txt
+  - Software.txt
+  - tokens.txt
+  - steam_tokens.txt
+  - Google Accounts/Restore_*.txt
+  - seed.txt
+loaders:
+  - AWARE Crypter (aware-cr1.com, commercial FUD packer-as-a-service)
+distribution_channels:
+  - "t.me/KhazanCloud (log-dump Telegram channel, possibly also live C2-URL bot - needs collection to disambiguate)"
+  - "@BuzzLogsPlanet (sales / support handle shipped in victim files as 'Buy:' marketing)"
+  - "https://linktr.ee/LogsPlanet (reserve / overflow link stamped on every banner block)"
+references:
+  - title: 'MWB packed sample: 14ca810daf0e2f39f91430a926ba057e'
+    url: https://bazaar.abuse.ch/sample/87a171e6a749340ffe3699524826cb1e52cad6e8f0e2350e84ced50dc13a8de8/
+  - title: 'MWB unpacked Vidar core: 247b57a63b2bbe0d690229e5b4cfcea6'
+    url: https://bazaar.abuse.ch/sample/6ff3935d6215fc5bd0f6323430ee2e69da7b7344cb0f567ea8a91200ab414351/
+  - title: 'AWARE Crypter storefront'
+    url: https://aware-cr1.com
+  - title: 'Full finding writeup'
+    url: development/FINDING_khazan_is_vidar_aware.md
+notes: >
+  'Khazan' is not a new malware family. It is an affiliate PANEL that
+  distributes the Vidar stealer (upstream family since 2018), with
+  binaries packed by the commercial AWARE Crypter service.
+
+  The chain:
+
+    Vidar core           the actual stealer logic (unpacked ~777 KB,
+                         no import table, walks imports dynamically)
+       ↓ packed by
+    AWARE Crypter        reflective loading OR process hollowing,
+                         UPX pre-compress, anti-debug, anti-VM,
+                         activity check, PPID spoof, fake error
+       ↓ distributed through
+    Khazan Cloud panel   t.me/KhazanCloud + @BuzzLogsPlanet sales
+       ↓ tagged per operator with
+    Traffic: <affid>     gwynbleidd (40%), Alexxxx (16%), Samurai,
+                         jakoer228, 02, vikidr, ponton402, fogkzx
+
+  Attribution forensics on the 'MD5:' field in Information.txt:
+
+    Work Dir: In memory              reflective-loaded, MD5 is the
+                                     HOLLOWED HOST process (Microsoft-
+                                     signed system binaries at top
+                                     of the cluster: MpDlpService.exe
+                                     etc). Not the malware's hash.
+
+    Work Dir: Admin @BuzzLogsPlanet  Khazan marketing text stomped
+                                     into the field; these builds are
+                                     the UPX-dropped direct-execution
+                                     kind, and MD5 is the real packed
+                                     Vidar binary. Plug into MWB.
+
+  Known real-stealer MD5 clusters under the Khazan-branded Work Dir:
+
+    38  c990672aef66adf529b0d06207c6e86f  cc06652f8c.exe, UPX, Vidar
+    16  de17f7b52884e1f9902e7ff88cc13023
+    14  343a3b05080bc445331e570cae74481a
+    11  14ca810daf0e2f39f91430a926ba057e  CONFIRMED Vidar (MWB, see refs)
+     6  7982d91fee5272dc1da750c398008113
+
+  The 777 KB UPX-decompressed inner binary is the clean reverse-
+  engineering target (MD5 247b57a63b2bbe0d690229e5b4cfcea6).
+
+  Cross-family implication: if another stealer sample (RedLine /
+  Lumma / StealC) drops the AWARE seed.txt calling card, they share
+  the AWARE packing supplier even though they nominally belong to
+  different families. The 'aware_crypter' family manifest covers
+  that detection.
+
+  Any.Run sandbox evasion is confirmed on at least one Khazan
+  sample (MWB hash 87a171e..., 'No threats detected' verdict),
+  matching AWARE's advertised anti-VM + activity-check features.
+  Downstream pipelines using Any.Run as a verification layer for
+  this corpus will miss the detection.
+
+  Khazan2 corpus geo spread (differs between parse shapes):
+    UserInformation.txt dominant shape:  BR 10, US 3, IN 3, PH 3,
+                                         TR 3, GB 2, IQ 2, CO 2,
+                                         DE 2, PL 2, AR 1, DZ 1
+    Information.txt v29 shape:           IN 124, US 23, PH 17,
+                                         DE 15, BR 9, GB 9, BD 8,
+                                         ID 8, FR 7, PL 7, VN 6,
+                                         CN 5
+  Shape divergence may map to distinct operator sub-groups within
+  the Khazan panel targeting different geographic markets.
+
+  Build-version drift: v1.0 through v3.0 all co-existing in-field
+  across the sample. No deprecation flow; the panel keeps all
+  historical builds in service.
