@@ -1,0 +1,27 @@
+id: stealc_information_sections
+version: 1
+layer: content
+family: stealc
+priority: 100
+path_glob: information.txt
+description: >
+  StealC v1 [Hardware] section extraction. The [Software] section is a
+  bare program list (no `=` separator), so we don't try to parse it
+  here; a dedicated software-inventory rule can lift it later via
+  delimiter type if that signal becomes useful.
+match:
+  type: keyvalue_ini
+  requires_sections:
+    - Hardware
+extract:
+  keys:
+    "Hardware.Processor": cpu
+    "Hardware.Cores": cpu_cores
+    "Hardware.Threads": cpu_threads
+    "Hardware.RAM": ram
+    "Hardware.VideoCard": gpu
+normalize:
+  - { verb: replace_re2,     field: cpu, pattern: '\s+', replacement: ' ' }
+  - { verb: int_from_string, field: cpu_cores }
+  - { verb: int_from_string, field: cpu_threads }
+  - { verb: int_from_string, field: ram }

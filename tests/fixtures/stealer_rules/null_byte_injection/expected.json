@@ -1,0 +1,8 @@
+{
+  "family": null,
+  "fields": {
+    "user": "anti\\x00admin",
+    "hwid": "ABC\\x00123",
+    "country": "US"
+  }
+}

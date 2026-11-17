@@ -25,13 +25,18 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "stealer_rules"
 
 
 def _load_fixture(fdir: Path):
-    rule = yaml.safe_load((fdir / "rule.yaml").read_text(encoding="utf-8"))
+    # rule.yaml can hold a single rule OR a list of rules (for fixtures
+    # that need a container + content pair, or the combolist probes).
+    raw = yaml.safe_load((fdir / "rule.yaml").read_text(encoding="utf-8"))
+    rules = raw if isinstance(raw, list) else [raw]
     expected = json.loads((fdir / "expected.json").read_text(encoding="utf-8"))
     input_files = [p for p in fdir.iterdir() if p.name.startswith("input.")]
     assert len(input_files) == 1, f"{fdir.name}: expected exactly one input.* file"
-    file_path = rule.get("path_glob") or input_files[0].name
+    # Pick the first content rule's path_glob for the synthesized file path.
+    content_rule = next((r for r in rules if r.get("layer") == "content"), rules[0])
+    file_path = content_rule.get("path_glob") or input_files[0].name
     text = input_files[0].read_text(encoding="utf-8")
-    return rule, expected, ContentInput(path=file_path, text=text)
+    return rules, expected, ContentInput(path=file_path, text=text)
 
 
 @pytest.mark.parametrize(
@@ -40,9 +45,9 @@ def _load_fixture(fdir: Path):
 )
 def test_fixture_matches_expected(fixture_id: str) -> None:
     fdir = FIXTURES / fixture_id
-    rule, expected, content = _load_fixture(fdir)
+    rules, expected, content = _load_fixture(fdir)
     folder = VictimFolder(root_name=fixture_id, files=(content,))
-    result = run_rules([rule], folder)
+    result = run_rules(rules, folder)
 
     actual = {"family": result.family, "fields": result.fields}
     # Round-trip through JSON so int/float/bool normalization matches what

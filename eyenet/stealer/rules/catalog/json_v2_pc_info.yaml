@@ -1,0 +1,39 @@
+id: json_v2_pc_info
+version: 1
+layer: content
+family: json_v2
+priority: 100
+path_glob: pc_info.json
+description: >
+  Victim metadata from StealC-v2 / Acreed / Stealerium pc_info.json. Top
+  level is a flat object; GPU and LocalAdapterIpList are arrays, which
+  flow through JSONPath-lite as JSON-stringified blobs (good for raw
+  retention, searchable downstream). LocalTime is "YYYY-MM-DD HH:MM:SS"
+  without a timezone: we parse it iso8601 (Python's fromisoformat +
+  JS's Date.parse both accept the space separator).
+match:
+  type: json
+  requires_keys:
+    - PcName
+    - Os
+    - Ip
+extract:
+  paths:
+    hostname: $.PcName
+    os: $.Os
+    ip: $.Ip
+    country: $.Country
+    city: $.City
+    zip_code: $.ZipCode
+    ram: $.RAM
+    cpu_cores: $.CpuCores
+    arch: $.Arch
+    screen: $.ScreenSize
+    local_time: $.LocalTime
+    is_elevated: $.IsElevator
+    gpu_list: $.GPU
+    adapter_ips: $.LocalAdapterIpList
+    process_list: $.ProcessList
+normalize:
+  - { verb: lowercase,  field: country }
+  - { verb: date_parse, field: local_time, format: iso8601 }

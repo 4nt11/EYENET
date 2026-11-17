@@ -1,0 +1,3 @@
+https://mail.example.com/login;anti@example.com;Tr0ub4dour&3-correct-horse-battery-staple-xk9!
+https://forum.example.org/user;bob;hunter2
+https://cdn.foo.io:8443/auth;carol;spaces are fine too? no, fail

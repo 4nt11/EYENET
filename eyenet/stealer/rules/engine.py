@@ -11,6 +11,7 @@ from typing import Any
 
 import re2
 
+from eyenet.stealer.rules.matchers import _re2_compile  # noqa: F401 - shared RE2 config
 from eyenet.stealer.rules.matchers import (
     match_delimiter,
     match_folder,
@@ -60,6 +61,11 @@ def run_rules(rules: list[RuleSpec], folder: VictimFolder) -> RunResult:
 
     merged: dict[str, Any] = {}
     for r in content_rules:
+        # Optional opt-in family filter. Used by fallback rules (e.g. the
+        # combolist probes) that must not fire inside a real stealer folder.
+        req_fam = r.get("requires_container_family")
+        if req_fam is not None and req_fam != family:
+            continue
         glob = r.get("path_glob", "**/*")
         for file in folder.files:
             if not match_glob(glob, file.path):
@@ -81,8 +87,11 @@ def _eval_container(r: RuleSpec, inp: ContainerInput) -> EvalResult:
     if fields is None:
         return EvalResult(**base, matched=False, reason="no match")
     mapped = _apply_map(fields, r.get("map"))
+    rej = _rule_rejects(r, mapped)
+    if rej is not None:
+        return EvalResult(**base, matched=False, reason=f"reject: {rej}")
     normed = apply_normalize(mapped, r["normalize"]) if r.get("normalize") else mapped
-    return EvalResult(**base, matched=True, fields=normed)
+    return EvalResult(**base, matched=True, fields=_escape_nulls(normed))
 
 
 def _eval_content(r: RuleSpec, file) -> EvalResult:
@@ -112,8 +121,52 @@ def _eval_content(r: RuleSpec, file) -> EvalResult:
     if fields is None:
         return EvalResult(**base, matched=False, reason="no match")
     mapped = _apply_map(fields, r.get("map"))
+    rej = _rule_rejects(r, mapped)
+    if rej is not None:
+        return EvalResult(**base, matched=False, reason=f"reject: {rej}")
     normed = apply_normalize(mapped, r["normalize"]) if r.get("normalize") else mapped
-    return EvalResult(**base, matched=True, fields=normed)
+    return EvalResult(**base, matched=True, fields=_escape_nulls(normed))
+
+
+def _rule_rejects(r: RuleSpec, fields: dict[str, Any]) -> str | None:
+    """Return the first reject_pattern that matches any extracted field value,
+    or None if nothing rejects. Patterns are RE2 (ReDoS-safe, max_mem bounded).
+    Applied AFTER map and BEFORE normalize so raw banner/null-sentinel text is
+    caught before any transform masks it (e.g. uppercase("none") would still
+    catch 'NONE' but a truncated value could evade a literal-equality rule).
+    Mirrors ulpextract's bannerLogin + isNullPassword behavior at the DSL layer.
+    """
+    patterns = r.get("reject_patterns") or []
+    if not patterns:
+        return None
+    try:
+        compiled = [_re2_compile(p) for p in patterns]
+    except Exception:
+        return None  # bad pattern = no reject (fail-open; validation runs at load)
+    for v in fields.values():
+        s = str(v)
+        for raw, re_c in zip(patterns, compiled, strict=True):
+            try:
+                if re_c.search(s):
+                    return raw
+            except Exception:
+                continue
+    return None
+
+
+def _escape_nulls(fields: dict[str, Any]) -> dict[str, Any]:
+    """Replace raw NUL (U+0000) in string values with the literal 4-char
+    escape ``\\x00``. Lossless: round-trips, stays searchable, surfaces the
+    attack to the analyst instead of hiding it. Applied after normalize so
+    truncate operates on the original byte length, not the escaped form.
+    Nested-object values arrived as JSON blobs where json.dumps already
+    encoded any inner null as ``\\u0000``, so the raw-NUL check won't fire
+    on them; parity with JS is preserved.
+    """
+    out: dict[str, Any] = {}
+    for k, v in fields.items():
+        out[k] = v.replace("\x00", "\\x00") if isinstance(v, str) and "\x00" in v else v
+    return out
 
 
 def _base_eval(r: RuleSpec) -> dict[str, Any]:

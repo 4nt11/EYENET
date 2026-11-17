@@ -1,0 +1,35 @@
+- id: combolist_container_reject_test
+  version: 1
+  layer: container
+  family: combolist
+  priority: 1
+  description: Fallback container so the probe fires.
+  match:
+    type: folder
+    requires: []
+    min_score: 0
+
+- id: combolist_reject_probe
+  version: 1
+  layer: content
+  family: combolist_ulp_semicolon
+  priority: 20
+  path_glob: "**/*.txt"
+  requires_container_family: combolist
+  description: >
+    Parity fixture for reject_patterns. The REGEX matcher happily
+    captures the line (url=https://t.me/..., user="Telegram",
+    password="..."), but reject_patterns catch the banner markers
+    before normalize. Output: the container still wins family=combolist
+    but the probe rule produces no fields. Mirrors ulpextract's
+    bannerLogin filter.
+  match:
+    type: regex
+    pattern: '^(?P<url>https?://[^\s;]+);(?P<user>[^;\s]+);(?P<password>\S+)$'
+    multiline: true
+  extract:
+    fields: [url, user, password]
+  reject_patterns:
+    - '(?i)^(tg|telegram|channel|our\s+channel|cloud\s+channel|subscribe|join)\b'
+    - '(?i)\bt\.me/'
+    - '(?i)^(null|none|empty|-+|null\s*password)$'

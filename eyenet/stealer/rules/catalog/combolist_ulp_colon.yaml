@@ -1,0 +1,25 @@
+id: combolist_ulp_colon
+version: 1
+layer: content
+family: combolist_ulp_colon
+priority: 10
+path_glob: "**/*.txt"
+requires_container_family: combolist
+description: >
+  "URL:user:pass" ULP shape. Harder than the semicolon / pipe variants
+  because URLs contain colons (scheme, port). The regex anchors on
+  https?://, then consumes the URL up to the LAST colon before a
+  non-URL-looking tail. Priority 10 so the clean separators probe first.
+  Known false-negative: user or password containing a colon. ulpextract
+  is still the ground truth for bulk parsing.
+match:
+  type: regex
+  pattern: '^(?P<url>https?://[^\s:]+(?::\d+)?[^\s:]*):(?P<user>[^:\s]+):(?P<password>\S+)$'
+  multiline: true
+extract:
+  fields: [url, user, password]
+reject_patterns:
+  - '(?i)^(tg|telegram|channel|our\s+channel|cloud\s+channel|subscribe|join)\b'
+  - '(?i)\bt\.me/'
+  - '(?i)^(null|none|empty|-+|null\s*password)$'
+  - '(?i)ht[0-9]ps://'

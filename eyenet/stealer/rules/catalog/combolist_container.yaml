@@ -1,0 +1,15 @@
+id: combolist_container
+version: 1
+layer: container
+family: combolist
+priority: 1
+description: >
+  Fallback container that matches ANY drop. Priority 1 so every real
+  stealer-family container (priority 100) wins before this fires. Once
+  the four known families above have been exhausted, we tag the drop
+  "combolist" so the per-file probe rules can classify its line shape.
+  min_score 0 + empty requires = unconditional match.
+match:
+  type: folder
+  requires: []
+  min_score: 0

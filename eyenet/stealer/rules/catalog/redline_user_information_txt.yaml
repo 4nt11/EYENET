@@ -1,0 +1,40 @@
+id: redline_user_information_txt
+version: 1
+layer: content
+family: redline
+priority: 100
+path_glob: UserInformation.txt
+description: >
+  RedLine header. Plain "Key: Value" lines; no dash prefix, no INI
+  sections. Uptime, Keyboards, and LCID-tagged Language are the
+  RedLine-specific fingerprint keys (none of Lumma/Vidar/StealC emit
+  all three). RAM arrives like "16384 MB"; int_from_string strips "MB".
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - Computer
+    - User
+    - IP
+extract:
+  keys:
+    Computer: hostname
+    User: user
+    IP: ip
+    Country: country
+    OS: os
+    CPU: cpu
+    RAM: ram
+    Screen: screen
+    Language: language
+    Keyboards: keyboards
+    Uptime: uptime_minutes
+    Path: payload_path
+    AV: av
+normalize:
+  - { verb: strip_whitespace, field: hostname }
+  - { verb: lowercase,        field: country }
+  - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
+  - { verb: int_from_string,  field: ram }
+  - { verb: int_from_string,  field: uptime_minutes }

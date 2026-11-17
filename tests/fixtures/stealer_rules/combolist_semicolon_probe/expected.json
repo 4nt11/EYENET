@@ -1,0 +1,8 @@
+{
+  "family": "combolist",
+  "fields": {
+    "url": "https://mail.example.com/login",
+    "user": "anti@example.com",
+    "password": "Tr0ub4dour&3-correct-horse-battery-staple-xk9!"
+  }
+}

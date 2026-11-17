@@ -1,0 +1,27 @@
+id: lumma_container
+version: 1
+layer: container
+family: lumma
+priority: 100
+description: >
+  Lumma victim-folder predicate. Clean match: System.txt present AND at
+  least two of the native Lumma sidecar files are there. Rejects Raccoon
+  (which can also ship System.txt) via the min_score; a bare System.txt
+  without sidecars falls through to raccoon_container.
+match:
+  type: folder
+  requires:
+    - System.txt
+  forbids:
+    - pc_info.json
+    - UserInformation.txt
+    - information.txt
+  optional:
+    - Clipboard.txt
+    - Environment.txt
+    - ProcessList.txt
+    - BrowserSummary.txt
+    - GoogleTokens.txt
+    - Domains.txt
+    - "All Passwords.txt"
+  min_score: 3

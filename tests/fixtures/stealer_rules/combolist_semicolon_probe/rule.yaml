@@ -1,0 +1,28 @@
+- id: combolist_container_test
+  version: 1
+  layer: container
+  family: combolist
+  priority: 1
+  description: Fallback container, always matches.
+  match:
+    type: folder
+    requires: []
+    min_score: 0
+
+- id: combolist_semicolon_probe_test
+  version: 1
+  layer: content
+  family: combolist_ulp_semicolon
+  priority: 20
+  path_glob: "**/*.txt"
+  requires_container_family: combolist
+  description: >
+    Proves the opt-in family filter: the probe fires because the L1
+    winner's family is "combolist". Change the container to set family
+    "lumma" and the probe silently skips.
+  match:
+    type: regex
+    pattern: '^(?P<url>https?://[^\s;]+);(?P<user>[^;\s]+);(?P<password>\S+)$'
+    multiline: true
+  extract:
+    fields: [url, user, password]

@@ -1,0 +1,28 @@
+id: stealc_container
+version: 1
+layer: container
+family: stealc
+priority: 100
+description: >
+  StealC v1 victim-folder predicate. information.txt is the hinge;
+  Autofill/ + Cookies/ + History/ tree confirms it. Vidar ships the same
+  file name under repack, so a bare information.txt without the grabber
+  dirs falls through to a lower-priority Vidar probe later.
+match:
+  type: folder
+  requires:
+    - information.txt
+  forbids:
+    - pc_info.json
+    - System.txt
+    - UserInformation.txt
+  optional:
+    - Autofill/
+    - Cookies/
+    - History/
+    - "Google Accounts/"
+    - GoogleAccounts/
+    - passwords.txt
+    - Soft/
+    - Software/
+  min_score: 3

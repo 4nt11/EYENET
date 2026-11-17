@@ -8,6 +8,8 @@
 // here touches the filesystem or the DOM. The workbench UI wraps this
 // with FileSystemAccess / drag-drop plumbing.
 
+import { RE2 } from '@adguard/re2-wasm';
+
 import { applyNormalize } from './normalize.js';
 import {
   matchFolder,
@@ -19,6 +21,8 @@ import {
   matchKeyvalue,
   matchKeyvalueIni
 } from './matchers.js';
+
+const RE2_MAX_MEM = 8 * 1024 * 1024;
 
 /** @typedef {import('./types.js').RuleSpec} RuleSpec */
 /** @typedef {import('./types.js').EvalResult} EvalResult */
@@ -67,6 +71,9 @@ export function runRules(rules, folder) {
   /** @type {Record<string,string|number>} */
   const merged = {};
   for (const r of contentRules) {
+    // Optional opt-in family filter. Used by fallback rules (e.g. the
+    // combolist probes) that must not fire inside a real stealer folder.
+    if (r.requires_container_family != null && r.requires_container_family !== family) continue;
     const glob = r.path_glob ?? '**/*';
     for (const file of folder.files) {
       if (!matchGlob(glob, file.path)) continue;
@@ -111,8 +118,47 @@ function evalRule(r, env) {
   if (fields === null) return { ...base, matched: false, reason: 'no match' };
 
   const mapped = applyMap(fields, r.map);
+  const rej = ruleRejects(r, mapped);
+  if (rej !== null) return { ...base, matched: false, reason: `reject: ${rej}` };
   const normed = r.normalize ? applyNormalize(mapped, r.normalize) : mapped;
-  return { ...base, matched: true, fields: normed };
+  return { ...base, matched: true, fields: escapeNulls(normed) };
+}
+
+// First reject_pattern that matches any extracted value, or null if clean.
+// RE2 (ReDoS-safe, max_mem bounded). Applied AFTER map and BEFORE normalize
+// so raw banner/null-sentinel text is caught before any transform.
+function ruleRejects(r, fields) {
+  const patterns = r.reject_patterns ?? [];
+  if (patterns.length === 0) return null;
+  /** @type {RE2[]} */
+  const compiled = [];
+  for (const p of patterns) {
+    try { compiled.push(new RE2(p, 'u', RE2_MAX_MEM)); }
+    catch { return null; }  // bad pattern = no reject (fail-open; load-time validates)
+  }
+  for (const v of Object.values(fields)) {
+    const s = String(v);
+    for (let i = 0; i < compiled.length; i++) {
+      try { if (compiled[i].test(s)) return patterns[i]; }
+      catch { /* keep scanning */ }
+    }
+  }
+  return null;
+}
+
+// Replace raw NUL (U+0000) in string values with the literal 4-char escape
+// '\x00'. Lossless: round-trips, stays searchable, surfaces an injected null
+// to the analyst instead of hiding it. Applied after normalize so truncate
+// operates on the original length. Nested-object values arrived as JSON
+// blobs where JSON.stringify already encoded any inner null as '\u0000', so
+// the raw-NUL check won't fire on them; parity with Python is preserved.
+function escapeNulls(fields) {
+  /** @type {Record<string,string|number>} */
+  const out = {};
+  for (const [k, v] of Object.entries(fields)) {
+    out[k] = typeof v === 'string' && v.includes('\x00') ? v.replace(/\x00/g, '\\x00') : v;
+  }
+  return out;
 }
 
 /**

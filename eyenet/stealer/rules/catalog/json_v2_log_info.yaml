@@ -1,0 +1,27 @@
+id: json_v2_log_info
+version: 1
+layer: content
+family: json_v2
+priority: 110
+path_glob: log_info.json
+description: >
+  Exfil manifest metadata. Priority 110 (above pc_info at 100) so
+  BuildID, counts, and CreatedOnUtc override anything of the same name
+  from pc_info. BuildID prefix is what a later sub-tag rule should key
+  off to split json_v2 into stealc_v2 / acreed / stealerium.
+match:
+  type: json
+  requires_keys:
+    - BuildID
+extract:
+  paths:
+    build_id: $.BuildID
+    is_duplicate: $.IsDuplicate
+    browser_count: $.BrowserCount
+    cookie_count: $.CookiesCount
+    wallet_count: $.WalletCount
+    password_count: $.PasswordsCount
+    messengers: $.Messengers
+    exfil_at: $.CreatedOnUtc
+normalize:
+  - { verb: date_parse, field: exfil_at, format: iso8601 }

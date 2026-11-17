@@ -1,0 +1,22 @@
+id: combolist_ulp_pipe
+version: 1
+layer: content
+family: combolist_ulp_pipe
+priority: 20
+path_glob: "**/*.txt"
+requires_container_family: combolist
+description: >
+  "URL|user|pass" ULP shape. Pipe is clean (URLs don't contain it).
+  Common in forum dumps that use `|` to avoid both the `:` URL-port
+  collision and the `;` CRLF-render quirk some tools have.
+match:
+  type: regex
+  pattern: '^(?P<url>https?://[^\s|]+)\|(?P<user>[^|\s]+)\|(?P<password>\S+)$'
+  multiline: true
+extract:
+  fields: [url, user, password]
+reject_patterns:
+  - '(?i)^(tg|telegram|channel|our\s+channel|cloud\s+channel|subscribe|join)\b'
+  - '(?i)\bt\.me/'
+  - '(?i)^(null|none|empty|-+|null\s*password)$'
+  - '(?i)ht[0-9]ps://'

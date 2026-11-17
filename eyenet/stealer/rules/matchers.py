@@ -54,11 +54,18 @@ _YAML12SafeLoader.add_implicit_resolver(
 
 
 def _re2_compile(pattern: str, multiline: bool = False, dotall: bool = False):
+    # Note: google-re2's Options.one_line / Options.dot_nl are not honored
+    # by the Python binding in a way that affects ^/$/. matching. Embedded
+    # flags (?m) and (?s) are RE2's documented path and work both here and
+    # on the browser side (@adguard/re2-wasm uses the standard m/s flags).
     opts = re2.Options()
     opts.max_mem = _RE2_MAX_MEM
-    opts.one_line = not multiline
-    opts.dot_nl = dotall
-    return re2.compile(pattern, options=opts)
+    prefix = ""
+    if multiline:
+        prefix += "(?m)"
+    if dotall:
+        prefix += "(?s)"
+    return re2.compile(prefix + pattern, options=opts)
 
 
 # --------------------------------------------------------------------- #

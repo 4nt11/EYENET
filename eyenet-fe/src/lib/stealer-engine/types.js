@@ -109,9 +109,11 @@
  * @property {number} priority
  * @property {string} [description]
  * @property {string} [path_glob]   - content layer only; default '**\/*'
+ * @property {string} [requires_container_family]  - content layer only; only fire when the L1 winner has this family
  * @property {MatchSpec} match
  * @property {ExtractSpec} [extract]
  * @property {MapSpec} [map]
+ * @property {string[]} [reject_patterns]  - RE2 patterns tested against every extracted value; any hit drops the whole match
  * @property {NormalizeStep[]} [normalize]
  */
 

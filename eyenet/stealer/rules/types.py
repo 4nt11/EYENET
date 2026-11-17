@@ -108,9 +108,11 @@ class RuleSpec(TypedDict, total=False):
     priority: int
     description: str
     path_glob: str
+    requires_container_family: str  # content layer only; only fire when L1 winner family == this
     match: MatchSpec
     extract: ExtractSpec
     map: MapSpec
+    reject_patterns: list[str]  # RE2 patterns tested against every extracted value
     normalize: list[NormalizeStep]
 
 

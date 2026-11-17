@@ -1,0 +1,23 @@
+id: combolist_ulpextract_tsv
+version: 1
+layer: content
+family: combolist_ulpextract_output
+priority: 40
+path_glob: "**/*.tsv"
+requires_container_family: combolist
+description: >
+  ulpextract's OWN output format: host<TAB>url<TAB>login<TAB>password per
+  line. We parse our pipeline's downstream artefact so operators can
+  round-trip normalized log files through the workbench without
+  re-running the extractor.
+match:
+  type: delimiter
+  separator: "\t"
+  min_columns: 4
+  skip_blank: true
+extract:
+  columns:
+    0: host
+    1: url
+    2: user
+    3: password

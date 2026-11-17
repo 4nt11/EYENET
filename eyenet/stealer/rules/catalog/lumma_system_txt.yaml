@@ -1,0 +1,42 @@
+id: lumma_system_txt
+version: 1
+layer: content
+family: lumma
+priority: 100
+path_glob: System.txt
+description: >
+  Lumma victim header. Native shape is "- Key: Value" (dash prefix, then
+  colon-space). We key the extract map by the literal "- Key" so the
+  dash is part of the lookup; case-insensitive match handles the rare
+  all-caps/lowercased variants. HWID uniqueness (UUID-style) is the
+  Lumma-vs-Raccoon tiebreak downstream; we extract it as-is here.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - "- HWID"
+extract:
+  keys:
+    "- HWID": hwid
+    "- Hostname": hostname
+    "- User": user
+    "- OS Version": os
+    "- Language": language
+    "- Local Date": local_date
+    "- Install Date": install_date
+    "- Time Zone": time_zone
+    "- Elevated": elevated
+    "- RAM Size": ram
+    "- CPU Vendor": cpu_vendor
+    "- CPU Name": cpu
+    "- CPU Threads": cpu_threads
+    "- GPU": gpu
+normalize:
+  - { verb: strip_whitespace, field: hwid }
+  - { verb: uppercase,        field: hwid }
+  - { verb: int_from_string,  field: cpu_threads }
+  - { verb: int_from_string,  field: ram }
+  - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
+  - { verb: date_parse,       field: install_date, format: iso8601 }
+  - { verb: date_parse,       field: local_date, format: iso8601 }

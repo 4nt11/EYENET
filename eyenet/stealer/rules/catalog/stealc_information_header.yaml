@@ -1,0 +1,28 @@
+id: stealc_information_header
+version: 1
+layer: content
+family: stealc
+priority: 90
+path_glob: information.txt
+description: >
+  StealC v1 information.txt pre-section header. Plain "Key: Value" lines
+  BEFORE the [Hardware] / [Software] INI sections. A second rule
+  (stealc_information_sections, priority 100) handles the INI body; the
+  two rules extract disjoint field sets and merge.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - "User Name"
+extract:
+  keys:
+    "Windows": os
+    "Computer Name": hostname
+    "User Name": user
+    "Display Resolution": screen
+    "Local Time": local_time
+    "Antivirus": av
+normalize:
+  - { verb: strip_whitespace, field: hostname }
+  - { verb: date_parse,       field: local_time, format: iso8601 }

@@ -1,0 +1,27 @@
+id: json_v2_container
+version: 1
+layer: container
+family: json_v2
+priority: 100
+description: >
+  JSON-first family cluster: StealC v2, Acreed, Stealerium. All three
+  emit pc_info.json + log_info.json; single-folder disambiguation is not
+  reliable without BuildID prefix or C2 telemetry. Catalog them as one
+  logical family "json_v2" and let a downstream classifier sub-tag by
+  log_info.BuildID (dedicated rule, to be added).
+match:
+  type: folder
+  requires:
+    - pc_info.json
+  forbids:
+    - information.txt
+    - System.txt
+    - UserInformation.txt
+  optional:
+    - log_info.json
+    - passwords.tsv
+    - screen.jpg
+    - Autofill/
+    - Cookies/
+    - Software/
+  min_score: 2

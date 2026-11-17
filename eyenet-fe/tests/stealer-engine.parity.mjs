@@ -15,13 +15,16 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = resolve(HERE, '../../tests/fixtures/stealer_rules');
 
 function loadFixture(fdir) {
-  const rule = yamlLoad(readFileSync(resolve(fdir, 'rule.yaml'), 'utf8'));
+  // rule.yaml may be a single rule or a list (container + content pair).
+  const raw = yamlLoad(readFileSync(resolve(fdir, 'rule.yaml'), 'utf8'));
+  const rules = Array.isArray(raw) ? raw : [raw];
   const expected = JSON.parse(readFileSync(resolve(fdir, 'expected.json'), 'utf8'));
   const inputs = readdirSync(fdir).filter((n) => n.startsWith('input.'));
   if (inputs.length !== 1) throw new Error(`${fdir}: want 1 input.*, got ${inputs.length}`);
-  const path = rule.path_glob || inputs[0];
+  const contentRule = rules.find((r) => r.layer === 'content') ?? rules[0];
+  const path = contentRule.path_glob || inputs[0];
   const text = readFileSync(resolve(fdir, inputs[0]), 'utf8');
-  return { rule, expected, file: { path, text } };
+  return { rules, expected, file: { path, text } };
 }
 
 function canon(v) {
@@ -44,9 +47,9 @@ let failed = 0;
 for (const name of readdirSync(FIXTURES).sort()) {
   const fdir = resolve(FIXTURES, name);
   if (!statSync(fdir).isDirectory()) continue;
-  const { rule, expected, file } = loadFixture(fdir);
+  const { rules, expected, file } = loadFixture(fdir);
   const folder = { rootName: name, files: [file] };
-  const result = runRules([rule], folder);
+  const result = runRules(rules, folder);
   const actual = { family: result.family, fields: result.fields };
   if (canon(actual) !== canon(expected)) {
     failed++;

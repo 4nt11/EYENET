@@ -1,0 +1,26 @@
+id: redline_container
+version: 1
+layer: container
+family: redline
+priority: 100
+description: >
+  RedLine victim-folder predicate. UserInformation.txt is specific
+  enough on its own; the Browsers/ subdir is the second-highest-signal
+  marker. Builds ship either "UserInformation.txt" or
+  "User Information.txt" (space is build-dependent); we require only the
+  no-space form here and leave the spaced variant to a sibling rule if
+  we start seeing it in intake.
+match:
+  type: folder
+  requires:
+    - UserInformation.txt
+  forbids:
+    - pc_info.json
+    - System.txt
+    - information.txt
+  optional:
+    - Browsers/
+    - Passwords.txt
+    - InstalledSoftware.txt
+    - Screenshot.jpg
+  min_score: 2

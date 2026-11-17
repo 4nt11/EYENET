@@ -1,0 +1,26 @@
+id: null_byte_injection_test
+version: 1
+layer: content
+family: generic
+priority: 100
+path_glob: evil.txt
+description: >
+  Hostile stealer injects raw NUL bytes (U+0000) into header values in
+  an attempt to display-truncate or search-smuggle data. The engine
+  MUST escape every raw NUL to the literal 4-char string '\x00' in the
+  final fields dict, losslessly, so the attack becomes VISIBLE to the
+  analyst and search-indexable instead of silently dropping bytes.
+  Applied after normalize so truncate sees the original byte length.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - User
+extract:
+  keys:
+    User: user
+    HWID: hwid
+    Country: country
+normalize:
+  - { verb: uppercase, field: hwid }

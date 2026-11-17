@@ -1,0 +1,20 @@
+id: combolist_android
+version: 1
+layer: content
+family: combolist_android_app
+priority: 30
+path_glob: "**/*.txt"
+requires_container_family: combolist
+description: >
+  Android app credentials: `android://<hash>@<com.pkg.name>/<delim>user<delim>pass`
+  where delim is pipe or colon. ulpextract runs this BEFORE the generic
+  scheme strip so the hash@pkg doesn't get misread as a URL path. We
+  give it the highest combolist priority (30) for the same reason.
+  The hash can be any length when scheme is literal 'android://'; other
+  schemes would need a stricter hash length check to avoid false positives.
+match:
+  type: regex
+  pattern: '^android://(?P<app_hash>[^@\s]+)@(?P<url>[a-z0-9_]+(?:\.[a-z0-9_]+)+)[/:|](?P<user>[^|:\s]+)[|:](?P<password>\S+)$'
+  multiline: true
+extract:
+  fields: [app_hash, url, user, password]
