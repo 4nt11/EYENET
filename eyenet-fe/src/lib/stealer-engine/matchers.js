@@ -35,18 +35,25 @@ function _re2Compile(pattern, { multiline = false, dotall = false } = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Folder matcher. Two authoring styles: a flat `requires/forbids/
+ * optional/min_score` shape (v1 sugar) and a predicate tree (v2, real
+ * boolean algebra). The flat style is lowered to an equivalent tree at
+ * evaluation time so the engine only ever walks one code path.
  * @param {import('./types.js').FolderMatch} m
  * @param {ContainerInput} input
  * @returns {Record<string,string|number>|null}
  */
 export function matchFolder(m, input) {
   const set = new Set(input.paths);
-  for (const r of m.requires ?? []) if (!hasPath(set, r)) return null;
-  for (const f of m.forbids ?? []) if (hasPath(set, f)) return null;
-  const req = (m.requires ?? []).length;
-  const opt = (m.optional ?? []).filter((p) => hasPath(set, p)).length;
-  const minScore = m.min_score ?? req;
-  return req + opt >= minScore ? {} : null;
+  const list = input.paths;
+  const pred = m.predicate ?? lowerLegacyFolder(m);
+  try {
+    return evalPredicate(pred, set, list) ? {} : null;
+  } catch (e) {
+    // Fail-safe: a broken predicate warns but doesn't crash evaluation.
+    console.warn('folder predicate rejected:', e?.message ?? e);
+    return null;
+  }
 }
 
 /** Treat a trailing slash as a directory prefix (subtree membership). */
@@ -56,6 +63,97 @@ function hasPath(set, p) {
     return false;
   }
   return set.has(p);
+}
+
+/**
+ * Walk a predicate tree. Each node is a single-key dict naming the
+ * operator. Operators: and / or / xor / not / at_least / exactly /
+ * at_most. Leaves: path / glob.
+ */
+function evalPredicate(node, set, list) {
+  if (!node || typeof node !== 'object' || Array.isArray(node) || Object.keys(node).length !== 1) {
+    throw new Error(`predicate node must be a single-key dict: ${JSON.stringify(node)}`);
+  }
+  const op = Object.keys(node)[0];
+  const body = node[op];
+  switch (op) {
+    case 'and':
+      if (!Array.isArray(body)) throw new Error("'and' expects a list");
+      return body.every((c) => evalPredicate(c, set, list));
+    case 'or':
+      if (!Array.isArray(body)) throw new Error("'or' expects a list");
+      return body.some((c) => evalPredicate(c, set, list));
+    case 'xor': {
+      if (!Array.isArray(body)) throw new Error("'xor' expects a list");
+      // Odd-parity, matches standard digital logic.
+      let trues = 0;
+      for (const c of body) if (evalPredicate(c, set, list)) trues++;
+      return trues % 2 === 1;
+    }
+    case 'not':
+      return !evalPredicate(body, set, list);
+    case 'at_least':
+    case 'exactly':
+    case 'at_most': {
+      if (!body || typeof body !== 'object' || !Array.isArray(body.of)) {
+        throw new Error(`'${op}' expects {count, of: [...]}`);
+      }
+      const count = body.count ?? 0;
+      if (!Number.isInteger(count) || count < 0) {
+        throw new Error(`'${op}' count must be a non-negative integer`);
+      }
+      let hits = 0;
+      for (const c of body.of) if (evalPredicate(c, set, list)) hits++;
+      if (op === 'at_least') return hits >= count;
+      if (op === 'at_most') return hits <= count;
+      return hits === count;
+    }
+    case 'path':
+      if (typeof body !== 'string') throw new Error("'path' expects a string");
+      return hasPath(set, body);
+    case 'glob':
+      if (typeof body !== 'string') throw new Error("'glob' expects a string");
+      // Local import via dynamic reference to avoid a cycle at module init.
+      return list.some((p) => matchGlobLocal(body, p));
+    default:
+      throw new Error(`unknown predicate operator: ${op}`);
+  }
+}
+
+/**
+ * Sugar lowering: translate the flat requires/forbids/optional/min_score
+ * shape to an equivalent predicate tree.
+ */
+function lowerLegacyFolder(m) {
+  const requires = m.requires ?? [];
+  const forbids = m.forbids ?? [];
+  const optional = m.optional ?? [];
+  const minScore = m.min_score ?? requires.length;
+  /** @type {object[]} */
+  const clauses = [];
+  for (const r of requires) clauses.push({ path: r });
+  for (const f of forbids) clauses.push({ not: { path: f } });
+  if (minScore > 0 && (requires.length || optional.length)) {
+    clauses.push({
+      at_least: {
+        count: minScore,
+        of: [...requires, ...optional].map((p) => ({ path: p }))
+      }
+    });
+  }
+  return clauses.length === 0 ? { and: [] } : { and: clauses };
+}
+
+// matchGlob lives in engine.js; this is the same algorithm reimplemented
+// here to avoid an import cycle. Behaviour is byte-parity with engine.matchGlob.
+function matchGlobLocal(glob, path) {
+  const re = '^' + glob
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '::GLOBSTAR::')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/::GLOBSTAR::/g, '.*') + '$';
+  return new RegExp(re).test(path);
 }
 
 /* ------------------------------------------------------------------ */

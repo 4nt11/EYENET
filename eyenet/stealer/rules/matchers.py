@@ -73,23 +73,117 @@ def _re2_compile(pattern: str, multiline: bool = False, dotall: bool = False):
 # --------------------------------------------------------------------- #
 
 def match_folder(m: FolderMatch, inp: ContainerInput) -> dict[str, Any] | None:
+    """Folder matcher.
+
+    Two authoring styles live side by side. If ``predicate`` is set, the
+    engine walks that expression tree. Otherwise it lowers the flat
+    ``requires`` / ``forbids`` / ``optional`` / ``min_score`` fields to
+    an equivalent tree first (for one evaluation code path). The lowering
+    is pure sugar: all legacy rules keep working byte-for-byte.
+    """
     paths = set(inp.paths)
-    for r in m.get("requires", []):
-        if not _has_path(paths, r):
-            return None
-    for f in m.get("forbids", []):
-        if _has_path(paths, f):
-            return None
-    req = len(m.get("requires", []))
-    opt = sum(1 for p in m.get("optional", []) if _has_path(paths, p))
-    min_score = m.get("min_score", req)
-    return {} if req + opt >= min_score else None
+    paths_list = list(inp.paths)
+    pred = m.get("predicate")
+    if pred is None:
+        pred = _lower_legacy_folder(m)
+    try:
+        if _eval_predicate(pred, paths, paths_list):
+            return {}
+    except _BadPredicate as exc:
+        import logging
+        logging.getLogger(__name__).warning("folder predicate rejected: %s", exc)
+        return None
+    return None
 
 
 def _has_path(paths: set[str], p: str) -> bool:
     if p.endswith("/"):
         return any(x.startswith(p) for x in paths)
     return p in paths
+
+
+class _BadPredicate(ValueError):
+    """Load-time predicate shape error. Caught by the matcher and surfaced
+    as a non-match + WARN so a broken rule can't take the pipeline down."""
+
+
+def _eval_predicate(node: Any, paths: set[str], paths_list: list[str]) -> bool:
+    """Walk a predicate tree. Each node is a dict with exactly one key
+    naming the operator. Returns a bool.
+
+    Operators: and / or / xor / not / at_least / exactly / at_most
+    Leaves:    path / glob
+    """
+    if not isinstance(node, dict) or len(node) != 1:
+        raise _BadPredicate(f"predicate node must be a single-key dict: {node!r}")
+    op, body = next(iter(node.items()))
+    if op == "and":
+        if not isinstance(body, list):
+            raise _BadPredicate("'and' expects a list")
+        return all(_eval_predicate(c, paths, paths_list) for c in body)
+    if op == "or":
+        if not isinstance(body, list):
+            raise _BadPredicate("'or' expects a list")
+        return any(_eval_predicate(c, paths, paths_list) for c in body)
+    if op == "xor":
+        if not isinstance(body, list):
+            raise _BadPredicate("'xor' expects a list")
+        # Odd-parity semantics; matches standard digital logic.
+        return sum(1 for c in body if _eval_predicate(c, paths, paths_list)) % 2 == 1
+    if op == "not":
+        return not _eval_predicate(body, paths, paths_list)
+    if op in ("at_least", "exactly", "at_most"):
+        if not isinstance(body, dict) or "of" not in body:
+            raise _BadPredicate(f"{op!r} expects {{count, of: [...]}}")
+        count = body.get("count", 0)
+        if not isinstance(count, int) or count < 0:
+            raise _BadPredicate(f"{op!r} count must be a non-negative integer")
+        children = body["of"]
+        if not isinstance(children, list):
+            raise _BadPredicate(f"{op!r} 'of' must be a list")
+        hits = sum(1 for c in children if _eval_predicate(c, paths, paths_list))
+        if op == "at_least":
+            return hits >= count
+        if op == "at_most":
+            return hits <= count
+        return hits == count
+    if op == "path":
+        if not isinstance(body, str):
+            raise _BadPredicate("'path' expects a string")
+        return _has_path(paths, body)
+    if op == "glob":
+        if not isinstance(body, str):
+            raise _BadPredicate("'glob' expects a string")
+        from eyenet.stealer.rules.engine import match_glob  # local import to break cycle
+        return any(match_glob(body, p) for p in paths_list)
+    raise _BadPredicate(f"unknown predicate operator: {op!r}")
+
+
+def _lower_legacy_folder(m: dict[str, Any]) -> dict[str, Any]:
+    """Sugar: translate the flat requires/forbids/optional/min_score shape
+    to an equivalent predicate tree. Keeps all pre-v2 rules working with
+    no edits to the rules on disk.
+    """
+    requires = m.get("requires") or []
+    forbids = m.get("forbids") or []
+    optional = m.get("optional") or []
+    min_score = m.get("min_score", len(requires))
+
+    clauses: list[dict[str, Any]] = []
+    for r in requires:
+        clauses.append({"path": r})
+    for f in forbids:
+        clauses.append({"not": {"path": f}})
+    if min_score > 0 and (requires or optional):
+        clauses.append({
+            "at_least": {
+                "count": min_score,
+                "of": [{"path": p} for p in requires + optional],
+            }
+        })
+    if not clauses:
+        return {"and": []}  # vacuously true
+    return {"and": clauses}
 
 
 # --------------------------------------------------------------------- #

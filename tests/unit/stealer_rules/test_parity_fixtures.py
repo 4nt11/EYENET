@@ -30,13 +30,28 @@ def _load_fixture(fdir: Path):
     raw = yaml.safe_load((fdir / "rule.yaml").read_text(encoding="utf-8"))
     rules = raw if isinstance(raw, list) else [raw]
     expected = json.loads((fdir / "expected.json").read_text(encoding="utf-8"))
+
+    # Two input styles:
+    #   (a) single file via input.* at the fixture root (v1, legacy)
+    #   (b) a full folder tree under input_folder/ (v2, needed for
+    #       container-predicate fixtures that evaluate against many paths)
+    folder_dir = fdir / "input_folder"
+    if folder_dir.is_dir():
+        files = []
+        for p in sorted(folder_dir.rglob("*")):
+            if p.is_file():
+                files.append(ContentInput(
+                    path=str(p.relative_to(folder_dir)),
+                    text=p.read_text(encoding="utf-8"),
+                ))
+        return rules, expected, tuple(files)
+
     input_files = [p for p in fdir.iterdir() if p.name.startswith("input.")]
-    assert len(input_files) == 1, f"{fdir.name}: expected exactly one input.* file"
-    # Pick the first content rule's path_glob for the synthesized file path.
+    assert len(input_files) == 1, f"{fdir.name}: expected one input.* OR an input_folder/"
     content_rule = next((r for r in rules if r.get("layer") == "content"), rules[0])
     file_path = content_rule.get("path_glob") or input_files[0].name
     text = input_files[0].read_text(encoding="utf-8")
-    return rules, expected, ContentInput(path=file_path, text=text)
+    return rules, expected, (ContentInput(path=file_path, text=text),)
 
 
 @pytest.mark.parametrize(
@@ -45,8 +60,8 @@ def _load_fixture(fdir: Path):
 )
 def test_fixture_matches_expected(fixture_id: str) -> None:
     fdir = FIXTURES / fixture_id
-    rules, expected, content = _load_fixture(fdir)
-    folder = VictimFolder(root_name=fixture_id, files=(content,))
+    rules, expected, files = _load_fixture(fdir)
+    folder = VictimFolder(root_name=fixture_id, files=files)
     result = run_rules(rules, folder)
 
     actual = {"family": result.family, "fields": result.fields}

@@ -1,0 +1,65 @@
+- id: predicate_all_ops_container
+  version: 1
+  layer: container
+  family: generic
+  priority: 100
+  description: >
+    Exercises every predicate operator (and / or / xor / not / at_least /
+    exactly / at_most / path / glob) in one tree. Input folder is
+    hand-crafted so the WHOLE predicate evaluates to true only if every
+    operator is wired correctly. If any engine diverges on even one
+    operator this fixture fails loud.
+  match:
+    type: folder
+    predicate:
+      and:
+        - path: Apple.txt                # literal leaf: ALL must be present
+        - not: { path: Watermelon.txt }  # NOT + path: Watermelon is absent
+        - glob: "Browsers/*.txt"         # glob leaf: hits Browsers/Edge.txt
+        - or:                            # OR: at least one true
+            - path: NEVERTHERE.txt
+            - path: Cherry/
+        - xor:                           # XOR 3 children: odd parity needed
+            - path: Apple.txt            # true
+            - path: NEVERTHERE.txt       # false
+            - path: NEVERTHEREEITHER.txt  # false  -> parity=1 -> true
+        - at_least:
+            count: 2
+            of:
+              - path: Apple.txt          # true
+              - path: Banana.txt         # true
+              - path: Durian.txt         # true
+              - path: NEVERTHERE.txt     # false   -> 3 true, 3 >= 2 -> true
+        - exactly:
+            count: 1
+            of:
+              - path: Apple.txt          # true
+              - path: NEVERTHERE.txt     # false
+              - path: NEVERTHEREEITHER.txt  # false  -> exactly 1 -> true
+        - at_most:
+            count: 2
+            of:
+              - path: Apple.txt          # true
+              - path: Banana.txt         # true
+              - path: NEVERTHERE.txt     # false    -> 2 true, 2 <= 2 -> true
+
+- id: predicate_dossier_probe
+  version: 1
+  layer: content
+  family: generic
+  priority: 100
+  path_glob: Apple.txt
+  requires_container_family: generic
+  description: >
+    Trivial content rule so the fixture has at least one extracted
+    field. Confirms that a predicate container still drives the
+    requires_container_family gate downstream.
+  match:
+    type: keyvalue
+    separator: ": "
+    strip_whitespace: true
+    requires_keys:
+      - fruit
+  extract:
+    keys:
+      fruit: fruit

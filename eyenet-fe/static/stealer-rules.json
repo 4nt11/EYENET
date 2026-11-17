@@ -527,34 +527,76 @@
   },
   {
     "id": "opus_container",
-    "version": 1,
+    "version": 2,
     "layer": "container",
     "family": "opus",
     "priority": 110,
-    "description": "Opus (WEB RAT) victim-folder predicate. Priority 110 so it beats the RedLine container (100) on the UserInformation.txt collision. Opus ALWAYS ships worklog.txt + a Clients/ dir with at least one of the four messenger files; neither RedLine nor any other family emits both. Telegram/ (the tdata + forks dir) is a strong secondary signal.\n",
+    "description": "Opus (WEB RAT) victim-folder predicate, v2 (predicate-tree form). Catches BOTH:\n\n  (a) classic Opus: UserInformation.txt AND worklog.txt (even if the\n      sidecar dirs are thin)\n  (b) Opus-missing-worklog: UserInformation.txt AND at least 3 of the\n      Opus-specific sidecars (Clients/<messenger> OR Telegram/ /\n      Extensions/ / Wallets/ / Files/). An operator may ship with\n      worklog disabled; the sidecar density still identifies it as\n      Opus, not RedLine.\n\nMutual-exclusion arm rejects any drop that also carries the json_v2 / Lumma / StealC signatures (pc_info.json / System.txt / information.txt) so disambiguation is one-sided.\nPriority 110 beats redline_container (100) on the UserInformation.txt collision when either arm of the top-level OR fires.\n",
     "match": {
       "type": "folder",
-      "requires": [
-        "UserInformation.txt",
-        "worklog.txt"
-      ],
-      "forbids": [
-        "pc_info.json",
-        "System.txt",
-        "information.txt"
-      ],
-      "optional": [
-        "Clients/DiscordTokens.txt",
-        "Clients/SteamTokens.txt",
-        "Clients/Roblox.txt",
-        "Clients/MAX.txt",
-        "Telegram/",
-        "Extensions/",
-        "Wallets/",
-        "Files/",
-        "Browsers/"
-      ],
-      "min_score": 3
+      "predicate": {
+        "and": [
+          {
+            "path": "UserInformation.txt"
+          },
+          {
+            "or": [
+              {
+                "path": "worklog.txt"
+              },
+              {
+                "at_least": {
+                  "count": 3,
+                  "of": [
+                    {
+                      "path": "Clients/DiscordTokens.txt"
+                    },
+                    {
+                      "path": "Clients/SteamTokens.txt"
+                    },
+                    {
+                      "path": "Clients/Roblox.txt"
+                    },
+                    {
+                      "path": "Clients/MAX.txt"
+                    },
+                    {
+                      "path": "Telegram/"
+                    },
+                    {
+                      "path": "Extensions/"
+                    },
+                    {
+                      "path": "Wallets/"
+                    },
+                    {
+                      "path": "Files/"
+                    },
+                    {
+                      "path": "Browsers/"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "not": {
+              "path": "pc_info.json"
+            }
+          },
+          {
+            "not": {
+              "path": "System.txt"
+            }
+          },
+          {
+            "not": {
+              "path": "information.txt"
+            }
+          }
+        ]
+      }
     }
   },
   {
@@ -714,28 +756,93 @@
   },
   {
     "id": "redline_container",
-    "version": 1,
+    "version": 2,
     "layer": "container",
     "family": "redline",
     "priority": 100,
-    "description": "RedLine victim-folder predicate. UserInformation.txt is specific enough on its own; the Browsers/ subdir is the second-highest-signal marker. Builds ship either \"UserInformation.txt\" or \"User Information.txt\" (space is build-dependent); we require only the no-space form here and leave the spaced variant to a sibling rule if we start seeing it in intake.\n",
+    "description": "RedLine victim-folder predicate, v2 (predicate-tree form). Explicit Opus / json_v2 / Lumma / StealC exclusions so a drop that LOOKS like RedLine but actually isn't gets correctly rejected. Requires at least two of the three RedLine-specific sidecar signals (Browsers/ dir with per-browser Passwords layout, InstalledSoftware.txt, Screenshot.jpg).\nOpus-exclusion arm: a UserInformation.txt drop that ALSO carries worklog.txt OR a Clients/<messenger> file is NOT RedLine, no matter how many other sidecars match. Previously this rule required only the filename and the min_score; now it says so explicitly.\n",
     "match": {
       "type": "folder",
-      "requires": [
-        "UserInformation.txt"
-      ],
-      "forbids": [
-        "pc_info.json",
-        "System.txt",
-        "information.txt"
-      ],
-      "optional": [
-        "Browsers/",
-        "Passwords.txt",
-        "InstalledSoftware.txt",
-        "Screenshot.jpg"
-      ],
-      "min_score": 2
+      "predicate": {
+        "and": [
+          {
+            "path": "UserInformation.txt"
+          },
+          {
+            "not": {
+              "path": "pc_info.json"
+            }
+          },
+          {
+            "not": {
+              "path": "System.txt"
+            }
+          },
+          {
+            "not": {
+              "path": "information.txt"
+            }
+          },
+          {
+            "not": {
+              "or": [
+                {
+                  "path": "worklog.txt"
+                },
+                {
+                  "path": "Clients/DiscordTokens.txt"
+                },
+                {
+                  "path": "Clients/SteamTokens.txt"
+                },
+                {
+                  "path": "Clients/Roblox.txt"
+                },
+                {
+                  "path": "Clients/MAX.txt"
+                },
+                {
+                  "path": "Telegram/"
+                },
+                {
+                  "path": "Extensions/"
+                },
+                {
+                  "path": "Wallets/"
+                }
+              ]
+            }
+          },
+          {
+            "at_least": {
+              "count": 2,
+              "of": [
+                {
+                  "path": "Browsers/"
+                },
+                {
+                  "path": "Passwords.txt"
+                },
+                {
+                  "path": "InstalledSoftware.txt"
+                },
+                {
+                  "path": "Screenshot.jpg"
+                },
+                {
+                  "path": "Clipboard.txt"
+                },
+                {
+                  "path": "Environment.txt"
+                },
+                {
+                  "path": "ProcessList.txt"
+                }
+              ]
+            }
+          }
+        ]
+      }
     }
   },
   {

@@ -1,31 +1,45 @@
 id: opus_container
-version: 1
+version: 2
 layer: container
 family: opus
 priority: 110
 description: >
-  Opus (WEB RAT) victim-folder predicate. Priority 110 so it beats the
-  RedLine container (100) on the UserInformation.txt collision. Opus
-  ALWAYS ships worklog.txt + a Clients/ dir with at least one of the
-  four messenger files; neither RedLine nor any other family emits both.
-  Telegram/ (the tdata + forks dir) is a strong secondary signal.
+  Opus (WEB RAT) victim-folder predicate, v2 (predicate-tree form).
+  Catches BOTH:
+
+    (a) classic Opus: UserInformation.txt AND worklog.txt (even if the
+        sidecar dirs are thin)
+    (b) Opus-missing-worklog: UserInformation.txt AND at least 3 of the
+        Opus-specific sidecars (Clients/<messenger> OR Telegram/ /
+        Extensions/ / Wallets/ / Files/). An operator may ship with
+        worklog disabled; the sidecar density still identifies it as
+        Opus, not RedLine.
+
+  Mutual-exclusion arm rejects any drop that also carries the
+  json_v2 / Lumma / StealC signatures (pc_info.json / System.txt /
+  information.txt) so disambiguation is one-sided.
+
+  Priority 110 beats redline_container (100) on the UserInformation.txt
+  collision when either arm of the top-level OR fires.
 match:
   type: folder
-  requires:
-    - UserInformation.txt
-    - worklog.txt
-  forbids:
-    - pc_info.json
-    - System.txt
-    - information.txt
-  optional:
-    - Clients/DiscordTokens.txt
-    - Clients/SteamTokens.txt
-    - Clients/Roblox.txt
-    - Clients/MAX.txt
-    - Telegram/
-    - Extensions/
-    - Wallets/
-    - Files/
-    - Browsers/
-  min_score: 3
+  predicate:
+    and:
+      - path: UserInformation.txt
+      - or:
+          - path: worklog.txt
+          - at_least:
+              count: 3
+              of:
+                - path: Clients/DiscordTokens.txt
+                - path: Clients/SteamTokens.txt
+                - path: Clients/Roblox.txt
+                - path: Clients/MAX.txt
+                - path: Telegram/
+                - path: Extensions/
+                - path: Wallets/
+                - path: Files/
+                - path: Browsers/
+      - not: { path: pc_info.json }
+      - not: { path: System.txt }
+      - not: { path: information.txt }

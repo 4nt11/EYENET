@@ -71,35 +71,55 @@ func runFixture(t *testing.T, fdir string) {
 		rules = append(rules, r)
 	}
 
-	// Pick the single input.* file.
-	var inputFile string
-	entries, _ := os.ReadDir(fdir)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "input.") {
-			inputFile = filepath.Join(fdir, e.Name())
-			break
+	// Two input styles: single input.* file OR a full input_folder/ tree.
+	folderDir := filepath.Join(fdir, "input_folder")
+	var files []ContentInput
+	if info, err := os.Stat(folderDir); err == nil && info.IsDir() {
+		err := filepath.Walk(folderDir, func(p string, inf os.FileInfo, e error) error {
+			if e != nil || inf.IsDir() {
+				return e
+			}
+			rel, _ := filepath.Rel(folderDir, p)
+			rel = filepath.ToSlash(rel)
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			files = append(files, ContentInput{Path: rel, Text: string(b)})
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk input_folder: %v", err)
 		}
-	}
-	if inputFile == "" {
-		t.Fatal("no input.* file")
-	}
-	text, err := os.ReadFile(inputFile)
-	if err != nil {
-		t.Fatalf("read input: %v", err)
-	}
-	// First content rule's path_glob names the file path presented to
-	// the engine; falls back to the input file's base name.
-	filePath := filepath.Base(inputFile)
-	for _, r := range rules {
-		if r.Layer == "content" && r.PathGlob != "" {
-			filePath = r.PathGlob
-			break
+	} else {
+		var inputFile string
+		entries, _ := os.ReadDir(fdir)
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "input.") {
+				inputFile = filepath.Join(fdir, e.Name())
+				break
+			}
 		}
+		if inputFile == "" {
+			t.Fatal("no input.* file or input_folder/")
+		}
+		text, err := os.ReadFile(inputFile)
+		if err != nil {
+			t.Fatalf("read input: %v", err)
+		}
+		filePath := filepath.Base(inputFile)
+		for _, r := range rules {
+			if r.Layer == "content" && r.PathGlob != "" {
+				filePath = r.PathGlob
+				break
+			}
+		}
+		files = []ContentInput{{Path: filePath, Text: string(text)}}
 	}
 
 	folder := VictimFolder{
 		RootName: filepath.Base(fdir),
-		Files:    []ContentInput{{Path: filePath, Text: string(text)}},
+		Files:    files,
 	}
 	got := RunRules(rules, folder)
 

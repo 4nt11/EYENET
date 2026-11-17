@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -8,44 +9,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MatchFolder is byte-parity with Python / JS match_folder.
-//
-// Semantics:
-//   - every 'requires' path must be present (literal, or '/'-suffix prefix)
-//   - no 'forbids' path may be present
-//   - 'optional' paths each boost the score by 1 when present
-//   - result matches when (#requires + #optional_hit) >= min_score
-//   - min_score defaults to len(requires)
+// MatchFolder evaluates either a predicate tree (new v2 form) or a flat
+// requires/forbids/optional/min_score shape (v1 sugar, lowered to a
+// predicate tree at evaluation time). Byte-parity with Python / JS.
 func MatchFolder(m map[string]any, inp ContainerInput) map[string]any {
 	set := make(map[string]struct{}, len(inp.Paths))
 	for _, p := range inp.Paths {
 		set[p] = struct{}{}
 	}
-	requires := asStringList(m["requires"])
-	forbids := asStringList(m["forbids"])
-	optional := asStringList(m["optional"])
-	minScore, _ := asInt(m["min_score"])
-
-	for _, r := range requires {
-		if !hasPath(set, inp.Paths, r) {
-			return nil
-		}
+	pred, ok := m["predicate"].(map[string]any)
+	if !ok {
+		pred = lowerLegacyFolder(m)
 	}
-	for _, f := range forbids {
-		if hasPath(set, inp.Paths, f) {
-			return nil
-		}
+	hit, err := evalPredicate(pred, set, inp.Paths)
+	if err != nil {
+		// A broken predicate warns but can't crash evaluation.
+		// Matches Python's logging.warning + return None.
+		return nil
 	}
-	opt := 0
-	for _, o := range optional {
-		if hasPath(set, inp.Paths, o) {
-			opt++
-		}
-	}
-	if m["min_score"] == nil {
-		minScore = len(requires)
-	}
-	if len(requires)+opt >= minScore {
+	if hit {
 		return map[string]any{}
 	}
 	return nil
@@ -62,6 +44,169 @@ func hasPath(set map[string]struct{}, paths []string, p string) bool {
 	}
 	_, ok := set[p]
 	return ok
+}
+
+// evalPredicate walks a predicate tree. Each node is a single-key map
+// naming the operator. Operators: and / or / xor / not / at_least /
+// exactly / at_most. Leaves: path / glob.
+func evalPredicate(node map[string]any, set map[string]struct{}, list []string) (bool, error) {
+	if len(node) != 1 {
+		return false, fmt.Errorf("predicate node must be a single-key map, got %d keys", len(node))
+	}
+	var op string
+	var body any
+	for k, v := range node {
+		op = k
+		body = v
+	}
+	switch op {
+	case "and":
+		children, ok := body.([]any)
+		if !ok {
+			return false, fmt.Errorf("'and' expects a list")
+		}
+		for _, c := range children {
+			cn, _ := c.(map[string]any)
+			ok, err := evalPredicate(cn, set, list)
+			if err != nil {
+				return false, err
+			}
+			if !ok {
+				return false, nil
+			}
+		}
+		return true, nil
+	case "or":
+		children, ok := body.([]any)
+		if !ok {
+			return false, fmt.Errorf("'or' expects a list")
+		}
+		for _, c := range children {
+			cn, _ := c.(map[string]any)
+			ok, err := evalPredicate(cn, set, list)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				return true, nil
+			}
+		}
+		return false, nil
+	case "xor":
+		children, ok := body.([]any)
+		if !ok {
+			return false, fmt.Errorf("'xor' expects a list")
+		}
+		// Odd-parity semantics (standard digital logic).
+		hits := 0
+		for _, c := range children {
+			cn, _ := c.(map[string]any)
+			ok, err := evalPredicate(cn, set, list)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				hits++
+			}
+		}
+		return hits%2 == 1, nil
+	case "not":
+		cn, _ := body.(map[string]any)
+		inner, err := evalPredicate(cn, set, list)
+		if err != nil {
+			return false, err
+		}
+		return !inner, nil
+	case "at_least", "exactly", "at_most":
+		cfg, ok := body.(map[string]any)
+		if !ok {
+			return false, fmt.Errorf("'%s' expects {count, of: [...]}", op)
+		}
+		of, ok := cfg["of"].([]any)
+		if !ok {
+			return false, fmt.Errorf("'%s' 'of' must be a list", op)
+		}
+		count, ok := asInt(cfg["count"])
+		if !ok || count < 0 {
+			return false, fmt.Errorf("'%s' count must be a non-negative integer", op)
+		}
+		hits := 0
+		for _, c := range of {
+			cn, _ := c.(map[string]any)
+			ok, err := evalPredicate(cn, set, list)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				hits++
+			}
+		}
+		switch op {
+		case "at_least":
+			return hits >= count, nil
+		case "at_most":
+			return hits <= count, nil
+		default:
+			return hits == count, nil
+		}
+	case "path":
+		s, ok := body.(string)
+		if !ok {
+			return false, fmt.Errorf("'path' expects a string")
+		}
+		return hasPath(set, list, s), nil
+	case "glob":
+		s, ok := body.(string)
+		if !ok {
+			return false, fmt.Errorf("'glob' expects a string")
+		}
+		for _, p := range list {
+			if MatchGlob(s, p) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return false, fmt.Errorf("unknown predicate operator: %q", op)
+}
+
+// lowerLegacyFolder translates the flat requires/forbids/optional/
+// min_score shape to an equivalent predicate tree so legacy rules keep
+// evaluating through one code path.
+func lowerLegacyFolder(m map[string]any) map[string]any {
+	requires := asStringList(m["requires"])
+	forbids := asStringList(m["forbids"])
+	optional := asStringList(m["optional"])
+	minScore := len(requires)
+	if m["min_score"] != nil {
+		if n, ok := asInt(m["min_score"]); ok {
+			minScore = n
+		}
+	}
+
+	var clauses []any
+	for _, r := range requires {
+		clauses = append(clauses, map[string]any{"path": r})
+	}
+	for _, f := range forbids {
+		clauses = append(clauses, map[string]any{"not": map[string]any{"path": f}})
+	}
+	if minScore > 0 && (len(requires) > 0 || len(optional) > 0) {
+		var of []any
+		for _, p := range requires {
+			of = append(of, map[string]any{"path": p})
+		}
+		for _, p := range optional {
+			of = append(of, map[string]any{"path": p})
+		}
+		clauses = append(clauses, map[string]any{
+			"at_least": map[string]any{"count": minScore, "of": of},
+		})
+	}
+	if len(clauses) == 0 {
+		return map[string]any{"and": []any{}}
+	}
+	return map[string]any{"and": clauses}
 }
 
 // MatchRegex uses Go's RE2-syntax stdlib regexp. Named captures survive

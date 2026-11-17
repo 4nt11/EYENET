@@ -1,26 +1,44 @@
 id: redline_container
-version: 1
+version: 2
 layer: container
 family: redline
 priority: 100
 description: >
-  RedLine victim-folder predicate. UserInformation.txt is specific
-  enough on its own; the Browsers/ subdir is the second-highest-signal
-  marker. Builds ship either "UserInformation.txt" or
-  "User Information.txt" (space is build-dependent); we require only the
-  no-space form here and leave the spaced variant to a sibling rule if
-  we start seeing it in intake.
+  RedLine victim-folder predicate, v2 (predicate-tree form). Explicit
+  Opus / json_v2 / Lumma / StealC exclusions so a drop that LOOKS like
+  RedLine but actually isn't gets correctly rejected. Requires at least
+  two of the three RedLine-specific sidecar signals (Browsers/ dir with
+  per-browser Passwords layout, InstalledSoftware.txt, Screenshot.jpg).
+
+  Opus-exclusion arm: a UserInformation.txt drop that ALSO carries
+  worklog.txt OR a Clients/<messenger> file is NOT RedLine, no matter
+  how many other sidecars match. Previously this rule required only
+  the filename and the min_score; now it says so explicitly.
 match:
   type: folder
-  requires:
-    - UserInformation.txt
-  forbids:
-    - pc_info.json
-    - System.txt
-    - information.txt
-  optional:
-    - Browsers/
-    - Passwords.txt
-    - InstalledSoftware.txt
-    - Screenshot.jpg
-  min_score: 2
+  predicate:
+    and:
+      - path: UserInformation.txt
+      - not: { path: pc_info.json }
+      - not: { path: System.txt }
+      - not: { path: information.txt }
+      - not:
+          or:
+            - path: worklog.txt
+            - path: Clients/DiscordTokens.txt
+            - path: Clients/SteamTokens.txt
+            - path: Clients/Roblox.txt
+            - path: Clients/MAX.txt
+            - path: Telegram/
+            - path: Extensions/
+            - path: Wallets/
+      - at_least:
+          count: 2
+          of:
+            - path: Browsers/
+            - path: Passwords.txt
+            - path: InstalledSoftware.txt
+            - path: Screenshot.jpg
+            - path: Clipboard.txt
+            - path: Environment.txt
+            - path: ProcessList.txt
