@@ -76,7 +76,7 @@
       placeholder="Filter by slug, name, alias, loader, signature file"
       aria-label="Filter families"
     />
-    <button class="btn-primary" disabled title="not yet wired">+ New family</button>
+    <a class="btn-primary" href="/tuning/stealer/families/new">+ New family</a>
   </div>
 
   <nav class="status-tabs">
@@ -112,7 +112,7 @@
         </thead>
         <tbody>
           {#each filtered as f (f.slug)}
-            <tr>
+            <tr onclick={() => (window.location.href = `/tuning/stealer/families/${f.slug}`)} role="button" tabindex="0">
               <td class="mono id">{f.slug}</td>
               <td>{f.name}</td>
               <td class="status-td"><span class="status s-{f.status}">{f.status}</span></td>
@@ -171,6 +171,7 @@
   }
   .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
   .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { text-decoration: none; display: inline-flex; align-items: center; }
 
   .status-tabs { display: flex; gap: 2px; }
   .chip {
@@ -217,6 +218,7 @@
     transition: background 120ms ease;
   }
   tbody tr:last-child { border-bottom: none; }
+  tbody tr { cursor: pointer; }
   tbody tr:hover { background: var(--panel-2); }
   tbody td {
     padding: 7px 14px;

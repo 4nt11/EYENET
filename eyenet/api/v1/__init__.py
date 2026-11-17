@@ -276,12 +276,17 @@ from eyenet.api.v1.stealer.api_audit_coverage import router as stealer_audit_cov
 from eyenet.api.v1.stealer.api_audit_samples import router as stealer_audit_samples_router
 from eyenet.api.v1.stealer.api_audit_search import router as stealer_audit_search_router
 from eyenet.api.v1.stealer.api_audit_unknown import router as stealer_audit_unknown_router
+from eyenet.api.v1.stealer.api_create_stealer_family import router as stealer_families_create_router
 from eyenet.api.v1.stealer.api_create_stealer_rule import router as stealer_rules_create_router
+from eyenet.api.v1.stealer.api_delete_stealer_family import router as stealer_families_delete_router
 from eyenet.api.v1.stealer.api_delete_stealer_rule import router as stealer_rules_delete_router
+from eyenet.api.v1.stealer.api_get_stealer_family import router as stealer_families_get_router
 from eyenet.api.v1.stealer.api_get_stealer_rule import router as stealer_rules_get_router
+from eyenet.api.v1.stealer.api_list_stealer_families import router as stealer_families_list_router
 from eyenet.api.v1.stealer.api_list_stealer_rules import router as stealer_rules_list_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
 from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
+from eyenet.api.v1.stealer.api_update_stealer_family import router as stealer_families_update_router
 from eyenet.api.v1.stealer.api_update_stealer_rule import router as stealer_rules_update_router
 
 # === stream ===
@@ -515,6 +520,11 @@ v1_router.include_router(stealer_rules_get_router)       # GET /stealer/rules/{i
 v1_router.include_router(stealer_rules_create_router)    # POST /stealer/rules (write:stealer)
 v1_router.include_router(stealer_rules_update_router)    # PUT /stealer/rules/{id} (write:stealer)
 v1_router.include_router(stealer_rules_delete_router)    # DELETE /stealer/rules/{id} (admin:stealer)
+v1_router.include_router(stealer_families_list_router)   # GET /stealer/families (read:stealer)
+v1_router.include_router(stealer_families_get_router)    # GET /stealer/families/{slug} (read:stealer)
+v1_router.include_router(stealer_families_create_router) # POST /stealer/families (write:stealer)
+v1_router.include_router(stealer_families_update_router) # PUT /stealer/families/{slug} (write:stealer)
+v1_router.include_router(stealer_families_delete_router) # DELETE /stealer/families/{slug} (admin:stealer)
 v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /groups/* routes
 
 # identities + panic
