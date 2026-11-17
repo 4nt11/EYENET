@@ -2,10 +2,45 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/lib/secret_name_guard.sh"
 
-# git-lfs pre-push (merged manually — see `git lfs update --manual`)
+# Capture stdin ONCE at the top: git writes the push ref list here, and
+# both `git lfs pre-push` and the filename guard below need to read it.
+PUSH_REFS="$(cat)"
+
+# git-lfs pre-push (merged manually; see `git lfs update --manual`)
 command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\ngit-lfs not found on PATH\n\n"; exit 2; }
-git lfs pre-push "$@"
+printf '%s\n' "$PUSH_REFS" | git lfs pre-push "$@"
+
+# FIRST gate: filename-pattern guard across every file in every commit
+# being pushed. Backstops the pre-commit guard in case it was bypassed
+# (--no-verify, amend, hooksPath drift). Each stdin line is
+# `<local_ref> <local_sha> <remote_ref> <remote_sha>`.
+#
+# For each range local_sha..remote_sha we collect every added-or-modified
+# path and sweep it through secret_name_guard.
+step "secret filename guard (push scope: every commit in every ref)"
+PUSH_PATHS=()
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -z "$local_sha" ]] && continue
+  # Deleted refs push a zero local_sha; nothing to inspect.
+  [[ "$local_sha" == "0000000000000000000000000000000000000000" ]] && continue
+  if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+    # New branch: inspect every commit reachable from local_sha that is
+    # NOT already on the remote. Limited to 500 commits to keep sane.
+    range_args=("$local_sha" --not --remotes)
+  else
+    range_args=("$remote_sha..$local_sha")
+  fi
+  mapfile -t paths < <(git diff --name-only --diff-filter=AM "${range_args[@]}" 2>/dev/null || true)
+  PUSH_PATHS+=("${paths[@]}")
+done <<<"$PUSH_REFS"
+# De-duplicate.
+if [[ ${#PUSH_PATHS[@]} -gt 0 ]]; then
+  mapfile -t UNIQUE < <(printf '%s\n' "${PUSH_PATHS[@]}" | sort -u)
+  secret_name_guard "${UNIQUE[@]}" || abort "dangerous filename pattern in pushed commits"
+fi
+ok "no dangerous filenames in push range"
 
 if [[ -z "${VIRTUAL_ENV:-}" ]] && [[ -f .venv/bin/activate ]]; then
   # shellcheck disable=SC1091

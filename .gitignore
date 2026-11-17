@@ -17,6 +17,39 @@ venv/
 .env.*
 !.env.example
 
+# Secret-adjacent files: defense in depth against ad-hoc `.servicename`
+# dotfiles stashing API keys, auth-key bags per vendor, etc. Add a specific
+# `!` exception if a file is legitimately NOT a secret (e.g. a public
+# `.vendorname.yaml` config). Prefer putting secrets at ~/.config/ paths
+# that are OUTSIDE the repo entirely.
+.abuse*
+.aws
+.authinfo
+.netrc
+.pgpass
+*api_key*
+*apikey*
+*api-key*
+*secret*
+*_token
+*_token.*
+*passwd*
+*.pem
+*.p12
+*.pfx
+# Our own secret-detection machinery and the detect-secrets baseline file
+# do not contain secrets. Opt them back in explicitly. Later rules override
+# earlier ones, so these negations re-include the matched paths.
+!.githooks/
+!.githooks/**
+!.secrets.baseline
+# Backup copies with secrets often get named *.bak or *.old
+.env.bak
+.env.old
+# Tilde/vim swap files sometimes leak content from secret files
+*.env.swp
+*.env~
+
 # uv
 uv.lock        # commit this if you want — leaving uncommitted in v0
 .uv-cache/

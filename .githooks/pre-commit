@@ -2,6 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/lib/secret_name_guard.sh"
 
 # Activate uv-managed venv if not active and one exists.
 if [[ -z "${VIRTUAL_ENV:-}" ]] && [[ -f .venv/bin/activate ]]; then
@@ -17,6 +18,15 @@ require deptry
 require pytest
 
 mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# FIRST gate: filename-pattern guard. Runs before any other tool so an
+# obviously-dangerous file name (.abuse.*, *api_key*, *.pem, etc.) blocks
+# the commit without waiting for the long test / type / audit chain.
+step "secret filename guard (name-based, backstops detect-secrets)"
+if [[ ${#STAGED[@]} -gt 0 ]]; then
+  secret_name_guard "${STAGED[@]}" || abort "dangerous filename pattern in staged files"
+fi
+ok "no dangerous filenames"
 PY_STAGED=()
 EYENET_PY=()
 for f in "${STAGED[@]:-}"; do
