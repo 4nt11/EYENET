@@ -2,12 +2,18 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import Dropdown from '$lib/components/Dropdown.svelte';
   import { getRule, createRule, updateRule, deleteRule } from '$lib/stealerRulesApi.svelte.js';
 
-  const MATCH_TYPES = ['folder', 'regex', 'delimiter', 'template', 'json', 'yaml', 'keyvalue', 'keyvalue_ini'];
-  const LAYERS = ['container', 'content'];
-  const NORMALIZE_VERBS = ['strip_whitespace', 'lowercase', 'uppercase', 'truncate', 'int_from_string', 'replace_re2', 'date_parse'];
-  const DATE_FORMATS = ['iso8601', 'rfc2822', 'epoch_seconds'];
+  // Dropdown.svelte expects {v, l} option shape.
+  const MATCH_TYPE_OPTS = ['folder', 'regex', 'delimiter', 'template', 'json', 'yaml', 'keyvalue', 'keyvalue_ini'].map((v) => ({ v, l: v }));
+  const LAYER_OPTS = [{ v: 'container', l: 'container' }, { v: 'content', l: 'content' }];
+  const NORMALIZE_VERB_OPTS = ['strip_whitespace', 'lowercase', 'uppercase', 'truncate', 'int_from_string', 'replace_re2', 'date_parse'].map((v) => ({ v, l: v }));
+  const DATE_FORMAT_OPTS = ['iso8601', 'rfc2822', 'epoch_seconds'].map((v) => ({ v, l: v }));
+
+  const familyOpts = $derived(families.map((f) => ({ v: f.slug, l: f.slug })));
+  const requiresContainerFamilyOpts = $derived([{ v: '', l: '(any)' }, ...familyOpts]);
+
 
   const slug = $derived($page.params.id);
   const isNew = $derived(slug === 'new');
@@ -248,15 +254,11 @@
             </label>
             <label>
               <span>Layer</span>
-              <select bind:value={rule.layer}>
-                {#each LAYERS as l}<option value={l}>{l}</option>{/each}
-              </select>
+              <Dropdown options={LAYER_OPTS} bind:value={rule.layer} minWidth="100%" />
             </label>
             <label>
               <span>Family</span>
-              <select class="mono" bind:value={rule.family}>
-                {#each families as f}<option value={f.slug}>{f.slug}</option>{/each}
-              </select>
+              <Dropdown options={familyOpts} bind:value={rule.family} minWidth="100%" />
             </label>
             <label>
               <span>Priority</span>
@@ -272,10 +274,11 @@
             </label>
             <label>
               <span>Requires container family</span>
-              <select class="mono" bind:value={rule.requires_container_family} disabled={rule.layer === 'container'}>
-                <option value="">(any)</option>
-                {#each families as f}<option value={f.slug}>{f.slug}</option>{/each}
-              </select>
+              {#if rule.layer === 'container'}
+                <div class="dd-disabled mono">(any)</div>
+              {:else}
+                <Dropdown options={requiresContainerFamilyOpts} bind:value={rule.requires_container_family} minWidth="100%" />
+              {/if}
             </label>
           </div>
         </section>
@@ -296,9 +299,7 @@
             {/if}
             <label>
               <span>Match type</span>
-              <select class="mono" bind:value={rule.match.type}>
-                {#each MATCH_TYPES as t}<option value={t}>{t}</option>{/each}
-              </select>
+              <Dropdown options={MATCH_TYPE_OPTS} bind:value={rule.match.type} minWidth="100%" />
             </label>
 
             {#if rule.match.type === 'folder'}
@@ -503,9 +504,7 @@
               {#each rule.normalize as step, i}
                 <div class="step">
                   <div class="idx mono">{String(i + 1).padStart(2, '0')}</div>
-                  <select class="mono" bind:value={step.verb}>
-                    {#each NORMALIZE_VERBS as v}<option value={v}>{v}</option>{/each}
-                  </select>
+                  <Dropdown options={NORMALIZE_VERB_OPTS} bind:value={step.verb} minWidth="160px" />
                   <input class="mono" type="text" bind:value={step.field} placeholder="field" />
                   {#if step.verb === 'truncate'}
                     <input class="mono num" type="number" placeholder="max_len" bind:value={step.max_len} />
@@ -513,9 +512,7 @@
                     <input class="mono" type="text" placeholder="pattern" bind:value={step.pattern} />
                     <input class="mono" type="text" placeholder="replacement" bind:value={step.replacement} />
                   {:else if step.verb === 'date_parse'}
-                    <select class="mono" bind:value={step.format}>
-                      {#each DATE_FORMATS as f}<option value={f}>{f}</option>{/each}
-                    </select>
+                    <Dropdown options={DATE_FORMAT_OPTS} bind:value={step.format} minWidth="150px" />
                   {/if}
                   <div class="row-actions">
                     <button class="btn-ghost sm" onclick={() => moveStep(i, -1)} disabled={i === 0} title="Move up">^</button>
@@ -626,6 +623,14 @@
     outline: none; min-width: 0;
   }
   input.mono, select.mono, textarea.mono { font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); }
+  .dd-disabled {
+    height: 28px; display: flex; align-items: center;
+    padding: 0 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-faint); font-size: var(--fs-12);
+    opacity: .55;
+  }
   input.num { max-width: 90px; }
   input.flex { flex: 1; }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); }
