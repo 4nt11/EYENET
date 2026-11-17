@@ -1,0 +1,27 @@
+slug: filezilla
+name: FileZilla FTP client saved sites
+status: active
+first_seen_year: 2001
+aliases: [filezilla, sitemanager, filezilla3]
+signature_files:
+  - sitemanager.xml
+  - recentservers.xml
+  - FileZilla/sitemanager.xml
+loaders: []
+distribution_channels:
+  - inside any stealer that grabs %APPDATA%/FileZilla
+references:
+  - title: FileZilla docs (Site Manager)
+    url: https://wiki.filezilla-project.org/Site_Manager
+notes: >
+  FileZilla is the single most common Windows FTP client. sitemanager.xml
+  is the operator's saved-sites list; recentservers.xml is the recent-
+  connection list. Both carry per-server Host / Port / Protocol / User /
+  Pass. Pass is base64-encoded (NOT encrypted; obfuscation only) with the
+  'encoding="base64"' attribute on the <Pass> element; plaintext
+  recovery is one b64decode call.
+
+  High-value shape for CTI pivoting: operators often save personal NAS,
+  corp staging servers, shared hosting control panels, and legacy FTP
+  endpoints here. Compromise of one FileZilla export regularly yields
+  dozens of unique credential sets.

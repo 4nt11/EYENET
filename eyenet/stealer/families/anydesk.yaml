@@ -1,0 +1,39 @@
+slug: anydesk
+name: AnyDesk remote-desktop client
+status: active
+first_seen_year: 2014
+aliases: [anydesk, ad.anynet]
+signature_files:
+  - service.conf
+  - system.conf
+  - user.conf
+  - AnyDesk/service.conf
+loaders: []
+distribution_channels:
+  - inside stealers that grab %APPDATA%/AnyDesk
+  - targeted by ransomware operators pre-encryption (initial-access reuse)
+references:
+  - title: AnyDesk security docs (AnyDesk ID + licensing)
+    url: https://support.anydesk.com/en/knowledge/anydesk-id-and-alias
+notes: >
+  AnyDesk stores its client state in three keyvalue files under
+  %APPDATA%/AnyDesk (or %PROGRAMDATA%/AnyDesk for service-mode):
+
+    service.conf   installed-service state. Carries 'ad.anynet.pkey'
+                   (the device's RSA PRIVATE KEY, PEM with literal
+                   \n line escapes), 'ad.license.state_store' (the
+                   license binding), and the anynet client stats hash.
+    system.conf    machine-wide settings. Holds 'ad.anynet.id' (the
+                   stable AnyDesk ID, e.g. 1319043527), 'ad.license.name',
+                   'ad.anynet.alias', 'ad.anynet.network_id'.
+    user.conf      per-user UI + invitation / roster state.
+
+  The AnyDesk ID + the device private key together = silent device
+  takeover: an attacker can impersonate the victim's AnyDesk device on
+  the AnyDesk network without ever needing the unattended-access
+  password. This is one of the highest-value credential targets in a
+  stealer log and one that every popular stealer (Lumma, StealC v2,
+  RedLine, Acreed, Opus) grabs by default.
+
+  Observed in the Khazan sample as the trio of service/system/user.conf
+  siblings under Software/AnyDsk/ (vowel-stripped).

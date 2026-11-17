@@ -501,6 +501,346 @@ class _VDFParser:
             return
 
 
+# ----------------------------------------------------------------------- #
+#  XML                                                                     #
+# ----------------------------------------------------------------------- #
+# Hardened hand-rolled parser. No DTD, no entity expansion beyond the five
+# standard XML entities (&amp; &lt; &gt; &quot; &apos;), no PI handling,
+# no namespace resolution logic (prefix is kept as part of the local name
+# so matching stays literal), no external I/O. A <!DOCTYPE ...> is fatal.
+# The 5 standard entities are 1-character replacements so there's no
+# recursion to cap; we still cap nesting depth at MAX_DEPTH to refuse
+# pathologically-nested documents.
+
+_XML_MAX_DEPTH = 256
+
+_XML_ENTITIES = {"lt": "<", "gt": ">", "amp": "&", "quot": '"', "apos": "'"}
+
+
+class _XMLParseError(ValueError):
+    pass
+
+
+class _XMLElement:
+    __slots__ = ("name", "attrs", "children", "text")
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.attrs: dict[str, str] = {}
+        self.children: list[_XMLElement] = []
+        # 'text' is the concatenation of character data directly under
+        # this element (mixed-content is lossy here on purpose; XPath-like
+        # text() access only cares about the leaf).
+        self.text = ""
+
+
+def _parse_xml(text: str) -> _XMLElement:
+    p = _XMLParser(text)
+    return p.parse_root()
+
+
+class _XMLParser:
+    __slots__ = ("t", "i", "n", "depth")
+
+    def __init__(self, text: str) -> None:
+        self.t = text
+        self.i = 0
+        self.n = len(text)
+        self.depth = 0
+
+    def parse_root(self) -> _XMLElement:
+        self._skip_prolog()
+        if self.i >= self.n or self.t[self.i] != "<":
+            raise _XMLParseError("no root element")
+        return self._parse_element()
+
+    def _skip_prolog(self) -> None:
+        # Skip <?xml ...?> processing instructions and comments at the top.
+        # Reject <!DOCTYPE outright before any element starts.
+        while self.i < self.n:
+            self._skip_ws()
+            if self.i + 2 < self.n and self.t.startswith("<?", self.i):
+                end = self.t.find("?>", self.i + 2)
+                if end < 0:
+                    raise _XMLParseError("unterminated processing instruction")
+                self.i = end + 2
+                continue
+            if self.t.startswith("<!--", self.i):
+                end = self.t.find("-->", self.i + 4)
+                if end < 0:
+                    raise _XMLParseError("unterminated comment")
+                self.i = end + 3
+                continue
+            if self.t.startswith("<!DOCTYPE", self.i):
+                raise _XMLParseError("DOCTYPE declarations are not supported")
+            return
+
+    def _parse_element(self) -> _XMLElement:
+        self.depth += 1
+        if self.depth > _XML_MAX_DEPTH:
+            raise _XMLParseError(f"nesting depth > {_XML_MAX_DEPTH}")
+        if self.t[self.i] != "<":
+            raise _XMLParseError(f"expected '<' at {self.i}")
+        self.i += 1
+        name = self._read_name()
+        el = _XMLElement(name)
+        while True:
+            self._skip_ws()
+            if self.i >= self.n:
+                raise _XMLParseError(f"unterminated start tag <{name}>")
+            if self.t.startswith("/>", self.i):
+                self.i += 2
+                self.depth -= 1
+                return el
+            if self.t[self.i] == ">":
+                self.i += 1
+                break
+            attr_name = self._read_name()
+            self._skip_ws()
+            if self.i >= self.n or self.t[self.i] != "=":
+                raise _XMLParseError(f"missing '=' after attribute {attr_name!r}")
+            self.i += 1
+            self._skip_ws()
+            el.attrs[attr_name] = self._read_attr_value()
+        # Body: alternating text + child elements until </name>.
+        buf: list[str] = []
+        while True:
+            if self.i >= self.n:
+                raise _XMLParseError(f"unterminated element <{name}>")
+            if self.t.startswith("</", self.i):
+                self.i += 2
+                closing = self._read_name()
+                self._skip_ws()
+                if self.i >= self.n or self.t[self.i] != ">":
+                    raise _XMLParseError(f"malformed close tag </{closing}>")
+                self.i += 1
+                if closing != name:
+                    raise _XMLParseError(f"close tag </{closing}> != open <{name}>")
+                el.text = "".join(buf)
+                self.depth -= 1
+                return el
+            if self.t.startswith("<!--", self.i):
+                end = self.t.find("-->", self.i + 4)
+                if end < 0:
+                    raise _XMLParseError("unterminated comment")
+                self.i = end + 3
+                continue
+            if self.t.startswith("<![CDATA[", self.i):
+                end = self.t.find("]]>", self.i + 9)
+                if end < 0:
+                    raise _XMLParseError("unterminated CDATA")
+                buf.append(self.t[self.i + 9:end])
+                self.i = end + 3
+                continue
+            if self.t.startswith("<?", self.i):
+                end = self.t.find("?>", self.i + 2)
+                if end < 0:
+                    raise _XMLParseError("unterminated processing instruction")
+                self.i = end + 2
+                continue
+            if self.t[self.i] == "<":
+                el.children.append(self._parse_element())
+                continue
+            # text chunk
+            end = self.t.find("<", self.i)
+            if end < 0:
+                raise _XMLParseError(f"unterminated element <{name}>")
+            buf.append(_xml_unescape(self.t[self.i:end]))
+            self.i = end
+
+    def _read_name(self) -> str:
+        start = self.i
+        if self.i >= self.n or not (self.t[self.i].isalpha() or self.t[self.i] in "_:"):
+            raise _XMLParseError(f"expected name at {self.i}")
+        self.i += 1
+        while self.i < self.n and (self.t[self.i].isalnum() or self.t[self.i] in "_-.:"):
+            self.i += 1
+        return self.t[start:self.i]
+
+    def _read_attr_value(self) -> str:
+        if self.i >= self.n or self.t[self.i] not in '"\'':
+            raise _XMLParseError(f"attribute value must be quoted at {self.i}")
+        q = self.t[self.i]
+        self.i += 1
+        start = self.i
+        while self.i < self.n and self.t[self.i] != q:
+            self.i += 1
+        if self.i >= self.n:
+            raise _XMLParseError("unterminated attribute value")
+        v = _xml_unescape(self.t[start:self.i])
+        self.i += 1
+        return v
+
+    def _skip_ws(self) -> None:
+        while self.i < self.n and self.t[self.i] in " \t\r\n":
+            self.i += 1
+
+
+def _xml_unescape(s: str) -> str:
+    """Resolve the 5 standard XML entities. &#NN; and &#xHH; numeric
+    character refs too. ANY OTHER &entity; (including &xxe; from a DTD
+    the parser already rejected) is passed through literally; there is
+    no entity table to expand so there's no recursion to cap."""
+    if "&" not in s:
+        return s
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        if s[i] != "&":
+            out.append(s[i])
+            i += 1
+            continue
+        end = s.find(";", i + 1)
+        if end < 0:
+            out.append("&")
+            i += 1
+            continue
+        entity = s[i + 1:end]
+        if entity in _XML_ENTITIES:
+            out.append(_XML_ENTITIES[entity])
+        elif entity.startswith("#x") or entity.startswith("#X"):
+            try:
+                out.append(chr(int(entity[2:], 16)))
+            except ValueError:
+                out.append(s[i:end + 1])
+        elif entity.startswith("#"):
+            try:
+                out.append(chr(int(entity[1:], 10)))
+            except ValueError:
+                out.append(s[i:end + 1])
+        else:
+            # Unknown named entity (e.g. &xxe; from an attempted DTD
+            # injection). Preserve literally; do NOT resolve.
+            out.append(s[i:end + 1])
+        i = end + 1
+    return "".join(out)
+
+
+def match_xml(
+    m: dict[str, Any], ex: ExtractSpec | None, inp: ContentInput,
+) -> dict[str, Any] | None:
+    """XML matcher. requires_keys checks root + direct children.
+    When pivot is set, bulk mode iterates the matching elements; this
+    single-record entry returns the first.
+
+    Path grammar extends JSONPath-lite with ``@attr`` for attributes:
+      $.Pass           -> text content of the first <Pass> child
+      $.Pass@encoding  -> value of <Pass encoding="...">'s attr
+      $key             -> the pivot child's element name
+    """
+    try:
+        root = _parse_xml(inp.text)
+    except _XMLParseError:
+        return None
+    required = m.get("requires_keys") or []
+    if required:
+        top = {root.name: True}
+        for c in root.children:
+            top[c.name] = True
+        for k in required:
+            if k not in top:
+                return None
+    pivot = m.get("pivot")
+    paths = (ex or {}).get("paths") or {}
+    if pivot:
+        for key, el in _xml_pivot_children(root, pivot):
+            return _xml_extract_record(el, key, paths)
+        return None
+    return _xml_extract_record(root, root.name, paths)
+
+
+def iter_xml(
+    m: dict[str, Any], ex: ExtractSpec | None, text: str,
+) -> Iterator[dict[str, Any]]:
+    """Walk every pivot child as a record (used by bulk_parse)."""
+    try:
+        root = _parse_xml(text)
+    except _XMLParseError:
+        return
+    required = m.get("requires_keys") or []
+    if required:
+        top = {root.name: True}
+        for c in root.children:
+            top[c.name] = True
+        for k in required:
+            if k not in top:
+                return
+    paths = (ex or {}).get("paths") or {}
+    pivot = m.get("pivot")
+    if not pivot:
+        yield _xml_extract_record(root, root.name, paths)
+        return
+    for key, el in _xml_pivot_children(root, pivot):
+        yield _xml_extract_record(el, key, paths)
+
+
+def _xml_pivot_children(root: _XMLElement, pivot_expr: str):
+    """Walk the pivot path; the LAST segment names the element type to
+    iterate. E.g. '$.FileZilla3.Servers.Server' navigates to the
+    <Servers> element and yields each <Server> child in order.
+    """
+    if not pivot_expr.startswith("$"):
+        return
+    steps = []
+    for tok in _PATH_TOKEN.finditer(pivot_expr[1:]):
+        key = tok.group(1)
+        if key is None:
+            return
+        steps.append(key)
+    if not steps:
+        return
+    # Top-level step may name the root OR a direct child; try both.
+    cur = root
+    if steps[0] == root.name:
+        steps = steps[1:]
+    for step in steps[:-1]:
+        cur = next((c for c in cur.children if c.name == step), None)
+        if cur is None:
+            return
+    target = steps[-1]
+    for c in cur.children:
+        if c.name == target:
+            yield c.name, c
+
+
+def _xml_extract_record(el: _XMLElement, key_name: str, paths: dict[str, str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for field, expr in paths.items():
+        if expr == "$key":
+            out[field] = key_name
+            continue
+        v = _xml_eval_path(el, expr)
+        if v is None:
+            continue
+        out[field] = v
+    return out
+
+
+def _xml_eval_path(el: _XMLElement, expr: str) -> str | None:
+    """JSONPath-lite + '@attr' suffix. Returns the text content of the
+    leaf element, or the attribute value when the final segment is
+    '@name'. Non-existent paths return None."""
+    if not expr.startswith("$"):
+        return None
+    attr: str | None = None
+    if "@" in expr:
+        head, attr = expr.rsplit("@", 1)
+        expr = head
+    cur = el
+    for tok in _PATH_TOKEN.finditer(expr[1:]):
+        key = tok.group(1)
+        if key is None:
+            return None
+        found = next((c for c in cur.children if c.name == key), None)
+        if found is None:
+            return None
+        cur = found
+    if attr is not None:
+        return cur.attrs.get(attr)
+    return cur.text
+
+
 def match_yaml(
     m: YamlMatch, ex: ExtractSpec | None, inp: ContentInput,
 ) -> dict[str, Any] | None:

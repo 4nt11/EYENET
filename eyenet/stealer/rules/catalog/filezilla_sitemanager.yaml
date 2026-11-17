@@ -1,0 +1,29 @@
+id: filezilla_sitemanager
+version: 1
+layer: content
+family: filezilla
+priority: 90
+path_glob: "**itemanager.xml"
+description: >
+  FileZilla Site Manager export. One record per <Server> under
+  <FileZilla3><Servers>. Port is cast to int; password stays raw base64
+  (FileZilla's 'encoding' attribute is informational, the obfuscation
+  is just b64) so the pipeline can decode after insert. The engine
+  uses a hardened in-tree XML parser: no DOCTYPE, no external entity
+  resolution, only the five standard XML entities, depth cap 256,
+  zero network reachability (no fetch code path exists in the parser).
+match:
+  type: xml
+  requires_keys: [FileZilla3]
+  pivot: $.FileZilla3.Servers.Server
+extract:
+  paths:
+    host: $.Host
+    port: $.Port
+    protocol: $.Protocol
+    user: $.User
+    name: $.Name
+    password_b64: $.Pass
+    password_encoding: $.Pass@encoding
+normalize:
+  - { verb: int_from_string, field: port }

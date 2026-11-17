@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<FileZilla3 version="3.60.1" platform="windows">
+	<Servers>
+		<Server>
+			<Host>geekgaming.synology.me</Host>
+			<Port>5000</Port>
+			<Protocol>0</Protocol>
+			<Type>0</Type>
+			<User>Wayne</User>
+			<Pass encoding="base64">R2Vla2dhbWluZ3NjZW5pY3MxMjM=</Pass>
+			<Logontype>1</Logontype>
+			<Name>Geek Gaming</Name>
+		</Server>
+		<Server>
+			<Host>ftp.pwp.blueyonder.co.uk</Host>
+			<Port>21</Port>
+			<Protocol>0</Protocol>
+			<Type>0</Type>
+			<User>wdcooper</User>
+			<Pass encoding="base64">emlwY29kZTY2Ng==</Pass>
+			<Logontype>1</Logontype>
+			<Name>Nexorcist</Name>
+		</Server>
+	</Servers>
+</FileZilla3>

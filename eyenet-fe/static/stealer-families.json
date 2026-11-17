@@ -26,6 +26,34 @@
     "notes": "Newly discovered family. Info.txt is YAML-shaped (not INI, not plain keyvalue), which is unusual in this ecosystem and was the hinge that led us to add YAML support to the rule engine. Observed in Khazan intake with ~57 folders carrying the YAML Info.txt. Dead-drop resolver (DDR) technique for C2 fetch. No rules in our catalog yet; add when we see enough samples to characterize the output shape stably across builds.\n"
   },
   {
+    "slug": "anydesk",
+    "name": "AnyDesk remote-desktop client",
+    "status": "active",
+    "first_seen_year": 2014,
+    "aliases": [
+      "anydesk",
+      "ad.anynet"
+    ],
+    "signature_files": [
+      "service.conf",
+      "system.conf",
+      "user.conf",
+      "AnyDesk/service.conf"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealers that grab %APPDATA%/AnyDesk",
+      "targeted by ransomware operators pre-encryption (initial-access reuse)"
+    ],
+    "references": [
+      {
+        "title": "AnyDesk security docs (AnyDesk ID + licensing)",
+        "url": "https://support.anydesk.com/en/knowledge/anydesk-id-and-alias"
+      }
+    ],
+    "notes": "AnyDesk stores its client state in three keyvalue files under %APPDATA%/AnyDesk (or %PROGRAMDATA%/AnyDesk for service-mode):\n\n  service.conf   installed-service state. Carries 'ad.anynet.pkey'\n                 (the device's RSA PRIVATE KEY, PEM with literal\n                 \\n line escapes), 'ad.license.state_store' (the\n                 license binding), and the anynet client stats hash.\n  system.conf    machine-wide settings. Holds 'ad.anynet.id' (the\n                 stable AnyDesk ID, e.g. 1319043527), 'ad.license.name',\n                 'ad.anynet.alias', 'ad.anynet.network_id'.\n  user.conf      per-user UI + invitation / roster state.\n\nThe AnyDesk ID + the device private key together = silent device takeover: an attacker can impersonate the victim's AnyDesk device on the AnyDesk network without ever needing the unattended-access password. This is one of the highest-value credential targets in a stealer log and one that every popular stealer (Lumma, StealC v2, RedLine, Acreed, Opus) grabs by default.\nObserved in the Khazan sample as the trio of service/system/user.conf siblings under Software/AnyDsk/ (vowel-stripped).\n"
+  },
+  {
     "slug": "browser_autofills",
     "name": "Browser autofill entries",
     "status": "active",
@@ -145,6 +173,33 @@
       }
     ],
     "notes": "Meta-family for the de-facto cookie.txt format. Tab-separated with seven columns: domain, include_subdomains, path, secure, expires, name, value. Lines starting with # are comments and blank lines are skipped. Every stealer family ships cookies in this format somewhere under Browsers/ or Cookies/; our Netscape probe rule classifies the file shape regardless of which stealer produced it.\n"
+  },
+  {
+    "slug": "filezilla",
+    "name": "FileZilla FTP client saved sites",
+    "status": "active",
+    "first_seen_year": 2001,
+    "aliases": [
+      "filezilla",
+      "sitemanager",
+      "filezilla3"
+    ],
+    "signature_files": [
+      "sitemanager.xml",
+      "recentservers.xml",
+      "FileZilla/sitemanager.xml"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside any stealer that grabs %APPDATA%/FileZilla"
+    ],
+    "references": [
+      {
+        "title": "FileZilla docs (Site Manager)",
+        "url": "https://wiki.filezilla-project.org/Site_Manager"
+      }
+    ],
+    "notes": "FileZilla is the single most common Windows FTP client. sitemanager.xml is the operator's saved-sites list; recentservers.xml is the recent- connection list. Both carry per-server Host / Port / Protocol / User / Pass. Pass is base64-encoded (NOT encrypted; obfuscation only) with the 'encoding=\"base64\"' attribute on the <Pass> element; plaintext recovery is one b64decode call.\nHigh-value shape for CTI pivoting: operators often save personal NAS, corp staging servers, shared hosting control panels, and legacy FTP endpoints here. Compromise of one FileZilla export regularly yields dozens of unique credential sets.\n"
   },
   {
     "slug": "gabb_grabber",

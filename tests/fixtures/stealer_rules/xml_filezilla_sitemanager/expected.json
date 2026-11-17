@@ -1,0 +1,11 @@
+{
+  "family": null,
+  "fields": {
+    "host": "geekgaming.synology.me",
+    "port": 5000,
+    "user": "Wayne",
+    "name": "Geek Gaming",
+    "password_b64": "R2Vla2dhbWluZ3NjZW5pY3MxMjM=",
+    "password_encoding": "base64"
+  }
+}

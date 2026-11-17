@@ -1,0 +1,23 @@
+id: xml_filezilla_sitemanager
+version: 1
+layer: content
+family: generic
+priority: 90
+path_glob: sitemanager.xml
+description: >
+  Hardened XML parser + pivot + $.element@attr attribute access. Expected
+  output is the FIRST <Server> under <FileZilla3><Servers>.
+match:
+  type: xml
+  requires_keys: [FileZilla3]
+  pivot: $.FileZilla3.Servers.Server
+extract:
+  paths:
+    host: $.Host
+    port: $.Port
+    user: $.User
+    name: $.Name
+    password_b64: $.Pass
+    password_encoding: $.Pass@encoding
+normalize:
+  - { verb: int_from_string, field: port }

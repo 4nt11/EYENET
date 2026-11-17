@@ -416,6 +416,222 @@ function skipWS(p) {
   }
 }
 
+// --------------------------------------------------------------------- //
+//  XML (hardened in-tree parser)                                         //
+// --------------------------------------------------------------------- //
+// No DOCTYPE. No entity expansion beyond the five standard XML entities
+// plus &#NN; and &#xHH; numeric refs. No PI resolution (<?...?> is
+// skipped unread). No namespace resolution. Depth cap 256. The parser
+// is hand-rolled so there is no fetch / no DOM reachability / no DTD
+// grammar to subvert. Byte-parity with the Python and Go ports.
+
+const XML_MAX_DEPTH = 256;
+const XML_ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+
+class XMLParseError extends Error {}
+
+export function matchXml(m, ex, input) {
+  let root;
+  try { root = parseXml(input.text); } catch { return null; }
+  if (!checkXmlRequires(root, m.requires_keys ?? [])) return null;
+  const paths = ex?.paths ?? {};
+  if (m.pivot) {
+    for (const [key, el] of xmlPivotChildren(root, m.pivot)) {
+      return xmlExtractRecord(el, key, paths);
+    }
+    return null;
+  }
+  return xmlExtractRecord(root, root.name, paths);
+}
+
+export function* iterXml(m, ex, text) {
+  let root;
+  try { root = parseXml(text); } catch { return; }
+  if (!checkXmlRequires(root, m.requires_keys ?? [])) return;
+  const paths = ex?.paths ?? {};
+  if (!m.pivot) { yield xmlExtractRecord(root, root.name, paths); return; }
+  for (const [key, el] of xmlPivotChildren(root, m.pivot)) {
+    yield xmlExtractRecord(el, key, paths);
+  }
+}
+
+function checkXmlRequires(root, required) {
+  if (required.length === 0) return true;
+  const top = new Set([root.name, ...root.children.map((c) => c.name)]);
+  return required.every((k) => top.has(k));
+}
+
+function* xmlPivotChildren(root, pivotExpr) {
+  if (!pivotExpr.startsWith('$')) return;
+  const steps = [];
+  for (const tok of pivotExpr.slice(1).matchAll(/\.(\w+)/g)) steps.push(tok[1]);
+  if (steps.length === 0) return;
+  let cur = root;
+  let rest = steps[0] === root.name ? steps.slice(1) : steps;
+  const target = rest.pop();
+  for (const step of rest) {
+    cur = cur.children.find((c) => c.name === step);
+    if (!cur) return;
+  }
+  for (const c of cur.children) if (c.name === target) yield [c.name, c];
+}
+
+function xmlExtractRecord(el, keyName, paths) {
+  const out = {};
+  for (const [field, expr] of Object.entries(paths)) {
+    if (expr === '$key') { out[field] = keyName; continue; }
+    const v = xmlEvalPath(el, expr);
+    if (v == null) continue;
+    out[field] = v;
+  }
+  return out;
+}
+
+function xmlEvalPath(el, expr) {
+  if (!expr?.startsWith('$')) return null;
+  let attr = null;
+  if (expr.includes('@')) {
+    const i = expr.lastIndexOf('@');
+    attr = expr.slice(i + 1);
+    expr = expr.slice(0, i);
+  }
+  let cur = el;
+  for (const tok of expr.slice(1).matchAll(/\.(\w+)/g)) {
+    const next = cur.children.find((c) => c.name === tok[1]);
+    if (!next) return null;
+    cur = next;
+  }
+  if (attr != null) return cur.attrs[attr] ?? null;
+  return cur.text;
+}
+
+function parseXml(text) {
+  const p = { t: text, i: 0, n: text.length, depth: 0 };
+  skipProlog(p);
+  if (p.i >= p.n || p.t[p.i] !== '<') throw new XMLParseError('no root element');
+  return parseElement(p);
+}
+
+function skipProlog(p) {
+  for (;;) {
+    while (p.i < p.n && /\s/.test(p.t[p.i])) p.i++;
+    if (p.t.startsWith('<?', p.i)) {
+      const end = p.t.indexOf('?>', p.i + 2);
+      if (end < 0) throw new XMLParseError('unterminated PI');
+      p.i = end + 2; continue;
+    }
+    if (p.t.startsWith('<!--', p.i)) {
+      const end = p.t.indexOf('-->', p.i + 4);
+      if (end < 0) throw new XMLParseError('unterminated comment');
+      p.i = end + 3; continue;
+    }
+    if (p.t.startsWith('<!DOCTYPE', p.i)) throw new XMLParseError('DOCTYPE not supported');
+    return;
+  }
+}
+
+function parseElement(p) {
+  p.depth++;
+  if (p.depth > XML_MAX_DEPTH) throw new XMLParseError(`depth > ${XML_MAX_DEPTH}`);
+  if (p.t[p.i] !== '<') throw new XMLParseError(`expected '<' at ${p.i}`);
+  p.i++;
+  const name = readName(p);
+  const el = { name, attrs: {}, children: [], text: '' };
+  for (;;) {
+    while (p.i < p.n && /\s/.test(p.t[p.i])) p.i++;
+    if (p.i >= p.n) throw new XMLParseError(`unterminated start tag <${name}>`);
+    if (p.t.startsWith('/>', p.i)) { p.i += 2; p.depth--; return el; }
+    if (p.t[p.i] === '>') { p.i++; break; }
+    const an = readName(p);
+    while (p.i < p.n && /\s/.test(p.t[p.i])) p.i++;
+    if (p.t[p.i] !== '=') throw new XMLParseError(`missing '=' after attr ${an}`);
+    p.i++;
+    while (p.i < p.n && /\s/.test(p.t[p.i])) p.i++;
+    el.attrs[an] = readAttrValue(p);
+  }
+  const buf = [];
+  for (;;) {
+    if (p.i >= p.n) throw new XMLParseError(`unterminated <${name}>`);
+    if (p.t.startsWith('</', p.i)) {
+      p.i += 2;
+      const closing = readName(p);
+      while (p.i < p.n && /\s/.test(p.t[p.i])) p.i++;
+      if (p.t[p.i] !== '>') throw new XMLParseError(`malformed close </${closing}>`);
+      p.i++;
+      if (closing !== name) throw new XMLParseError(`close </${closing}> != open <${name}>`);
+      el.text = buf.join('');
+      p.depth--;
+      return el;
+    }
+    if (p.t.startsWith('<!--', p.i)) {
+      const end = p.t.indexOf('-->', p.i + 4);
+      if (end < 0) throw new XMLParseError('unterminated comment');
+      p.i = end + 3; continue;
+    }
+    if (p.t.startsWith('<![CDATA[', p.i)) {
+      const end = p.t.indexOf(']]>', p.i + 9);
+      if (end < 0) throw new XMLParseError('unterminated CDATA');
+      buf.push(p.t.slice(p.i + 9, end));
+      p.i = end + 3; continue;
+    }
+    if (p.t.startsWith('<?', p.i)) {
+      const end = p.t.indexOf('?>', p.i + 2);
+      if (end < 0) throw new XMLParseError('unterminated PI');
+      p.i = end + 2; continue;
+    }
+    if (p.t[p.i] === '<') { el.children.push(parseElement(p)); continue; }
+    const end = p.t.indexOf('<', p.i);
+    if (end < 0) throw new XMLParseError(`unterminated <${name}>`);
+    buf.push(xmlUnescape(p.t.slice(p.i, end)));
+    p.i = end;
+  }
+}
+
+function readName(p) {
+  const start = p.i;
+  if (!/[A-Za-z_:]/.test(p.t[p.i])) throw new XMLParseError(`expected name at ${p.i}`);
+  p.i++;
+  while (p.i < p.n && /[A-Za-z0-9_\-.:]/.test(p.t[p.i])) p.i++;
+  return p.t.slice(start, p.i);
+}
+
+function readAttrValue(p) {
+  const q = p.t[p.i];
+  if (q !== '"' && q !== "'") throw new XMLParseError('attr value not quoted');
+  p.i++;
+  const start = p.i;
+  while (p.i < p.n && p.t[p.i] !== q) p.i++;
+  if (p.i >= p.n) throw new XMLParseError('unterminated attr value');
+  const v = xmlUnescape(p.t.slice(start, p.i));
+  p.i++;
+  return v;
+}
+
+function xmlUnescape(s) {
+  if (!s.includes('&')) return s;
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] !== '&') { out.push(s[i]); i++; continue; }
+    const end = s.indexOf(';', i + 1);
+    if (end < 0) { out.push('&'); i++; continue; }
+    const name = s.slice(i + 1, end);
+    if (name in XML_ENTITIES) out.push(XML_ENTITIES[name]);
+    else if (name.startsWith('#x') || name.startsWith('#X')) {
+      const cp = parseInt(name.slice(2), 16);
+      out.push(Number.isFinite(cp) ? String.fromCodePoint(cp) : s.slice(i, end + 1));
+    } else if (name.startsWith('#')) {
+      const cp = parseInt(name.slice(1), 10);
+      out.push(Number.isFinite(cp) ? String.fromCodePoint(cp) : s.slice(i, end + 1));
+    } else {
+      // Unknown named entity: preserve literally; do NOT resolve.
+      out.push(s.slice(i, end + 1));
+    }
+    i = end + 1;
+  }
+  return out.join('');
+}
+
 export function matchYaml(m, ex, input) {
   let doc;
   try {

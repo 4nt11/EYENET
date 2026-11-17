@@ -17,9 +17,11 @@ from eyenet.stealer.rules.matchers import (
     match_folder,
     match_json,
     iter_vdf,
+    iter_xml,
     match_keyvalue,
     match_keyvalue_ini,
     match_vdf,
+    match_xml,
     match_regex,
     match_template,
     match_yaml,
@@ -114,6 +116,8 @@ def _eval_content(r: RuleSpec, file) -> EvalResult:
         fields = match_yaml(m, ex, file)  # type: ignore[arg-type]
     elif kind == "vdf":
         fields = match_vdf(m, ex, file)  # type: ignore[arg-type]
+    elif kind == "xml":
+        fields = match_xml(m, ex, file)  # type: ignore[arg-type]
     elif kind == "keyvalue":
         fields = match_keyvalue(m, ex, file)  # type: ignore[arg-type]
     elif kind == "keyvalue_ini":

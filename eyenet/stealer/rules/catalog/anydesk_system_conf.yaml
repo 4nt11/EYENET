@@ -1,0 +1,30 @@
+id: anydesk_system_conf
+version: 1
+layer: content
+family: anydesk
+priority: 90
+path_glob: "**system.conf"
+description: >
+  AnyDesk machine-wide config. Keyvalue '=' separator. Carries the
+  AnyDesk ID (ad.anynet.id, the stable 10-digit anynet device address),
+  the license name + cache hash, the alias (anynet dns-like handle),
+  and the frontend clipboard permission flags. Pair with the service
+  private key from service.conf for silent device takeover.
+match:
+  type: keyvalue
+  separator: "="
+  strip_whitespace: true
+  requires_keys:
+    - ad.anynet.id
+extract:
+  keys:
+    ad.anynet.id: anynet_id
+    ad.anynet.alias: anynet_alias
+    ad.anynet.network_id: anynet_network_id
+    ad.anynet.fpr: anynet_fingerprint
+    ad.anynet.last_relay: anynet_last_relay
+    ad.inst.id: install_id
+    ad.license.name: license_name
+    ad.license.expiry: license_expiry
+    ad.license.cache_hash: license_cache_hash
+    ad.security.update_version: security_update_version

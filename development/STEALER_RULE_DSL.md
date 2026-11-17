@@ -203,6 +203,43 @@ extract:
 
 Semantics: context-free.
 
+### 3.5a XML (content layer only)
+
+Hardened in-tree XML parser. **No DOCTYPE** (fatal), **no entity
+expansion** beyond the five standard XML entities (`&lt; &gt; &amp;
+&quot; &apos;`) plus `&#NN;` / `&#xHH;` numeric character refs, **no
+external I/O** (the parser is pure string indexing, there is no fetch
+code path to subvert), **no namespace resolution** (element names
+match literally, prefix included), **depth cap 256**. Byte-parity
+across Python / JS / Go.
+
+Path grammar extends JSONPath-lite with an attribute suffix:
+
+| expr              | resolves to                              |
+|-------------------|------------------------------------------|
+| `$.Host`          | text content of `<Host>` under current element |
+| `$.Pass@encoding` | value of the `encoding` attribute on `<Pass>`  |
+| `$key`            | element name of the pivot child (pivot mode)   |
+
+Pivot semantics: the last segment of the pivot path names the element
+TYPE to iterate. For `$.FileZilla3.Servers.Server`, the engine
+navigates to `<Servers>` and yields each `<Server>` child.
+
+```yaml
+match:
+  type: xml
+  requires_keys: [FileZilla3]
+  pivot: $.FileZilla3.Servers.Server
+extract:
+  paths:
+    host: $.Host
+    port: $.Port
+    password_b64: $.Pass
+    password_encoding: $.Pass@encoding
+```
+
+Semantics: context-free (balanced element nesting with textual leaves).
+
 ### 3.6a VDF (content layer only)
 
 Valve Data Format (Steam's KeyValues). Hierarchical: alternating
