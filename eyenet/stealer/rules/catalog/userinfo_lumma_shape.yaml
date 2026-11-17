@@ -52,3 +52,5 @@ extract:
     Uptime: ui_uptime_min
     Path: ui_payload_path
     AV: ui_av
+ttps:
+  - T1082

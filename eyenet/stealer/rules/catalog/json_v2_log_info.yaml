@@ -33,3 +33,5 @@ extract:
     exfil_at: $.CreatedOnUtc
 normalize:
   - { verb: date_parse, field: exfil_at, format: iso8601 }
+ttps:
+  - T1082

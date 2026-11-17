@@ -20,3 +20,5 @@ match:
     - Gabb/Dwas/
     - Gabb/Rt/
   min_score: 2
+ttps:
+  - T1555.003

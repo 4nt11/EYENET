@@ -30,3 +30,5 @@ match:
   pattern: '(?i)\b(?P<ddos_tool>fsociety|slowloris|goldeneye|torshammer|saphyra|l3m0n|mhddos|r4v3n|xerxes|hyenae)\b'
 extract:
   fields: [ddos_tool]
+ttps:
+  - T1498

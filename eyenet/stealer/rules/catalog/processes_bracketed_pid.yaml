@@ -13,3 +13,5 @@ match:
   pattern: '(?m)^\[(?P<pid>\d+)\]\s+(?P<process_name>\S[^\n]*)$'
 extract:
   fields: [pid, process_name]
+ttps:
+  - T1057

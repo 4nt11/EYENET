@@ -38,3 +38,5 @@ match:
   pattern: '(?m)^DOMAIN:\s*(?P<ls_domain>[^\n]+)\nKEY:\s*(?P<ls_key>[^\n]+)\nVALUE:\s*(?P<ls_value>[^\n]+)$'
 extract:
   fields: [ls_domain, ls_key, ls_value]
+ttps:
+  - T1005

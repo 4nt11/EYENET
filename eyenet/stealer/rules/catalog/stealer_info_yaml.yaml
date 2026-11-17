@@ -61,3 +61,7 @@ extract:
     hw_ram_size: $.hardware.ram[0].size
     hw_gpu: $.hardware.gpu[0]
     hw_display: $.hardware.display
+ttps:
+  - T1082
+  - T1518
+  - T1057

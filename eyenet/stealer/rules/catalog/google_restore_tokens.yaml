@@ -31,3 +31,5 @@ reject_patterns:
   - "^fake-"
 extract:
   fields: [refresh_token, gaia_id]
+ttps:
+  - T1528

@@ -33,3 +33,5 @@ match:
   pattern: 'SECO.{0,16}seco-(?P<seco_scheme>v\d-[\w-]+).{1,2}(?P<seco_vendor>Exodus|Electrum|Atomic)\x06(?P<seco_version>[\d.]+)'
 extract:
   fields: [seco_scheme, seco_vendor, seco_version]
+ttps:
+  - T1552.001

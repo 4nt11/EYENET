@@ -20,3 +20,5 @@ extract:
     exodus_created_at: $.meta.createdAt
     exodus_updated_at: $.meta.updatedAt
     exodus_fiat_unit: $.data.fiat.unit
+ttps:
+  - T1082

@@ -27,3 +27,5 @@ extract:
     password_encoding: $.Pass@encoding
 normalize:
   - { verb: int_from_string, field: port }
+ttps:
+  - T1552.001

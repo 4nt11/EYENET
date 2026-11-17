@@ -13,3 +13,4 @@ match:
   type: folder
   predicate:
     glob: "**/ssfn*"
+ttps: []

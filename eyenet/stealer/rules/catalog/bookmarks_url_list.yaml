@@ -15,3 +15,5 @@ match:
   pattern: '(?P<url>https?://[^\s\n]+)'
 extract:
   fields: [url]
+ttps:
+  - T1217

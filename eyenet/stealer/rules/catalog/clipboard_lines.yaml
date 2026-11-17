@@ -35,3 +35,5 @@ reject_patterns:
   - '^.{1,2}$'
 extract:
   fields: [clipboard_item]
+ttps:
+  - T1115

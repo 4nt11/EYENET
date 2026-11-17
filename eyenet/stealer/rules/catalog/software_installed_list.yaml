@@ -38,3 +38,5 @@ match:
   pattern: '(?m)^(?P<software_name>\S.{2,})$'
 extract:
   fields: [software_name]
+ttps:
+  - T1518

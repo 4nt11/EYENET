@@ -17,3 +17,5 @@ match:
   multiline: true
 extract:
   fields: [url, user, password]
+ttps:
+  - T1555.003

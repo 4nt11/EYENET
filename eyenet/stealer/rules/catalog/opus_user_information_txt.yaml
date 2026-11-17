@@ -48,3 +48,6 @@ normalize:
   - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
   - { verb: int_from_string,  field: ram }
   - { verb: date_parse,       field: local_time, format: iso8601 }
+ttps:
+  - T1555.003
+  - T1082

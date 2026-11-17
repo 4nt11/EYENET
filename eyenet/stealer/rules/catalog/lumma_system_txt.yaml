@@ -40,3 +40,5 @@ normalize:
   - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
   - { verb: date_parse,       field: install_date, format: iso8601 }
   - { verb: date_parse,       field: local_date, format: iso8601 }
+ttps:
+  - T1082

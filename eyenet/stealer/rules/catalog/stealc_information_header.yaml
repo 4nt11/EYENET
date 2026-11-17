@@ -26,3 +26,6 @@ extract:
 normalize:
   - { verb: strip_whitespace, field: hostname }
   - { verb: date_parse,       field: local_time, format: iso8601 }
+ttps:
+  - T1555.003
+  - T1082

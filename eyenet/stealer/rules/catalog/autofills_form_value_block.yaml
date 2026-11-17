@@ -35,3 +35,6 @@ match:
   pattern: '(?m)^FORM:\s*(?P<form_key>[^\n]+)\nVALUE:\s*(?P<form_value>[^\n]+)$'
 extract:
   fields: [form_key, form_value]
+ttps:
+  - T1555.003
+  - T1552.001

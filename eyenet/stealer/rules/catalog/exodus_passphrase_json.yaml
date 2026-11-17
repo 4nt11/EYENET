@@ -36,3 +36,5 @@ extract:
   paths:
     exodus_passphrase_wrap: $.passphrase
     exodus_passphrase_system: $.system
+ttps:
+  - T1552.001

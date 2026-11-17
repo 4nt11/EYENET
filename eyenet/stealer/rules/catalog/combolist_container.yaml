@@ -13,3 +13,5 @@ match:
   type: folder
   requires: []
   min_score: 0
+ttps:
+  - T1555.003

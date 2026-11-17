@@ -70,3 +70,5 @@ extract:
     UserLanguage: ui_user_lang
     Keyboard Language: ui_keyboard_lang
     Display Resolution: ui_screen
+ttps:
+  - T1082

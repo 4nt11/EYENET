@@ -29,3 +29,6 @@ extract:
     most_recent: $.MostRecent
 normalize:
   - { verb: int_from_string, field: last_login }
+ttps:
+  - T1552.001
+  - T1528

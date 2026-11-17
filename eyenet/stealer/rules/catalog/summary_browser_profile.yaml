@@ -50,3 +50,6 @@ extract:
     - sum_sync
     - sum_last_active
     - sum_theme
+ttps:
+  - T1217
+  - T1082

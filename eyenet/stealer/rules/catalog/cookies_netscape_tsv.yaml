@@ -57,3 +57,5 @@ extract:
     4: cookie_expires_epoch
     5: cookie_name
     6: cookie_value
+ttps:
+  - T1539

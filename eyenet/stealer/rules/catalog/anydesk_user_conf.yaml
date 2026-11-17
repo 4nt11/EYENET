@@ -45,3 +45,5 @@ normalize:
     verb: replace_re2
     pattern: "^([0-9]+):.*$"
     replacement: "\\1"
+ttps:
+  - T1021

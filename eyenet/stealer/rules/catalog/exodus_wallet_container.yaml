@@ -17,3 +17,4 @@ match:
       - path: seed.seco
       - glob: "**/seed.seco"
       - glob: "**/storage.seco"
+ttps: []

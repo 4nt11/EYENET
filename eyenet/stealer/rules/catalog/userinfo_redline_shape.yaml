@@ -63,3 +63,5 @@ extract:
     Processor: ui_cpu
     Installed RAM: ui_ram_mb
     Graphics card: ui_gpu
+ttps:
+  - T1082

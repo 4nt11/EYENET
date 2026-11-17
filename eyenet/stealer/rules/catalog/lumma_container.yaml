@@ -25,3 +25,4 @@ match:
     - Domains.txt
     - "All Passwords.txt"
   min_score: 3
+ttps: []

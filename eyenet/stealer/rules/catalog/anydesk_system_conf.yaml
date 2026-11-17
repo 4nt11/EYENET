@@ -28,3 +28,6 @@ extract:
     ad.license.expiry: license_expiry
     ad.license.cache_hash: license_cache_hash
     ad.security.update_version: security_update_version
+ttps:
+  - T1082
+  - T1518

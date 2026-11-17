@@ -62,3 +62,5 @@ extract:
     IP: ui_egress_ip
     GEO: ui_country
     Resolution: ui_screen
+ttps:
+  - T1082

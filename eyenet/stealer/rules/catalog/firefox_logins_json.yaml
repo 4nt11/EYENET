@@ -30,3 +30,5 @@ extract:
     time_password_changed: $.timePasswordChanged
     times_used: $.timesUsed
     guid: $.guid
+ttps:
+  - T1555.003

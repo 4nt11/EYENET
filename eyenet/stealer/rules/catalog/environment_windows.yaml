@@ -63,3 +63,5 @@ extract:
     PROCESSOR_IDENTIFIER: env_cpu_identifier
     SESSIONNAME: env_session_name
     PROCESSOR_ARCHITECTURE: env_cpu_arch
+ttps:
+  - T1082

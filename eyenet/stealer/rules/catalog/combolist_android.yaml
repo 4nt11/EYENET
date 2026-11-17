@@ -18,3 +18,5 @@ match:
   multiline: true
 extract:
   fields: [app_hash, url, user, password]
+ttps:
+  - T1555.003

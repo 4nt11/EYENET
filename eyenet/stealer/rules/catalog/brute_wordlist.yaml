@@ -39,3 +39,5 @@ reject_patterns:
   - '^.{1,2}$'
 extract:
   fields: [candidate]
+ttps:
+  - T1552.001

@@ -36,3 +36,5 @@ match:
   pattern: '(?m)^(?P<discord_token>[A-Za-z0-9_-]{24,28}\.[A-Za-z0-9_-]{6,8}\.[A-Za-z0-9_-]{25,45})$'
 extract:
   fields: [discord_token]
+ttps:
+  - T1528

@@ -35,3 +35,5 @@ match:
   pattern: '(?m)^DOMAIN:\s*(?P<ls_jwt_domain>[^\n]+)\nKEY:\s*(?P<ls_jwt_key>[^\n]+)\nVALUE:\s*(?P<ls_jwt_token>eyJ[A-Za-z0-9_-]{15,200}\.eyJ[A-Za-z0-9_-]{40,900}\.[A-Za-z0-9_-]{27,120})$'
 extract:
   fields: [ls_jwt_domain, ls_jwt_key, ls_jwt_token]
+ttps:
+  - T1528

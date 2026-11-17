@@ -47,3 +47,6 @@ match:
   pattern: '(?im)^(?P<corporate_marker>.*\b(Microsoft Office LTSC|Microsoft 365 Apps for [Ee]nterprise|Office Professional Plus|Visual Studio Enterprise|Visio Professional|Project Professional|SAP GUI|SAP Logon|AutoCAD|SolidWorks|Adobe Creative Cloud (?:Enterprise|for Teams)|Citrix Workspace|Citrix Receiver|Cisco AnyConnect|GlobalProtect|FortiClient|OpenVPN Connect|Microsoft Intune|Company Portal|ServiceNow|Atlassian Jira|Atlassian Confluence)\b.*)$'
 extract:
   fields: [corporate_marker]
+ttps:
+  - T1518
+  - T1083

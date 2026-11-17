@@ -1,0 +1,108 @@
+# MITRE ATT&CK technique catalog used by the stealer-rule TTP tags.
+#
+# Only the techniques REFERENCED by one or more rules live here. Not a
+# full ATT&CK mirror. Regenerate semi-annually against the ATT&CK STIX
+# feed (https://github.com/mitre/cti) if MITRE renames a tactic or
+# retires a technique; IDs are stable across versions.
+#
+# Scope note: a follow-up API endpoint may expose /v1/stealer/search?q=T1528
+# returning the artifacts / files whose rules carry that technique. Keep
+# the catalog + rule YAML the single source of truth so that endpoint
+# resolves reliably.
+#
+# Field contract per technique:
+#   name      ATT&CK technique display name
+#   tactic    tactic display name (one of 14)
+#   tactic_id ATT&CK tactic ID (TA0001 .. TA0043 range)
+#   url       canonical ATT&CK technique URL
+
+techniques:
+  T1005:
+    name: Data from Local System
+    tactic: Collection
+    tactic_id: TA0009
+    url: https://attack.mitre.org/techniques/T1005/
+
+  T1021:
+    name: Remote Services
+    tactic: Lateral Movement
+    tactic_id: TA0008
+    url: https://attack.mitre.org/techniques/T1021/
+
+  T1027.002:
+    name: Software Packing
+    tactic: Defense Evasion
+    tactic_id: TA0005
+    url: https://attack.mitre.org/techniques/T1027/002/
+
+  T1055.012:
+    name: Process Hollowing
+    tactic: Defense Evasion
+    tactic_id: TA0005
+    url: https://attack.mitre.org/techniques/T1055/012/
+
+  T1057:
+    name: Process Discovery
+    tactic: Discovery
+    tactic_id: TA0007
+    url: https://attack.mitre.org/techniques/T1057/
+
+  T1082:
+    name: System Information Discovery
+    tactic: Discovery
+    tactic_id: TA0007
+    url: https://attack.mitre.org/techniques/T1082/
+
+  T1083:
+    name: File and Directory Discovery
+    tactic: Discovery
+    tactic_id: TA0007
+    url: https://attack.mitre.org/techniques/T1083/
+
+  T1115:
+    name: Clipboard Data
+    tactic: Collection
+    tactic_id: TA0009
+    url: https://attack.mitre.org/techniques/T1115/
+
+  T1217:
+    name: Browser Information Discovery
+    tactic: Discovery
+    tactic_id: TA0007
+    url: https://attack.mitre.org/techniques/T1217/
+
+  T1498:
+    name: Network Denial of Service
+    tactic: Impact
+    tactic_id: TA0040
+    url: https://attack.mitre.org/techniques/T1498/
+
+  T1518:
+    name: Software Discovery
+    tactic: Discovery
+    tactic_id: TA0007
+    url: https://attack.mitre.org/techniques/T1518/
+
+  T1528:
+    name: Steal Application Access Token
+    tactic: Credential Access
+    tactic_id: TA0006
+    url: https://attack.mitre.org/techniques/T1528/
+
+  T1539:
+    name: Steal Web Session Cookie
+    tactic: Credential Access
+    tactic_id: TA0006
+    url: https://attack.mitre.org/techniques/T1539/
+
+  T1552.001:
+    name: 'Unsecured Credentials: Credentials In Files'
+    tactic: Credential Access
+    tactic_id: TA0006
+    url: https://attack.mitre.org/techniques/T1552/001/
+
+  T1555.003:
+    name: 'Credentials from Password Stores: Credentials from Web Browsers'
+    tactic: Credential Access
+    tactic_id: TA0006
+    url: https://attack.mitre.org/techniques/T1555/003/

@@ -32,3 +32,5 @@ match:
   pattern: '(?m)^#\s*(?P<steam_login>\S+)\s*\|\s*SteamID:\s*(?P<steam_id>\d+)\s*\|\s*Persona:\s*(?P<steam_persona>[^\n\r]+?)\s*\r?\n[^\s.]+\.(?P<steam_jwt>[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$'
 extract:
   fields: [steam_login, steam_id, steam_persona, steam_jwt]
+ttps:
+  - T1528

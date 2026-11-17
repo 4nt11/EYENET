@@ -65,3 +65,6 @@ normalize:
   - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
   - { verb: int_from_string,  field: ram }
   - { verb: int_from_string,  field: uptime_minutes }
+ttps:
+  - T1555.003
+  - T1082

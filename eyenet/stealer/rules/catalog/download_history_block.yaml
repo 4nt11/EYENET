@@ -36,3 +36,5 @@ normalize:
   - field: download_time
     verb: date_parse
     format: iso8601
+ttps:
+  - T1217

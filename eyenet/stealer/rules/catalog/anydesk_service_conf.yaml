@@ -25,3 +25,6 @@ extract:
     ad.license.state_store: license_state_store
     ad.anynet.client_stats_hash: client_stats_hash
     ad.anynet.fpr: service_fingerprint
+ttps:
+  - T1021
+  - T1552.001

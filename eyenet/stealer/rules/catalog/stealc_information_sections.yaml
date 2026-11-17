@@ -25,3 +25,6 @@ normalize:
   - { verb: int_from_string, field: cpu_cores }
   - { verb: int_from_string, field: cpu_threads }
   - { verb: int_from_string, field: ram }
+ttps:
+  - T1555.003
+  - T1082

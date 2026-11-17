@@ -35,3 +35,5 @@ match:
   pattern: 'AWARE\s*-\s*#1\s*Crypto\s*Protection\s*Service\s*\n\s*FUD\s*Crypter\s*\n\s*(?P<crypter_storefront>https?://\S+)'
 extract:
   fields: [crypter_storefront]
+ttps:
+  - T1027.002

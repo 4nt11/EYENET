@@ -16,3 +16,5 @@ match:
   pattern: '(?m)^(?P<process_name>[A-Za-z][A-Za-z0-9._ -]*\.exe)$'
 extract:
   fields: [process_name]
+ttps:
+  - T1057
