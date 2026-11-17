@@ -219,6 +219,9 @@
     <!-- Sticky top bar spans full width -->
     <div class="topbar">
       <a class="back" href="/tuning/stealer">&lt; Rules library</a>
+      <span class="layer-chip l-{rule.layer}">
+        {rule.layer === 'container' ? 'L1 CONTAINER' : 'L3 CONTENT'}
+      </span>
       <h2>
         {#if isNew}New rule{:else}<span class="mono">{slug}</span>{/if}
       </h2>
@@ -282,9 +285,15 @@
           <header>
             <span class="n">01</span>
             <span class="label">Match</span>
-            <span class="hint">which bytes qualify as a hit</span>
+            <span class="hint">{rule.layer === 'container' ? 'does this victim folder match the family?' : 'which bytes qualify as a hit'}</span>
           </header>
           <div class="pad">
+            {#if rule.layer === 'content'}
+              <div class="l2-note mono">
+                L2 handler is derived: this rule's <strong>path glob</strong> + <strong>match type</strong>
+                together route "{rule.path_glob || '**/*'}" to the <strong>{rule.match.type}</strong> parser.
+              </div>
+            {/if}
             <label>
               <span>Match type</span>
               <select class="mono" bind:value={rule.match.type}>
@@ -549,6 +558,15 @@
     text-transform: uppercase; color: var(--text-muted); text-decoration: none;
   }
   .topbar .back:hover { color: var(--accent-text); }
+  .layer-chip {
+    padding: 3px 8px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--text-muted); background: var(--surface);
+  }
+  .layer-chip.l-container { color: var(--accent-text); border-color: var(--accent); background: var(--accent-fill); }
+  .layer-chip.l-content   { color: var(--text); border-color: var(--border-strong); }
   .topbar h2 { margin: 0; font-family: var(--font-sans); font-size: var(--fs-16); font-weight: var(--fw-semibold); color: var(--text); }
   .topbar h2 .mono { font-family: var(--font-mono); color: var(--accent-text); }
   .topbar .spacer { flex: 1; }
@@ -616,6 +634,19 @@
   textarea { resize: vertical; min-height: 80px; }
 
   .pad { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+
+  .l2-note {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent-text);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    font-size: var(--fs-11);
+    color: var(--text-muted);
+    letter-spacing: var(--tracking-data);
+    line-height: var(--lh-normal);
+  }
+  .l2-note strong { color: var(--accent-text); font-weight: var(--fw-regular); }
 
   .field { display: flex; flex-direction: column; gap: 6px; }
   .field-label { font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold); color: var(--text-faint); text-transform: uppercase; letter-spacing: var(--tracking-label); }
