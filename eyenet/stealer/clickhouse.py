@@ -22,7 +22,15 @@ if TYPE_CHECKING:
 
 # ulpextract emits these columns, tab-separated, in this order.
 _COLUMNS = [
-    "host", "url", "login", "password", "scheme", "tld", "source", "ip_class", "source_file"
+    "host",
+    "url",
+    "login",
+    "password",
+    "scheme",
+    "tld",
+    "source",
+    "ip_class",
+    "source_file",
 ]
 
 _CREATE_DB = "CREATE DATABASE IF NOT EXISTS {db}"
@@ -182,8 +190,13 @@ ORDER BY (archive_sha256, rule_id, file_path, cityHash64(toString(fields)))
 
 
 _RECORDS_COLUMNS = [
-    "archive_sha256", "source", "victim_folder", "file_path",
-    "rule_id", "family", "fields",
+    "archive_sha256",
+    "source",
+    "victim_folder",
+    "file_path",
+    "rule_id",
+    "family",
+    "fields",
 ]
 
 
@@ -559,6 +572,51 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
 )
 
 
+# v1.3.4 monitored-domain watchlist. Operator-curated list of domains /
+# domain-suffixes we actively care about: corporate domains the client is
+# protecting, known attacker C2 / staging hosts, dropbox URLs, etc.
+#
+# Schema is deliberately minimal and read-mostly. Writes happen via a small
+# admin API (POST /v1/stealer/monitored-domains) and very occasionally in
+# bulk from a YAML seed. Reads are the hot path:
+#
+#   SELECT archive_sha256, victim_folder, groupArrayDistinct(vd.domain) AS hits
+#   FROM victim_domains vd
+#   INNER JOIN monitored_domains md
+#     ON (md.match_type = 'exact'  AND vd.domain = md.domain)
+#     OR (md.match_type = 'suffix' AND endsWith(vd.domain, md.domain))
+#   GROUP BY archive_sha256, victim_folder
+#
+# With ~100 monitored domains and millions of victim_domain rows, the join
+# is bounded by the small side (monitored_domains) and runs in ms thanks to
+# the domain-first ORDER BY on victim_domains.
+#
+# match_type:
+#   'exact'   victim_domain == monitored.domain (case-insensitive)
+#   'suffix'  endsWith(victim_domain, monitored.domain). Lets 'acme-corp.com'
+#             match 'okta.acme-corp.com', 'vpn.acme-corp.com', etc without
+#             the operator having to enumerate every subdomain.
+#
+# severity: operator-assigned. 'critical' fires the red-dot in the UI and
+# can trigger alert webhooks; 'info' is a passive tag.
+_MONITORED_DOMAINS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.monitored_domains
+    (
+        domain      String,
+        match_type  LowCardinality(String) DEFAULT 'suffix',
+        severity    LowCardinality(String) DEFAULT 'info',
+        tag         LowCardinality(String) DEFAULT '',
+        note        String DEFAULT '',
+        added_by    String DEFAULT '',
+        added_at    DateTime DEFAULT now()
+    )
+    ENGINE = ReplacingMergeTree(added_at)
+    ORDER BY domain
+    """,
+)
+
+
 class ClickHouseRecordsSink:
     """Connection + schema + batched insert for ``<db>.extracted_records``.
 
@@ -588,21 +646,22 @@ class ClickHouseRecordsSink:
         )
         # v1.3.3 per-victim profile roll-up (table + MV + idempotent backfill).
         for stmt in _VICTIM_PROFILES:
-            client.command(
-                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause())
-            )
+            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
         # v1.3.3 per-victim domain index (detection engine primitive).
         for stmt in _VICTIM_DOMAINS:
-            client.command(
-                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause())
-            )
+            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+        # v1.3.4 monitored-domain watchlist (detection-engine input table).
+        for stmt in _MONITORED_DOMAINS:
+            client.command(stmt.format(db=self._db))
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)
         if not batch:
             return 0
         self._connect().insert(
-            f"{self._db}.extracted_records", batch, column_names=_RECORDS_COLUMNS,
+            f"{self._db}.extracted_records",
+            batch,
+            column_names=_RECORDS_COLUMNS,
         )
         return len(batch)
 
@@ -838,9 +897,7 @@ class FileAuditSink:
         batch: list[list[Any]] = list(rows)
         if not batch:
             return 0
-        self._connect().insert(
-            f"{self._db}.file_audit", batch, column_names=_FILE_AUDIT_COLUMNS
-        )
+        self._connect().insert(f"{self._db}.file_audit", batch, column_names=_FILE_AUDIT_COLUMNS)
         return len(batch)
 
     def close(self) -> None:

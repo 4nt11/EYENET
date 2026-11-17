@@ -8,7 +8,7 @@ Backs the read:stealer API (overview charts + host search). Queries are paramete
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from eyenet.stealer.clickhouse import clickhouse_db, get_clickhouse_client
 
@@ -95,11 +95,15 @@ class StealerCredsReader:
         db: dict[str, object] = {"db": self._db}
         db_top: dict[str, object] = {"db": self._db, "top": int(top)}
         try:
-            scalars = self._c().query(
-                "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
-                "FROM {db:Identifier}.creds",
-                parameters=db,
-            ).result_rows[0]
+            scalars = (
+                self._c()
+                .query(
+                    "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
+                    "FROM {db:Identifier}.creds",
+                    parameters=db,
+                )
+                .result_rows[0]
+            )
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -150,13 +154,17 @@ class StealerCredsReader:
             where = "WHERE host ILIKE {pat:String}"  # dashboard: substring
             params["pat"] = f"%{host}%"
         try:
-            rows = self._c().query(
-                # `where` is a code constant (not user input); the search term + db + limits
-                # are all bound params, so the f-string only splices our own literal.
-                "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608
-                f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
-                parameters=params,
-            ).result_rows
+            rows = (
+                self._c()
+                .query(
+                    # `where` is a code constant (not user input); the search term + db + limits
+                    # are all bound params, so the f-string only splices our own literal.
+                    "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608  # nosec B608
+                    f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
+                    parameters=params,
+                )
+                .result_rows
+            )
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -248,9 +256,9 @@ class FileAuditReader:
             self._client = get_clickhouse_client()
         return self._client
 
-    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
         try:
-            return self._c().query(sql, parameters=params).result_rows
+            return self._c().query(sql, parameters=params).result_rows  # type: ignore[return-value]
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -272,9 +280,7 @@ class FileAuditReader:
     def _window(page: int, limit: int) -> int:
         return max(0, (page - 1) * limit)
 
-    def coverage(
-        self, *, page: int, limit: int
-    ) -> tuple[list[CoverageRow], int, int]:
+    def coverage(self, *, page: int, limit: int) -> tuple[list[CoverageRow], int, int]:
         """Returns (rows, total, page_count). Reads the roll-up, not file_audit."""
         off = self._window(page, limit)
         rows = self._rows(
@@ -309,9 +315,7 @@ class FileAuditReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def unknown(
-        self, *, page: int, limit: int
-    ) -> tuple[list[UnknownRow], int, int]:
+    def unknown(self, *, page: int, limit: int) -> tuple[list[UnknownRow], int, int]:
         """Returns (rows, total, page_count). Reads the per-unknown-file roll-up."""
         off = self._window(page, limit)
         rows = self._rows(
@@ -343,9 +347,7 @@ class FileAuditReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def samples(
-        self, *, filename: str, page: int, limit: int
-    ) -> tuple[list[SampleRow], int, int]:
+    def samples(self, *, filename: str, page: int, limit: int) -> tuple[list[SampleRow], int, int]:
         """Returns (rows, total, page_count). Filtered scan over file_audit;
         case-insensitive filename match + parsed_at DESC ordering."""
         off = self._window(page, limit)
@@ -373,9 +375,7 @@ class FileAuditReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def search(
-        self, *, q: str, page: int, limit: int
-    ) -> tuple[list[AuditSearchRow], int, int]:
+    def search(self, *, q: str, page: int, limit: int) -> tuple[list[AuditSearchRow], int, int]:
         """Returns (rows, total, page_count). Case-insensitive substring across
         filename+rel_path+sample_head. The ngrambf_v1 index on sample_head
         prunes granules that cannot contain the query (case-folded match on
@@ -387,18 +387,18 @@ class FileAuditReader:
             " OR positionCaseInsensitive(filename, {q:String}) > 0"
         )
         rows = self._rows(
-            "SELECT archive_sha256, rel_path, filename, heuristic_kind, size_bytes,"
+            "SELECT archive_sha256, rel_path, filename, heuristic_kind, size_bytes,"  # nosec B608  # noqa: S608
             "       substring(sample_head,"
             "                 greatest(1, positionCaseInsensitive(sample_head, {q:String}) - 80),"
             "                 200) AS match_context"
-            f"  FROM {{db:Identifier}}.file_audit"  # noqa: S608
+            f"  FROM {{db:Identifier}}.file_audit"
             f"  WHERE {where}"
             "   ORDER BY parsed_at DESC"
             "   LIMIT {lim:UInt32} OFFSET {off:UInt32}",
             {"db": self._db, "q": q, "lim": int(limit), "off": int(off)},
         )
         total = self._scalar(
-            f"SELECT count() FROM {{db:Identifier}}.file_audit WHERE {where}",  # noqa: S608
+            f"SELECT count() FROM {{db:Identifier}}.file_audit WHERE {where}",  # noqa: S608  # nosec B608
             {"db": self._db, "q": q},
         )
         out = [
@@ -484,6 +484,10 @@ class ArtifactDetailRow:
     first_corporate_marker: str
     first_wallet_family: str
     fired_rule_ids: list[str] = field(default_factory=list)
+    # v1.3.4 monitored-domain hits. Count of distinct domains this victim
+    # touched that match the operator's monitored_domains watchlist via
+    # exact or suffix match. Drives the 'DOMAIN HITS' stat tile.
+    monitored_domain_hits: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,9 +529,9 @@ class StealerArtifactsReader:
             self._client = get_clickhouse_client()
         return self._client
 
-    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
         try:
-            return self._c().query(sql, parameters=params).result_rows
+            return self._c().query(sql, parameters=params).result_rows  # type: ignore[return-value]
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -570,22 +574,20 @@ class StealerArtifactsReader:
         params["offset"] = offset
 
         total_rows = self._rows(
-            f"SELECT count() FROM {self._db}.victim_profiles WHERE {where_sql}",
+            f"SELECT count() FROM {self._db}.victim_profiles WHERE {where_sql}",  # nosec B608  # noqa: S608
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
 
         rows = self._rows(
-            f"""
-            SELECT
-                archive_sha256, victim_folder, country, traffic_affid, build_version,
-                creds_count, cookies_count, wallet_vaults_count,
-                has_corporate_marker, has_wallet, has_crypter_banner
-            FROM {self._db}.victim_profiles
-            WHERE {where_sql}
-            ORDER BY (archive_sha256, victim_folder)
-            LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
-            """,
+            "SELECT "  # noqa: S608
+            "  archive_sha256, victim_folder, country, traffic_affid, build_version, "
+            "  creds_count, cookies_count, wallet_vaults_count, "
+            "  has_corporate_marker, has_wallet, has_crypter_banner "
+            f"FROM {self._db}.victim_profiles "  # nosec B608
+            f"WHERE {where_sql} "
+            "ORDER BY (archive_sha256, victim_folder) "
+            "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
             params,
         )
         out = [
@@ -606,25 +608,21 @@ class StealerArtifactsReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def detail(
-        self, archive_sha256: str, victim_folder: str
-    ) -> ArtifactDetailRow | None:
+    def detail(self, archive_sha256: str, victim_folder: str) -> ArtifactDetailRow | None:
         rows = self._rows(
-            f"""
-            SELECT
-                source, country, egress_ip, user_name, computer_name, os_version,
-                traffic_affid, build_version, payload_md5, work_dir,
-                creds_count, cookies_count, autofills_count, history_count,
-                downloads_count, processes_count, software_count,
-                discord_tokens_count, steam_tokens_count, google_refresh_count,
-                localstorage_jwt_count, wallet_vaults_count,
-                has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner,
-                webmail_identity, first_corporate_marker, first_wallet_family
-            FROM {self._db}.victim_profiles
-            WHERE archive_sha256 = {{sha:FixedString(64)}}
-              AND victim_folder = {{vf:String}}
-            LIMIT 1
-            """,
+            "SELECT "  # noqa: S608
+            "  source, country, egress_ip, user_name, computer_name, os_version, "
+            "  traffic_affid, build_version, payload_md5, work_dir, "
+            "  creds_count, cookies_count, autofills_count, history_count, "
+            "  downloads_count, processes_count, software_count, "
+            "  discord_tokens_count, steam_tokens_count, google_refresh_count, "
+            "  localstorage_jwt_count, wallet_vaults_count, "
+            "  has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner, "
+            "  webmail_identity, first_corporate_marker, first_wallet_family "
+            f"FROM {self._db}.victim_profiles "  # nosec B608
+            "WHERE archive_sha256 = {sha:FixedString(64)} "
+            "  AND victim_folder = {vf:String} "
+            "LIMIT 1",
             {"sha": archive_sha256, "vf": victim_folder},
         )
         if not rows:
@@ -633,12 +631,10 @@ class StealerArtifactsReader:
         # Pull the distinct rule_ids fired for this victim; drives the
         # MITRE technique derivation at the API-route layer.
         fired = self._rows(
-            f"""
-            SELECT DISTINCT rule_id
-            FROM {self._db}.extracted_records
-            WHERE archive_sha256 = {{sha:FixedString(64)}}
-              AND splitByChar('/', file_path)[2] = {{vf:String}}
-            """,
+            "SELECT DISTINCT rule_id "  # noqa: S608
+            f"FROM {self._db}.extracted_records "  # nosec B608
+            "WHERE archive_sha256 = {sha:FixedString(64)} "
+            "  AND splitByChar('/', file_path)[2] = {vf:String}",
             {"sha": archive_sha256, "vf": victim_folder},
         )
         return ArtifactDetailRow(
@@ -674,20 +670,37 @@ class StealerArtifactsReader:
             first_corporate_marker=r[27],
             first_wallet_family=r[28],
             fired_rule_ids=[row[0] for row in fired],
+            monitored_domain_hits=self._monitored_domain_hits(archive_sha256, victim_folder),
         )
 
-    def file_tree(
-        self, archive_sha256: str, victim_folder: str
-    ) -> list[ArtifactFileRow]:
+    def _monitored_domain_hits(self, archive_sha256: str, victim_folder: str) -> int:
+        """Count distinct monitored-watchlist domains this victim touched.
+
+        Joins ``victim_domains`` against ``monitored_domains`` by exact or
+        suffix match depending on each row's ``match_type``. Returns 0 if
+        the monitored_domains table has no rows (watchlist not seeded yet),
+        which is the common early-stage state.
+        """
         rows = self._rows(
-            f"""
-            SELECT rel_path, filename, size_bytes, heuristic_kind,
-                   extractor_touched, rows_emitted, sample_head, file_sha256
-            FROM {self._db}.file_audit
-            WHERE archive_sha256 = {{sha:FixedString(64)}}
-              AND victim_folder = {{vf:String}}
-            ORDER BY rel_path
-            """,
+            "SELECT uniqExact(vd.domain) AS n "  # noqa: S608
+            f"FROM {self._db}.victim_domains AS vd "  # nosec B608
+            f"INNER JOIN {self._db}.monitored_domains AS md "
+            "  ON (md.match_type = 'exact'  AND vd.domain = md.domain) "
+            "  OR (md.match_type = 'suffix' AND endsWith(vd.domain, md.domain)) "
+            "WHERE vd.archive_sha256 = {sha:FixedString(64)} "
+            "  AND vd.victim_folder  = {vf:String}",
+            {"sha": archive_sha256, "vf": victim_folder},
+        )
+        return int(rows[0][0]) if rows else 0
+
+    def file_tree(self, archive_sha256: str, victim_folder: str) -> list[ArtifactFileRow]:
+        rows = self._rows(
+            "SELECT rel_path, filename, size_bytes, heuristic_kind, "  # noqa: S608
+            "       extractor_touched, rows_emitted, sample_head, file_sha256 "
+            f"FROM {self._db}.file_audit "  # nosec B608
+            "WHERE archive_sha256 = {sha:FixedString(64)} "
+            "  AND victim_folder = {vf:String} "
+            "ORDER BY rel_path",
             {"sha": archive_sha256, "vf": victim_folder},
         )
         return [
@@ -731,19 +744,17 @@ class StealerArtifactsReader:
         where_sql = " AND ".join(where)
 
         total_rows = self._rows(
-            f"SELECT count() FROM {self._db}.extracted_records WHERE {where_sql}",
+            f"SELECT count() FROM {self._db}.extracted_records WHERE {where_sql}",  # nosec B608  # noqa: S608
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
 
         rows = self._rows(
-            f"""
-            SELECT rule_id, family, file_path, fields
-            FROM {self._db}.extracted_records
-            WHERE {where_sql}
-            ORDER BY rule_id, file_path
-            LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
-            """,
+            "SELECT rule_id, family, file_path, fields "  # noqa: S608
+            f"FROM {self._db}.extracted_records "  # nosec B608
+            f"WHERE {where_sql} "
+            "ORDER BY rule_id, file_path "
+            "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
             params,
         )
         out = [
@@ -751,32 +762,23 @@ class StealerArtifactsReader:
                 rule_id=r[0],
                 family=r[1],
                 file_path=r[2],
-                fields={str(k): str(v) for k, v in dict(r[3] or {}).items()},
+                fields={str(k): str(v) for k, v in (r[3] or {}).items()},
             )
             for r in rows
         ]
         return out, total, self._page_count(total, limit)
 
-    def domains(
-        self, archive_sha256: str, victim_folder: str
-    ) -> list[ArtifactDomainRow]:
+    def domains(self, archive_sha256: str, victim_folder: str) -> list[ArtifactDomainRow]:
         rows = self._rows(
-            f"""
-            SELECT domain, source_kind, sum(count) AS total_count
-            FROM {self._db}.victim_domains
-            WHERE archive_sha256 = {{sha:FixedString(64)}}
-              AND victim_folder = {{vf:String}}
-            GROUP BY domain, source_kind
-            ORDER BY total_count DESC, domain
-            """,
+            "SELECT domain, source_kind, sum(count) AS total_count "  # noqa: S608
+            f"FROM {self._db}.victim_domains "  # nosec B608
+            "WHERE archive_sha256 = {sha:FixedString(64)} "
+            "  AND victim_folder = {vf:String} "
+            "GROUP BY domain, source_kind "
+            "ORDER BY total_count DESC, domain",
             {"sha": archive_sha256, "vf": victim_folder},
         )
-        return [
-            ArtifactDomainRow(
-                domain=r[0], source_kind=r[1], count=int(r[2])
-            )
-            for r in rows
-        ]
+        return [ArtifactDomainRow(domain=r[0], source_kind=r[1], count=int(r[2])) for r in rows]
 
 
 __all__ = [

@@ -38,9 +38,7 @@ async def stealer_get_artifact(
     victim_folder: Annotated[str, Path(min_length=1, max_length=512)],
 ) -> StealerArtifactDetail:
     try:
-        row = await asyncio.to_thread(
-            lambda: reader.detail(archive_sha256, victim_folder)
-        )
+        row = await asyncio.to_thread(lambda: reader.detail(archive_sha256, victim_folder))
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
     if row is None:
@@ -54,17 +52,17 @@ async def stealer_get_artifact(
             tactic=str(t["tactic"]),
             tactic_id=str(t["tactic_id"]),
             url=str(t["url"]),
-            fired_from_rules=list(t["fired_from_rules"]),  # type: ignore[arg-type]
+            fired_from_rules=list(t["fired_from_rules"]),  # type: ignore[call-overload]
         )
         for t in techs_raw
     ]
 
     # Stat tiles: a condensed view for the top strip.
-    # domain_hits + related stay 0 until monitored_domains / cross-artifact
-    # linkage ship.
+    # related stays 0 until cross-artifact linkage (shared HWID/MachineGuid)
+    # ships; domain_hits now reflects the monitored_domains join.
     tiles = StealerArtifactStatTiles(
         credentials=row.creds_count,
-        domain_hits=0,
+        domain_hits=row.monitored_domain_hits,
         cookies=row.cookies_count,
         country=row.country,
         related=0,

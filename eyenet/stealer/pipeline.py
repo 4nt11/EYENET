@@ -11,6 +11,7 @@ out of the service's address space.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess  # nosec B404: fixed tools (unrar/ulpextract), list argv, never a shell
 import tempfile
@@ -59,6 +60,24 @@ class ProcessResult:
     # ulpextract count stays at 0.
     records_inserted: int = 0
     gotractor_families: list[str] = field(default_factory=list)
+
+
+_VICTIM_FOLDER_SEGMENT_IDX = 1
+
+
+def _victim_folder_from_path(file_path: str) -> str:
+    """Return the per-victim folder from a Khazan-style archive path.
+
+    Archives nest as ``<channel_wrapper>/<victim>/<content>``, so the
+    victim folder is path segment index 1. Matches the ClickHouse MV's
+    ``splitByChar('/', file_path)[2]`` (1-indexed) in
+    ``_VICTIM_PROFILES``. Returns "" when the file is at the archive
+    root; victim_profiles MV filters those out.
+    """
+    segments = file_path.split("/", 2)
+    if len(segments) <= _VICTIM_FOLDER_SEGMENT_IDX:
+        return ""
+    return segments[_VICTIM_FOLDER_SEGMENT_IDX]
 
 
 def _find_password_files(root: Path) -> list[Path]:
@@ -172,8 +191,12 @@ def process_archive(
     try:
         pw = _extract(blob_path, password_candidates, dest)
         if pw is None:
-            return ProcessResult(ok=False, creds_inserted=0, password_used=None,
-                                 error="no password opened the archive")
+            return ProcessResult(
+                ok=False,
+                creds_inserted=0,
+                password_used=None,
+                error="no password opened the archive",
+            )
         pw_files = _find_password_files(dest)
         total = 0
         if pw_files:
@@ -185,8 +208,9 @@ def process_archive(
                     total += sink.insert_rows(batch)
                     batch = []
             total += sink.insert_rows(batch)
-            _log.info("stealer.archive_processed", creds=total, files=len(pw_files),
-                      blob=blob_path.name)
+            _log.info(
+                "stealer.archive_processed", creds=total, files=len(pw_files), blob=blob_path.name
+            )
         # v1.3.1 gotractor dual-write. Runs on the ENTIRE extracted tree
         # (not just pw files) because the DSL rules fire on cookies,
         # autofills, bookmarks, credentials_windows, json_v2 metadata,
@@ -198,11 +222,17 @@ def process_archive(
         if records_sink is not None and gotractor is not None:
             try:
                 records, families = _gotractor_insert_daemon(
-                    gotractor, records_sink, dest, blob_path, source_label,
+                    gotractor,
+                    records_sink,
+                    dest,
+                    blob_path,
+                    source_label,
                 )
-            except Exception as exc:  # noqa: BLE001 - never fail pipeline on gotractor side
-                _log.warning("stealer.gotractor_failed", error=str(exc),
-                             error_type=type(exc).__name__)
+            except Exception as exc:
+                # never fail pipeline on gotractor side
+                _log.warning(
+                    "stealer.gotractor_failed", error=str(exc), error_type=type(exc).__name__
+                )
         # v1.3.2 wallet-vault extraction pass. Runs after the DSL records
         # pass because browser-wallet LevelDB vaults are a pre-DSL binary
         # extraction (goleveldb + idb_cmp1 comparer), not a regex rule.
@@ -212,21 +242,34 @@ def process_archive(
         if records_sink is not None:
             try:
                 wallet_recs = _gotractor_extract_wallets(
-                    records_sink, dest, blob_path, source_label,
+                    records_sink,
+                    dest,
+                    blob_path,
+                    source_label,
                 )
                 records += wallet_recs
-            except Exception as exc:  # noqa: BLE001 - wallet failures are never fatal
-                _log.warning("stealer.wallet_extract_failed", error=str(exc),
-                             error_type=type(exc).__name__)
+            except Exception as exc:
+                # wallet failures are never fatal
+                _log.warning(
+                    "stealer.wallet_extract_failed", error=str(exc), error_type=type(exc).__name__
+                )
         if audit_sink is not None:
             _write_file_audit(audit_sink, dest, blob_path, pw_files)
         if not pw_files and records == 0:
-            return ProcessResult(ok=True, creds_inserted=0, password_used=pw,
-                                 error="no password files in archive",
-                                 records_inserted=0, gotractor_families=[])
+            return ProcessResult(
+                ok=True,
+                creds_inserted=0,
+                password_used=pw,
+                error="no password files in archive",
+                records_inserted=0,
+                gotractor_families=[],
+            )
         return ProcessResult(
-            ok=True, creds_inserted=total, password_used=pw,
-            records_inserted=records, gotractor_families=families,
+            ok=True,
+            creds_inserted=total,
+            password_used=pw,
+            records_inserted=records,
+            gotractor_families=families,
         )
     finally:
         shutil.rmtree(dest, ignore_errors=True)  # never leave a 2 GB tree behind
@@ -250,7 +293,6 @@ def _gotractor_insert_daemon(
     """
     sink.ensure_schema()
     archive_sha = blob_path.stem  # <sha256>.bin
-    victim_folder = dest.name
     stream, done_q = daemon.run(dest, source_label=source_label)
     total = 0
     families: list[str] = []
@@ -261,13 +303,20 @@ def _gotractor_insert_daemon(
             if fam:
                 families.append(fam)
             continue
-        # msg["_kind"] == "record"
+        # Record branch: derive per-victim folder from file_path segment [1] (second
+        # path segment under the archive root, matching the Khazan wrapper
+        # structure <channel_wrapper>/<victim>/<content>). Empty string if
+        # the file is at the archive root; victim_profiles MV filters those
+        # out. See eyenet/stealer/clickhouse.py _VICTIM_PROFILES for the
+        # matching derivation at the MV level.
+        file_path = msg.get("file_path", "")
+        victim_folder = _victim_folder_from_path(file_path)
         batch.append(
             [
                 archive_sha,
                 source_label,
                 victim_folder,
-                msg.get("file_path", ""),
+                file_path,
                 msg.get("rule_id", ""),
                 msg.get("family", ""),
                 {k: str(v) for k, v in (msg.get("fields") or {}).items()},
@@ -279,12 +328,16 @@ def _gotractor_insert_daemon(
     total += sink.insert_rows(batch)
     try:
         done = done_q.get(timeout=5.0)
-        _log.info("stealer.gotractor_run", archive=archive_sha, records=total,
-                  families=families, wall_ms=done.wall_ms,
-                  rules_fired=done.rules_fired)
-    except Exception:  # noqa: BLE001
-        _log.info("stealer.gotractor_run", archive=archive_sha, records=total,
-                  families=families)
+        _log.info(
+            "stealer.gotractor_run",
+            archive=archive_sha,
+            records=total,
+            families=families,
+            wall_ms=done.wall_ms,
+            rules_fired=done.rules_fired,
+        )
+    except Exception:
+        _log.info("stealer.gotractor_run", archive=archive_sha, records=total, families=families)
     return total, families
 
 
@@ -305,9 +358,7 @@ def _gotractor_extract_wallets(
     no reload loop. A one-shot subprocess per archive is cleaner than
     extending the daemon protocol for a one-off mode.
     """
-    import json
     archive_sha = blob_path.stem
-    victim_folder = dest.name
     try:
         proc = subprocess.run(  # noqa: S603  # nosec B603
             [gotractor_path(), "--mode", "extract-wallets", "--input", str(dest)],
@@ -320,30 +371,43 @@ def _gotractor_extract_wallets(
         _log.warning("stealer.wallet_extract_timeout", archive=archive_sha)
         return 0
     if proc.returncode != 0:
-        _log.warning("stealer.wallet_extract_rc", archive=archive_sha,
-                     rc=proc.returncode, stderr=proc.stderr[:400])
+        _log.warning(
+            "stealer.wallet_extract_rc",
+            archive=archive_sha,
+            rc=proc.returncode,
+            stderr=proc.stderr[:400],
+        )
         return 0
     batch: list[list[object]] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
+    for raw_line in proc.stdout.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
-        batch.append([
-            archive_sha,
-            source_label,
-            victim_folder,
-            msg.get("file_path", ""),
-            msg.get("rule_id", ""),
-            msg.get("family", ""),
-            {k: str(v) for k, v in (msg.get("fields") or {}).items()},
-        ])
+        # Derive per-victim folder from file_path segment [1] as in the
+        # DSL records path above. Wallet extractor uses the LevelDB dir
+        # as file_path which already carries the full path under the
+        # archive root, so the same split produces the right victim.
+        file_path = msg.get("file_path", "")
+        victim_folder = _victim_folder_from_path(file_path)
+        batch.append(
+            [
+                archive_sha,
+                source_label,
+                victim_folder,
+                file_path,
+                msg.get("rule_id", ""),
+                msg.get("family", ""),
+                {k: str(v) for k, v in (msg.get("fields") or {}).items()},
+            ]
+        )
     total = sink.insert_rows(batch) if batch else 0
-    _log.info("stealer.wallet_extract_run", archive=archive_sha,
-              records=total, stderr=proc.stderr[:200])
+    _log.info(
+        "stealer.wallet_extract_run", archive=archive_sha, records=total, stderr=proc.stderr[:200]
+    )
     return total
 
 
@@ -385,7 +449,8 @@ def _write_file_audit(
                 batch = []
         count += audit_sink.insert_rows(batch)
         _log.info("stealer.file_audit_written", archive=archive_sha, rows=count)
-    except Exception as exc:  # noqa: BLE001 - audit side channel; never fail the pipeline
+    except Exception as exc:
+        # audit side channel; never fail the pipeline
         _log.warning("stealer.file_audit_failed", error=str(exc), error_type=type(exc).__name__)
 
 

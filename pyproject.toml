@@ -379,6 +379,8 @@ ignore = [
 # revision files are close kin to generated code.
 "eyenet/storage/sqlite_repo/migrations/**/*.py" = ["ARG001", "E501"]
 "eyenet/storage/postgres_repo/migrations/**/*.py" = ["ARG001", "E501"]
+# ClickHouse DDL + AggregatingMergeTree SQL strings; splitting hurts readability.
+"eyenet/stealer/clickhouse.py" = ["E501"]
 # Manual ops CLI: alembic callback signatures (ARG001) + operator-facing prints (T201).
 "eyenet/storage/sqlite_repo/_drift_check.py" = ["ARG001", "T201", "PLR2004"]
 "eyenet/storage/**/*.py" = ["TC001", "TC002", "TC003"]
