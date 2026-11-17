@@ -30,28 +30,34 @@ type VaultRecord struct {
 }
 
 // FindWalletDirs walks a victim folder and returns every LevelDB
-// directory that belongs to a known wallet extension. Match: parent
-// directory basename equals a KnownExtension.ID AND a CURRENT sentinel
-// file exists inside (the LevelDB manifest pointer).
+// directory that belongs to a known wallet extension. Two conventions
+// are recognized:
+//
+//   1. LocalStorage:  .../Local Extension Settings/<ext_id>/
+//                     parent-dir basename == ext_id
+//   2. IndexedDB:     .../IndexedDB/chrome-extension_<ext_id>_0.indexeddb.leveldb/
+//                     dir name matches the chrome-extension_ prefix
+//                     and contains the ext_id as a substring
+//
+// Match also requires a CURRENT sentinel file (the LevelDB manifest
+// pointer) before the dir is reported as a hit.
 func FindWalletDirs(root string) ([]WalletDirHit, error) {
 	var hits []WalletDirHit
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// Skip unreadable paths without aborting the walk; stealer
-			// dumps often have individual unreadable entries.
 			return nil
 		}
 		if !d.IsDir() {
 			return nil
 		}
-		ext, ok := LookupByID(d.Name())
+		ext, kind, ok := classifyWalletDir(d.Name())
 		if !ok {
 			return nil
 		}
 		if _, err := os.Stat(filepath.Join(path, "CURRENT")); err != nil {
 			return nil
 		}
-		hits = append(hits, WalletDirHit{Path: path, Extension: ext})
+		hits = append(hits, WalletDirHit{Path: path, Extension: ext, Kind: kind})
 		return nil
 	})
 	if err != nil {
@@ -60,11 +66,40 @@ func FindWalletDirs(root string) ([]WalletDirHit, error) {
 	return hits, nil
 }
 
+// classifyWalletDir returns the extension, storage kind, and a hit
+// flag for a directory basename. Supports the two Chromium extension-
+// storage conventions.
+func classifyWalletDir(basename string) (KnownExtension, StorageKind, bool) {
+	if ext, ok := LookupByID(basename); ok {
+		return ext, StorageLocal, true
+	}
+	const idbPrefix = "chrome-extension_"
+	const idbSuffix = "_0.indexeddb.leveldb"
+	if strings.HasPrefix(basename, idbPrefix) && strings.HasSuffix(basename, idbSuffix) {
+		mid := basename[len(idbPrefix) : len(basename)-len(idbSuffix)]
+		if ext, ok := LookupByID(mid); ok {
+			return ext, StorageIndexedDB, true
+		}
+	}
+	return KnownExtension{}, "", false
+}
+
+// StorageKind tags which Chromium storage API hosts the wallet data.
+// Determines which goleveldb comparator must be registered when
+// opening the directory.
+type StorageKind string
+
+const (
+	StorageLocal     StorageKind = "localstorage"
+	StorageIndexedDB StorageKind = "indexeddb"
+)
+
 // WalletDirHit pairs a filesystem path with the wallet extension it
-// represents.
+// represents and the storage convention.
 type WalletDirHit struct {
 	Path      string
 	Extension KnownExtension
+	Kind      StorageKind
 }
 
 // ExtractVaults opens one wallet LevelDB directory read-only and
@@ -79,12 +114,18 @@ type WalletDirHit struct {
 //
 // Values are often double-JSON-encoded (a JSON string containing JSON).
 // We unwrap one layer of JSON-string-encoding transparently.
-func ExtractVaults(dir string, ext KnownExtension) ([]VaultRecord, error) {
-	db, err := leveldb.OpenFile(dir, &opt.Options{
+func ExtractVaults(dir string, ext KnownExtension, kind StorageKind) ([]VaultRecord, error) {
+	options := &opt.Options{
 		ReadOnly:          true,
 		ErrorIfMissing:    true,
 		DisableBlockCache: true,
-	})
+	}
+	if kind == StorageIndexedDB {
+		// IndexedDB-backed LevelDBs use the Chromium-custom 'idb_cmp1'
+		// comparator. goleveldb refuses to open without a matching name.
+		options.Comparer = idbComparer{}
+	}
+	db, err := leveldb.OpenFile(dir, options)
 	if err != nil {
 		if errors.Is(err, storage.ErrLocked) {
 			return nil, fmt.Errorf("leveldb locked (another process?): %w", err)

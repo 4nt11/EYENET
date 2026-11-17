@@ -246,7 +246,7 @@ func runExtractWallets(root string, w *os.File) error {
 	enc := json.NewEncoder(w)
 	okCount, errCount, vaultCount := 0, 0, 0
 	for _, h := range hits {
-		recs, err := wallets.ExtractVaults(h.Path, h.Extension)
+		recs, err := wallets.ExtractVaults(h.Path, h.Extension, h.Kind)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "extract %s (%s): %v\n", h.Path, h.Extension.Name, err)
 			errCount++
