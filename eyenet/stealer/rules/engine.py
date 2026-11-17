@@ -16,6 +16,7 @@ from eyenet.stealer.rules.matchers import (
     match_delimiter,
     match_folder,
     match_json,
+    iter_json,
     iter_vdf,
     iter_xml,
     match_keyvalue,

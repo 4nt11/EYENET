@@ -1,0 +1,22 @@
+id: json_pivot_logins
+version: 1
+layer: content
+family: generic
+priority: 90
+path_glob: logins.json
+description: >
+  Exercises JSON pivot on $.logins (array). $key resolves to the array
+  index as a string. Primary-match returns the first login.
+match:
+  type: json
+  requires_keys: [logins]
+  pivot: $.logins
+extract:
+  paths:
+    idx: $key
+    login_id: $.id
+    hostname: $.hostname
+    username_enc: $.encryptedUsername
+    password_enc: $.encryptedPassword
+    time_created: $.timeCreated
+    times_used: $.timesUsed

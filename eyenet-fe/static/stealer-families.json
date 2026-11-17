@@ -228,6 +228,33 @@
     "notes": "FileZilla is the single most common Windows FTP client. sitemanager.xml is the operator's saved-sites list; recentservers.xml is the recent- connection list. Both carry per-server Host / Port / Protocol / User / Pass. Pass is base64-encoded (NOT encrypted; obfuscation only) with the 'encoding=\"base64\"' attribute on the <Pass> element; plaintext recovery is one b64decode call.\nHigh-value shape for CTI pivoting: operators often save personal NAS, corp staging servers, shared hosting control panels, and legacy FTP endpoints here. Compromise of one FileZilla export regularly yields dozens of unique credential sets.\n"
   },
   {
+    "slug": "firefox_logins",
+    "name": "Firefox saved logins (logins.json + key4.db)",
+    "status": "active",
+    "first_seen_year": 2004,
+    "aliases": [
+      "firefox-logins",
+      "logins.json",
+      "firefox-nss"
+    ],
+    "signature_files": [
+      "logins.json",
+      "key4.db",
+      "Browsers/Ffx/*/logins.json"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside every stealer that grabs the Firefox profile tree"
+    ],
+    "references": [
+      {
+        "title": "Mozilla docs on Firefox password storage (NSS + PKCS#11 soft tokens)",
+        "url": "https://wiki.mozilla.org/NSS_Shared_DB_And_LINUX"
+      }
+    ],
+    "notes": "Firefox stores saved logins as encryptedUsername + encryptedPassword base64 PKCS#7 blobs inside logins.json, wrapped by an AES key derived from the user's master password (empty by default) through PBKDF2 from key4.db's 'metaData' row. Blobs are tractable to decrypt offline with publicly available tooling (firefox_decrypt and friends) once key4.db ships alongside logins.json, which stealers grab as a pair by default.\nlogins.json schema:\n  {\n    \"nextId\": N,\n    \"logins\": [\n      {\n        \"id\": 1,\n        \"hostname\": \"https://accounts.google.com\",\n        \"encryptedUsername\": \"<base64 PKCS#7>\",\n        \"encryptedPassword\": \"<base64 PKCS#7>\",\n        \"usernameField\": \"identifier\",\n        \"passwordField\": \"Passwd\",\n        \"timeCreated\": <epoch_ms>,\n        \"timeLastUsed\": <epoch_ms>,\n        \"timePasswordChanged\": <epoch_ms>,\n        \"timesUsed\": N,\n        ...\n      },\n      ...\n    ]\n  }\n\nOperator-grade signal even BEFORE decryption: the per-login hostnames enumerate which accounts the victim has saved passwords for (a bank login vs an arbitrary forum carries very different triage priority).\n"
+  },
+  {
     "slug": "gabb_grabber",
     "name": "Gabb file-grabber (sidecar)",
     "status": "new",

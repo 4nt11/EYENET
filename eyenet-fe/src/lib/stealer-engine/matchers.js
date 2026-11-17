@@ -254,9 +254,69 @@ export function matchJson(m, ex, input) {
   } catch {
     return null;
   }
-  if (!doc || typeof doc !== 'object') return null;
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return null;
   for (const k of m.requires_keys ?? []) if (!(k in doc)) return null;
-  return extractPaths(doc, ex?.paths ?? {});
+  const paths = ex?.paths ?? {};
+  if (m.pivot) {
+    for (const [key, value] of jsonPivotChildren(doc, m.pivot)) {
+      return jsonExtractRecord(value, key, paths);
+    }
+    return null;
+  }
+  return extractPaths(doc, paths);
+}
+
+export function* iterJson(m, ex, text) {
+  let doc;
+  try { doc = JSON.parse(text); } catch { return; }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return;
+  for (const k of m.requires_keys ?? []) if (!(k in doc)) return;
+  const paths = ex?.paths ?? {};
+  if (!m.pivot) { yield extractPaths(doc, paths); return; }
+  for (const [key, value] of jsonPivotChildren(doc, m.pivot)) {
+    yield jsonExtractRecord(value, key, paths);
+  }
+}
+
+function* jsonPivotChildren(doc, pivotExpr) {
+  if (!pivotExpr.startsWith('$')) return;
+  let cur = doc;
+  for (const tok of pivotExpr.slice(1).matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
+    if (cur == null) return;
+    if (tok[1] !== undefined) {
+      if (typeof cur !== 'object' || Array.isArray(cur)) return;
+      cur = cur[tok[1]];
+    } else {
+      if (!Array.isArray(cur)) return;
+      const i = Number.parseInt(tok[2], 10);
+      cur = i < cur.length ? cur[i] : undefined;
+    }
+  }
+  if (Array.isArray(cur)) {
+    for (let i = 0; i < cur.length; i++) yield [String(i), cur[i]];
+  } else if (cur && typeof cur === 'object') {
+    for (const [k, v] of Object.entries(cur)) yield [k, v];
+  }
+}
+
+function jsonExtractRecord(value, keyName, paths) {
+  const out = {};
+  for (const [field, expr] of Object.entries(paths)) {
+    if (expr === '$key') { out[field] = keyName; continue; }
+    // Same JSONPath-lite walk the top-level extractPaths uses.
+    let cur = value;
+    if (!expr?.startsWith('$')) continue;
+    for (const tok of expr.slice(1).matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
+      if (cur == null) { cur = undefined; break; }
+      cur = tok[1] !== undefined ? cur[tok[1]] : cur[Number.parseInt(tok[2], 10)];
+    }
+    if (cur == null) continue;
+    if (typeof cur === 'number' && !Number.isFinite(cur)) continue;
+    if (typeof cur === 'string' || typeof cur === 'number') out[field] = cur;
+    else if (typeof cur === 'boolean') out[field] = JSON.stringify(cur);
+    else out[field] = JSON.stringify(cur);
+  }
+  return out;
 }
 
 /**

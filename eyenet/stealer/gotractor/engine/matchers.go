@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -341,6 +342,9 @@ func IterDelimiter(m map[string]any, ex map[string]any, text string) <-chan map[
 // nested-object stringification preserves source key order (parity
 // with Python json.dumps(dict) + JS JSON.stringify(obj); Go's default
 // json.Marshal of map[string]any sorts keys alphabetically).
+// When ``pivot`` is set, iterates each entry (array elements or
+// object values) as its own record; ``$key`` resolves to the array
+// index (as string) or the object key.
 func MatchJSON(m map[string]any, ex map[string]any, inp ContentInput) map[string]any {
 	doc, err := parseOrderedJSON([]byte(inp.Text))
 	if err != nil {
@@ -356,7 +360,167 @@ func MatchJSON(m map[string]any, ex map[string]any, inp ContentInput) map[string
 		}
 	}
 	paths, _ := ex["paths"].(map[string]any)
+	pivot, _ := m["pivot"].(string)
+	if pivot != "" {
+		for _, kv := range jsonPivotChildren(doc, pivot) {
+			return jsonExtractRecord(kv.value, kv.key, paths)
+		}
+		return nil
+	}
 	return extractPaths(doc, paths)
+}
+
+// IterJSON walks every pivot entry as its own record.
+func IterJSON(m map[string]any, ex map[string]any, text string) <-chan map[string]any {
+	ch := make(chan map[string]any)
+	go func() {
+		defer close(ch)
+		doc, err := parseOrderedJSON([]byte(text))
+		if err != nil {
+			return
+		}
+		om, ok := doc.(*orderedMap)
+		if !ok {
+			return
+		}
+		for _, k := range asStringList(m["requires_keys"]) {
+			if _, has := om.Values[k]; !has {
+				return
+			}
+		}
+		paths, _ := ex["paths"].(map[string]any)
+		pivot, _ := m["pivot"].(string)
+		if pivot == "" {
+			ch <- extractPaths(doc, paths)
+			return
+		}
+		for _, kv := range jsonPivotChildren(doc, pivot) {
+			ch <- jsonExtractRecord(kv.value, kv.key, paths)
+		}
+	}()
+	return ch
+}
+
+type jsonKV struct {
+	key   string
+	value any
+}
+
+func jsonPivotChildren(doc any, pivotExpr string) []jsonKV {
+	if len(pivotExpr) == 0 || pivotExpr[0] != '$' {
+		return nil
+	}
+	cur := doc
+	for _, tok := range pathToken.FindAllStringSubmatch(pivotExpr[1:], -1) {
+		if cur == nil {
+			return nil
+		}
+		if tok[1] != "" {
+			om, ok := cur.(*orderedMap)
+			if !ok {
+				return nil
+			}
+			cur = om.Values[tok[1]]
+		} else {
+			arr, ok := cur.([]any)
+			if !ok {
+				return nil
+			}
+			idx := 0
+			_, _ = fmt.Sscanf(tok[2], "%d", &idx)
+			if idx >= len(arr) {
+				return nil
+			}
+			cur = arr[idx]
+		}
+	}
+	var out []jsonKV
+	switch v := cur.(type) {
+	case []any:
+		for i, e := range v {
+			out = append(out, jsonKV{key: fmt.Sprintf("%d", i), value: e})
+		}
+	case *orderedMap:
+		for _, k := range v.Keys {
+			out = append(out, jsonKV{key: k, value: v.Values[k]})
+		}
+	}
+	return out
+}
+
+func jsonExtractRecord(value any, keyName string, paths map[string]any) map[string]any {
+	out := map[string]any{}
+	for field, exprAny := range paths {
+		expr, _ := exprAny.(string)
+		if expr == "$key" {
+			out[field] = keyName
+			continue
+		}
+		// Walk a single path, respecting orderedMap vs []any shapes.
+		if len(expr) == 0 || expr[0] != '$' {
+			continue
+		}
+		cur := value
+		for _, tok := range pathToken.FindAllStringSubmatch(expr[1:], -1) {
+			if cur == nil {
+				break
+			}
+			if tok[1] != "" {
+				switch om := cur.(type) {
+				case *orderedMap:
+					cur = om.Values[tok[1]]
+				case map[string]any:
+					cur = om[tok[1]]
+				default:
+					cur = nil
+				}
+			} else {
+				arr, ok := cur.([]any)
+				if !ok {
+					cur = nil
+					continue
+				}
+				idx := 0
+				_, _ = fmt.Sscanf(tok[2], "%d", &idx)
+				if idx < len(arr) {
+					cur = arr[idx]
+				} else {
+					cur = nil
+				}
+			}
+		}
+		if cur == nil {
+			continue
+		}
+		// Same coerce rules as extractPaths at top level.
+		switch v := cur.(type) {
+		case float64:
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				continue
+			}
+			if v == float64(int64(v)) {
+				out[field] = int64(v)
+			} else {
+				out[field] = v
+			}
+		case int64:
+			out[field] = v
+		case bool:
+			if v {
+				out[field] = "true"
+			} else {
+				out[field] = "false"
+			}
+		case string:
+			out[field] = v
+		case *orderedMap, []any, map[string]any:
+			b, err := marshalOrdered(v)
+			if err == nil {
+				out[field] = string(b)
+			}
+		}
+	}
+	return out
 }
 
 // MatchYAML parses the input as YAML 1.2 (yaml.v3 default), with the

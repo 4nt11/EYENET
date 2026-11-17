@@ -1,0 +1,8 @@
+{
+  "nextId": 3,
+  "logins": [
+    {"id": 1, "hostname": "https://bank.example.com", "encryptedUsername": "USR1", "encryptedPassword": "PWD1", "timeCreated": 1734084573835, "timesUsed": 5},
+    {"id": 2, "hostname": "https://forum.example.org", "encryptedUsername": "USR2", "encryptedPassword": "PWD2", "timeCreated": 1734084573999, "timesUsed": 1}
+  ],
+  "version": 3
+}

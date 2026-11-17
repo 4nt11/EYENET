@@ -23,6 +23,7 @@ import {
   matchKeyvalue,
   matchKeyvalueIni,
   iterDelimiter,
+  iterJson,
   iterVdf,
   iterXml
 } from './matchers.js';
@@ -226,6 +227,9 @@ export function bulkParse(rule, file, limit = 1000) {
       break;
     case 'xml':
       for (const row of iterXml(rule.match, rule.extract, file.text)) push(row);
+      break;
+    case 'json':
+      for (const row of iterJson(rule.match, rule.extract, file.text)) push(row);
       break;
     case 'delimiter':
       for (const row of iterDelimiter(rule.match, rule.extract, file.text)) push(row);

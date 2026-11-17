@@ -267,6 +267,11 @@ def match_delimiter(
 def match_json(
     m: JsonMatch, ex: ExtractSpec | None, inp: ContentInput,
 ) -> dict[str, Any] | None:
+    """JSON matcher. requires_keys checks root. When ``pivot`` is set
+    the pivot path must resolve to either a LIST (iterate each element
+    as a record; ``$key`` resolves to the array index as a string) or an
+    OBJECT (iterate each key-value as a record; ``$key`` is the key).
+    Primary-match returns the first record; iter_json walks all."""
     try:
         doc = json.loads(inp.text)
     except json.JSONDecodeError:
@@ -276,7 +281,89 @@ def match_json(
     for k in m.get("requires_keys", []):
         if k not in doc:
             return None
-    return _extract_paths(doc, (ex or {}).get("paths") or {})
+    pivot = m.get("pivot")
+    paths = (ex or {}).get("paths") or {}
+    if pivot:
+        for key, value in _json_pivot_children(doc, pivot):
+            return _json_extract_record(value, key, paths)
+        return None
+    return _extract_paths(doc, paths)
+
+
+def iter_json(
+    m: dict[str, Any], ex: ExtractSpec | None, text: str,
+) -> Iterator[dict[str, Any]]:
+    """Walk every pivot entry as a record (used by bulk_parse)."""
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(doc, dict):
+        return
+    for k in m.get("requires_keys", []):
+        if k not in doc:
+            return
+    paths = (ex or {}).get("paths") or {}
+    pivot = m.get("pivot")
+    if not pivot:
+        yield _extract_paths(doc, paths)
+        return
+    for key, value in _json_pivot_children(doc, pivot):
+        yield _json_extract_record(value, key, paths)
+
+
+def _json_pivot_children(doc: Any, pivot_expr: str):
+    """Walk pivot_expr via JSONPath-lite and yield (key, value) pairs
+    for each entry. When the pivot resolves to a list, keys are the
+    stringified array indices; when it resolves to an object, keys are
+    the object's own keys."""
+    cur = doc
+    if not pivot_expr.startswith("$"):
+        return
+    for tok in _PATH_TOKEN.finditer(pivot_expr[1:]):
+        if cur is None:
+            return
+        key, idx = tok.group(1), tok.group(2)
+        if key is not None:
+            if not isinstance(cur, dict):
+                return
+            cur = cur.get(key)
+        else:
+            if not isinstance(cur, list):
+                return
+            i = int(idx)
+            cur = cur[i] if i < len(cur) else None
+    if isinstance(cur, list):
+        for i, v in enumerate(cur):
+            yield str(i), v
+    elif isinstance(cur, dict):
+        for k, v in cur.items():
+            yield k, v
+
+
+def _json_extract_record(value: Any, key_name: str, paths: dict[str, str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for field, expr in paths.items():
+        if expr == "$key":
+            out[field] = key_name
+            continue
+        # Reuse the same type-coercion rules as _extract_paths so pivoted
+        # JSON records behave identically to the single-doc case.
+        v = _eval_path(value, expr)
+        if v is None:
+            continue
+        import math  # local to avoid a cycle at module import
+        if isinstance(v, float) and not math.isfinite(v):
+            continue
+        if isinstance(v, float) and v.is_integer():
+            v = int(v)
+        if isinstance(v, bool):
+            out[field] = json.dumps(v)
+        elif isinstance(v, (str, int, float)):
+            out[field] = v
+        else:
+            out[field] = json.dumps(v, separators=(",", ":"))
+    return out
 
 
 def match_vdf(

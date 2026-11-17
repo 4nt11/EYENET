@@ -1,0 +1,32 @@
+id: firefox_logins_json
+version: 1
+layer: content
+family: firefox_logins
+priority: 90
+path_glob: "**logins.json"
+description: >
+  Firefox logins.json pivoted on $.logins: one record per saved login.
+  encryptedUsername / encryptedPassword are base64-wrapped PKCS#7
+  blobs that need key4.db + the master password (empty by default)
+  to decrypt. Even before decryption, the per-login hostname list is
+  CTI-grade inventory (bank domains vs forum domains = very different
+  triage priority).
+match:
+  type: json
+  requires_keys: [logins]
+  pivot: $.logins
+extract:
+  paths:
+    login_id: $.id
+    hostname: $.hostname
+    http_realm: $.httpRealm
+    form_submit_url: $.formSubmitURL
+    username_field: $.usernameField
+    password_field: $.passwordField
+    username_enc: $.encryptedUsername
+    password_enc: $.encryptedPassword
+    time_created: $.timeCreated
+    time_last_used: $.timeLastUsed
+    time_password_changed: $.timePasswordChanged
+    times_used: $.timesUsed
+    guid: $.guid

@@ -1,0 +1,12 @@
+{
+  "family": null,
+  "fields": {
+    "idx": "0",
+    "login_id": 1,
+    "hostname": "https://bank.example.com",
+    "username_enc": "USR1",
+    "password_enc": "PWD1",
+    "time_created": 1734084573835,
+    "times_used": 5
+  }
+}

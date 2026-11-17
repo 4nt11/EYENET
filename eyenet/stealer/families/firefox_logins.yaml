@@ -1,0 +1,49 @@
+slug: firefox_logins
+name: Firefox saved logins (logins.json + key4.db)
+status: active
+first_seen_year: 2004
+aliases: [firefox-logins, logins.json, firefox-nss]
+signature_files:
+  - logins.json
+  - key4.db
+  - Browsers/Ffx/*/logins.json
+loaders: []
+distribution_channels:
+  - inside every stealer that grabs the Firefox profile tree
+references:
+  - title: Mozilla docs on Firefox password storage (NSS + PKCS#11 soft tokens)
+    url: https://wiki.mozilla.org/NSS_Shared_DB_And_LINUX
+notes: >
+  Firefox stores saved logins as encryptedUsername + encryptedPassword
+  base64 PKCS#7 blobs inside logins.json, wrapped by an AES key derived
+  from the user's master password (empty by default) through PBKDF2
+  from key4.db's 'metaData' row. Blobs are tractable to decrypt
+  offline with publicly available tooling (firefox_decrypt and
+  friends) once key4.db ships alongside logins.json, which stealers
+  grab as a pair by default.
+
+  logins.json schema:
+    {
+      "nextId": N,
+      "logins": [
+        {
+          "id": 1,
+          "hostname": "https://accounts.google.com",
+          "encryptedUsername": "<base64 PKCS#7>",
+          "encryptedPassword": "<base64 PKCS#7>",
+          "usernameField": "identifier",
+          "passwordField": "Passwd",
+          "timeCreated": <epoch_ms>,
+          "timeLastUsed": <epoch_ms>,
+          "timePasswordChanged": <epoch_ms>,
+          "timesUsed": N,
+          ...
+        },
+        ...
+      ]
+    }
+
+  Operator-grade signal even BEFORE decryption: the per-login
+  hostnames enumerate which accounts the victim has saved
+  passwords for (a bank login vs an arbitrary forum carries very
+  different triage priority).
