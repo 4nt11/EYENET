@@ -8,7 +8,7 @@
 // here touches the filesystem or the DOM. The workbench UI wraps this
 // with FileSystemAccess / drag-drop plumbing.
 
-import { RE2 } from '@adguard/re2-wasm';
+import { RE2JS } from 're2js';
 
 import { applyNormalize } from './normalize.js';
 import {
@@ -22,7 +22,6 @@ import {
   matchKeyvalueIni
 } from './matchers.js';
 
-const RE2_MAX_MEM = 8 * 1024 * 1024;
 
 /** @typedef {import('./types.js').RuleSpec} RuleSpec */
 /** @typedef {import('./types.js').EvalResult} EvalResult */
@@ -125,21 +124,20 @@ function evalRule(r, env) {
 }
 
 // First reject_pattern that matches any extracted value, or null if clean.
-// RE2 (ReDoS-safe, max_mem bounded). Applied AFTER map and BEFORE normalize
+// re2js (ReDoS-safe, linear time). Applied AFTER map and BEFORE normalize
 // so raw banner/null-sentinel text is caught before any transform.
 function ruleRejects(r, fields) {
   const patterns = r.reject_patterns ?? [];
   if (patterns.length === 0) return null;
-  /** @type {RE2[]} */
   const compiled = [];
   for (const p of patterns) {
-    try { compiled.push(new RE2(p, 'u', RE2_MAX_MEM)); }
+    try { compiled.push(RE2JS.compile(p)); }
     catch { return null; }  // bad pattern = no reject (fail-open; load-time validates)
   }
   for (const v of Object.values(fields)) {
     const s = String(v);
     for (let i = 0; i < compiled.length; i++) {
-      try { if (compiled[i].test(s)) return patterns[i]; }
+      try { if (compiled[i].matcher(s).find()) return patterns[i]; }
       catch { /* keep scanning */ }
     }
   }

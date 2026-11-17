@@ -5,17 +5,24 @@
 // output on a given input MUST equal the Python engine's output on the
 // same input.
 //
-// RE2: operator-authored patterns go through AdGuard's RE2-wasm fork, which
-// gives us RE2's linear-time guarantee PLUS a per-pattern memory cap so a
-// pathological pattern can't blow the WASM heap at compile time. Default
-// cap is 8 MB per regex (plenty for extraction patterns, still bounded).
+// RE2: operator-authored patterns go through re2js, a pure-JS port of
+// Google's RE2 with the same linear-time DFA/NFA guarantee (no ReDoS).
+// Python side uses google-re2; parity between the two bindings is enforced
+// by the golden fixtures. We traded the WASM memory cap for Vite-friendly
+// loading; the workbench runs single-folder at a time, so a pathological
+// COMPILE that blows memory would only hang the local tab.
 // YAML: js-yaml's safe `load` is the safe_load-equivalent entry point
 // (YAML 1.2 CFG subset, no custom tags).
 
-import { RE2 } from '@adguard/re2-wasm';
+import { RE2JS } from 're2js';
 import { load as yamlLoad } from 'js-yaml';
 
-const RE2_MAX_MEM = 8 * 1024 * 1024;
+function _re2Compile(pattern, { multiline = false, dotall = false } = {}) {
+  let flags = 0;
+  if (multiline) flags |= RE2JS.MULTILINE;
+  if (dotall) flags |= RE2JS.DOTALL;
+  return RE2JS.compile(pattern, flags);
+}
 
 /** @typedef {import('./types.js').RuleSpec} RuleSpec */
 /** @typedef {import('./types.js').MatchSpec} MatchSpec */
@@ -61,25 +68,27 @@ function hasPath(set, p) {
  * @param {ContentInput} input
  */
 export function matchRegex(m, ex, input) {
-  const flags = 'u' + (m.multiline ? 'm' : '') + (m.dotall ? 's' : '');
   let re;
   try {
-    re = new RE2(m.pattern, flags, RE2_MAX_MEM);
+    re = _re2Compile(m.pattern, { multiline: m.multiline, dotall: m.dotall });
   } catch {
     return null;
   }
-  let hit;
+  let matcher;
   try {
-    hit = re.exec(input.text);
+    matcher = re.matcher(input.text);
+    if (!matcher.find()) return null;
   } catch {
-    return null;  // maxMem exceeded or match-time failure
+    return null;
   }
-  if (!hit) return null;
-  if (!hit.groups) return {};
-  const want = ex?.fields ?? Object.keys(hit.groups);
+  let groups;
+  try { groups = matcher.getNamedGroups(); }
+  catch { groups = {}; }
+  if (!groups || Object.keys(groups).length === 0) return {};
+  const want = ex?.fields ?? Object.keys(groups);
   /** @type {Record<string,string>} */
   const out = {};
-  for (const k of want) if (hit.groups[k] !== undefined) out[k] = hit.groups[k];
+  for (const k of want) if (groups[k] !== undefined && groups[k] !== null) out[k] = groups[k];
   return out;
 }
 

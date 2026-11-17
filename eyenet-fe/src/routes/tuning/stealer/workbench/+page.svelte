@@ -1,14 +1,8 @@
 <script>
   import { onMount } from 'svelte';
+  import { runRules } from '$lib/stealer-engine/engine.js';
   import { listRules } from '$lib/stealerRulesApi.svelte.js';
 
-  // @adguard/re2-wasm is CJS + emscripten; Vite can't trace the .wasm asset
-  // through its require('../wasm/re2') call. We grab the binary via ?url
-  // (Vite copies it to _app/immutable/assets/) and shim Module.locateFile
-  // BEFORE importing the engine so emscripten finds it. The dynamic import
-  // guarantees import ordering: shim first, engine second.
-  let runRules;
-  let engineLoadErr = $state(null);
 
   // ---- state ----
   /** @type {import('$lib/stealer-engine/types.js').RuleSpec[]} */
@@ -104,7 +98,7 @@
 
   // ---- run ----
   async function onRun() {
-    if (files.length === 0 || rules.length === 0 || !runRules) return;
+    if (files.length === 0 || rules.length === 0) return;
     running = true;
     const t0 = performance.now();
     try {
@@ -120,26 +114,6 @@
   }
 
   onMount(async () => {
-    try {
-      const wasmUrl = (await import('@adguard/re2-wasm/build/wasm/re2.wasm?url')).default;
-      // Emscripten's default browser path uses a SYNCHRONOUS XHR to fetch
-      // the .wasm, which modern browsers block. The documented workaround
-      // is to preload the binary into Module.wasmBinary as an ArrayBuffer;
-      // emscripten then skips the fetch entirely. locateFile stays as a
-      // belt-and-braces fallback.
-      const res = await fetch(wasmUrl);
-      if (!res.ok) throw new Error(`wasm fetch ${res.status}`);
-      const wasmBinary = await res.arrayBuffer();
-      const prior = globalThis.Module ?? {};
-      globalThis.Module = {
-        ...prior,
-        wasmBinary,
-        locateFile: (path) => (path.endsWith('.wasm') ? wasmUrl : (prior.locateFile?.(path) ?? path))
-      };
-      ({ runRules } = await import('$lib/stealer-engine/engine.js'));
-    } catch (e) {
-      engineLoadErr = String(e?.message ?? e);
-    }
     try { rules = await listRules(); }
     catch (e) { rulesLoadErr = String(e?.message ?? e); }
   });
@@ -159,7 +133,7 @@
       {files.length ? 'Pick another folder' : 'Pick folder'}
       <input type="file" webkitdirectory directory multiple onchange={onFolderPick} />
     </label>
-    <button class="btn-primary" onclick={onRun} disabled={!files.length || !rules.length || !runRules || running}>
+    <button class="btn-primary" onclick={onRun} disabled={!files.length || !rules.length || running}>
       {running ? 'Running...' : 'Run rules'}
     </button>
     <div class="stats mono">
@@ -179,9 +153,6 @@
     </div>
   </div>
 
-  {#if engineLoadErr}
-    <div class="warn">Engine load failed: <code>{engineLoadErr}</code>. RE2-wasm asset may not have shipped; running is disabled.</div>
-  {/if}
   {#if rulesLoadErr}
     <div class="warn">Rules load failed: <code>{rulesLoadErr}</code>. Workbench will still load files, but running is disabled.</div>
   {/if}

@@ -5,11 +5,9 @@
 // Parity: the Python engine implements the same seven verbs against
 // the same inputs with the same outputs. Golden fixtures enforce it.
 //
-// replace_re2 runs through the same ReDoS-safe RE2 engine the matchers use.
+// replace_re2 runs through the same ReDoS-safe re2js engine the matchers use.
 
-import { RE2 } from '@adguard/re2-wasm';
-
-const RE2_MAX_MEM = 8 * 1024 * 1024;
+import { RE2JS } from 're2js';
 
 /** @typedef {import('./types.js').NormalizeStep} NormalizeStep */
 
@@ -63,8 +61,7 @@ function runVerb(step, raw) {
     case 'replace_re2': {
       if (!step.pattern) return raw;
       try {
-        const re = new RE2(step.pattern, 'gu', RE2_MAX_MEM);
-        return re.replace(raw, step.replacement ?? '');
+        return RE2JS.compile(step.pattern).matcher(raw).replaceAll(step.replacement ?? '');
       } catch {
         return undefined;
       }
