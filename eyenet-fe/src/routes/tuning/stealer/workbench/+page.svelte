@@ -122,11 +122,18 @@
   onMount(async () => {
     try {
       const wasmUrl = (await import('@adguard/re2-wasm/build/wasm/re2.wasm?url')).default;
-      // Emscripten reads globalThis.Module when the module init runs.
-      // Preserve anything else callers may have set.
+      // Emscripten's default browser path uses a SYNCHRONOUS XHR to fetch
+      // the .wasm, which modern browsers block. The documented workaround
+      // is to preload the binary into Module.wasmBinary as an ArrayBuffer;
+      // emscripten then skips the fetch entirely. locateFile stays as a
+      // belt-and-braces fallback.
+      const res = await fetch(wasmUrl);
+      if (!res.ok) throw new Error(`wasm fetch ${res.status}`);
+      const wasmBinary = await res.arrayBuffer();
       const prior = globalThis.Module ?? {};
       globalThis.Module = {
         ...prior,
+        wasmBinary,
         locateFile: (path) => (path.endsWith('.wasm') ? wasmUrl : (prior.locateFile?.(path) ?? path))
       };
       ({ runRules } = await import('$lib/stealer-engine/engine.js'));
