@@ -1,7 +1,9 @@
 <script>
   import { onMount } from 'svelte';
-  import { runRules } from '$lib/stealer-engine/engine.js';
+  import { runRules, bulkParse } from '$lib/stealer-engine/engine.js';
   import { listRules } from '$lib/stealerRulesApi.svelte.js';
+
+  const BULK_LIMIT = 1000;
 
 
   // ---- state ----
@@ -117,6 +119,30 @@
   // Click-to-expand: one file open at a time.
   let expandedPath = $state(null);
   function togglePreview(p) { expandedPath = expandedPath === p ? null : p; }
+
+  // Memoised per-file bulk parse. Keyed by file path + rule id; computed
+  // on demand when a file row is expanded. Keeps the big parses lazy.
+  /** @type {Record<string, {records: any[], total: number, truncated: boolean}>} */
+  let bulkCache = $state({});
+  function bulkFor(file, rule) {
+    const key = `${file.path}::${rule.id}`;
+    if (bulkCache[key]) return bulkCache[key];
+    const out = bulkParse(rule, { path: file.path, text: file.text || file.preview || '' }, BULK_LIMIT);
+    bulkCache[key] = out;
+    return out;
+  }
+  // Recompute lazily: fresh folder picks clear the cache.
+  $effect(() => { if (files) bulkCache = {}; });
+
+  function rulesForFile(path) {
+    if (!result) return [];
+    return result.evaluations.filter(
+      (e) => e.layer === 'content' && e.matched && e.file_path === path
+    );
+  }
+
+  const ruleById = $derived(new Map(rules.map((r) => [r.id, r])));
+  function _getRule(id) { return ruleById.get(id); }
 
   function looksBinary(text, size) {
     if (!text) return size > 0;
@@ -261,6 +287,35 @@
                   {#if (f.text && f.text.length > PREVIEW_BYTES) || f.size > PREVIEW_BYTES}
                     <div class="ptail">Showing first {PREVIEW_BYTES.toLocaleString()} chars of {f.size.toLocaleString()} bytes.</div>
                   {/if}
+
+                  {#each rulesForFile(f.path) as ev}
+                    {@const r = _getRule(ev.rule_id)}
+                    {@const bulk = r ? bulkFor(f, r) : null}
+                    {#if bulk && bulk.records.length > 0}
+                      <div class="records">
+                        <div class="records-head">
+                          <span class="label-small">Parsed by</span>
+                          <span class="id mono">{ev.rule_id}</span>
+                          <span class="count mono">{bulk.records.length}{bulk.truncated ? ` / ${bulk.total}` : ''} record{bulk.records.length === 1 ? '' : 's'}</span>
+                        </div>
+                        <div class="records-wrap">
+                          <table class="recordstbl">
+                            <thead>
+                              <tr>{#each Object.keys(bulk.records[0]) as k}<th>{k}</th>{/each}</tr>
+                            </thead>
+                            <tbody>
+                              {#each bulk.records as rec}
+                                <tr>{#each Object.keys(bulk.records[0]) as k}<td class="mono">{rec[k] ?? ''}</td>{/each}</tr>
+                              {/each}
+                            </tbody>
+                          </table>
+                        </div>
+                        {#if bulk.truncated}
+                          <div class="ptail">Showing first {bulk.records.length.toLocaleString()} of {bulk.total.toLocaleString()} records (limit {BULK_LIMIT.toLocaleString()}).</div>
+                        {/if}
+                      </div>
+                    {/if}
+                  {/each}
                 </div>
               {/if}
             </li>
@@ -446,6 +501,34 @@
     white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
   }
   .ptail { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); letter-spacing: var(--tracking-data); }
+
+  .records {
+    margin-top: 12px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); overflow: hidden;
+  }
+  .records-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+  .records-head .id { color: var(--accent-text); font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); }
+  .records-head .count { margin-left: auto; color: var(--text-muted); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+  .records-wrap { max-height: 320px; overflow: auto; }
+  .recordstbl { width: 100%; border-collapse: collapse; }
+  .recordstbl thead th {
+    position: sticky; top: 0;
+    text-align: left; padding: 6px 10px;
+    font-family: var(--font-sans); font-size: var(--fs-11); font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-label); text-transform: uppercase;
+    color: var(--text-faint);
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .recordstbl tbody tr { border-bottom: 1px solid var(--border); }
+  .recordstbl tbody tr:last-child { border-bottom: none; }
+  .recordstbl tbody tr:hover { background: var(--surface); }
+  .recordstbl td {
+    padding: 4px 10px;
+    font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data);
+    color: var(--text); vertical-align: top;
+    word-break: break-all; max-width: 260px;
+  }
 
   .result-body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 

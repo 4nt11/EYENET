@@ -1,5 +1,5 @@
 // Public surface of the stealer rule engine. UI code should import from here.
-export { runRules, matchGlob } from './engine.js';
+export { runRules, matchGlob, bulkParse } from './engine.js';
 export { applyNormalize } from './normalize.js';
 export {
   matchFolder,

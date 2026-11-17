@@ -120,23 +120,28 @@ export function matchTemplate(m, ex, input) {
  * @param {ContentInput} input
  */
 export function matchDelimiter(m, ex, input) {
-  const lines = input.text.split(/\r?\n/);
+  for (const row of iterDelimiter(m, ex, input.text)) return row;
+  return null;
+}
+
+// Iterator used by matchDelimiter (takes first row) and by bulkParse
+// (walks every row). Centralised so a tweak lands once and parity stays
+// tight.
+export function* iterDelimiter(m, ex, text) {
   const cols = ex?.columns ?? {};
-  /** @type {Record<string,string>|null} */
-  let first = null;
-  for (const line of lines) {
+  for (const line of text.split(/\r?\n/)) {
     if (m.skip_blank !== false && line.trim() === '') continue;
     if (m.skip_comment_prefix && line.startsWith(m.skip_comment_prefix)) continue;
     const parts = line.split(m.separator);
     if (m.min_columns && parts.length < m.min_columns) continue;
-    const row = /** @type {Record<string,string>} */ ({});
+    /** @type {Record<string,string>} */
+    const row = {};
     for (const [idxStr, field] of Object.entries(cols)) {
       const i = Number.parseInt(idxStr, 10);
       if (i < parts.length) row[field] = parts[i];
     }
-    if (!first) first = row;
+    yield row;
   }
-  return first;
 }
 
 /**

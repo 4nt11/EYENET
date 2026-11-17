@@ -19,7 +19,8 @@ import {
   matchJson,
   matchYaml,
   matchKeyvalue,
-  matchKeyvalueIni
+  matchKeyvalueIni,
+  iterDelimiter
 } from './matchers.js';
 
 
@@ -175,6 +176,81 @@ function applyMap(fields, m) {
     out[rename[k] ?? k] = v;
   }
   return out;
+}
+
+/**
+ * Walk EVERY matching record in a file instead of just the first (which is
+ * what the engine's single-shot matchers return by design). Used by the
+ * workbench to let an operator verify that a TSV / cookies file / combolist
+ * really parses, row by row. Applies the rule's map, reject_patterns, and
+ * normalize per-record so output is parity with what gets stored.
+ *
+ * - delimiter: iterates every matching line
+ * - regex:     finds every non-overlapping match
+ * - everything else is single-record by design: returns [fields] or []
+ *
+ * @param {import('./types.js').RuleSpec} rule
+ * @param {import('./types.js').ContentInput} file
+ * @param {number} [limit] default 1000
+ * @returns {{records: Record<string,string|number>[], total: number, truncated: boolean}}
+ */
+export function bulkParse(rule, file, limit = 1000) {
+  const records = [];
+  let total = 0;
+  const compiledRejects = (rule.reject_patterns ?? []).map((p) => {
+    try { return RE2JS.compile(p); } catch { return null; }
+  });
+  const push = (raw) => {
+    total++;
+    if (records.length >= limit) return;
+    const mapped = applyMap(raw, rule.map);
+    for (const re of compiledRejects) {
+      if (!re) continue;
+      for (const v of Object.values(mapped)) {
+        if (re.matcher(String(v)).find()) return;  // whole record rejected
+      }
+    }
+    const normed = rule.normalize ? applyNormalize(mapped, rule.normalize) : mapped;
+    records.push(escapeNulls(normed));
+  };
+
+  switch (rule.match?.type) {
+    case 'delimiter':
+      for (const row of iterDelimiter(rule.match, rule.extract, file.text)) push(row);
+      break;
+    case 'regex': {
+      let rest = file.text;
+      let safety = 10000;
+      while (rest && safety-- > 0) {
+        const hit = matchRegex(rule.match, rule.extract, { path: file.path, text: rest });
+        if (!hit || Object.keys(hit).length === 0) break;
+        push(hit);
+        const first = Object.values(hit)[0];
+        if (typeof first === 'string' && first) {
+          const idx = rest.indexOf(first);
+          rest = idx >= 0 ? rest.slice(idx + first.length) : rest.slice(1);
+        } else {
+          const nl = rest.indexOf('\n');
+          rest = nl >= 0 ? rest.slice(nl + 1) : '';
+        }
+      }
+      break;
+    }
+    default: {
+      // Single-record matcher. Reuse the per-type matcher and emit one row.
+      let fields = null;
+      const m = rule.match, ex = rule.extract;
+      switch (m.type) {
+        case 'template':     fields = matchTemplate(m, ex, file); break;
+        case 'json':         fields = matchJson(m, ex, file); break;
+        case 'yaml':         fields = matchYaml(m, ex, file); break;
+        case 'keyvalue':     fields = matchKeyvalue(m, ex, file); break;
+        case 'keyvalue_ini': fields = matchKeyvalueIni(m, ex, file); break;
+      }
+      if (fields) push(fields);
+    }
+  }
+  return { records, total, truncated: total > records.length };
 }
 
 /**
