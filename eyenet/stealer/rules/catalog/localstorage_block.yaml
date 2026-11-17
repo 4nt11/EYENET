@@ -1,0 +1,40 @@
+id: localstorage_block
+version: 1
+layer: content
+family: victim_localstorage
+priority: 75
+path_glob: "**LocalStorage.txt"
+description: >
+  Chromium / Chromium-fork localStorage dump. Three-line records
+  'DOMAIN:' / 'KEY:' / 'VALUE:' separated by blank lines. One
+  record per (origin, key) pair in the browser's LevelDB-backed
+  localStorage store.
+
+  Volume is huge (several thousand rows per file) because every
+  webapp the victim has ever touched leaves state. Signal density
+  varies wildly:
+
+    client state         views, timestamps, 'isDismissed' flags -
+                         low signal, high noise
+    user identifiers     Poki games user_id, analytics IDs - cross-
+                         site tracking fingerprint
+    service tokens       JWTs, OAuth access tokens, Firebase ID
+                         tokens, Slack xoxc/xoxp tokens, Tawk.to
+                         visitor tokens - direct session hijack
+                         (the webapp uses the token IN PLACE of a
+                         cookie, so Cookies.txt replay would NOT
+                         land them)
+    chat metadata        WhatsApp Web group IDs, Discord user
+                         prefs, Slack workspace IDs - social graph
+    draft content        sometimes draft messages / form state
+
+  This rule captures every row. A sibling rule
+  (localstorage_jwt_candidates) specifically extracts JWT-shaped
+  values for the direct-replay promotion list.
+
+  Khazan branding banners mid-file do not break the regex.
+match:
+  type: regex
+  pattern: '(?m)^DOMAIN:\s*(?P<ls_domain>[^\n]+)\nKEY:\s*(?P<ls_key>[^\n]+)\nVALUE:\s*(?P<ls_value>[^\n]+)$'
+extract:
+  fields: [ls_domain, ls_key, ls_value]

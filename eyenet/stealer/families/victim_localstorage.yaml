@@ -1,0 +1,52 @@
+slug: victim_localstorage
+name: Browser localStorage dump (LocalStorage.txt)
+status: active
+first_seen_year: 2019
+aliases: [localstorage, leveldb-ls, web-storage]
+signature_files:
+  - LocalStorage.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer walks the Local Storage LevelDB
+    and serializes it as a text dump
+references:
+  - title: HTML5 Web Storage spec (localStorage)
+    url: https://html.spec.whatwg.org/multipage/webstorage.html
+notes: >
+  Chromium-fork localStorage dump. Three-line records 'DOMAIN:' /
+  'KEY:' / 'VALUE:' separated by blank lines. One record per
+  (origin, key) pair.
+
+  Volume is huge: typically 2k-12k rows per victim because every
+  webapp leaves state. Signal density varies:
+
+    low:  views/isDismissed/timestamps flags - noise
+    mid:  analytics / cross-site user_id tracking fingerprint
+    high: JWT / OAuth / Firebase ID / Slack / Supabase session
+          tokens. Many modern webapps store the bearer token in
+          localStorage INSTEAD of a cookie - cookie replay would
+          not land them, only the localStorage row does.
+    sidechannel: WhatsApp Web group IDs, Discord prefs, Slack
+                 workspace IDs - social-graph leaks.
+
+  Khazan2 corpus sweep: 59 files, 39,787 rows, 54 JWT candidates.
+
+  Hot sub-findings from this sample:
+    hubscuola.it     7 JWTs   Italian school platform (Mondadori)
+                              - teacher/student sessions
+    raiplay.it       4        Italian national broadcaster streams
+    dating_rt /      6        dating app session tokens (extortion
+      dating_token              or social-eng targets)
+    tikops.io        3        ad-network panel session
+    discordsays.com  3        Discord Activity embedded-game tokens
+    twk_token_*     10+       Tawk.to live-chat visitor JWTs on
+                              customer-support widgets
+
+  CTI uses:
+    * webapp session hijack bypassing cookie replay
+    * verified social-graph binding (victim is a member of
+      WhatsApp group X, Discord guild Y, Slack workspace Z)
+    * geo/employer binding via institutional webapp JWTs
+      (.edu, .gov, government-subsidy apps)
+    * dormant cross-site identifiers (Poki games user_id,
+      analytics) for cluster correlation across the corpus

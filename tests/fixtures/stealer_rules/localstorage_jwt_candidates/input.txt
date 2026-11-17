@@ -1,0 +1,11 @@
+DOMAIN: https://web.whatsapp.com
+KEY:    isDismissed
+VALUE:  false
+
+DOMAIN: https://school.example.edu.it
+KEY:    bcejwt.loginToken
+VALUE:  eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzeW50aGV0aWMtZml4dHVyZS1zdHVkZW50LTAwMSIsImlzcyI6ImJjZSIsImV4cCI6MjAwMDAwMDAwMH0.synthetic_fixture_signature_not_a_real_grant_bytes_only
+
+DOMAIN: https://poki.com
+KEY:    poki_pbf
+VALUE:  1

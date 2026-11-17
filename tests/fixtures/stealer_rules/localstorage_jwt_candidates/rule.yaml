@@ -1,0 +1,16 @@
+id: localstorage_jwt_candidates
+version: 1
+layer: content
+family: victim_localstorage
+priority: 90
+path_glob: LocalStorage.txt
+description: >
+  Parity fixture for localStorage JWT capture. Verifies the
+  DOMAIN/KEY/VALUE three-line record parses to the (domain, key,
+  token) triple, that a non-JWT value is skipped, and that the eyJ
+  prefix anchors the capture.
+match:
+  type: regex
+  pattern: '(?m)^DOMAIN:\s*(?P<ls_jwt_domain>[^\n]+)\nKEY:\s*(?P<ls_jwt_key>[^\n]+)\nVALUE:\s*(?P<ls_jwt_token>eyJ[A-Za-z0-9_-]{15,200}\.eyJ[A-Za-z0-9_-]{40,900}\.[A-Za-z0-9_-]{27,120})$'
+extract:
+  fields: [ls_jwt_domain, ls_jwt_key, ls_jwt_token]
