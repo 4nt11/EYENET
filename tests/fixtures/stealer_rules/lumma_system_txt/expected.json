@@ -1,0 +1,10 @@
+{
+  "family": null,
+  "fields": {
+    "hwid": "ABC-DEF-123-XYZ",
+    "ip": "185.12.44.9",
+    "country": "us",
+    "city": "São Paulo de Guarulh",
+    "c2": "https://cdn.example.com:8443/api/v1/push"
+  }
+}

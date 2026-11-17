@@ -1,0 +1,11 @@
+{
+  "family": null,
+  "fields": {
+    "country": "NO",
+    "enabled": "yes",
+    "mode": "on",
+    "build_num": 42,
+    "version_str": "42",
+    "is_live": "true"
+  }
+}

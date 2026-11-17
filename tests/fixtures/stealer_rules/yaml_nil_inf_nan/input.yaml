@@ -1,0 +1,12 @@
+ExplicitNull: null
+TildeNull: ~
+EmptyNull:
+UpperNull: NULL
+BareNull: Null
+Inf: .inf
+NegInf: -.inf
+Nan: .nan
+GoodStr: hello
+GoodInt: 7
+GoodBool: false
+Keeper: survives

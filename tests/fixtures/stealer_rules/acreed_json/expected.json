@@ -1,0 +1,15 @@
+{
+  "family": null,
+  "fields": {
+    "hwid": "ZZ-BUILD-A1",
+    "build": "ACR-2026-11",
+    "pm_ext_count": 17,
+    "os": "Windows 11",
+    "user": "Иван",
+    "first_wallet_kind": "BTC",
+    "first_wallet_path": "C:\\Users\\Иван\\AppData\\Roaming\\Bitcoin\\wallet.dat",
+    "config_blob": "{\"ExtensionsEnabled\":true,\"MaxDepth\":4,\"Blacklist\":[\"temp\",\"cache\"]}",
+    "is_active": "true",
+    "exfil_at": "2026-11-10T14:30:42Z"
+  }
+}

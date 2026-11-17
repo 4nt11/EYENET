@@ -1,0 +1,36 @@
+id: lumma_system_txt
+version: 1
+layer: content
+family: lumma
+priority: 100
+path_glob: System.txt
+description: >
+  Lumma victim header. KEYVALUE with ": " (colon-space) separator.
+  Case-insensitive requires; keys arrive mixed-case in the wild.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - HWID
+    - IP
+extract:
+  keys:
+    HWID: hwid_raw
+    IP: ip
+    Country: country
+    City: city
+    "Build ID": build
+    "C2 URL": c2
+    LAN: lan_drop_me
+map:
+  rename:
+    hwid_raw: hwid
+  _drop:
+    - lan_drop_me
+normalize:
+  - { verb: strip_whitespace, field: hwid }
+  - { verb: uppercase,        field: hwid }
+  - { verb: lowercase,        field: country }
+  - { verb: truncate,         field: city, max_len: 20 }
+  - { verb: replace_re2,      field: build, pattern: '\s+', replacement: ' ' }

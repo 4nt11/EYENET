@@ -800,6 +800,112 @@ def stealer_processor_run(  # pragma: no cover
     _run(lambda bus, storage: StealerProcessorService(bus=bus, storage=storage), cfg)
 
 
+@app.command("stealer-reprocess-local")
+def stealer_reprocess_local(  # pragma: no cover
+    archive: Path = typer.Argument(..., exists=True, readable=True, help="Path to the stealer archive (.rar / .zip / ...) to process."),
+    password: list[str] = typer.Option(
+        [],
+        "--password",
+        "-p",
+        help="Archive password candidate. Pass multiple --password flags to try several in order.",
+    ),
+    source_label: str = typer.Option(
+        "local-reprocess",
+        "--source-label",
+        help="Value written to stealer.creds.source for provenance of this local run.",
+    ),
+    work_root: Path = typer.Option(
+        Path("/tmp/eyenet-local-ulp"),  # noqa: S108 - operator-chosen scratch dir
+        "--work-root",
+        help="Scratch directory for the decrypted archive tree (cleaned on exit).",
+    ),
+) -> None:
+    """Run the full stealer pipeline against ONE local archive end-to-end.
+
+    The fast iteration loop for v1.3.0 rule-engine work: tweak a YAML rule,
+    re-run this against the same archive, see the new infection + audit rows
+    in ClickHouse immediately. No Telegram, no bus, no attachment table: pure
+    decrypt -> ulpextract -> creds + file_audit roll-ups.
+
+    ClickHouse is read from the standard EYENET_CLICKHOUSE_* env vars; default
+    is the local docker-compose stack (host=clickhouse on the compose network,
+    localhost:8123 from the host). Set EYENET_CLICKHOUSE_HOST=localhost when
+    running the CLI OUTSIDE the stack network.
+
+    The archive is content-addressed by its own sha256 for the file_audit
+    archive_sha256 column; a symlink is used so the pipeline sees the expected
+    <sha256>.bin naming without copying a potentially huge blob. source_label
+    on stealer.creds carries a stable identity for local test runs so they do
+    not collide with real channel ingest in the corpus.
+    """
+    import hashlib  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    from eyenet.stealer.clickhouse import ClickHouseCredsSink, FileAuditSink  # noqa: PLC0415
+    from eyenet.stealer.pipeline import process_archive  # noqa: PLC0415
+
+    if not password:
+        raise typer.BadParameter(
+            "at least one --password candidate is required (archives are encrypted)"
+        )
+
+    typer.echo(f"hashing {archive} ...")
+    sha = hashlib.sha256()
+    with archive.open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            sha.update(chunk)
+    archive_sha = sha.hexdigest()
+    typer.echo(f"  sha256 = {archive_sha}")
+
+    # The pipeline derives archive_sha256 for file_audit from blob_path.stem;
+    # symlink the archive to <sha>.bin so it sees the expected naming without
+    # us copying a 2 GB blob.
+    stage_root = Path(tempfile.mkdtemp(prefix="eyenet-local-reprocess-"))
+    stage_blob = stage_root / f"{archive_sha}.bin"
+    stage_blob.symlink_to(archive.resolve())
+
+    work_root.mkdir(parents=True, exist_ok=True)
+    sink = ClickHouseCredsSink()
+    audit_sink = FileAuditSink()
+
+    try:
+        typer.echo(
+            f"running pipeline (candidates={len(password)}, source_label='{source_label}') ..."
+        )
+        result = process_archive(
+            blob_path=stage_blob,
+            password_candidates=list(password),
+            work_root=work_root,
+            sink=sink,
+            source_label=source_label,
+            audit_sink=audit_sink,
+        )
+    finally:
+        sink.close()
+        audit_sink.close()
+        shutil.rmtree(stage_root, ignore_errors=True)
+
+    typer.echo("--- result ---")
+    typer.echo(f"  ok              = {result.ok}")
+    typer.echo(f"  creds_inserted  = {result.creds_inserted}")
+    typer.echo(f"  password_used   = {result.password_used!r}")
+    if result.error:
+        typer.echo(f"  error           = {result.error}")
+    typer.echo("")
+    typer.echo("  Inspect the results in ClickHouse:")
+    typer.echo(
+        f"    SELECT count() FROM stealer.creds WHERE source = '{source_label}';"
+    )
+    typer.echo(
+        f"    SELECT * FROM stealer.file_audit WHERE archive_sha256 = '{archive_sha}' LIMIT 20;"
+    )
+    typer.echo(
+        "    SELECT * FROM stealer.file_audit_per_archive WHERE archive_sha256"
+        f" = '{archive_sha}';"
+    )
+
+
 @app.command("engine")
 def engine_run(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),

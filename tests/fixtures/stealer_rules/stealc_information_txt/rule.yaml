@@ -1,0 +1,32 @@
+id: stealc_information_txt
+version: 1
+layer: content
+family: stealc
+priority: 100
+path_glob: information.txt
+description: >
+  StealC victim header. INI with [Hardware]/[Software]/[Browsers].
+  Repeated keys follow last-wins; comments (; and #) skipped;
+  values with embedded `=` keep everything after the first `=`.
+match:
+  type: keyvalue_ini
+  requires_sections:
+    - Hardware
+    - Software
+extract:
+  keys:
+    Hardware.HWID: hwid
+    Hardware.CPU: cpu
+    Hardware.RAM: ram
+    Software.OS: os
+    Software.UserAgent: ua
+    Software.ApiEndpoint: api
+    Browsers.Chrome: chrome_profile
+    Browsers.Firefox: firefox_profile
+    Browsers.Missing: missing_browser
+normalize:
+  - { verb: strip_whitespace, field: hwid }
+  - { verb: uppercase,        field: hwid }
+  - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
+  - { verb: int_from_string,  field: ram }
+  - { verb: truncate,         field: ua, max_len: 40 }

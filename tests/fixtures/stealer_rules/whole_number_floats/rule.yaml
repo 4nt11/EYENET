@@ -1,0 +1,25 @@
+id: whole_number_floats
+version: 1
+layer: content
+family: generic
+priority: 100
+path_glob: config.json
+description: >
+  Locks the JS-vs-Python float parity: JS has only float64, so 1.0
+  round-trips to "1"; Python keeps 1.0 as "1.0". The engine coerces
+  integer-valued floats to int so both sides emit the same thing.
+  True fractional floats (1.5) are untouched on both sides.
+match:
+  type: json
+  requires_keys:
+    - Build
+extract:
+  paths:
+    build: $.Build
+    whole_float: $.Major
+    exp_whole: $.Exp
+    neg_whole: $.Neg
+    ratio: $.Ratio
+    neg_ratio: $.NegRatio
+    tiny: $.Tiny
+    plain_int: $.Int

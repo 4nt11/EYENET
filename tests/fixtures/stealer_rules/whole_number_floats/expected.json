@@ -1,0 +1,13 @@
+{
+  "family": null,
+  "fields": {
+    "build": "v7",
+    "whole_float": 7,
+    "exp_whole": 300,
+    "neg_whole": -4,
+    "ratio": 1.5,
+    "neg_ratio": -0.25,
+    "tiny": 0.125,
+    "plain_int": 42
+  }
+}

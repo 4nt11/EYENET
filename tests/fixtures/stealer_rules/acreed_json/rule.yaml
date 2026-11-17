@@ -1,0 +1,32 @@
+id: acreed_pc_info_json
+version: 1
+layer: content
+family: acreed
+priority: 100
+path_glob: pc_info.json
+description: >
+  Acreed/Stealerium pc_info.json. Nested arrays, missing paths dropped,
+  boolean + nested-object values flow through JSONPath-lite correctly.
+match:
+  type: json
+  requires_keys:
+    - HWID
+    - BuildID
+extract:
+  paths:
+    hwid: $.HWID
+    build: $.BuildID
+    pm_ext_count: $.PMExtCount
+    os: $.System.OS
+    user: $.System.User
+    first_wallet_kind: $.Wallets[0].kind
+    first_wallet_path: $.Wallets[0].paths[0]
+    missing_wallet: $.Wallets[5].kind
+    config_blob: $.Config
+    is_active: $.Config.ExtensionsEnabled
+    exfil_at: $.ExfilAt
+normalize:
+  - { verb: strip_whitespace, field: hwid }
+  - { verb: uppercase,        field: hwid }
+  - { verb: truncate,         field: os, max_len: 10 }
+  - { verb: date_parse,       field: exfil_at, format: rfc2822 }

@@ -47,7 +47,14 @@ export const NAV = [
     group: 'Tuning',
     items: [
       { slug: 'tuning-indicators', label: 'Indicator rules', href: '/tuning/indicators', built: true, desc: 'Operator-tunable indicator-extraction ruleset · wallets, handles, email, PGP, Session, Tox' },
-      { slug: 'tuning-incidents', label: 'Incident rules', href: '/tuning/incidents', built: true, desc: 'RE2 → incident-taxonomy label overrides layered on the classifier' }
+      { slug: 'tuning-incidents', label: 'Incident rules', href: '/tuning/incidents', built: true, desc: 'RE2 → incident-taxonomy label overrides layered on the classifier' },
+      { slug: 'stealer-cfg', label: 'Stealer configurations', href: '/tuning/stealer', future: true, desc: 'Family-detection + extraction rules for stealer-log dossiers',
+        children: [
+          { slug: 'stealer-rules', label: 'Rules library', href: '/tuning/stealer', future: true, desc: 'L1 container / L2 handlers / L3 content rules · enable, reorder, draft' },
+          { slug: 'stealer-workbench', label: 'Workbench', href: '/tuning/stealer/workbench', future: true, desc: 'Load a sample folder · run rules client-side · files never leave the browser' },
+          { slug: 'stealer-failures', label: 'Parse failures', href: '/tuning/stealer/failures', future: true, desc: 'Unparsed lines grouped by shape · draft rule from line' },
+          { slug: 'stealer-pipeline', label: 'Normalize pipeline', href: '/tuning/stealer/pipeline', future: true, desc: 'Global normalize verbs · per-rule opt-outs' }
+        ] }
     ]
   },
   {

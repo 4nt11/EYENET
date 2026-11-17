@@ -1,0 +1,27 @@
+id: yaml_norway_problem
+version: 1
+layer: content
+family: generic
+priority: 100
+path_glob: meta.yaml
+description: >
+  Regression against the YAML 1.1 / 1.2 divergence. Victim data with the
+  literal string "NO" (as in Norway) or words like "yes"/"on"/"off" MUST
+  survive as strings; a YAML 1.1 parser would silently coerce them to
+  booleans. Also verifies: quoted "42" stays string, bare 42 stays int,
+  bare true stays bool (stringified "true" by extract_paths).
+match:
+  type: yaml
+  requires_keys:
+    - Country
+    - BuildID
+extract:
+  paths:
+    country: $.Country
+    enabled: $.Enabled
+    mode: $.Mode
+    build_num: $.BuildID
+    version_str: $.Version
+    is_live: $.IsLive
+normalize:
+  - { verb: uppercase, field: country }

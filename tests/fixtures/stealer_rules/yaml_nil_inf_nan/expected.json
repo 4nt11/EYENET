@@ -1,0 +1,9 @@
+{
+  "family": null,
+  "fields": {
+    "good_str": "HELLO",
+    "good_int": 7,
+    "good_bool": "false",
+    "keeper": "survives"
+  }
+}

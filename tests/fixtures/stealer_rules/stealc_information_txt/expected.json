@@ -1,0 +1,13 @@
+{
+  "family": null,
+  "fields": {
+    "hwid": "AA-BB-CC-DD-EE-FF",
+    "cpu": "Intel(R) Core(TM) i7-1265U @ 2.60GHz",
+    "ram": 16384,
+    "os": "Windows 11 Home 23H2",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64",
+    "api": "https://c2.example.net/api?token=abc=def=ghi&cid=42",
+    "chrome_profile": "C:\\Users\\victim\\AppData\\Local\\Google\\Chrome\\User Data\\Default",
+    "firefox_profile": "C:\\Users\\victim\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\xyz.default"
+  }
+}

@@ -1,0 +1,8 @@
+HWID: ABC-DEF-123-xyz
+IP: 185.12.44.9
+
+Country: US
+City: São Paulo de Guarulhos
+Build   ID:   LummaC2    v4.3    build	2026-11-10
+C2 URL: https://cdn.example.com:8443/api/v1/push
+LAN: 192.168.1.42

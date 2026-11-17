@@ -1,0 +1,34 @@
+id: yaml_nil_inf_nan
+version: 1
+layer: content
+family: generic
+priority: 100
+path_glob: edge.yaml
+description: >
+  Locks null/nil and non-finite-number handling. Every extracted path that
+  resolves to null (any of the six YAML null spellings), Infinity, -Infinity,
+  or NaN MUST be DROPPED from the fields dict. Only fully-typed finite values
+  survive. A requires_keys check against a key whose value is null still
+  PASSES, because the key exists in the document.
+match:
+  type: yaml
+  requires_keys:
+    - ExplicitNull
+    - Keeper
+extract:
+  paths:
+    explicit_null: $.ExplicitNull
+    tilde_null: $.TildeNull
+    empty_null: $.EmptyNull
+    upper_null: $.UpperNull
+    bare_null: $.BareNull
+    inf: $.Inf
+    neg_inf: $.NegInf
+    nan: $.Nan
+    good_str: $.GoodStr
+    good_int: $.GoodInt
+    good_bool: $.GoodBool
+    keeper: $.Keeper
+    missing_path: $.DoesNotExist
+normalize:
+  - { verb: uppercase, field: good_str }
