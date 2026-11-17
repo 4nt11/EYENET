@@ -276,8 +276,13 @@ from eyenet.api.v1.stealer.api_audit_coverage import router as stealer_audit_cov
 from eyenet.api.v1.stealer.api_audit_samples import router as stealer_audit_samples_router
 from eyenet.api.v1.stealer.api_audit_search import router as stealer_audit_search_router
 from eyenet.api.v1.stealer.api_audit_unknown import router as stealer_audit_unknown_router
+from eyenet.api.v1.stealer.api_create_stealer_rule import router as stealer_rules_create_router
+from eyenet.api.v1.stealer.api_delete_stealer_rule import router as stealer_rules_delete_router
+from eyenet.api.v1.stealer.api_get_stealer_rule import router as stealer_rules_get_router
+from eyenet.api.v1.stealer.api_list_stealer_rules import router as stealer_rules_list_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
 from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
+from eyenet.api.v1.stealer.api_update_stealer_rule import router as stealer_rules_update_router
 
 # === stream ===
 from eyenet.api.v1.stream.api_stream_all import router as stream_all_router
@@ -505,6 +510,11 @@ v1_router.include_router(stealer_audit_coverage_router)  # GET /stealer/audit/co
 v1_router.include_router(stealer_audit_unknown_router)   # GET /stealer/audit/unknown
 v1_router.include_router(stealer_audit_samples_router)   # GET /stealer/audit/samples
 v1_router.include_router(stealer_audit_search_router)    # GET /stealer/audit/search
+v1_router.include_router(stealer_rules_list_router)      # GET /stealer/rules (read:stealer)
+v1_router.include_router(stealer_rules_get_router)       # GET /stealer/rules/{id} (read:stealer)
+v1_router.include_router(stealer_rules_create_router)    # POST /stealer/rules (write:stealer)
+v1_router.include_router(stealer_rules_update_router)    # PUT /stealer/rules/{id} (write:stealer)
+v1_router.include_router(stealer_rules_delete_router)    # DELETE /stealer/rules/{id} (admin:stealer)
 v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /groups/* routes
 
 # identities + panic

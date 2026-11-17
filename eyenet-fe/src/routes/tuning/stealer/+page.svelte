@@ -79,7 +79,7 @@
       placeholder="Filter by id, family, path glob, or type"
       aria-label="Filter rules"
     />
-    <button class="btn-primary" disabled title="not yet wired">+ New rule</button>
+    <a class="btn-primary" href="/tuning/stealer/rules/new">+ New rule</a>
   </div>
 
   {#if loading}
@@ -107,7 +107,7 @@
         </thead>
         <tbody>
           {#each container as r (r.id)}
-            <tr>
+            <tr onclick={() => (window.location.href = `/tuning/stealer/rules/${r.id}`)} role="button" tabindex="0">
               <td class="pri mono">{r.priority}</td>
               <td class="mono id">{r.id}</td>
               <td><span class="family">{r.family}</span></td>
@@ -170,7 +170,7 @@
         </thead>
         <tbody>
           {#each content as r (r.id)}
-            <tr>
+            <tr onclick={() => (window.location.href = `/tuning/stealer/rules/${r.id}`)} role="button" tabindex="0">
               <td class="pri mono">{r.priority}</td>
               <td class="mono id">{r.id}</td>
               <td><span class="family">{r.family}</span></td>
@@ -229,7 +229,8 @@
     background: var(--accent); color: white; border: 1px solid var(--accent);
     border-radius: var(--radius); padding: 6px 12px;
     font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data);
-    cursor: pointer; transition: background 120ms ease;
+    cursor: pointer; transition: background 120ms ease; text-decoration: none;
+    display: inline-flex; align-items: center;
   }
   .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
   .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
@@ -280,6 +281,7 @@
     transition: background 120ms ease;
   }
   tbody tr:last-child { border-bottom: none; }
+  tbody tr { cursor: pointer; }
   tbody tr:hover { background: var(--panel-2); }
   tbody td {
     padding: 7px 14px;

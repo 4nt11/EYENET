@@ -1,0 +1,53 @@
+// Thin client for /v1/stealer/rules CRUD. Hits the real API in prod;
+// falls back to /stealer-rules.json (the static export) for list/get
+// so the FE still works pre-deploy or when run against an unauthenticated
+// dev build. The write operations have no fallback; they fail loudly.
+
+import { apiGet, apiPost, apiPut, apiDelete } from '$lib/api.js';
+
+const STATIC_LIST = '/stealer-rules.json';
+
+async function tryStatic() {
+  try {
+    const r = await fetch(STATIC_LIST);
+    if (!r.ok) throw new Error(`static fetch ${r.status}`);
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function listRules() {
+  try {
+    const r = await apiGet('/stealer/rules', { auth: true });
+    return r?.rules ?? r ?? [];
+  } catch {
+    const s = await tryStatic();
+    if (s) return s;
+    throw new Error('rules unavailable (API and static both failed)');
+  }
+}
+
+export async function getRule(id) {
+  try {
+    return await apiGet(`/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
+  } catch {
+    const s = await tryStatic();
+    if (!s) throw new Error('getRule: API and static both failed');
+    const hit = s.find((r) => r.id === id);
+    if (!hit) throw new Error(`rule not found: ${id}`);
+    return hit;
+  }
+}
+
+export async function createRule(rule) {
+  return await apiPost('/stealer/rules', rule, { auth: true });
+}
+
+export async function updateRule(id, rule) {
+  return await apiPut(`/stealer/rules/${encodeURIComponent(id)}`, rule, { auth: true });
+}
+
+export async function deleteRule(id) {
+  return await apiDelete(`/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
+}
