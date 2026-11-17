@@ -1,0 +1,50 @@
+slug: victim_clipboard
+name: Clipboard snapshot (Clipboard.txt)
+status: active
+first_seen_year: 2019
+aliases: [clipboard, paste, last-copied]
+signature_files:
+  - Clipboard.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer dumps the Windows clipboard state
+    at capture time
+references:
+  - title: Windows clipboard history (Win32 clipboard API)
+    url: https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard
+notes: >
+  Most-recent-clipboard dump. Content is wildly varied: single
+  short strings (passwords, 2FA codes, crypto addresses, shortened
+  URLs) or multi-line pastes (code snippets, error traces, drafts).
+
+  Low-volume, HIGH-SIGNAL file: the victim literally just copied or
+  typed this. Downstream classifier does the semantic tagging:
+
+    short strong-password shape    direct creds, likely mid-login
+    6-digit code                   likely 2FA, dead by now
+    crypto address (BTC/ETH/SOL)   pay-to-attacker opportunity if
+                                   the clipboard-hijacker malware
+                                   variant was active
+    URL                            link target the victim copied
+    free text                      search query, drafted message,
+                                   software name - intent / lifestyle
+
+  Khazan2 corpus sweep: 89 files, 74 non-empty, 126 records lifted.
+  Shape distribution: 100 free-text, 13 strong-password-shape,
+  13 URLs, 0 crypto addresses in this sample, 0 OTPs.
+
+  Sample intel observations:
+    'KMS Tools Lite oт 03.02.2026'         Russian speaker,
+                                             cracked activator
+    'Setup PreSonus Sphere Manager v2.0.0'   pro audio installer
+    'forza horizon 6 free download'          game piracy intent
+    'Qwen 3.8 Max Uncensored'                uncensored LLM search
+    PyMuPDF traceback (Python 3.14)          dev-machine signal,
+                                             victim trying to open
+                                             password-protected PDF
+
+  Clipboard-hijacker side-channel: many stealers DO run a parallel
+  clipboard monitor that rewrites copied crypto addresses on the fly.
+  Any crypto address seen here that does not match any address in
+  the victim's actual wallet dump is a HIJACK TARGET - the attacker's
+  payment address the victim would have pasted. Promote those loud.

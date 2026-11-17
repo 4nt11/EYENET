@@ -1,0 +1,37 @@
+id: clipboard_lines
+version: 1
+layer: content
+family: victim_clipboard
+priority: 75
+path_glob: "**Clipboard.txt"
+description: >
+  Most-recent-clipboard dump captured at stealer execution time.
+  Content is wildly varied, from single short strings (passwords,
+  2FA codes, crypto addresses, shortened URLs) to multi-line pastes
+  (code snippets, error stack traces, drafted messages).
+
+  Rule captures one record per non-empty line, stripping any leading
+  whitespace. Indented code paste lines ARE preserved so the operator
+  sees the whole context. Downstream classifier does the semantic
+  tagging:
+
+    short strong-password shape   (/^[A-Za-z0-9!@#$%^&*_+\-=]{8,20}$/)
+    6-digit code                  likely 2FA
+    crypto address                BTC bech32 / ETH 0x / SOL base58
+    URL                           pasted link target
+    search query                  (free text, 1-10 tokens)
+    stack trace / code            runtime leak (dev-machine signal)
+
+  High per-record intel density (the victim literally just typed or
+  copied this) but low volume per victim (typically 1-20 lines in the
+  file). Khazan2 sample observations: search queries for cracked
+  software, LLM uncensor prompts, Russian-language KMS activator
+  searches, Python 3.14 PyMuPDF error from victim trying to open a
+  password-protected PDF.
+match:
+  type: regex
+  pattern: '(?m)^[ \t]*(?P<clipboard_item>\S.*?)[ \t]*$'
+reject_patterns:
+  - '^.{1,2}$'
+extract:
+  fields: [clipboard_item]
