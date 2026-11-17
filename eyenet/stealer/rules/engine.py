@@ -71,6 +71,7 @@ def run_rules(rules: list[RuleSpec], folder: VictimFolder) -> RunResult:
             if not match_glob(glob, file.path):
                 continue
             ev = _eval_content(r, file)
+            ev.file_path = file.path
             evaluations.append(ev)
             if ev.matched and ev.fields:
                 merged.update(ev.fields)

@@ -34,6 +34,23 @@
   const contentMatched = $derived(contentEvals.filter((e) => e.matched));
   const fieldsTable = $derived(Object.entries(result?.fields ?? {}));
 
+  // Per-file: how many content rules were evaluated against it and how many matched.
+  // Only content evaluations carry file_path; container rules operate on the folder
+  // listing, not individual files.
+  const perFile = $derived.by(() => {
+    /** @type {Map<string, {evaluated: number, matched: number, matchedRules: string[]}>} */
+    const m = new Map();
+    for (const ev of contentEvals) {
+      const p = ev.file_path;
+      if (!p) continue;
+      const entry = m.get(p) ?? { evaluated: 0, matched: 0, matchedRules: [] };
+      entry.evaluated++;
+      if (ev.matched) { entry.matched++; entry.matchedRules.push(ev.rule_id); }
+      m.set(p, entry);
+    }
+    return m;
+  });
+
   // ---- ingest ----
   // Chromium + Firefox + Safari all accept webkitdirectory. ZIP archives are
   // NOT unpacked in the browser (same hard rule as the mockup); the operator
@@ -166,7 +183,15 @@
       <header>
         <span class="n">.</span>
         <span class="label">Loaded files</span>
-        <span class="hint">{files.length ? `${rootName}/` : 'no folder loaded'}</span>
+        <span class="hint">
+          {#if files.length && result}
+            {[...perFile.values()].filter((p) => p.matched > 0).length} of {stats.textFiles} text files matched by a rule
+          {:else if files.length}
+            {rootName}/
+          {:else}
+            no folder loaded
+          {/if}
+        </span>
       </header>
       {#if !files.length}
         <div class="placeholder">
@@ -176,10 +201,25 @@
       {:else}
         <ol class="filelist mono">
           {#each files as f}
-            <li class:binary={f.binary} title={f.reason ?? ''}>
+            {@const pf = perFile.get(f.path)}
+            <li
+              class:binary={f.binary}
+              class:hit={pf && pf.matched > 0}
+              class:scanned={pf && pf.matched === 0 && pf.evaluated > 0}
+              class:unscanned={result && !pf && !f.binary}
+              title={pf && pf.matchedRules.length ? pf.matchedRules.join(', ') : (f.reason ?? '')}
+            >
               <span class="path">{f.path}</span>
               <span class="size">{fmtBytes(f.size)}</span>
-              {#if f.binary}<span class="tag">binary</span>{/if}
+              {#if f.binary}
+                <span class="tag">binary</span>
+              {:else if pf && pf.matched > 0}
+                <span class="tag ok">{pf.matched}/{pf.evaluated} hit</span>
+              {:else if pf}
+                <span class="tag muted">0/{pf.evaluated}</span>
+              {:else if result}
+                <span class="tag muted">no rule</span>
+              {/if}
             </li>
           {/each}
         </ol>
@@ -237,13 +277,14 @@
             </div>
             <table class="trace">
               <thead>
-                <tr><th>Layer</th><th>Rule</th><th>Family</th><th>Pri</th><th>Hit</th><th>Why</th></tr>
+                <tr><th>Layer</th><th>Rule</th><th>File</th><th>Family</th><th>Pri</th><th>Hit</th><th>Why</th></tr>
               </thead>
               <tbody>
                 {#each result.evaluations as ev}
                   <tr class:matched={ev.matched} class:miss={!ev.matched}>
                     <td class="mono muted">{ev.layer === 'container' ? 'L1' : 'L3'}</td>
                     <td class="mono id">{ev.rule_id}</td>
+                    <td class="mono muted file-cell">{ev.file_path ?? (ev.layer === 'container' ? '(folder)' : '')}</td>
                     <td class="mono muted">{ev.family}</td>
                     <td class="mono muted n">{ev.priority}</td>
                     <td class="status"><span class="dot" class:on={ev.matched}></span></td>
@@ -328,9 +369,15 @@
   }
   .filelist li:last-child { border-bottom: none; }
   .filelist li.binary { color: var(--text-faint); }
+  .filelist li.hit { border-left: 2px solid var(--accent-text); background: var(--accent-fill); }
+  .filelist li.hit .path { color: var(--accent-text); }
+  .filelist li.scanned { border-left: 2px solid var(--border-strong); }
+  .filelist li.unscanned { color: var(--text-faint); }
   .filelist .path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .filelist .size { color: var(--text-faint); font-size: var(--fs-11); }
   .filelist .tag { font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .filelist .tag.ok { color: var(--accent-text); border-color: var(--accent); background: var(--accent-fill); }
+  .filelist .tag.muted { color: var(--text-faint); }
 
   .result-body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 
@@ -360,6 +407,7 @@
   .trace .muted { color: var(--text-muted); }
   .trace .id { color: var(--accent-text); }
   .trace td.n { text-align: right; width: 50px; }
+  .trace td.file-cell { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .trace td.status { width: 40px; text-align: center; }
   .trace .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
   .trace .dot.on { background: var(--accent-text); }

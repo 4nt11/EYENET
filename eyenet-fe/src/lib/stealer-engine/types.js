@@ -144,6 +144,7 @@
  * @property {number}  priority
  * @property {Record<string,string|number>} [fields]
  * @property {string}  [reason]   - set when matched=false, for workbench UX
+ * @property {string}  [file_path] - content-layer only; the file this evaluation ran against
  */
 
 export {};

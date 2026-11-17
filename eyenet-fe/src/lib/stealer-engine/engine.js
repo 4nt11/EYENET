@@ -77,6 +77,7 @@ export function runRules(rules, folder) {
     for (const file of folder.files) {
       if (!matchGlob(glob, file.path)) continue;
       const ev = evalRule(r, { kind: 'content', input: file });
+      ev.file_path = file.path;
       evaluations.push(ev);
       if (ev.matched && ev.fields) Object.assign(merged, ev.fields);
     }

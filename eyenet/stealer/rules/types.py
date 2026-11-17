@@ -138,6 +138,7 @@ class EvalResult:
     matched: bool
     fields: dict[str, Any] = field(default_factory=dict)
     reason: str | None = None
+    file_path: str | None = None  # content-layer only; the file this evaluation ran against
 
 
 @dataclass(slots=True)
