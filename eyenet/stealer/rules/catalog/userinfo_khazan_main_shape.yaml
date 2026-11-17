@@ -1,0 +1,72 @@
+id: userinfo_khazan_main_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 80
+path_glob: "**UserInformation.txt"
+description: >
+  UserInformation.txt - dominant Khazan cluster shape (49 of 55
+  files in khazan2). Distinguished by the 'Version Build:' key and
+  the '-------------' section separator between system and user
+  fields.
+
+  Headliner fields:
+
+    Traffic         NAMED affiliate / traffic-source tag ('ponton402',
+                    not a hex blob). Operator-assigned marker that
+                    clusters victims to the same ad campaign or
+                    forum thread. Excellent cross-victim JOIN key
+                    for a single operator's reach.
+
+    Version Build   stealer version string. Correlate build drift
+                    across the corpus to the operator release
+                    schedule.
+
+    HWID            16-hex host identifier. The join key for
+                    'same machine appearing in multiple dumps'.
+
+    Admin Group     TRUE / FALSE. Elevated execution unlocks
+                    stronger persistence.
+
+    Integrity       Windows integrity level (High / Medium / Low).
+                    'High' + 'Admin Group: TRUE' is the elevated
+                    worst-case.
+
+    Country / IP    egress geolocation + IP
+    Domain Name     'WORKGROUP' == home. A real domain string ==
+                    AD-joined, escalate priority.
+
+    Date format     'DD/MM/YY HH:MM' - European/LATAM convention,
+                    reinforces the Spanish/Portuguese locale skew
+                    of this cluster.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - Log date
+    - Traffic
+    - Version Build
+    - HWID
+extract:
+  keys:
+    Log date: ui_log_date
+    Traffic: ui_traffic_affid
+    Version Build: ui_build_version
+    HWID: ui_hwid
+    Country: ui_country
+    IP: ui_egress_ip
+    System Language: ui_system_lang
+    Processor: ui_cpu
+    Installed RAM: ui_memory
+    Operation System: ui_os
+    Graphics card: ui_gpu
+    Computer Name: ui_computer
+    Domain Name: ui_domain
+    User Name: ui_user_name
+    Admin Group: ui_admin_group
+    Integrity: ui_integrity
+    TimeZone: ui_timezone
+    UserLanguage: ui_user_lang
+    Keyboard Language: ui_keyboard_lang
+    Display Resolution: ui_screen

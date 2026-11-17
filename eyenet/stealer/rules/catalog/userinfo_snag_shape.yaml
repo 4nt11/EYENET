@@ -1,0 +1,64 @@
+id: userinfo_snag_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 80
+path_glob: "**UserInformation.txt"
+description: >
+  UserInformation.txt - 'Snag' / Khazan-build cluster shape.
+  Dominant variant in khazan2 (50 of 55 UserInfo files). Carries
+  three fields the other two shapes do not:
+
+    Build ID / Build Version / Build Comment
+                   ATTACKER-LEFT INTERNAL RELEASE NOTES. Example:
+                     Build ID: 9TxFRZ9zaLibdaDSCUzn
+                     Build Version: 0.26.5
+                     Build Comment: Snag comeback 23.01.2025
+                   Build ID clusters victims to a single operator
+                   release. Build Comment often reveals the
+                   attacker's internal naming for the fork (here:
+                   'Snag') and their release schedule.
+
+    Admin rights   true/false. When 'true' the stealer ran
+                   ELEVATED, which unlocks the more durable
+                   persistence paths (Registry Run, Scheduled Task
+                   with SYSTEM principal, service install).
+
+    Active window  what window title had focus at capture time.
+                   Often blank; when populated reveals what the
+                   victim was doing at the exact moment of
+                   exfiltration (browsing a specific site, having
+                   a specific Discord DM open, playing a specific
+                   game).
+
+  Standard fields: User time, HWID (32-hex hash), PC Name, User
+  Name ('DOMAIN\\\\user' format), CPU, GPU, Memory ('36 GB' not MB),
+  OS, Build Path, IP, GEO (2-letter country), Resolution (comma-
+  separated for multi-monitor).
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - HWID
+    - Build ID
+    - Build Version
+extract:
+  keys:
+    User time: ui_capture_time
+    HWID: ui_hwid
+    PC Name: ui_computer
+    User Name: ui_user_name
+    CPU: ui_cpu
+    GPU: ui_gpu
+    Memory: ui_memory
+    OS: ui_os
+    Active window: ui_active_window
+    Build Path: ui_payload_path
+    Build ID: ui_build_id
+    Build Version: ui_build_version
+    Build Comment: ui_build_comment
+    Admin rights: ui_admin_rights
+    IP: ui_egress_ip
+    GEO: ui_country
+    Resolution: ui_screen

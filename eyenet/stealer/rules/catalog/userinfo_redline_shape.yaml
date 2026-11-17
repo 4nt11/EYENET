@@ -1,0 +1,65 @@
+id: userinfo_redline_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 80
+path_glob: "**UserInformation.txt"
+description: >
+  UserInformation.txt - RedLine / StealC cluster shape. 17-field
+  key/value sheet, 'KEY: VALUE' per line. Distinguished from the
+  Lumma-cluster sibling by the presence of 'Log date', 'Traffic',
+  'MachineID', and 'UUID' fields.
+
+  Fields captured:
+    Log date        ISO-ish '2026-07-24 06:34:41' capture time
+    Traffic         hex 'traffic source' / affiliate-ID counter
+    IP              egress IP at capture
+    Country         2-letter country code
+    UserName        Windows user name (NOT hashed in this shape)
+    ComputerName    NetBIOS hostname
+    Operation System  'Windows 10 build 19045' format
+    System / User / Keyboard Language
+                    three independent locale signals; divergence
+                    (eg system=English, keyboard=Persian) == bi-
+                    lingual host
+    TimeZone        'UTC+1:0' or 'UTC-4:0' style
+    MachineID       Windows machine GUID (HKLM\\Software\\
+                      Microsoft\\Cryptography\\MachineGuid)
+    UUID            SMBIOS system UUID from DMI
+    Current Path    stealer binary absolute path.
+                    'C:\\ProgramData\\app_config\\<campaign>\\N.exe'
+                    patterns are CAMPAIGN-CLUSTERING gold - two
+                    victims sharing the EXACT same install path
+                    were infected by the same build.
+    ScreenSize      resolution WxH
+    Processor       CPU model string
+    Installed RAM   decimal MB
+    Graphics card   GPU model(s)
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - Log date
+    - MachineID
+    - UUID
+extract:
+  keys:
+    Log date: ui_log_date
+    Traffic: ui_traffic_affid
+    IP: ui_egress_ip
+    Country: ui_country
+    UserName: ui_user_name
+    ComputerName: ui_computer
+    Operation System: ui_os
+    System Language: ui_system_lang
+    User Language: ui_user_lang
+    Keyboard Language: ui_keyboard_lang
+    TimeZone: ui_timezone
+    MachineID: ui_machine_guid
+    UUID: ui_smbios_uuid
+    Current Path: ui_payload_path
+    ScreenSize: ui_screen
+    Processor: ui_cpu
+    Installed RAM: ui_ram_mb
+    Graphics card: ui_gpu

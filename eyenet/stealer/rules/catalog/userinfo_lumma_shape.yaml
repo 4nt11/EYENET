@@ -1,0 +1,54 @@
+id: userinfo_lumma_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 80
+path_glob: "**UserInformation.txt"
+description: >
+  UserInformation.txt - Lumma-cluster shape. Shorter 10-field
+  key/value sheet, 'KEY: VALUE' per line. Distinguished from the
+  RedLine/StealC-cluster sibling (userinfo_redline_shape) by the
+  absence of 'Log date', 'MachineID', 'UUID' fields - those are
+  the RedLine-cluster tells.
+
+  Fields captured:
+    Computer     victim NetBIOS hostname
+    User         hashed/opaque user identifier (16 hex chars)
+    IP           egress IP at capture time
+    OS           'Windows 11 (Build 22631)' format
+    CPU          vendor + model + core count in one string
+    RAM          decimal MB
+    Screen       resolution WxH
+    Language     'English (United States) [0x0409]' - carries the
+                 Win32 LCID in brackets
+    Keyboards    comma-separated keyboard layout list - two layouts
+                 (eg 'English, Persian') reveals bilingual host
+    Uptime       minutes since boot - 'Uptime: 2162 min' == 36 hours
+                 since reboot, suggests a workstation not a VM
+    Path         ABSOLUTE PATH of the stealer binary at capture
+                 time. 'C:\\Users\\X\\AppData\\Local\\Temp\\...\\payload.exe'
+                 pattern is a Temp-dir staging drop - typical for
+                 double-click infections.
+    AV           installed AV product name
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - Computer
+    - User
+    - Uptime
+extract:
+  keys:
+    Computer: ui_computer
+    User: ui_user_hash
+    IP: ui_egress_ip
+    OS: ui_os
+    CPU: ui_cpu
+    RAM: ui_ram_mb
+    Screen: ui_screen
+    Language: ui_language
+    Keyboards: ui_keyboards
+    Uptime: ui_uptime_min
+    Path: ui_payload_path
+    AV: ui_av
