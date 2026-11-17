@@ -25,6 +25,7 @@ from eyenet.contracts.stealer_events import (
 from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED
 from eyenet.service import ServiceBase
 from eyenet.stealer.clickhouse import ClickHouseCredsSink, ClickHouseRecordsSink, FileAuditSink
+from eyenet.stealer.gotractor_client import GotractorDaemon
 from eyenet.stealer.password import parse_password, password_candidates
 from eyenet.stealer.pipeline import process_archive
 from eyenet.telemetry.logging import get_logger
@@ -62,10 +63,6 @@ class StealerProcessorService(ServiceBase):
         # EYENET_STEALER_DISABLE_GOTRACTOR=1. Rules + families dirs default
         # to the vendored catalog paths; prod overrides via
         # EYENET_STEALER_RULES_DIR / _FAMILIES_DIR.
-        self._records_sink: ClickHouseRecordsSink | None = (
-            None if os.environ.get("EYENET_STEALER_DISABLE_GOTRACTOR") == "1"
-            else ClickHouseRecordsSink()
-        )
         _vendored = Path(__file__).parent / "rules" / "catalog"
         _vendored_families = Path(__file__).parent / "families"
         self._rules_dir = Path(
@@ -73,6 +70,19 @@ class StealerProcessorService(ServiceBase):
         )
         self._families_dir = Path(
             os.environ.get("EYENET_STEALER_FAMILIES_DIR", str(_vendored_families))
+        )
+        _gotractor_disabled = os.environ.get("EYENET_STEALER_DISABLE_GOTRACTOR") == "1"
+        self._records_sink: ClickHouseRecordsSink | None = (
+            None if _gotractor_disabled else ClickHouseRecordsSink()
+        )
+        # One resident gotractor process per service. Prometheus port is
+        # EYENET_GOTRACTOR_METRICS_PORT (default 9091; 0 disables). The
+        # subprocess is started in on_subscribe() so test-time service
+        # construction doesn't spawn it.
+        self._gotractor: GotractorDaemon | None = None if _gotractor_disabled else GotractorDaemon(
+            rules_dir=self._rules_dir,
+            families_dir=self._families_dir,
+            metrics_port=int(os.environ.get("EYENET_GOTRACTOR_METRICS_PORT", "9091")) or None,
         )
         # Scratch space for the (large) archive extraction; cleaned per-archive.
         self._work_root = Path(
@@ -89,8 +99,11 @@ class StealerProcessorService(ServiceBase):
         return self._instance_id
 
     async def on_subscribe(self) -> None:
+        if self._gotractor is not None:
+            self._gotractor.start()
+
         async def _on_captured(_s: str, p: bytes, h: dict[str, str]) -> None:
-            asyncio.create_task(self._process(p, h))  # noqa: RUF006 — fire-and-track below
+            asyncio.create_task(self._process(p, h))  # noqa: RUF006: fire-and-track below
 
         await self._bus.subscribe(
             SUBJECT_STEALER_ATTACHMENT_CAPTURED, _on_captured, queue_group="stealer"
@@ -146,8 +159,7 @@ class StealerProcessorService(ServiceBase):
             source_label=f"attachment:{attachment_id}",
             audit_sink=self._audit_sink,
             records_sink=self._records_sink,
-            rules_dir=self._rules_dir,
-            families_dir=self._families_dir,
+            gotractor=self._gotractor,
         )
         if result.ok:
             await self._storage.set_stealer_processing(
@@ -170,6 +182,8 @@ class StealerProcessorService(ServiceBase):
         self._audit_sink.close()
         if self._records_sink is not None:
             self._records_sink.close()
+        if self._gotractor is not None:
+            self._gotractor.close()
         await super().shutdown()
 
 

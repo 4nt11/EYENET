@@ -11,16 +11,14 @@ out of the service's address space.
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
-import subprocess  # nosec B404: fixed tools (unrar/ulpextract/gotractor), list argv, never a shell
+import subprocess  # nosec B404: fixed tools (unrar/ulpextract), list argv, never a shell
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from eyenet.stealer.extractor import gotractor_path, ulpextract_path
+from eyenet.stealer.extractor import ulpextract_path
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
@@ -31,6 +29,7 @@ if TYPE_CHECKING:
         ClickHouseRecordsSink,
         FileAuditSink,
     )
+    from eyenet.stealer.gotractor_client import GotractorDaemon
 
 _log = get_logger()
 _ULPEXTRACT_COLUMNS = 9  # host,url,login,password,scheme,tld,source,ip_class,source_file
@@ -152,8 +151,7 @@ def process_archive(
     source_label: str,
     audit_sink: FileAuditSink | None = None,
     records_sink: ClickHouseRecordsSink | None = None,
-    rules_dir: Path | str | None = None,
-    families_dir: Path | str | None = None,
+    gotractor: GotractorDaemon | None = None,
 ) -> ProcessResult:
     """Decrypt + extract the archive, run BOTH extractors (ulpextract for the
     legacy TSV creds table, gotractor for the new rule-driven records table),
@@ -192,13 +190,15 @@ def process_archive(
         # v1.3.1 gotractor dual-write. Runs on the ENTIRE extracted tree
         # (not just pw files) because the DSL rules fire on cookies,
         # autofills, bookmarks, credentials_windows, json_v2 metadata,
-        # etc., not only passwords.txt.
+        # etc., not only passwords.txt. Daemon mode: one resident
+        # subprocess per service, we dispatch a 'run' command and stream
+        # the records straight into ClickHouse.
         records = 0
         families: list[str] = []
-        if records_sink is not None:
+        if records_sink is not None and gotractor is not None:
             try:
-                records, families = _gotractor_insert(
-                    records_sink, dest, blob_path, source_label, rules_dir, families_dir,
+                records, families = _gotractor_insert_daemon(
+                    gotractor, records_sink, dest, blob_path, source_label,
                 )
             except Exception as exc:  # noqa: BLE001 - never fail pipeline on gotractor side
                 _log.warning("stealer.gotractor_failed", error=str(exc),
@@ -217,86 +217,59 @@ def process_archive(
         shutil.rmtree(dest, ignore_errors=True)  # never leave a 2 GB tree behind
 
 
-def _gotractor_insert(
+def _gotractor_insert_daemon(
+    daemon: GotractorDaemon,
     sink: ClickHouseRecordsSink,
     dest: Path,
     blob_path: Path,
     source_label: str,
-    rules_dir: Path | str | None,
-    families_dir: Path | str | None,
 ) -> tuple[int, list[str]]:
-    """Spawn gotractor on the extracted tree, stream JSON records into
-    ``stealer.extracted_records``. Returns ``(rows_inserted, family_tags)``.
+    """Dispatch a 'run' command to the resident gotractor daemon, stream
+    the record lines into ``stealer.extracted_records``. Returns
+    ``(rows_inserted, family_tags)``.
 
-    The Python process is the batcher; the Go process is the parser.
-    Records-mode output on gotractor's stdout is one JSON object per line
-    of three kinds: ``verdict`` (container tag), ``record`` (the data),
-    ``truncated`` (soft limit notice, logged). We batch every record
-    into an INSERT every ``_INSERT_BATCH`` rows."""
+    The Python process is the batcher; the Go daemon is the parser.
+    Daemon mode: one resident subprocess for the service lifetime, no
+    per-archive fork. Records stream through a thread-safe queue in
+    GotractorDaemon.run().
+    """
     sink.ensure_schema()
     archive_sha = blob_path.stem  # <sha256>.bin
     victim_folder = dest.name
-    env = {**os.environ}
-    if rules_dir:
-        env["EYENET_STEALER_RULES_DIR"] = str(rules_dir)
-    if families_dir:
-        env["EYENET_STEALER_FAMILIES_DIR"] = str(families_dir)
-    if not env.get("EYENET_STEALER_RULES_DIR") or not env.get("EYENET_STEALER_FAMILIES_DIR"):
-        raise RuntimeError(
-            "gotractor needs EYENET_STEALER_RULES_DIR + EYENET_STEALER_FAMILIES_DIR "
-            "(or pass rules_dir / families_dir to process_archive)"
-        )
-    proc = subprocess.Popen(  # noqa: S603  # nosec B603 - fixed tool, list argv, no shell
-        [gotractor_path(), "--mode=records", "--input", str(dest)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-    )
-    assert proc.stdout is not None  # noqa: S101 - documented API of Popen(stdout=PIPE)
+    stream, done_q = daemon.run(dest, source_label=source_label)
     total = 0
     families: list[str] = []
     batch: list[list[object]] = []
+    for msg in stream:
+        if msg["_kind"] == "verdict":
+            fam = msg.get("family")
+            if fam:
+                families.append(fam)
+            continue
+        # msg["_kind"] == "record"
+        batch.append(
+            [
+                archive_sha,
+                source_label,
+                victim_folder,
+                msg.get("file_path", ""),
+                msg.get("rule_id", ""),
+                msg.get("family", ""),
+                {k: str(v) for k, v in (msg.get("fields") or {}).items()},
+            ]
+        )
+        if len(batch) >= _INSERT_BATCH:
+            total += sink.insert_rows(batch)
+            batch = []
+    total += sink.insert_rows(batch)
     try:
-        for line in proc.stdout:
-            try:
-                d = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            kind = d.get("kind")
-            if kind == "verdict":
-                fam = d.get("family")
-                if fam:
-                    families.append(fam)
-            elif kind == "record":
-                batch.append(
-                    [
-                        archive_sha,
-                        source_label,
-                        victim_folder,
-                        d.get("file_path", ""),
-                        d.get("rule_id", ""),
-                        d.get("family", ""),
-                        {k: str(v) for k, v in (d.get("fields") or {}).items()},
-                    ]
-                )
-                if len(batch) >= _INSERT_BATCH:
-                    total += sink.insert_rows(batch)
-                    batch = []
-            elif kind == "truncated":
-                _log.warning(
-                    "stealer.gotractor_truncated",
-                    rule_id=d.get("rule_id"), file_path=d.get("file_path"),
-                    emitted=d.get("emitted"), total_seen=d.get("total_seen"),
-                )
-        total += sink.insert_rows(batch)
-    finally:
-        proc.stdout.close()
-        proc.wait()
-    _log.info("stealer.gotractor_run", archive=archive_sha, records=total,
-              families=families)
+        done = done_q.get(timeout=5.0)
+        _log.info("stealer.gotractor_run", archive=archive_sha, records=total,
+                  families=families, wall_ms=done.wall_ms,
+                  rules_fired=done.rules_fired)
+    except Exception:  # noqa: BLE001
+        _log.info("stealer.gotractor_run", archive=archive_sha, records=total,
+                  families=families)
     return total, families
 
 
