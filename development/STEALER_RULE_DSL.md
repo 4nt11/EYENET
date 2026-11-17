@@ -289,11 +289,20 @@ Extraction mirrors JSON.
 match:
   type: yaml
   requires_keys: [Build, HWID]
+  strip_before: "Build:"   # optional: slice text from first occurrence
 extract:
   paths:
     hwid: $.HWID
     build: $.Build
 ```
+
+`strip_before` (optional, literal string): when set, the matcher locates
+the first occurrence of the literal in `input.text` and parses the
+substring from that offset onward. Lets us tolerate stealer banner
+lines prepended above the real YAML document (Khazan `Info.txt` ships
+two branded lines before the `build:` key). If the marker is not
+found, the match fails. Parity-tested across all three engines via
+fixture `yaml_info_banner_strip`.
 
 Semantics: context-free (safe subset).
 

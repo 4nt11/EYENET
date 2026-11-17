@@ -931,10 +931,20 @@ def _xml_eval_path(el: _XMLElement, expr: str) -> str | None:
 def match_yaml(
     m: YamlMatch, ex: ExtractSpec | None, inp: ContentInput,
 ) -> dict[str, Any] | None:
+    text = inp.text
+    # Optional banner strip: slice from first occurrence of literal marker.
+    # Lets us parse stealer Info.txt files that prepend branding above
+    # the real YAML document.
+    marker = m.get("strip_before")
+    if marker:
+        idx = text.find(marker)
+        if idx < 0:
+            return None
+        text = text[idx:]
     try:
         # YAML 1.2 Core schema (see _YAML12SafeLoader above): `yes`/`no`/`on`/`off`
         # stay as strings to match js-yaml and preserve forensic correctness.
-        doc = yaml.load(inp.text, Loader=_YAML12SafeLoader)
+        doc = yaml.load(text, Loader=_YAML12SafeLoader)
     except yaml.YAMLError:
         return None
     if not isinstance(doc, dict):

@@ -693,11 +693,20 @@ function xmlUnescape(s) {
 }
 
 export function matchYaml(m, ex, input) {
+  let text = input.text;
+  // Optional banner strip: slice from first occurrence of literal marker.
+  // Lets us parse stealer Info.txt files that prepend branding above
+  // the real YAML document.
+  if (m.strip_before) {
+    const idx = text.indexOf(m.strip_before);
+    if (idx < 0) return null;
+    text = text.slice(idx);
+  }
   let doc;
   try {
     // js-yaml's default schema is the safe one: JSON-equivalent tag subset,
     // no code execution, no !!js/function. Equivalent to Python's safe_load.
-    doc = yamlLoad(input.text);
+    doc = yamlLoad(text);
   } catch {
     return null;
   }

@@ -1,0 +1,63 @@
+id: stealer_info_yaml
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 70
+path_glob: "**Info.txt"
+description: >
+  Khazan / Lumma-family Info.txt victim-fingerprint sheet. Standard
+  YAML document that the stealer self-produces at capture time. One
+  record per file.
+
+  CTI-grade content:
+
+    build.* : the stealer's own self-report. Build date + tag (e.g.
+              'pup'), the AutoIt3 loader path (gold for DFIR replay),
+              elevation state, egress IP + country + capture time.
+
+    os.*    : Windows version, timezone, locale, install date,
+              computer / user / NetBIOS / hostname, domain membership,
+              anti-virus roster (we lift the first AV entry as the
+              canonical one).
+
+    hardware.* : motherboard + CPU + RAM + GPU + display. Reads
+                 like an asset-inventory row - priceless when
+                 attributing a reused machine across multiple
+                 breaches.
+
+  The first-element indexing on hardware.cpu / hardware.ram / gpu
+  and os.anti-virus is deliberate: these are near-always 1-element
+  lists in practice, and a single flat extraction keeps the record
+  one-row (no pivot needed).
+match:
+  type: yaml
+  strip_before: "build:"
+  requires_keys: [build, os, hardware]
+extract:
+  paths:
+    build_date: $.build.date
+    build_tag: $.build.tag
+    build_loader_path: $.build.path
+    build_elevated: $.build.elevated
+    build_egress_ip: $.build.ip-address
+    build_country: $.build.country
+    build_capture_time: $.build.time
+    os_version: $.os.version
+    os_timezone: $.os.time-zone
+    os_local_date: $.os.local-date
+    os_install_date: $.os.install-date
+    os_language: $.os.language
+    os_computer_name: $.os.computer-name
+    os_user_name: $.os.user-name
+    os_netbios: $.os.netbios
+    os_domain: $.os.domain
+    os_hostname: $.os.hostname
+    os_av_name: $.os.anti-virus[0].name
+    os_av_state: $.os.anti-virus[0].state
+    hw_motherboard_vendor: $.hardware.motherboard.manufacturer
+    hw_motherboard_product: $.hardware.motherboard.product
+    hw_cpu_vendor: $.hardware.cpu[0].manufacturer
+    hw_cpu_product: $.hardware.cpu[0].product
+    hw_ram_size: $.hardware.ram[0].size
+    hw_gpu: $.hardware.gpu[0]
+    hw_display: $.hardware.display

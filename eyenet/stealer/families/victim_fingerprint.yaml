@@ -1,0 +1,32 @@
+slug: victim_fingerprint
+name: Victim system fingerprint (Info.txt / System.txt)
+status: active
+first_seen_year: 2019
+aliases: [info, system, host-info]
+signature_files:
+  - Info.txt
+  - System.txt
+  - UserInformation.txt
+loaders: []
+distribution_channels:
+  - inside every stealer log; the first file an analyst opens
+references:
+  - title: Lumma / RedLine / StealC victim-fingerprint sheets
+    url: https://any.run/malware-trends/lumma
+notes: >
+  Stealers self-produce a victim-fingerprint sheet alongside the
+  credential dumps. Format varies by family:
+
+    Lumma / Khazan: YAML with `build:` / `os:` / `hardware:` top
+                    keys. Khazan prepends two branded banner lines
+                    which must be stripped before parsing (see
+                    rule stealer_info_yaml, match.strip_before).
+    StealC:         INI with [Hardware] / [Software] / [Browsers]
+                    sections.
+    RedLine:        legacy key: value plaintext (no section header).
+
+  Contents are gold for triage: computer name, user name, locale,
+  timezone, egress IP + country, AV roster, motherboard + CPU + RAM
+  + GPU + display. Cross-victim correlation often lands on the
+  motherboard product + install date pair (same machine repeatedly
+  owned over time).

@@ -531,8 +531,19 @@ func jsonExtractRecord(value any, keyName string, paths map[string]any) map[stri
 // default, so `Country: NO` stays the string "NO" (parity with js-yaml
 // after the fix). No special loader needed.
 func MatchYAML(m map[string]any, ex map[string]any, inp ContentInput) map[string]any {
+	text := inp.Text
+	// Optional banner strip: slice from first occurrence of literal marker.
+	// Lets us parse stealer Info.txt files that prepend branding above
+	// the real YAML document.
+	if marker, _ := m["strip_before"].(string); marker != "" {
+		idx := strings.Index(text, marker)
+		if idx < 0 {
+			return nil
+		}
+		text = text[idx:]
+	}
 	var doc any
-	if err := yaml.Unmarshal([]byte(inp.Text), &doc); err != nil {
+	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
 		return nil
 	}
 	asMap, ok := doc.(map[string]any)

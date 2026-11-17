@@ -1,0 +1,26 @@
+id: yaml_info_banner_strip
+version: 1
+layer: content
+family: generic
+priority: 100
+path_glob: Info.txt
+description: >
+  Khazan Info.txt format: two banner lines + blank + real YAML doc.
+  strip_before: "build:" slices from the first real key. Verifies
+  array indexing, dashed keys, and scalar type preservation across
+  all three engines.
+match:
+  type: yaml
+  strip_before: "build:"
+  requires_keys: [build, os, hardware]
+extract:
+  paths:
+    build_tag: $.build.tag
+    build_elevated: $.build.elevated
+    build_country: $.build.country
+    os_version: $.os.version
+    os_user_name: $.os.user-name
+    os_av_name: $.os.anti-virus[0].name
+    hw_cpu_product: $.hardware.cpu[0].product
+    hw_gpu: $.hardware.gpu[0]
+    hw_display: $.hardware.display
