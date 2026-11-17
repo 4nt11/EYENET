@@ -555,7 +555,7 @@
   .topbar .saved { color: var(--accent-text); font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; }
   .topbar .errbar { color: var(--red-text); font-family: var(--font-mono); font-size: var(--fs-11); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 16px; align-items: flex-start; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: flex-start; }
   @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
 
   .editor { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -576,7 +576,9 @@
     letter-spacing: var(--tracking-data); color: var(--text);
     background: var(--surface);
     overflow: auto; flex: 1;
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .empty { padding: 40px; text-align: center; color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-13); border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
