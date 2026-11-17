@@ -52,7 +52,7 @@ export const NAV = [
         children: [
           { slug: 'stealer-families', label: 'Families', href: '/tuning/stealer/families', built: true, desc: 'Family catalog · system-defined enum sourced from the operator-curated entries' },
           { slug: 'stealer-rules', label: 'Rules library', href: '/tuning/stealer', built: true, desc: 'L1 container / L2 handlers / L3 content rules · enable, reorder, draft' },
-          { slug: 'stealer-workbench', label: 'Workbench', href: '/tuning/stealer/workbench', future: true, desc: 'Load a sample folder · run rules client-side · files never leave the browser' },
+          { slug: 'stealer-workbench', label: 'Workbench', href: '/tuning/stealer/workbench', built: true, desc: 'Load a sample folder · run rules client-side · files never leave the browser' },
           { slug: 'stealer-failures', label: 'Parse failures', href: '/tuning/stealer/failures', future: true, desc: 'Unparsed lines grouped by shape · draft rule from line' },
           { slug: 'stealer-pipeline', label: 'Normalize pipeline', href: '/tuning/stealer/pipeline', future: true, desc: 'Global normalize verbs · per-rule opt-outs' }
         ] }
