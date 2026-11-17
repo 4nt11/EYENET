@@ -1,0 +1,18 @@
+id: processes_plain_exe
+version: 1
+layer: content
+family: victim_processes
+priority: 60
+path_glob: "**rocess*.txt"
+description: >
+  Khazan-default plain process list: one .exe name per line, no PID,
+  no path. Lowest-signal variant. We require the '.exe' suffix so the
+  rule skips the kernel noise ('System', 'Registry', 'Secure System')
+  and any Khazan branding banner lines that happen to share the file.
+  Lower priority than the PID-bearing shapes so the richer variant
+  wins on any hybrid file.
+match:
+  type: regex
+  pattern: '(?m)^(?P<process_name>[A-Za-z][A-Za-z0-9._ -]*\.exe)$'
+extract:
+  fields: [process_name]

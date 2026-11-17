@@ -1,0 +1,45 @@
+slug: victim_processes
+name: Victim process list (Processes.txt / ProcessList.txt)
+status: active
+first_seen_year: 2019
+aliases: [processes, proclist, tasklist]
+signature_files:
+  - Processes.txt
+  - ProcessList.txt
+loaders: []
+distribution_channels:
+  - inside every stealer log alongside Info.txt
+references:
+  - title: Chromium-family stealer anatomy
+    url: https://any.run/malware-trends/redline
+notes: >
+  Running-process snapshot captured at stealer execution time.
+  Four shapes observed across the Khazan corpus:
+
+    block  three-line Name:/PID:/Path: record separated by '==',
+           carries the full image path - gold for masquerading
+           detection (a 'svchost.exe' at C:/Users/public/
+           svchost.exe is not svchost.exe).
+
+    dash   'PID: N - NAME' per line, often preceded by a '═══'
+           banner and 'RUNNING PROCESSES' header.
+
+    bracketed  '[PID] NAME' per line, handles the bracketed-name
+               '[System Process]' kernel entry.
+
+    plain  one process name per line, no PID. The Khazan default.
+           Rule requires the .exe suffix to skip kernel noise and
+           branding banner lines.
+
+  CTI uses:
+
+    * security-tooling fingerprint (EDR agent names, Wazuh,
+      SentinelOne, Sophos, Defender helpers)
+    * wallet / browser / crypto app co-residency at capture time
+    * co-resident RATs / stealers (one victim, multiple families)
+    * masquerading detection (same name, wrong path)
+    * admin + dev tooling presence (RDP, SSH, developer SDKs)
+
+  Khazan2 corpus sweep: 28,482 process records lifted across 126
+  files (plain=69, dash=49, block=5, bracketed=3). 100% shape
+  coverage of the corpus.

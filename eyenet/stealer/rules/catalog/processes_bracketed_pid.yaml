@@ -1,0 +1,15 @@
+id: processes_bracketed_pid
+version: 1
+layer: content
+family: victim_processes
+priority: 80
+path_glob: "**rocess*.txt"
+description: >
+  Bracketed-format process list: '[PID] NAME' per line. Includes the
+  literal bracketed-name special cases '[System Process]' which sits
+  at PID 0 and lacks an image. Mid-signal: PID + name, no image path.
+match:
+  type: regex
+  pattern: '(?m)^\[(?P<pid>\d+)\]\s+(?P<process_name>\S[^\n]*)$'
+extract:
+  fields: [pid, process_name]

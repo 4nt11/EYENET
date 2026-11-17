@@ -1,0 +1,18 @@
+id: processes_block_name_path
+version: 1
+layer: content
+family: victim_processes
+priority: 90
+path_glob: "**rocess*.txt"
+description: >
+  Block-format process list: three-line record 'Name: X' / 'PID: N'
+  / 'Path: C:\\...' separated by '==' lines. Richest variant because
+  it carries the full image path (gold for persistence / masquerading
+  detection: a 'svchost.exe' at 'C:/Users/public/svchost.exe' is not
+  svchost.exe). Regex matcher single-shot per run_rules call, bulk
+  iterates every block in the Workbench.
+match:
+  type: regex
+  pattern: '(?m)^Name:\s*(?P<process_name>[^\n]+)\nPID:\s*(?P<pid>\d+)\nPath:\s*(?P<process_path>[^\n]+)$'
+extract:
+  fields: [process_name, pid, process_path]

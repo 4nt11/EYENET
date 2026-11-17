@@ -1,0 +1,15 @@
+id: processes_dash_pid
+version: 1
+layer: content
+family: victim_processes
+priority: 80
+path_glob: ProcessList.txt
+description: >
+  Dash-format process list parity fixture. Regex matcher single-shot
+  captures the first PID/name pair; bulkParse iterates every record
+  on the Workbench side.
+match:
+  type: regex
+  pattern: '(?m)^PID:\s*(?P<pid>\d+)\s*-\s*(?P<process_name>\S[^\n]*)$'
+extract:
+  fields: [pid, process_name]

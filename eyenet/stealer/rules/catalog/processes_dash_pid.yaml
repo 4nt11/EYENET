@@ -1,0 +1,16 @@
+id: processes_dash_pid
+version: 1
+layer: content
+family: victim_processes
+priority: 80
+path_glob: "**rocess*.txt"
+description: >
+  Dash-format process list: 'PID: N - NAME' per line, often preceded
+  by a '═══' banner and a 'RUNNING PROCESSES' header. Mid-signal:
+  PID + name, no image path. Rare half-form 'PID: N' (access-denied
+  rows with no name) is intentionally NOT captured here.
+match:
+  type: regex
+  pattern: '(?m)^PID:\s*(?P<pid>\d+)\s*-\s*(?P<process_name>\S[^\n]*)$'
+extract:
+  fields: [pid, process_name]
