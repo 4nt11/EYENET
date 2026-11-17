@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -23,7 +23,9 @@ def storage() -> BaseRepository:
     return get_repository(in_memory=True)
 
 
-async def _put(storage: BaseRepository, *, sha: str, storage_uri: str | None, category: str | None):
+async def _put(
+    storage: BaseRepository, *, sha: str, storage_uri: str | None, category: str | None
+) -> UUID:
     return await storage.put_attachment(
         AttachmentRow(
             message_id=uuid4(),
@@ -67,6 +69,38 @@ async def test_list_unprocessed_excludes_done_and_unstored(storage: BaseReposito
     assert failed in ids  # retry a failure
     assert done not in ids  # already done
     assert len(ids) == 2  # the unstored + unmarked ones excluded too
+    await storage.close()
+
+
+async def test_list_for_reindex_includes_done(storage: BaseRepository) -> None:
+    """Reindex work-list INCLUDES done rows (opposite of the replay work-list)."""
+    never = await _put(storage, sha="g" * 64, storage_uri="blob/g.bin", category=_CAT)
+    done = await _put(storage, sha="h" * 64, storage_uri="blob/h.bin", category=_CAT)
+    await _put(storage, sha="i" * 64, storage_uri=None, category=_CAT)  # no blob, skip
+    await _put(storage, sha="j" * 64, storage_uri="blob/j.bin", category=None)  # unmarked, skip
+    await storage.set_stealer_processing(done, state=STEALER_DONE, creds_extracted=5)
+
+    rows = await storage.list_stealer_attachments_for_reindex(_CAT, limit=10)
+    ids = {r.id for r in rows}
+    assert never in ids
+    assert done in ids  # the key difference vs list_unprocessed
+    assert len(ids) == 2
+    await storage.close()
+
+
+async def test_list_for_reindex_pages_by_after_id(storage: BaseRepository) -> None:
+    """Keyset pagination: after_id=last_seen returns the next page strictly below it."""
+    ids = [
+        await _put(storage, sha=f"{chr(ord('k') + i)}" * 64, storage_uri="b", category=_CAT)
+        for i in range(3)
+    ]
+    page1 = await storage.list_stealer_attachments_for_reindex(_CAT, limit=2)
+    assert len(page1) == 2
+    page2 = await storage.list_stealer_attachments_for_reindex(
+        _CAT, limit=10, after_id=page1[-1].id
+    )
+    page2_ids = {r.id for r in page2}
+    assert set(ids) - {r.id for r in page1} == page2_ids
     await storage.close()
 
 

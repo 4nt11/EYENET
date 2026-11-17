@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -258,7 +259,13 @@ def _make_trace_context() -> TraceContext:
 
 
 _COLLECTOR_TYPES = (
-    "telegram-stub", "telegram", "matrix-stub", "matrix", "forum", "discord", "stub"
+    "telegram-stub",
+    "telegram",
+    "matrix-stub",
+    "matrix",
+    "forum",
+    "discord",
+    "stub",
 )
 # `stub` is the legacy alias for `telegram-stub` — kept for one release to
 # avoid breaking operator scripts written against M1/M2 docs.
@@ -802,7 +809,12 @@ def stealer_processor_run(  # pragma: no cover
 
 @app.command("stealer-reprocess-local")
 def stealer_reprocess_local(  # pragma: no cover
-    archive: Path = typer.Argument(..., exists=True, readable=True, help="Path to the stealer archive (.rar / .zip / ...) to process."),
+    archive: Path = typer.Argument(
+        ...,
+        exists=True,
+        readable=True,
+        help="Path to the stealer archive (.rar / .zip / ...) to process.",
+    ),
     password: list[str] = typer.Option(
         [],
         "--password",
@@ -815,9 +827,11 @@ def stealer_reprocess_local(  # pragma: no cover
         help="Value written to stealer.creds.source for provenance of this local run.",
     ),
     work_root: Path = typer.Option(
-        Path("/tmp/eyenet-local-ulp"),  # noqa: S108 - operator-chosen scratch dir
+        Path("/var/lib/eyenet/stealer-work"),
         "--work-root",
-        help="Scratch directory for the decrypted archive tree (cleaned on exit).",
+        help="Scratch directory for the decrypted archive tree (cleaned on exit)."
+        " Default is disk-backed; do NOT point at /tmp (tmpfs/RAM-backed on most"
+        " distros, OOMs the host on multi-GB archives).",
     ),
 ) -> None:
     """Run the full stealer pipeline against ONE local archive end-to-end.
@@ -860,8 +874,10 @@ def stealer_reprocess_local(  # pragma: no cover
 
     # The pipeline derives archive_sha256 for file_audit from blob_path.stem;
     # symlink the archive to <sha>.bin so it sees the expected naming without
-    # us copying a 2 GB blob.
-    stage_root = Path(tempfile.mkdtemp(prefix="eyenet-local-reprocess-"))
+    # us copying a 2 GB blob. Stage root lives under work_root so a misconfigured
+    # /tmp default can't drag a symlink dir onto tmpfs either.
+    work_root.mkdir(parents=True, exist_ok=True)
+    stage_root = Path(tempfile.mkdtemp(dir=work_root, prefix="eyenet-local-reprocess-"))
     stage_blob = stage_root / f"{archive_sha}.bin"
     stage_blob.symlink_to(archive.resolve())
 
@@ -895,14 +911,178 @@ def stealer_reprocess_local(  # pragma: no cover
     typer.echo("")
     typer.echo("  Inspect the results in ClickHouse:")
     typer.echo(
-        f"    SELECT count() FROM stealer.creds WHERE source = '{source_label}';"
+        f"    SELECT count() FROM stealer.creds WHERE source = '{source_label}';"  # noqa: S608  # nosec B608
     )
     typer.echo(
-        f"    SELECT * FROM stealer.file_audit WHERE archive_sha256 = '{archive_sha}' LIMIT 20;"
+        f"    SELECT * FROM stealer.file_audit WHERE archive_sha256 = '{archive_sha}' LIMIT 20;"  # noqa: S608  # nosec B608
     )
     typer.echo(
-        "    SELECT * FROM stealer.file_audit_per_archive WHERE archive_sha256"
-        f" = '{archive_sha}';"
+        f"    SELECT * FROM stealer.file_audit_per_archive WHERE archive_sha256 = '{archive_sha}';"  # noqa: S608  # nosec B608
+    )
+
+
+async def _reindex_one(  # pragma: no cover
+    att: Any,
+    *,
+    storage: Any,
+    creds_sink: Any,
+    audit_sink: Any,
+    records_sink: Any,
+    gotractor: Any,
+    work_root: Path,
+) -> tuple[bool, str]:
+    """Reindex one attachment. Returns (ok, status_line) for the caller to print."""
+    from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED  # noqa: PLC0415
+    from eyenet.stealer.password import (  # noqa: PLC0415
+        parse_password,
+        password_candidates,
+    )
+    from eyenet.stealer.pipeline import process_archive  # noqa: PLC0415
+
+    msg = await storage.get_message(att.message_id)
+    body = getattr(msg, "body", "") or ""
+    candidates = password_candidates(parse_password(body))
+    try:
+        result = process_archive(
+            blob_path=Path(att.storage_uri) if att.storage_uri else Path(),
+            password_candidates=candidates,
+            work_root=work_root,
+            sink=creds_sink,
+            source_label=f"reindex:{att.id}",
+            audit_sink=audit_sink,
+            records_sink=records_sink,
+            gotractor=gotractor,
+        )
+    except OSError as exc:
+        await storage.set_stealer_processing(
+            att.id, state=STEALER_FAILED, error=f"reindex crash: {exc}"
+        )
+        return False, f"CRASH: {exc}"
+    if result.ok:
+        await storage.set_stealer_processing(
+            att.id, state=STEALER_DONE, creds_extracted=result.creds_inserted
+        )
+        return True, (
+            f"ok creds={result.creds_inserted}"
+            f" records={result.records_inserted}"
+            f" families={','.join(result.gotractor_families)}"
+        )
+    await storage.set_stealer_processing(att.id, state=STEALER_FAILED, error=result.error)
+    return False, f"FAIL: {result.error}"
+
+
+@app.command("stealer-reindex")
+def stealer_reindex(  # noqa: PLR0915  # pragma: no cover
+    data_dir: Path | None = typer.Option(None, "--data-dir"),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        help="Max archives to process this run. Paginates in pages of 50 when --all is passed.",
+    ),
+    all_: bool = typer.Option(
+        False, "--all", help="Sweep the whole corpus, keyset-paged, up to --limit rows."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List the attachments that WOULD be reindexed and exit."
+    ),
+    skip_done: bool = typer.Option(
+        False, "--skip-done", help="Skip attachments already marked DONE."
+    ),
+    work_root: Path = typer.Option(
+        Path("/var/lib/eyenet/stealer-work"),
+        "--work-root",
+        help="Scratch root for archive extraction.",
+    ),
+) -> None:
+    """Walk every stored stealer archive and re-run the extraction pipeline against it.
+
+    Rule-catalog bumps, new wallet families, the v1.3.3 victim_profiles MV and the v1.3.4
+    monitored_domains watchlist surface against the EXISTING corpus only if the extractor
+    is re-run or the materialized views get a chance to backfill. The MVs backfill
+    idempotently on API boot via ensure_schema(); this CLI closes the other half of the
+    loop by re-running gotractor over on-disk archives. Serial on purpose: multi-GB
+    extractions dominate the box, parallel shreds disk + CPU.
+    """
+    from eyenet.contracts.group import STEALER_LOG_CATEGORY  # noqa: PLC0415
+    from eyenet.models.stealer import STEALER_DONE  # noqa: PLC0415
+    from eyenet.stealer.clickhouse import (  # noqa: PLC0415
+        ClickHouseCredsSink,
+        ClickHouseRecordsSink,
+        FileAuditSink,
+    )
+    from eyenet.stealer.gotractor_client import GotractorDaemon  # noqa: PLC0415
+
+    # Synchronous setup OUTSIDE the event loop: one-shot Path resolution + sink
+    # + daemon construction. Keeps _main() free of async-unsafe FS calls.
+    vendored = Path(__file__).resolve().parents[1] / "stealer"
+    rules_dir = Path(
+        os.environ.get("EYENET_STEALER_RULES_DIR", str(vendored / "rules" / "catalog"))
+    )
+    families_dir = Path(os.environ.get("EYENET_STEALER_FAMILIES_DIR", str(vendored / "families")))
+    creds_sink = None if dry_run else ClickHouseCredsSink()
+    audit_sink = None if dry_run else FileAuditSink()
+    records_sink = None if dry_run else ClickHouseRecordsSink()
+    gotractor: GotractorDaemon | None = None
+    if not dry_run:
+        gotractor = GotractorDaemon(
+            rules_dir=rules_dir, families_dir=families_dir, metrics_port=None
+        )
+        gotractor.start()
+        work_root.mkdir(parents=True, exist_ok=True)
+
+    async def _main() -> tuple[int, int, int]:
+        cfg = RuntimeConfig.from_env(data_dir=data_dir)
+        storage = get_repository(data_dir=cfg.data_dir)
+        processed = succeeded = skipped = 0
+        after_id: UUID | None = None
+        try:
+            while processed < limit:
+                page_size = min(50, limit - processed)
+                page = await storage.list_stealer_attachments_for_reindex(
+                    STEALER_LOG_CATEGORY, limit=page_size, after_id=after_id
+                )
+                if not page:
+                    break
+                for att in page:
+                    after_id = att.id
+                    if skip_done:
+                        existing = await storage.get_stealer_processing(att.id)
+                        if existing is not None and existing.state == STEALER_DONE:
+                            skipped += 1
+                            continue
+                    processed += 1
+                    if dry_run:
+                        typer.echo(f"  would reindex attachment={att.id} blob={att.storage_uri}")
+                        continue
+                    typer.echo(f"[{processed}] attachment={att.id} blob={att.storage_uri}")
+                    ok, line = await _reindex_one(
+                        att,
+                        storage=storage,
+                        creds_sink=creds_sink,
+                        audit_sink=audit_sink,
+                        records_sink=records_sink,
+                        gotractor=gotractor,
+                        work_root=work_root,
+                    )
+                    if ok:
+                        succeeded += 1
+                    typer.echo(f"  {line}")
+                if not all_ or processed >= limit:
+                    break
+        finally:
+            await storage.close()
+        return processed, succeeded, skipped
+
+    try:
+        processed, succeeded, skipped = asyncio.run(_main())
+    finally:
+        for closer in (creds_sink, audit_sink, records_sink, gotractor):
+            if closer is not None:
+                closer.close()
+    verb = "would reindex" if dry_run else "reindexed"
+    typer.echo(
+        f"done: {verb} {processed} attachments"
+        f" ({succeeded} ok, {processed - succeeded} failed), skipped {skipped}"
     )
 
 

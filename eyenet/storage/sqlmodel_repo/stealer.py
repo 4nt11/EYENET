@@ -17,9 +17,7 @@ from ._helpers import safe_session
 
 
 class StealerMixin:
-    async def get_stealer_processing(
-        self, attachment_id: UUID
-    ) -> StealerProcessingRow | None:
+    async def get_stealer_processing(self, attachment_id: UUID) -> StealerProcessingRow | None:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             row = await session.get(StealerProcessingTable, attachment_id)
             if row is None:
@@ -53,10 +51,10 @@ class StealerMixin:
     async def list_unprocessed_stealer_attachments(
         self, category: str, *, limit: int
     ) -> list[AttachmentRow]:
-        """Stealer-marked attachments WITH a blob that still need processing — the
+        """Stealer-marked attachments WITH a blob that still need processing: the
         startup replay work-list. Excludes rows already ``done``; includes never-tried
         and previously-``failed``/``running`` (retry). Newest-first (id DESC = uuid7).
-        Generic LEFT JOIN — no dialect leak."""
+        Generic LEFT JOIN, no dialect leak."""
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
             stmt = (
                 select(AttachmentTable)
@@ -74,6 +72,25 @@ class StealerMixin:
                 .order_by(col(AttachmentTable.id).desc())
                 .limit(limit)
             )
+            result = await session.exec(stmt)
+            return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
+
+    async def list_stealer_attachments_for_reindex(
+        self, category: str, *, limit: int, after_id: UUID | None = None
+    ) -> list[AttachmentRow]:
+        """Reindex work-list: ALL stealer-marked attachments with a blob,
+        regardless of processing state. Keyset-paged by id DESC so repeated
+        calls with the last-seen ``after_id`` sweep the whole corpus without a
+        growing OFFSET. Generic, no dialect leak."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = (
+                select(AttachmentTable)
+                .where(col(AttachmentTable.category) == category)
+                .where(col(AttachmentTable.storage_uri).is_not(None))
+            )
+            if after_id is not None:
+                stmt = stmt.where(col(AttachmentTable.id) < after_id)
+            stmt = stmt.order_by(col(AttachmentTable.id).desc()).limit(limit)
             result = await session.exec(stmt)
             return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
 

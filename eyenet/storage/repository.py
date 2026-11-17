@@ -987,9 +987,7 @@ class BaseRepository(ABC):
     # --- stealer-log ULP processing state ---
 
     @abstractmethod
-    async def get_stealer_processing(
-        self, attachment_id: UUID
-    ) -> StealerProcessingRow | None:
+    async def get_stealer_processing(self, attachment_id: UUID) -> StealerProcessingRow | None:
         """The ULP processing state for an attachment, or None if never handled."""
 
     @abstractmethod
@@ -1008,7 +1006,16 @@ class BaseRepository(ABC):
         self, category: str, *, limit: int
     ) -> list[AttachmentRow]:
         """Stealer-marked attachments with a blob that still need processing (not
-        done) — the processor's startup replay work-list."""
+        done): the processor's startup replay work-list."""
+
+    @abstractmethod
+    async def list_stealer_attachments_for_reindex(
+        self, category: str, *, limit: int, after_id: UUID | None = None
+    ) -> list[AttachmentRow]:
+        """All stealer-marked attachments with a blob (done, failed, running, or
+        unseen), keyset-paged by id DESC for the reindex CLI. Unlike the replay
+        work-list above, this one deliberately INCLUDES already-done rows so a
+        rule-catalog bump or schema change can replay the whole corpus."""
 
     @abstractmethod
     async def iter_attachment_shells(
