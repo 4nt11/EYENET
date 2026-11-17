@@ -1,0 +1,60 @@
+slug: aware_crypter
+name: AWARE Crypter (commercial FUD packer-as-a-service)
+status: active
+first_seen_year: 2024
+aliases: [aware, aware-cr1, aware-crypter, fud-crypter-service]
+signature_files:
+  - seed.txt
+loaders: []
+distribution_channels:
+  - the attacker's packed stealer binary. AWARE is not a stealer -
+    it's the ARMORING SUPPLIER whose output wraps whichever stealer
+    the attacker is selling (RedLine / Lumma / Vidar / StealC / etc).
+references:
+  - title: AWARE Crypter storefront (observed in khazan2 banners)
+    url: https://aware-cr1.com
+notes: >
+  AWARE is a commercial FUD (Fully UnDetectable) crypter-as-a-service.
+  Attackers subscribe, upload their stealer PE, and get back a packed
+  binary that evades AV signature detection for a billing period.
+
+  Service-level marketing: every packed binary drops a 'seed.txt'
+  calling card at %APPDATA% / wallet-seed-backup paths. The file is
+  768 bytes of repeating banner blocks:
+
+    =====
+      AWARE - #1 Crypto Protection Service
+      FUD Crypter
+      https://aware-cr1.com
+    =====
+
+  Double win for the attacker: AWARE gets free advertising on every
+  victim host; the victim's REAL plaintext seed backup at that path
+  (if any) is DESTROYED by the overwrite.
+
+  CTI uses:
+
+    cross-family attribution  the same banner appearing in RedLine /
+                              Lumma / Vidar / Khazan logs == shared
+                              crypter supplier across those
+                              nominally-distinct campaigns. Groups
+                              victims by armoring service instead of
+                              by the stealer that landed.
+
+    victim-cluster labeling   20% of khazan2 victims (86/439) were
+                              packed with AWARE. Flag these for
+                              distinct triage.
+
+    supply-chain pivot        aware-cr1.com is a live storefront with
+                              login/signup, chat, and support
+                              channels. Known-adversary infra for
+                              tracking, legal takedown targeting,
+                              and (via infiltration) upstream
+                              customer-list leakage.
+
+  The storefront URL is captured structured so artifact ingest can
+  correlate against other corpora where the same crypter brand
+  appears. If AWARE rotates to a new storefront (aware-cr2.com, etc),
+  the rule still fires on the brand-name signature; the URL field
+  then carries the new C2 address and the artifact classifier
+  surfaces the migration.

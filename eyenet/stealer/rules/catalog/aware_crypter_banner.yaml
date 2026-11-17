@@ -1,0 +1,37 @@
+id: aware_crypter_banner
+version: 1
+layer: content
+family: aware_crypter
+priority: 95
+path_glob: "**seed.txt"
+description: >
+  AWARE Crypter calling-card detection. AWARE is a commercial FUD
+  (Fully UnDetectable) packer-as-a-service; attackers who buy their
+  pack-and-sell flow get a branded 'seed.txt' artifact dropped at
+  the wallet-seed path on every infected host. The file is exactly
+  768 bytes, filled with repeating banner blocks:
+
+    =====
+      AWARE - #1 Crypto Protection Service
+      FUD Crypter
+      https://aware-cr1.com
+    =====
+
+  That the file lives at seed.txt is not accidental: it co-opts the
+  canonical wallet-seed-backup filename, which means a victim who
+  had a real plaintext seed stored at this path now has it
+  OVERWRITTEN by the crypter advert. Double win for the attacker:
+  advert branding + destruction of the victim's backup.
+
+  Rule anchors on the banner shape and captures the storefront URL.
+  When this fires, promote the victim to the 'packed_by_aware_crypter'
+  cluster downstream. The same banner across stealer families
+  (RedLine / Lumma / Vidar / Khazan) == shared crypter-service
+  supplier, which is a cross-family attribution signal.
+
+  Khazan2 corpus sweep: 86 of 439 victims (~20%) ship this file.
+match:
+  type: regex
+  pattern: 'AWARE\s*-\s*#1\s*Crypto\s*Protection\s*Service\s*\n\s*FUD\s*Crypter\s*\n\s*(?P<crypter_storefront>https?://\S+)'
+extract:
+  fields: [crypter_storefront]
