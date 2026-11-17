@@ -24,6 +24,22 @@ from eyenet.identity_pool import FileIdentityPool, IdentityFile, IdentityFileEnt
 from eyenet.identity_pool.loader import dump
 from eyenet.storage.factory import get_repository
 
+
+async def _seed_matrix_identity(storage: object, name: str) -> None:
+    """Insert the identity-pool entry into storage so MatrixCollector.on_subscribe
+    standalone-tests path finds a matching DB row (matrix/real.py no longer
+    auto-upserts a `matrix:{identity}` source). Mirrors test_forum_real.py.
+    """
+    from datetime import UTC, datetime
+
+    sid = await storage.upsert_source(  # type: ignore[attr-defined]
+        kind=SourceKind.MATRIX, display_name=f"matrix:{name}", created_at=datetime.now(UTC)
+    )
+    await storage.create_identity(  # type: ignore[attr-defined]
+        name=name, source_id=sid, session_path=f"/dev/null/{name}"
+    )
+
+
 # --- fake nio surface ----------------------------------------------------
 
 
@@ -215,6 +231,7 @@ async def test_on_subscribe_raises_when_required_fields_missing(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="matrix_access_token"):
         await coll.on_subscribe()
@@ -238,6 +255,7 @@ async def test_on_subscribe_raises_when_token_rejected(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="matrix_access_token rejected"):
         await coll.on_subscribe()
@@ -261,6 +279,7 @@ async def test_on_subscribe_raises_when_user_id_mismatch(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="does not match the token"):
         await coll.on_subscribe()
@@ -284,6 +303,7 @@ async def test_on_subscribe_raises_on_homeserver_unreachable(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     with pytest.raises(ValueError, match="did not respond to"):
         await coll.on_subscribe()
@@ -300,6 +320,7 @@ async def test_on_subscribe_wires_callbacks_and_resolves_aliases(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     await coll.on_subscribe()
 
@@ -331,6 +352,7 @@ async def test_ingest_event_publishes_envelope_and_persists(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
 
     captured: list[tuple[str, bytes]] = []
 
@@ -399,6 +421,7 @@ async def test_backfill_refuses_without_monitor_rooms(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     coll = MatrixCollector(
         bus=bus, storage=storage, pool=pool, identity_name="alpha_mx", backfill=True
     )
@@ -438,6 +461,7 @@ async def test_backfill_pages_room_history(tmp_path: Path, monkeypatch: pytest.M
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
 
     captured: list[str] = []
 
@@ -515,6 +539,7 @@ async def test_self_echo_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     captured: list[str] = []
 
     async def _recorder(subject: str, _p: bytes, _h: dict[str, str]) -> None:

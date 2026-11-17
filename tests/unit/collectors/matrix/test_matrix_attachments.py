@@ -64,6 +64,7 @@ async def _setup_collector(
     pool = FileIdentityPool(cfg_path)
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_matrix_identity(storage, "alpha_mx")
     captured: list[bytes] = []
 
     async def _recorder(_subject: str, payload: bytes, _h: dict[str, str]) -> None:
@@ -72,6 +73,18 @@ async def _setup_collector(
     await bus.subscribe("raw.message.>", _recorder)
     coll = MatrixCollector(bus=bus, storage=storage, pool=pool, identity_name="alpha_mx")
     return coll, bus, storage, captured
+
+
+async def _seed_matrix_identity(storage: object, name: str) -> None:
+    """See test_matrix_collector_unit._seed_matrix_identity docstring."""
+    from datetime import UTC, datetime
+
+    sid = await storage.upsert_source(  # type: ignore[attr-defined]
+        kind=SourceKind.MATRIX, display_name=f"matrix:{name}", created_at=datetime.now(UTC)
+    )
+    await storage.create_identity(  # type: ignore[attr-defined]
+        name=name, source_id=sid, session_path=f"/dev/null/{name}"
+    )
 
 
 @pytest.mark.unit
@@ -116,7 +129,7 @@ async def test_cleartext_image_attachment_downloaded_and_persisted(
         assert row.size_bytes == len(payload)
         assert row.storage_uri is not None
         storage_uri = row.storage_uri
-    blob = Path(storage_uri).read_bytes()  # noqa: ASYNC240 — local fs read in test
+    blob = Path(storage_uri).read_bytes()
     assert blob == payload
 
     # Envelope published with has_attachment=True.

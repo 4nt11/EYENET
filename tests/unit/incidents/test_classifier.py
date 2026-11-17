@@ -76,8 +76,19 @@ def test_prefilter_fusion_quiet_on_benign() -> None:
     assert prefilter_labels("gm everyone hows the market today") == set()
 
 
+def _torch_available() -> bool:
+    try:
+        import torch  # type: ignore[import-not-found]  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 @pytest.mark.skipif(
     not (model_dir() / "calibration.json").exists(), reason="no local trained model"
+)
+@pytest.mark.skipif(
+    not _torch_available(), reason="torch not installed in this venv (optional ML dep)"
 )
 def test_classify_end_to_end_when_model_present() -> None:
     from eyenet.incidents.classifier import fired_labels

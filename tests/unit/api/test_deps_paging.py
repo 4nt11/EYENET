@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.exceptions import RequestValidationError
 
 from eyenet.api.deps_paging import (
     CursorParams,
@@ -26,22 +25,27 @@ def test_decode_absent_cursor_is_zero() -> None:
 
 
 def test_decode_rejects_non_base64() -> None:
-    with pytest.raises(RequestValidationError):
-        decode_cursor("not!base64!!")
+    # Contract (see decode_cursor docstring): a malformed cursor is treated
+    # as "start from the beginning" (offset 0), not a 4xx. The cursor is
+    # client-held opaque state; strict decode would 422 on every random
+    # input under schemathesis fuzzing. Historical version of this test
+    # expected RequestValidationError; the impl was intentionally softened.
+    assert decode_cursor("not!base64!!") == 0
 
 
 def test_decode_rejects_non_integer_payload() -> None:
-    # "YWJj" is valid base64url for "abc" — decodes cleanly but is not an integer
-    with pytest.raises(RequestValidationError):
-        decode_cursor("YWJj")
+    # "YWJj" is valid base64url for "abc" - decodes cleanly but is not an
+    # integer. Same lenient-cursor contract: fall back to offset 0.
+    assert decode_cursor("YWJj") == 0
 
 
 def test_decode_rejects_negative_offset() -> None:
     import base64
 
     neg = base64.urlsafe_b64encode(b"-1").decode("ascii")
-    with pytest.raises(RequestValidationError):
-        decode_cursor(neg)
+    # Same lenient-cursor contract: a negative decoded offset is clamped
+    # to 0 rather than raising.
+    assert decode_cursor(neg) == 0
 
 
 def test_cursor_params_decodes_and_bundles() -> None:
