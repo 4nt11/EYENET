@@ -1,0 +1,59 @@
+id: cookies_netscape_tsv
+version: 1
+layer: content
+family: victim_cookies
+priority: 80
+path_glob: "**ookies*.txt"
+description: >
+  Netscape cookies.txt format: seven tab-separated columns per line.
+  This is the de facto session-hijack courier - curl, wget, Postman,
+  and Insomnia all import it natively: 'curl -b stolen_cookies.txt
+  https://target/' and the session replays without password or MFA
+  challenge.
+
+  Columns:
+    0  domain                 '.google.com' / 'accounts.google.com'
+    1  include_subdomains     TRUE / FALSE
+    2  path                   '/' or '/account'
+    3  secure                 TRUE / FALSE
+    4  expires                unix epoch seconds (0 == session only)
+    5  name                   cookie name
+    6  value                  cookie value (session token, JWT, sig)
+
+  Delimiter matcher is single-row by design; the pipeline's bulk
+  ingester walks every line. This rule exists for sample probing
+  and family anchoring.
+
+  Hot cookie-name allowlist (downstream classifier earns its keep):
+
+    Google       OSID, __Secure-OSID, HSID, SSID, APISID, SAPISID,
+                 __Secure-1PSID, __Secure-3PSID, SIDCC, LSID
+    Facebook     c_user, xs, fr, datr
+    X / Twitter  auth_token, ct0, personalization_id
+    Discord      token (the only one that matters)
+    Instagram    sessionid, csrftoken, ds_user_id
+    LinkedIn     li_at, JSESSIONID
+    GitHub       user_session, _gh_sess
+    Reddit       reddit_session
+    Microsoft    ESTSAUTH, ESTSAUTHPERSISTENT, RTFA, MC1
+    AWS          aws-userInfo, aws-creds
+    Cloudflare   __cfduid, cf_clearance
+    Steam        steamLoginSecure
+    Telegram     stel_web_auth
+
+  These are the cookies that matter. The rule captures all; the
+  downstream filter promotes high-value ones to artifact rows.
+match:
+  type: delimiter
+  separator: "\t"
+  min_columns: 7
+  skip_blank: true
+extract:
+  columns:
+    0: cookie_domain
+    1: cookie_include_subdomains
+    2: cookie_path
+    3: cookie_secure
+    4: cookie_expires_epoch
+    5: cookie_name
+    6: cookie_value

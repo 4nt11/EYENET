@@ -1,0 +1,58 @@
+slug: victim_cookies
+name: Chromium / Firefox cookie jar (Netscape cookies.txt)
+status: active
+first_seen_year: 2013
+aliases: [cookies, cookiejar, netscape-cookies]
+signature_files:
+  - Cookies.txt
+  - Cookies/Cookies_*.txt
+  - cookies_*.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer, every Firefox stealer; the single
+    richest file in a victim folder in both volume AND intel density
+references:
+  - title: Netscape cookies.txt format (de facto standard)
+    url: https://curl.se/docs/http-cookies.html
+notes: >
+  Seven tab-separated columns per cookie row:
+
+    domain  include_subdomains  path  secure  expires  name  value
+
+  Native-loaded by curl, wget, Postman, Insomnia, and basically every
+  HTTP client written in the last two decades. One command:
+
+    curl -b stolen_cookies.txt https://target/
+
+  and the victim's session replays with no password, no MFA, no
+  anomaly alert on the target end until the cookie's expiry.
+
+  Khazan2 corpus sweep: 1,926,449 cookies across 3,049 files.
+  104,202 hit a hot-domain allowlist (Google 70,964, LinkedIn 7,251,
+  Twitter 4,966, Instagram 4,639, Facebook 3,656, Reddit 3,369,
+  Microsoft 3,034, Steam 2,515, Discord 1,916, GitHub 1,831).
+  40,851 of those are known session-cookie NAMES.
+
+  Session-cookie name allowlist (what the downstream classifier
+  should promote to artifact rows):
+
+    Google full session family
+      OSID, __Secure-OSID, HSID, SSID, APISID, SAPISID,
+      __Secure-1PSID, __Secure-3PSID, SIDCC, LSID
+    Facebook      c_user, xs, fr, datr
+    X / Twitter   auth_token, ct0, personalization_id
+    Discord       token
+    Instagram     sessionid, csrftoken, ds_user_id
+    LinkedIn      li_at, JSESSIONID
+    GitHub        user_session, _gh_sess
+    Reddit        reddit_session
+    Microsoft     ESTSAUTH, ESTSAUTHPERSISTENT, RTFA
+    Steam         steamLoginSecure
+    Telegram      stel_web_auth
+
+  Expiry-filter at ingest: 'expires' == 0 means session-only, already
+  dead; expires in the past is dead. Live cookies are a scoring field.
+
+  Cross-victim join axis: same cookie VALUE in victim A and victim B
+  (not domain+name, VALUE itself) = tracking-cookie reuse by the same
+  ad network across devices. Cute browser-fingerprint link.

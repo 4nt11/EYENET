@@ -1,0 +1,25 @@
+id: cookies_netscape_tsv
+version: 1
+layer: content
+family: victim_cookies
+priority: 80
+path_glob: Cookies.txt
+description: >
+  Netscape cookies.txt parity fixture. Verifies the 7-column TSV
+  split lands each field in the expected key, including a known
+  session-cookie row (__Secure-OSID) so the downstream classifier
+  can identify it from the structured output.
+match:
+  type: delimiter
+  separator: "\t"
+  min_columns: 7
+  skip_blank: true
+extract:
+  columns:
+    0: cookie_domain
+    1: cookie_include_subdomains
+    2: cookie_path
+    3: cookie_secure
+    4: cookie_expires_epoch
+    5: cookie_name
+    6: cookie_value

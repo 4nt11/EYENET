@@ -1,0 +1,12 @@
+{
+  "family": null,
+  "fields": {
+    "cookie_domain": "accounts.google.com",
+    "cookie_expires_epoch": "1818309043",
+    "cookie_include_subdomains": "FALSE",
+    "cookie_name": "__Secure-OSID",
+    "cookie_path": "/",
+    "cookie_secure": "TRUE",
+    "cookie_value": "g.a000_SyntheticSessionCookieNotARealGrant_AAA"
+  }
+}

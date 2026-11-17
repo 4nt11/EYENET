@@ -1,0 +1,3 @@
+accounts.google.com	FALSE	/	TRUE	1818309043	__Secure-OSID	g.a000_SyntheticSessionCookieNotARealGrant_AAA
+.steampowered.com	TRUE	/	TRUE	1800000000	steamLoginSecure	76561198000000000%7C%7CSyntheticSteamSession
+.github.com	TRUE	/	TRUE	1810000000	user_session	synthetic_gh_session_payload_bytes_only
