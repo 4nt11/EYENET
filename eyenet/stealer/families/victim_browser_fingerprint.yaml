@@ -1,0 +1,60 @@
+slug: victim_browser_fingerprint
+name: Per-browser-profile fingerprint (Summary.txt)
+status: active
+first_seen_year: 2020
+aliases: [browser-summary, profile-fingerprint, sync-tell]
+signature_files:
+  - Summary.txt
+loaders: []
+distribution_channels:
+  - Chromium-family stealers walk every installed browser's
+    profile directory and emit a per-profile summary
+references:
+  - title: Chromium 'User Data' profile layout
+    url: https://source.chromium.org/chromium/chromium/src/+/main:chrome/common/chrome_constants.cc
+notes: >
+  Per-profile stanza shape:
+
+    -- <Browser> -- <Profile> --
+    Language: en-US
+    Version: 150.0.7871.187
+    Path: C:\\Users\\<user>\\AppData\\Local\\Google\\Chrome\\User Data\\Default
+    User Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...
+    Search Engine: Google
+    Extensions: 6
+    Sync: True
+    Last Active: 2026-07-30 12:06:43
+    Theme: Custom Theme
+
+  Each file preceded by a one-line 'Fingerprint: {<JSON>}' with the
+  same content as the human-readable block; we extract the latter.
+
+  Khazan2 corpus sweep: 68 files, 68 profile blocks matched.
+    sync True / False     42 / 26   (62% of victims have sync ON)
+    browser distribution  Chrome 43, Edge 13, Opera 4, Brave 2,
+                          Firefox 2, CocCoc 1, Vivaldi 1
+    language distribution en-US 30, en 7, it-IT 4, id-ID 4, it 3,
+                          en-GB 2, fr 2, vi 2, pt-PT 2
+
+  CTI uses:
+
+    sync-chain hijack     Sync: True means the victim's bookmarks,
+                          history, and saved-passwords are backed
+                          up to their Google / Microsoft account.
+                          Stealing the cookie / refresh token for
+                          that account unlocks the sync backup FROM
+                          ANY DEVICE - a secondary multiplier on
+                          the primary credential grab.
+
+    extension count       baseline for pairing with a per-browser
+                          extension list grab (wallets, password
+                          managers, productivity add-ons).
+
+    userAgent + version   exact build correlates to a Chrome
+                          release channel and OS, pairs with
+                          Info.txt hardware for de-anonymization
+                          on the same machine across captures.
+
+    language + theme      per-profile locale leak (can diverge from
+                          OS-level locale in Info.txt; the browser
+                          profile locale is what sites see).

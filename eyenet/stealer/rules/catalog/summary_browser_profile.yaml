@@ -1,0 +1,52 @@
+id: summary_browser_profile
+version: 1
+layer: content
+family: victim_browser_fingerprint
+priority: 80
+path_glob: "**Summary.txt"
+description: >
+  Per-browser-profile fingerprint. Each profile the stealer found
+  gets a two-stanza record:
+
+    1. 'Fingerprint: {<JSON>}' one-line with browser/profile/system
+       keys (version, UA, path, language, theme, searchEngine,
+       extensions count, syncEnabled, lastActive, platform)
+
+    2. '-- <Browser> -- <Profile> --' header followed by keyvalue
+       lines mirroring the JSON content in human-readable form
+
+  The rule captures the human-readable block because it is easier
+  to key against a stable shape; the Fingerprint JSON is on-disk
+  the raw truth but is a single long line not well-suited to a
+  per-field matcher.
+
+  CTI gold fields:
+    syncEnabled   == True means the victim's Chrome / Edge sync
+                     is live, which means bookmarks / history /
+                     saved-passwords are backed up to their
+                     Google / Microsoft account. Stealing the
+                     cookies for that account unlocks the sync
+                     backup from any new device.
+    lastActive    the last time the profile was used. Clusters
+                     dormant vs daily-driver profiles.
+    extensions    N-extension count. Paired with a separate
+                     Chrome extension list grab, reveals
+                     wallet / password-manager / productivity
+                     tooling.
+    userAgent /
+    version       exact build string. Correlates to a specific
+                     Chrome release channel and OS.
+match:
+  type: regex
+  pattern: '(?m)^Language:\s*(?P<sum_language>[^\n]+)\nVersion:\s*(?P<sum_browser_version>[^\n]+)\nPath:\s*(?P<sum_profile_path>[^\n]+)\nUser Agent:\s*(?P<sum_user_agent>[^\n]+)\nSearch Engine:\s*(?P<sum_search_engine>[^\n]+)\nExtensions:\s*(?P<sum_extensions_count>\d+)\nSync:\s*(?P<sum_sync>True|False)\nLast Active:\s*(?P<sum_last_active>[^\n]+)\nTheme:\s*(?P<sum_theme>[^\n]+)$'
+extract:
+  fields:
+    - sum_language
+    - sum_browser_version
+    - sum_profile_path
+    - sum_user_agent
+    - sum_search_engine
+    - sum_extensions_count
+    - sum_sync
+    - sum_last_active
+    - sum_theme

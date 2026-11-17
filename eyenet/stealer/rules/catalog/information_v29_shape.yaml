@@ -1,0 +1,57 @@
+id: information_v29_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 80
+path_glob: "**/*.txt"
+description: >
+  Information.txt - fifth stealer-info shape (sibling of the four
+  UserInformation shapes). Dominant key: MD5 of the stealer binary
+  itself. 'Version: 2.9' at top is the stealer-build version.
+
+  JACKPOT FIELD - the attacker literally ships their own binary
+  hash:
+
+    MD5: 6669e10c960f6c2297bcd3d5a27412aa
+
+  One click away from MalwareBazaar / VirusTotal lookup. Each
+  distinct MD5 in the corpus is a distinct stealer build; same MD5
+  across victims means same binary dropped them.
+
+  Other distinguishing fields:
+
+    Work Dir      'In memory' == reflective loading (no disk
+                   drop of the real payload, which pairs with the
+                   AWARE Crypter Reflective Loading execution
+                   method). 'C:\\...' path == classic Temp-dir
+                   drop.
+
+    GUID          short Windows UUID segment '{5c1cb694-61f1}'
+    HWID          COMPOSITE host-id combining disk serial, GUID,
+                   and a derived hash. Unique per host.
+    MachineID     Windows machine GUID (HKLM Cryptography key)
+    Date          'DD.MM.YYYY HH:MM:SS' European convention
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - MD5
+    - HWID
+    - Work Dir
+extract:
+  keys:
+    Version: ui_build_version
+    IP: ui_egress_ip
+    Country: ui_country
+    Date: ui_capture_time
+    MachineID: ui_machine_guid
+    GUID: ui_guid
+    HWID: ui_hwid
+    Path: ui_payload_path
+    MD5: ui_payload_md5
+    Work Dir: ui_work_dir
+    Windows: ui_os
+    Computer Name: ui_computer
+    User Name: ui_user_name
+    Display Resolution: ui_screen
