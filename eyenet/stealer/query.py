@@ -415,13 +415,383 @@ class FileAuditReader:
         return out, total, self._page_count(total, limit)
 
 
+# v1.3.3 per-victim artifact reader. Backs the FE drawer.
+#
+# Query design:
+#   - list_cards() reads victim_profiles directly (AggregatingMergeTree with
+#     SAF fields - no FINAL needed because all aggregates are commutative
+#     under merge). Filters are indexed via the set skip indexes on country,
+#     traffic_affid, has_wallet, has_corporate_marker.
+#   - detail() reads one row of victim_profiles plus joins against the
+#     mitre_catalog YAML (loaded once, cached) to render ATT&CK technique
+#     badges. Joins are in Python because the catalog is a small YAML file,
+#     not a CH table.
+#   - file_tree() reads from file_audit (the materialized victim_folder
+#     column has a set skip index for free).
+#   - records() reads from extracted_records with (archive_sha256,
+#     victim_folder) filter. Victim_folder derivation from file_path at
+#     query time because the stored column is broken (pipeline fix pending).
+#   - domains() reads from victim_domains ordered by (domain, archive,
+#     victim) so the (archive, victim) filter scans contiguous granules.
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactCardRow:
+    archive_sha256: str
+    victim_folder: str
+    country: str
+    traffic_affid: str
+    build_version: str
+    creds_count: int
+    cookies_count: int
+    wallet_vaults_count: int
+    has_corporate_marker: bool
+    has_wallet: bool
+    has_crypter_banner: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDetailRow:
+    archive_sha256: str
+    victim_folder: str
+    source: str
+    country: str
+    egress_ip: str
+    user_name: str
+    computer_name: str
+    os_version: str
+    traffic_affid: str
+    build_version: str
+    payload_md5: str
+    work_dir: str
+    creds_count: int
+    cookies_count: int
+    autofills_count: int
+    history_count: int
+    downloads_count: int
+    processes_count: int
+    software_count: int
+    discord_tokens_count: int
+    steam_tokens_count: int
+    google_refresh_count: int
+    localstorage_jwt_count: int
+    wallet_vaults_count: int
+    has_corporate_marker: bool
+    has_webmail_leak: bool
+    has_wallet: bool
+    has_crypter_banner: bool
+    webmail_identity: str
+    first_corporate_marker: str
+    first_wallet_family: str
+    fired_rule_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactFileRow:
+    rel_path: str
+    filename: str
+    size_bytes: int
+    heuristic_kind: str
+    extractor_touched: bool
+    rows_emitted: int
+    sample_head: str
+    file_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactRecordRow:
+    rule_id: str
+    family: str
+    file_path: str
+    fields: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDomainRow:
+    domain: str
+    source_kind: str
+    count: int
+
+
+class StealerArtifactsReader:
+    """Read side of the per-victim artifact drawer."""
+
+    def __init__(self) -> None:
+        self._db = clickhouse_db()
+        self._client: Client | None = None
+
+    def _c(self) -> Client:
+        if self._client is None:
+            self._client = get_clickhouse_client()
+        return self._client
+
+    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+        try:
+            return self._c().query(sql, parameters=params).result_rows
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError(
+                    "stealer.victim_profiles table does not exist yet"
+                ) from exc
+            raise
+
+    @staticmethod
+    def _page_count(total: int, limit: int) -> int:
+        return (total + limit - 1) // limit if total else 0
+
+    def list_cards(
+        self,
+        *,
+        page: int,
+        limit: int,
+        country: str | None = None,
+        traffic_affid: str | None = None,
+        has_wallet: bool | None = None,
+        has_corporate: bool | None = None,
+    ) -> tuple[list[ArtifactCardRow], int, int]:
+        where = ["1"]
+        params: dict[str, object] = {}
+        if country:
+            where.append("country = {country:String}")
+            params["country"] = country
+        if traffic_affid:
+            where.append("traffic_affid = {affid:String}")
+            params["affid"] = traffic_affid
+        if has_wallet is not None:
+            where.append("has_wallet = {hw:UInt8}")
+            params["hw"] = 1 if has_wallet else 0
+        if has_corporate is not None:
+            where.append("has_corporate_marker = {hc:UInt8}")
+            params["hc"] = 1 if has_corporate else 0
+
+        where_sql = " AND ".join(where)
+        offset = (page - 1) * limit
+        params["limit"] = limit
+        params["offset"] = offset
+
+        total_rows = self._rows(
+            f"SELECT count() FROM {self._db}.victim_profiles WHERE {where_sql}",
+            params,
+        )
+        total = int(total_rows[0][0]) if total_rows else 0
+
+        rows = self._rows(
+            f"""
+            SELECT
+                archive_sha256, victim_folder, country, traffic_affid, build_version,
+                creds_count, cookies_count, wallet_vaults_count,
+                has_corporate_marker, has_wallet, has_crypter_banner
+            FROM {self._db}.victim_profiles
+            WHERE {where_sql}
+            ORDER BY (archive_sha256, victim_folder)
+            LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
+            """,
+            params,
+        )
+        out = [
+            ArtifactCardRow(
+                archive_sha256=r[0],
+                victim_folder=r[1],
+                country=r[2],
+                traffic_affid=r[3],
+                build_version=r[4],
+                creds_count=int(r[5]),
+                cookies_count=int(r[6]),
+                wallet_vaults_count=int(r[7]),
+                has_corporate_marker=bool(r[8]),
+                has_wallet=bool(r[9]),
+                has_crypter_banner=bool(r[10]),
+            )
+            for r in rows
+        ]
+        return out, total, self._page_count(total, limit)
+
+    def detail(
+        self, archive_sha256: str, victim_folder: str
+    ) -> ArtifactDetailRow | None:
+        rows = self._rows(
+            f"""
+            SELECT
+                source, country, egress_ip, user_name, computer_name, os_version,
+                traffic_affid, build_version, payload_md5, work_dir,
+                creds_count, cookies_count, autofills_count, history_count,
+                downloads_count, processes_count, software_count,
+                discord_tokens_count, steam_tokens_count, google_refresh_count,
+                localstorage_jwt_count, wallet_vaults_count,
+                has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner,
+                webmail_identity, first_corporate_marker, first_wallet_family
+            FROM {self._db}.victim_profiles
+            WHERE archive_sha256 = {{sha:FixedString(64)}}
+              AND victim_folder = {{vf:String}}
+            LIMIT 1
+            """,
+            {"sha": archive_sha256, "vf": victim_folder},
+        )
+        if not rows:
+            return None
+        r = rows[0]
+        # Pull the distinct rule_ids fired for this victim; drives the
+        # MITRE technique derivation at the API-route layer.
+        fired = self._rows(
+            f"""
+            SELECT DISTINCT rule_id
+            FROM {self._db}.extracted_records
+            WHERE archive_sha256 = {{sha:FixedString(64)}}
+              AND splitByChar('/', file_path)[2] = {{vf:String}}
+            """,
+            {"sha": archive_sha256, "vf": victim_folder},
+        )
+        return ArtifactDetailRow(
+            archive_sha256=archive_sha256,
+            victim_folder=victim_folder,
+            source=r[0],
+            country=r[1],
+            egress_ip=r[2],
+            user_name=r[3],
+            computer_name=r[4],
+            os_version=r[5],
+            traffic_affid=r[6],
+            build_version=r[7],
+            payload_md5=r[8],
+            work_dir=r[9],
+            creds_count=int(r[10]),
+            cookies_count=int(r[11]),
+            autofills_count=int(r[12]),
+            history_count=int(r[13]),
+            downloads_count=int(r[14]),
+            processes_count=int(r[15]),
+            software_count=int(r[16]),
+            discord_tokens_count=int(r[17]),
+            steam_tokens_count=int(r[18]),
+            google_refresh_count=int(r[19]),
+            localstorage_jwt_count=int(r[20]),
+            wallet_vaults_count=int(r[21]),
+            has_corporate_marker=bool(r[22]),
+            has_webmail_leak=bool(r[23]),
+            has_wallet=bool(r[24]),
+            has_crypter_banner=bool(r[25]),
+            webmail_identity=r[26],
+            first_corporate_marker=r[27],
+            first_wallet_family=r[28],
+            fired_rule_ids=[row[0] for row in fired],
+        )
+
+    def file_tree(
+        self, archive_sha256: str, victim_folder: str
+    ) -> list[ArtifactFileRow]:
+        rows = self._rows(
+            f"""
+            SELECT rel_path, filename, size_bytes, heuristic_kind,
+                   extractor_touched, rows_emitted, sample_head, file_sha256
+            FROM {self._db}.file_audit
+            WHERE archive_sha256 = {{sha:FixedString(64)}}
+              AND victim_folder = {{vf:String}}
+            ORDER BY rel_path
+            """,
+            {"sha": archive_sha256, "vf": victim_folder},
+        )
+        return [
+            ArtifactFileRow(
+                rel_path=r[0],
+                filename=r[1],
+                size_bytes=int(r[2]),
+                heuristic_kind=r[3],
+                extractor_touched=bool(r[4]),
+                rows_emitted=int(r[5]),
+                sample_head=r[6],
+                file_sha256=r[7],
+            )
+            for r in rows
+        ]
+
+    def records(
+        self,
+        archive_sha256: str,
+        victim_folder: str,
+        *,
+        page: int,
+        limit: int,
+        rule_id: str | None = None,
+        family: str | None = None,
+    ) -> tuple[list[ArtifactRecordRow], int, int]:
+        where = [
+            "archive_sha256 = {sha:FixedString(64)}",
+            "splitByChar('/', file_path)[2] = {vf:String}",
+        ]
+        params: dict[str, object] = {"sha": archive_sha256, "vf": victim_folder}
+        if rule_id:
+            where.append("rule_id = {rid:String}")
+            params["rid"] = rule_id
+        if family:
+            where.append("family = {fam:String}")
+            params["fam"] = family
+        offset = (page - 1) * limit
+        params["limit"] = limit
+        params["offset"] = offset
+        where_sql = " AND ".join(where)
+
+        total_rows = self._rows(
+            f"SELECT count() FROM {self._db}.extracted_records WHERE {where_sql}",
+            params,
+        )
+        total = int(total_rows[0][0]) if total_rows else 0
+
+        rows = self._rows(
+            f"""
+            SELECT rule_id, family, file_path, fields
+            FROM {self._db}.extracted_records
+            WHERE {where_sql}
+            ORDER BY rule_id, file_path
+            LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
+            """,
+            params,
+        )
+        out = [
+            ArtifactRecordRow(
+                rule_id=r[0],
+                family=r[1],
+                file_path=r[2],
+                fields={str(k): str(v) for k, v in dict(r[3] or {}).items()},
+            )
+            for r in rows
+        ]
+        return out, total, self._page_count(total, limit)
+
+    def domains(
+        self, archive_sha256: str, victim_folder: str
+    ) -> list[ArtifactDomainRow]:
+        rows = self._rows(
+            f"""
+            SELECT domain, source_kind, sum(count) AS total_count
+            FROM {self._db}.victim_domains
+            WHERE archive_sha256 = {{sha:FixedString(64)}}
+              AND victim_folder = {{vf:String}}
+            GROUP BY domain, source_kind
+            ORDER BY total_count DESC, domain
+            """,
+            {"sha": archive_sha256, "vf": victim_folder},
+        )
+        return [
+            ArtifactDomainRow(
+                domain=r[0], source_kind=r[1], count=int(r[2])
+            )
+            for r in rows
+        ]
+
+
 __all__ = [
+    "ArtifactCardRow",
+    "ArtifactDetailRow",
+    "ArtifactDomainRow",
+    "ArtifactFileRow",
+    "ArtifactRecordRow",
     "AuditSearchRow",
     "Bucket",
     "CoverageRow",
     "CredRow",
     "FileAuditReader",
     "SampleRow",
+    "StealerArtifactsReader",
     "StealerCredsReader",
     "StealerStats",
     "UnknownRow",
