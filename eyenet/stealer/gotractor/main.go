@@ -37,16 +37,29 @@ import (
 
 	"eyenet.io/stealer/gotractor/daemon"
 	"eyenet.io/stealer/gotractor/engine"
+	"eyenet.io/stealer/gotractor/wallets"
 )
 
 func main() {
 	rulesDir := flag.String("rules-dir", envOr("EYENET_STEALER_RULES_DIR", ""), "catalog YAML directory")
 	familiesDir := flag.String("families-dir", envOr("EYENET_STEALER_FAMILIES_DIR", ""), "family catalog directory")
 	input := flag.String("input", "", "victim folder (or single file) to evaluate (records / summary)")
-	mode := flag.String("mode", "records", "records | summary | daemon | selftest")
+	mode := flag.String("mode", "records", "records | summary | daemon | selftest | extract-wallets")
 	limit := flag.Int("limit", 100000, "bulkParse record cap per file per rule")
 	metricsPort := flag.Int("metrics-port", 0, "daemon: bind Prometheus /metrics on this port (0 disables)")
 	flag.Parse()
+
+	// extract-wallets bypasses rule catalog - it is a binary pre-extractor
+	// that feeds synthetic vault JSON files into the DSL pipeline downstream.
+	if *mode == "extract-wallets" {
+		if *input == "" {
+			log.Fatal("--input is required for extract-wallets mode")
+		}
+		if err := runExtractWallets(*input, os.Stdout); err != nil {
+			log.Fatalf("extract-wallets: %v", err)
+		}
+		return
+	}
 
 	if *rulesDir == "" || *familiesDir == "" {
 		log.Fatal("--rules-dir and --families-dir are required (or set EYENET_STEALER_RULES_DIR / EYENET_STEALER_FAMILIES_DIR)")
@@ -218,4 +231,37 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// runExtractWallets walks a victim folder for known wallet LevelDB
+// directories, opens each read-only, and emits one JSON line per
+// extracted vault to the writer. Errors per directory are logged
+// but do not abort the walk - a stealer dump often has half-grabbed
+// extension directories.
+func runExtractWallets(root string, w *os.File) error {
+	hits, err := wallets.FindWalletDirs(root)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(w)
+	okCount, errCount, vaultCount := 0, 0, 0
+	for _, h := range hits {
+		recs, err := wallets.ExtractVaults(h.Path, h.Extension)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "extract %s (%s): %v\n", h.Path, h.Extension.Name, err)
+			errCount++
+			continue
+		}
+		okCount++
+		for _, r := range recs {
+			if err := enc.Encode(r); err != nil {
+				fmt.Fprintf(os.Stderr, "encode vault %s/%s: %v\n", h.Extension.Name, r.VaultKey, err)
+				continue
+			}
+			vaultCount++
+		}
+	}
+	fmt.Fprintf(os.Stderr, "extract-wallets: %d wallet dirs found, %d opened ok, %d errored, %d vaults emitted\n",
+		len(hits), okCount, errCount, vaultCount)
+	return nil
 }
