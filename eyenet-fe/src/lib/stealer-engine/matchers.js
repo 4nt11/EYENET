@@ -264,6 +264,158 @@ export function matchJson(m, ex, input) {
  * @param {ExtractSpec|undefined} ex
  * @param {ContentInput} input
  */
+/**
+ * Valve Data Format (Steam's .vdf) matcher. Parses the KeyValues tree,
+ * honours requires_keys on the top level, extracts via JSONPath-lite.
+ * When `pivot` is set, iterates each child of the pivot as a record
+ * (bulk-friendly); match_vdf itself returns the first record.
+ */
+export function matchVdf(m, ex, input) {
+  let doc;
+  try { doc = parseVdf(input.text); }
+  catch { return null; }
+  if (!doc || typeof doc !== 'object') return null;
+  for (const k of m.requires_keys ?? []) if (!(k in doc)) return null;
+  if (m.pivot) {
+    for (const [key, value] of pivotChildren(doc, m.pivot)) {
+      return extractVdfRecord(value, key, ex?.paths ?? {});
+    }
+    return null;
+  }
+  return extractPathsVdf(doc, ex?.paths ?? {});
+}
+
+/** Generator used by bulkParse: walk every pivot child as a record. */
+export function* iterVdf(m, ex, text) {
+  let doc;
+  try { doc = parseVdf(text); }
+  catch { return; }
+  if (!doc || typeof doc !== 'object') return;
+  for (const k of m.requires_keys ?? []) if (!(k in doc)) return;
+  if (!m.pivot) {
+    yield extractPathsVdf(doc, ex?.paths ?? {});
+    return;
+  }
+  const paths = ex?.paths ?? {};
+  for (const [key, value] of pivotChildren(doc, m.pivot)) {
+    yield extractVdfRecord(value, key, paths);
+  }
+}
+
+function* pivotChildren(doc, pivotExpr) {
+  if (!pivotExpr.startsWith('$')) return;
+  let cur = doc;
+  const rest = pivotExpr.slice(1);
+  for (const tok of rest.matchAll(/\.(\w+)|\[(\d+)\]/g)) {
+    if (cur == null || typeof cur !== 'object') return;
+    cur = tok[1] !== undefined ? cur[tok[1]] : null; // numeric index invalid for VDF
+    if (cur == null) return;
+  }
+  if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
+    for (const [k, v] of Object.entries(cur)) yield [k, v];
+  }
+}
+
+function extractVdfRecord(value, keyName, paths) {
+  const out = {};
+  for (const [field, expr] of Object.entries(paths)) {
+    if (expr === '$key') { out[field] = keyName; continue; }
+    const v = evalPathLocal(value, expr);
+    if (v == null) continue;
+    if (typeof v === 'string' || typeof v === 'number') out[field] = v;
+    else out[field] = JSON.stringify(v);
+  }
+  return out;
+}
+
+function extractPathsVdf(doc, paths) {
+  const out = {};
+  for (const [field, expr] of Object.entries(paths)) {
+    const v = evalPathLocal(doc, expr);
+    if (v == null) continue;
+    if (typeof v === 'string') out[field] = v;
+    else out[field] = JSON.stringify(v);
+  }
+  return out;
+}
+
+function evalPathLocal(doc, expr) {
+  if (!expr?.startsWith('$')) return null;
+  let cur = doc;
+  for (const tok of expr.slice(1).matchAll(/\.(\w+)|\[(\d+)\]/g)) {
+    if (cur == null || typeof cur !== 'object') return null;
+    cur = tok[1] !== undefined ? cur[tok[1]] : null;
+  }
+  return cur;
+}
+
+// VDF parser. KeyValues: alternating "key" + ("value" | { nested }) pairs.
+// Quoted strings with \" \\ \n \t escapes. '//' line comments. No arrays;
+// duplicate keys are last-wins when flattened (matches Steam behaviour).
+function parseVdf(text) {
+  const p = { text, i: 0, n: text.length };
+  const out = {};
+  for (;;) {
+    skipWS(p);
+    if (p.i >= p.n) break;
+    const key = readStr(p);
+    skipWS(p);
+    if (p.i >= p.n) throw new Error(`dangling key ${key} at eof`);
+    if (p.text[p.i] === '{') { p.i++; out[key] = readObj(p); }
+    else out[key] = readStr(p);
+  }
+  return out;
+}
+
+function readObj(p) {
+  const obj = {};
+  for (;;) {
+    skipWS(p);
+    if (p.i >= p.n) throw new Error('unterminated object');
+    if (p.text[p.i] === '}') { p.i++; return obj; }
+    const key = readStr(p);
+    skipWS(p);
+    if (p.i >= p.n) throw new Error(`dangling key ${key} inside object`);
+    if (p.text[p.i] === '{') { p.i++; obj[key] = readObj(p); }
+    else obj[key] = readStr(p);
+  }
+}
+
+function readStr(p) {
+  if (p.i >= p.n) throw new Error('expected string at eof');
+  if (p.text[p.i] === '"') {
+    p.i++;
+    let out = '';
+    while (p.i < p.n) {
+      const ch = p.text[p.i];
+      if (ch === '\\' && p.i + 1 < p.n) {
+        const nxt = p.text[p.i + 1];
+        out += nxt === 'n' ? '\n' : nxt === 't' ? '\t' : nxt === 'r' ? '\r' : nxt;
+        p.i += 2; continue;
+      }
+      if (ch === '"') { p.i++; return out; }
+      out += ch; p.i++;
+    }
+    throw new Error('unterminated quoted string');
+  }
+  const start = p.i;
+  while (p.i < p.n && !' \t\r\n{}"'.includes(p.text[p.i])) p.i++;
+  if (p.i === start) throw new Error(`expected string at ${p.i}`);
+  return p.text.slice(start, p.i);
+}
+
+function skipWS(p) {
+  while (p.i < p.n) {
+    const ch = p.text[p.i];
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') { p.i++; continue; }
+    if (ch === '/' && p.i + 1 < p.n && p.text[p.i + 1] === '/') {
+      while (p.i < p.n && p.text[p.i] !== '\n') p.i++;
+      continue;
+    }
+    return;
+  }
+}
+
 export function matchYaml(m, ex, input) {
   let doc;
   try {

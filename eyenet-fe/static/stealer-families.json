@@ -506,6 +506,37 @@
     "notes": "Original v1 line continues alongside the unrelated v2 rewrite (which is JSON-first and ships as the json_v2 cluster in our catalog). information.txt has a plain \"Key: Value\" header BLOCK followed by [Hardware] and [Software] INI sections. [Software] is a bare program list, no `=` separator.\n"
   },
   {
+    "slug": "steam_accounts",
+    "name": "Steam saved accounts",
+    "status": "active",
+    "first_seen_year": 2003,
+    "aliases": [
+      "steam",
+      "loginusers.vdf",
+      "valve-data-file"
+    ],
+    "signature_files": [
+      "loginusers.vdf",
+      "Software/Stam/loginusers.vdf",
+      "Steam/config/loginusers.vdf"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside any stealer that grabs the Steam config dir"
+    ],
+    "references": [
+      {
+        "title": "Valve KeyValues (VDF) format reference",
+        "url": "https://developer.valvesoftware.com/wiki/KeyValues"
+      },
+      {
+        "title": "Steam loginusers.vdf schema (community)",
+        "url": "https://help.steampowered.com/en/faqs/view/16E9-8CB2-FE8C-D7C4"
+      }
+    ],
+    "notes": "loginusers.vdf lives at Steam/config/loginusers.vdf on Windows (or in the vowel-stripped Software/Stam/ sidecar that json_v2 stealers emit). Lists every account that has touched this Steam install, keyed by SteamID64 (76561198*), with AccountName + PersonaName + Timestamp + AutoLogin + RememberPassword flags. The RememberPassword flag paired with a captured ssfn* session file = session-takeover without the account password.\n"
+  },
+  {
     "slug": "vidar",
     "name": "Vidar Stealer",
     "status": "active",

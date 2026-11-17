@@ -15,7 +15,7 @@ from typing import Any, Literal, TypedDict
 Layer = Literal["container", "content"]
 RuleType = Literal[
     "folder", "regex", "delimiter", "template",
-    "json", "yaml", "keyvalue", "keyvalue_ini",
+    "json", "yaml", "vdf", "keyvalue", "keyvalue_ini",
 ]
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 import re2
@@ -276,6 +277,228 @@ def match_json(
         if k not in doc:
             return None
     return _extract_paths(doc, (ex or {}).get("paths") or {})
+
+
+def match_vdf(
+    m: dict[str, Any], ex: ExtractSpec | None, inp: ContentInput,
+) -> dict[str, Any] | None:
+    """Valve Data Format (Steam's .vdf). Parse the KeyValues tree, honour
+    requires_keys on the top level, extract via the standard JSONPath-lite
+    paths. When ``pivot`` is set, bulkParse iterates each child of the
+    pivot path as its own record (each record's $key sigil resolves to
+    the child's dict key); match_vdf itself returns the first record so
+    the primary-match path stays symmetric with keyvalue/json/yaml.
+    """
+    try:
+        doc = _parse_vdf(inp.text)
+    except _VDFParseError:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    for k in m.get("requires_keys", []):
+        if k not in doc:
+            return None
+    pivot = m.get("pivot")
+    if pivot:
+        # Primary-match: emit the FIRST child under the pivot so callers
+        # that only use the single matcher still see a record. bulkParse
+        # walks every child.
+        for key, value in _pivot_children(doc, pivot):
+            return _extract_vdf_record(value, key, (ex or {}).get("paths") or {})
+        return None
+    return extract_paths_vdf(doc, (ex or {}).get("paths") or {})
+
+
+def iter_vdf(
+    m: dict[str, Any], ex: ExtractSpec | None, text: str,
+) -> Iterator[dict[str, Any]]:
+    """Walk every pivot child as a record. Used by engine.bulk_parse."""
+    try:
+        doc = _parse_vdf(text)
+    except _VDFParseError:
+        return
+    if not isinstance(doc, dict):
+        return
+    for k in m.get("requires_keys", []):
+        if k not in doc:
+            return
+    pivot = m.get("pivot")
+    if not pivot:
+        yield extract_paths_vdf(doc, (ex or {}).get("paths") or {})
+        return
+    paths = (ex or {}).get("paths") or {}
+    for key, value in _pivot_children(doc, pivot):
+        yield _extract_vdf_record(value, key, paths)
+
+
+def _pivot_children(doc: Any, pivot_expr: str):
+    """Walk pivot_expr via JSONPath-lite and yield (child_key, child_value)
+    pairs for each entry in the resolved map. Non-map pivots and missing
+    pivots yield nothing."""
+    cur = doc
+    if not pivot_expr.startswith("$"):
+        return
+    for tok in _PATH_TOKEN.finditer(pivot_expr[1:]):
+        if not isinstance(cur, dict):
+            return
+        key, _ = tok.group(1), tok.group(2)
+        if key is None:
+            return
+        cur = cur.get(key)
+        if cur is None:
+            return
+    if isinstance(cur, dict):
+        yield from cur.items()
+
+
+def _extract_vdf_record(value: Any, key_name: str, paths: dict[str, str]) -> dict[str, Any]:
+    """Extract fields from one pivot child. The $key sigil resolves to the
+    child's dict key (e.g. the SteamID in loginusers.vdf). All other
+    paths navigate through the child's value via JSONPath-lite."""
+    out: dict[str, Any] = {}
+    for field, expr in paths.items():
+        if expr == "$key":
+            out[field] = key_name
+            continue
+        v = _eval_path(value, expr)
+        if v is None:
+            continue
+        if isinstance(v, str):
+            out[field] = v
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[field] = v
+        else:
+            out[field] = json.dumps(v, separators=(",", ":"))
+    return out
+
+
+def extract_paths_vdf(doc: Any, paths: dict[str, str]) -> dict[str, Any]:
+    """Same output shape as _extract_paths for JSON/YAML, kept separate so
+    the VDF parser's native dict (always str-valued leaves) doesn't trip
+    the whole-number-float / bool-stringify paths that only apply to
+    JSON-ish types."""
+    out: dict[str, Any] = {}
+    for field, expr in paths.items():
+        v = _eval_path(doc, expr)
+        if v is None:
+            continue
+        if isinstance(v, str):
+            out[field] = v
+        else:
+            out[field] = json.dumps(v, separators=(",", ":"))
+    return out
+
+
+# --- VDF parser --- #
+# KeyValues format: alternating "key" + ("value" | { nested }) pairs.
+# Quoted strings support \" \\ \n \t escapes. '//' comments run to EOL.
+# No arrays; dicts can have duplicate keys in the wild (last-wins when
+# we flatten into a Python dict; matches game behaviour).
+
+class _VDFParseError(ValueError):
+    pass
+
+
+def _parse_vdf(text: str) -> dict[str, Any]:
+    p = _VDFParser(text)
+    return p.parse_root()
+
+
+class _VDFParser:
+    __slots__ = ("text", "i", "n")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.i = 0
+        self.n = len(text)
+
+    def parse_root(self) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        while True:
+            self._skip()
+            if self.i >= self.n:
+                break
+            key = self._read_string()
+            self._skip()
+            if self.i >= self.n:
+                raise _VDFParseError(f"dangling key {key!r} at eof")
+            if self.text[self.i] == "{":
+                self.i += 1
+                out[key] = self._read_object()
+            else:
+                out[key] = self._read_string()
+        return out
+
+    def _read_object(self) -> dict[str, Any]:
+        obj: dict[str, Any] = {}
+        while True:
+            self._skip()
+            if self.i >= self.n:
+                raise _VDFParseError("unterminated object")
+            ch = self.text[self.i]
+            if ch == "}":
+                self.i += 1
+                return obj
+            key = self._read_string()
+            self._skip()
+            if self.i >= self.n:
+                raise _VDFParseError(f"dangling key {key!r} inside object")
+            if self.text[self.i] == "{":
+                self.i += 1
+                obj[key] = self._read_object()
+            else:
+                obj[key] = self._read_string()
+
+    def _read_string(self) -> str:
+        if self.i >= self.n:
+            raise _VDFParseError("expected string at eof")
+        if self.text[self.i] == '"':
+            self.i += 1
+            start = self.i
+            buf: list[str] = []
+            while self.i < self.n:
+                ch = self.text[self.i]
+                if ch == "\\" and self.i + 1 < self.n:
+                    nxt = self.text[self.i + 1]
+                    if nxt == "n":
+                        buf.append("\n")
+                    elif nxt == "t":
+                        buf.append("\t")
+                    elif nxt == "r":
+                        buf.append("\r")
+                    elif nxt == '"':
+                        buf.append('"')
+                    elif nxt == "\\":
+                        buf.append("\\")
+                    else:
+                        buf.append(nxt)
+                    self.i += 2
+                    continue
+                if ch == '"':
+                    self.i += 1
+                    return "".join(buf) if buf else self.text[start:self.i - 1]
+                buf.append(ch)
+                self.i += 1
+            raise _VDFParseError("unterminated quoted string")
+        # Unquoted bareword: read until whitespace or control.
+        start = self.i
+        while self.i < self.n and self.text[self.i] not in ' \t\r\n{}"':
+            self.i += 1
+        if self.i == start:
+            raise _VDFParseError(f"expected string at offset {self.i}")
+        return self.text[start:self.i]
+
+    def _skip(self) -> None:
+        while self.i < self.n:
+            ch = self.text[self.i]
+            if ch in " \t\r\n":
+                self.i += 1
+                continue
+            if ch == "/" and self.i + 1 < self.n and self.text[self.i + 1] == "/":
+                while self.i < self.n and self.text[self.i] != "\n":
+                    self.i += 1
+                continue
+            return
 
 
 def match_yaml(

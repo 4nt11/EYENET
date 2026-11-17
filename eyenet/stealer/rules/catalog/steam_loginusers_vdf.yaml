@@ -1,0 +1,31 @@
+id: steam_loginusers_vdf
+version: 1
+layer: content
+family: steam_accounts
+priority: 90
+path_glob: "**oginusers.vdf"
+description: >
+  Steam's loginusers.vdf: one record per SteamID the victim has signed
+  into on this machine. $key resolves to the SteamID64; the remaining
+  fields come from the per-account VDF subtree. RememberPassword=1 +
+  captured ssfn* session files = silent session takeover.
+
+  Glob matches both the vanilla 'loginusers.vdf' and 'Loginusers.vdf',
+  under Software/Stam/ (json_v2 sidecar), Steam/config/ (direct grab),
+  or wherever the stealer flattened it.
+match:
+  type: vdf
+  requires_keys: [users]
+  pivot: $.users
+extract:
+  paths:
+    steam_id: $key
+    account_name: $.AccountName
+    persona_name: $.PersonaName
+    last_login: $.Timestamp
+    remember_password: $.RememberPassword
+    wants_offline_mode: $.WantsOfflineMode
+    auto_login: $.AutoLogin
+    most_recent: $.MostRecent
+normalize:
+  - { verb: int_from_string, field: last_login }

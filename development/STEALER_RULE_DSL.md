@@ -203,6 +203,46 @@ extract:
 
 Semantics: context-free.
 
+### 3.6a VDF (content layer only)
+
+Valve Data Format (Steam's KeyValues). Hierarchical: alternating
+`"key"` + (`"value"` | `{ nested }`) pairs. `//` line comments.
+Duplicate keys collapse last-wins.
+
+Two extraction modes:
+
+**Single-record** (no pivot): JSONPath-lite into the root document.
+
+```yaml
+match:
+  type: vdf
+  requires_keys: [InstallConfigStore]
+extract:
+  paths:
+    autoupdate: $.InstallConfigStore.Software.Valve.Steam.AutoUpdateWindowEnabled
+```
+
+**Pivoted iteration**: iterate each child of the pivot path as its
+own record. The new `$key` sigil in a path resolves to the child's
+dict key (e.g. a SteamID); other paths navigate the child's value.
+This is the shape for `loginusers.vdf` (one record per Steam account),
+`libraryfolders.vdf` (one record per library drive), and similar.
+
+```yaml
+match:
+  type: vdf
+  requires_keys: [users]
+  pivot: $.users            # iterate each child of this object
+extract:
+  paths:
+    steam_id: $key           # = child's dict key (SteamID64)
+    account_name: $.AccountName
+    persona_name: $.PersonaName
+    last_login: $.Timestamp
+```
+
+Semantics: context-free (keyvalue nesting with braces).
+
 ### 3.6 YAML (content layer only)
 
 YAML 1.2 safe_load subset (JSON-equivalent types + block maps/seqs).

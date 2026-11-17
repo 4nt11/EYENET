@@ -18,9 +18,11 @@ import {
   matchDelimiter,
   matchJson,
   matchYaml,
+  matchVdf,
   matchKeyvalue,
   matchKeyvalueIni,
-  iterDelimiter
+  iterDelimiter,
+  iterVdf
 } from './matchers.js';
 
 
@@ -109,6 +111,7 @@ function evalRule(r, env) {
       case 'delimiter':    fields = matchDelimiter(r.match, r.extract, env.input); break;
       case 'json':         fields = matchJson(r.match, r.extract, env.input); break;
       case 'yaml':         fields = matchYaml(r.match, r.extract, env.input); break;
+      case 'vdf':          fields = matchVdf(r.match, r.extract, env.input); break;
       case 'keyvalue':     fields = matchKeyvalue(r.match, r.extract, env.input); break;
       case 'keyvalue_ini': fields = matchKeyvalueIni(r.match, r.extract, env.input); break;
       case 'folder':
@@ -215,6 +218,9 @@ export function bulkParse(rule, file, limit = 1000) {
   };
 
   switch (rule.match?.type) {
+    case 'vdf':
+      for (const row of iterVdf(rule.match, rule.extract, file.text)) push(row);
+      break;
     case 'delimiter':
       for (const row of iterDelimiter(rule.match, rule.extract, file.text)) push(row);
       break;
@@ -244,6 +250,7 @@ export function bulkParse(rule, file, limit = 1000) {
         case 'template':     fields = matchTemplate(m, ex, file); break;
         case 'json':         fields = matchJson(m, ex, file); break;
         case 'yaml':         fields = matchYaml(m, ex, file); break;
+        case 'vdf':          fields = matchVdf(m, ex, file); break;
         case 'keyvalue':     fields = matchKeyvalue(m, ex, file); break;
         case 'keyvalue_ini': fields = matchKeyvalueIni(m, ex, file); break;
       }

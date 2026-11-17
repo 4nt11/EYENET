@@ -96,6 +96,10 @@ func BulkParse(rule Rule, file ContentInput, limit int) BulkResult {
 		for row := range IterDelimiter(rule.Match, rule.Extract, file.Text) {
 			push(row)
 		}
+	case "vdf":
+		for row := range IterVDF(rule.Match, rule.Extract, file.Text) {
+			push(row)
+		}
 	case "regex":
 		rest := file.Text
 		safety := 10000
@@ -210,6 +214,8 @@ func evalContent(r Rule, file ContentInput) EvalResult {
 		fields = MatchJSON(r.Match, r.Extract, file)
 	case "yaml":
 		fields = MatchYAML(r.Match, r.Extract, file)
+	case "vdf":
+		fields = MatchVDF(r.Match, r.Extract, file)
 	case "keyvalue":
 		fields = MatchKeyvalue(r.Match, r.Extract, file)
 	case "keyvalue_ini":

@@ -1,0 +1,25 @@
+id: steam_loginusers_vdf
+version: 1
+layer: content
+family: generic
+priority: 90
+path_glob: loginusers.vdf
+description: >
+  Golden-fixture VDF with pivot: iterates $.users and extracts fields
+  per Steam account. Primary-match (single-record) returns the first
+  SteamID. Tests the $key sigil + pivot semantics across all three
+  engines.
+match:
+  type: vdf
+  requires_keys: [users]
+  pivot: $.users
+extract:
+  paths:
+    steam_id: $key
+    account_name: $.AccountName
+    persona_name: $.PersonaName
+    last_login: $.Timestamp
+    remember_password: $.RememberPassword
+    auto_login: $.AutoLogin
+normalize:
+  - { verb: int_from_string, field: last_login }
