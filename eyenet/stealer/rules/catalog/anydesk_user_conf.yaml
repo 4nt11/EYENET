@@ -1,0 +1,47 @@
+id: anydesk_user_conf
+version: 1
+layer: content
+family: anydesk
+priority: 85
+path_glob: "**user.conf"
+description: >
+  AnyDesk per-user state. Keyvalue '=' separator. Three CTI-grade fields:
+
+    ad.security.permission_profiles.address_to_profile = REMOTE_ID:HEX
+      REMOTE_ID is a numeric AnyDesk address the victim has previously
+      connected to or from (lateral-movement history). The hex suffix is
+      the permission-profile blob for that peer. One line per remote peer.
+
+    ad.invite.received_list_encrypted
+      Encrypted list of received connection invitations (presence +
+      offline-decrypt candidate). Pair with the ad.anynet.pkey from
+      service.conf.
+
+    ad.license.cache_hash
+      Hash of the license token the client last saw. Cross-victim
+      correlation axis for license fraud.
+
+  Also handy: ad.ui.lang + ad.assembly.ui.lang (victim locale),
+  ad.ui.main_win.width / height (victim monitor), ad.telemetry.consent
+  (presence marker).
+match:
+  type: keyvalue
+  separator: "="
+  strip_whitespace: true
+  requires_keys:
+    - ad.ui.lang
+extract:
+  keys:
+    ad.security.permission_profiles.address_to_profile: user_remote_peer_blob
+    ad.invite.received_list_encrypted: user_invite_received_enc
+    ad.license.cache_hash: user_license_cache_hash
+    ad.ui.lang: user_ui_lang
+    ad.assembly.ui.lang: user_assembly_lang
+    ad.ui.main_win.width: user_screen_width
+    ad.ui.main_win.height: user_screen_height
+    ad.telemetry.consent: user_telemetry_consent
+normalize:
+  - field: user_remote_peer_blob
+    verb: replace_re2
+    pattern: "^([0-9]+):.*$"
+    replacement: "\\1"
