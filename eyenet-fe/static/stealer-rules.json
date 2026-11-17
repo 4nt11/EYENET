@@ -1,0 +1,638 @@
+[
+  {
+    "id": "combolist_android",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_android_app",
+    "priority": 30,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "Android app credentials: `android://<hash>@<com.pkg.name>/<delim>user<delim>pass` where delim is pipe or colon. ulpextract runs this BEFORE the generic scheme strip so the hash@pkg doesn't get misread as a URL path. We give it the highest combolist priority (30) for the same reason. The hash can be any length when scheme is literal 'android://'; other schemes would need a stricter hash length check to avoid false positives.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^android://(?P<app_hash>[^@\\s]+)@(?P<url>[a-z0-9_]+(?:\\.[a-z0-9_]+)+)[/:|](?P<user>[^|:\\s]+)[|:](?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "app_hash",
+        "url",
+        "user",
+        "password"
+      ]
+    }
+  },
+  {
+    "id": "combolist_any_scheme",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_ulp_any_scheme",
+    "priority": 15,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "Catches any-scheme ULPs beyond http(s): ftp://, smb://, chrome-extension://, app://, and the long tail of proprietary schemes stealer logs include. Mirrors ulpextract.leadingSchm (`[a-z][a-z0-9+-]*://`). Pipe is the cleanest field separator for this shape (ssh paths and chrome-extension IDs frequently contain colons).\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^(?P<url>[a-z][a-z0-9+-]*://[^\\s|]+)\\|(?P<user>[^|\\s]+)\\|(?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "url",
+        "user",
+        "password"
+      ]
+    }
+  },
+  {
+    "id": "combolist_container",
+    "version": 1,
+    "layer": "container",
+    "family": "combolist",
+    "priority": 1,
+    "description": "Fallback container that matches ANY drop. Priority 1 so every real stealer-family container (priority 100) wins before this fires. Once the four known families above have been exhausted, we tag the drop \"combolist\" so the per-file probe rules can classify its line shape. min_score 0 + empty requires = unconditional match.\n",
+    "match": {
+      "type": "folder",
+      "requires": [],
+      "min_score": 0
+    }
+  },
+  {
+    "id": "combolist_email_colon",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_email_pass",
+    "priority": 25,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "Email-anchored combos with no URL: user@domain:password. Priority 25 (above the ULP probes at 10-20) so a line that parses as email-only isn't misclassified as a ULP with a weird host. Mirrors the leadingEmail path in ulpextract.parseLine.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^(?P<user>[^@\\s:;|,]+@[^@\\s:;|,]+\\.[a-z]{2,}):(?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "user",
+        "password"
+      ]
+    }
+  },
+  {
+    "id": "combolist_schemeless",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_schemeless",
+    "priority": 12,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "Schemeless host combos: example.com/path:user:pass (no http:// prefix). Mirrors ulpextract.leadingURL which accepts IPv4 or dotted-host anchors. Lower priority (12) than scheme-anchored rules so an http:// line still matches the stricter probe first.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^(?P<url>(?:\\d{1,3}(?:\\.\\d{1,3}){3}|(?:[a-z0-9-]+\\.)+[a-z]{2,})(?:/[^\\s:;|,]*)?):(?P<user>[^:\\s]+):(?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "url",
+        "user",
+        "password"
+      ]
+    }
+  },
+  {
+    "id": "combolist_ulp_colon",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_ulp_colon",
+    "priority": 10,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "\"URL:user:pass\" ULP shape. Harder than the semicolon / pipe variants because URLs contain colons (scheme, port). The regex anchors on https?://, then consumes the URL up to the LAST colon before a non-URL-looking tail. Priority 10 so the clean separators probe first. Known false-negative: user or password containing a colon. ulpextract is still the ground truth for bulk parsing.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^(?P<url>https?://[^\\s:]+(?::\\d+)?[^\\s:]*):(?P<user>[^:\\s]+):(?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "url",
+        "user",
+        "password"
+      ]
+    },
+    "reject_patterns": [
+      "(?i)^(tg|telegram|channel|our\\s+channel|cloud\\s+channel|subscribe|join)\\b",
+      "(?i)\\bt\\.me/",
+      "(?i)^(null|none|empty|-+|null\\s*password)$",
+      "(?i)ht[0-9]ps://"
+    ]
+  },
+  {
+    "id": "combolist_ulp_pipe",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_ulp_pipe",
+    "priority": 20,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "\"URL|user|pass\" ULP shape. Pipe is clean (URLs don't contain it). Common in forum dumps that use `|` to avoid both the `:` URL-port collision and the `;` CRLF-render quirk some tools have.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^(?P<url>https?://[^\\s|]+)\\|(?P<user>[^|\\s]+)\\|(?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "url",
+        "user",
+        "password"
+      ]
+    },
+    "reject_patterns": [
+      "(?i)^(tg|telegram|channel|our\\s+channel|cloud\\s+channel|subscribe|join)\\b",
+      "(?i)\\bt\\.me/",
+      "(?i)^(null|none|empty|-+|null\\s*password)$",
+      "(?i)ht[0-9]ps://"
+    ]
+  },
+  {
+    "id": "combolist_ulp_semicolon",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_ulp_semicolon",
+    "priority": 20,
+    "path_glob": "**/*.txt",
+    "requires_container_family": "combolist",
+    "description": "Probe for the \"URL;user;pass\" ULP shape. Semicolon is the clean separator because URLs do not contain it. One sample row enough to confirm shape; ulpextract remains the per-row credential ingester.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "^(?P<url>https?://[^\\s;]+);(?P<user>[^;\\s]+);(?P<password>\\S+)$",
+      "multiline": true
+    },
+    "extract": {
+      "fields": [
+        "url",
+        "user",
+        "password"
+      ]
+    },
+    "reject_patterns": [
+      "(?i)^(tg|telegram|channel|our\\s+channel|cloud\\s+channel|subscribe|join)\\b",
+      "(?i)\\bt\\.me/",
+      "(?i)^(null|none|empty|-+|null\\s*password)$",
+      "(?i)ht[0-9]ps://"
+    ]
+  },
+  {
+    "id": "combolist_ulpextract_tsv",
+    "version": 1,
+    "layer": "content",
+    "family": "combolist_ulpextract_output",
+    "priority": 40,
+    "path_glob": "**/*.tsv",
+    "requires_container_family": "combolist",
+    "description": "ulpextract's OWN output format: host<TAB>url<TAB>login<TAB>password per line. We parse our pipeline's downstream artefact so operators can round-trip normalized log files through the workbench without re-running the extractor.\n",
+    "match": {
+      "type": "delimiter",
+      "separator": "\t",
+      "min_columns": 4,
+      "skip_blank": true
+    },
+    "extract": {
+      "columns": {
+        "0": "host",
+        "1": "url",
+        "2": "user",
+        "3": "password"
+      }
+    }
+  },
+  {
+    "id": "json_v2_container",
+    "version": 1,
+    "layer": "container",
+    "family": "json_v2",
+    "priority": 100,
+    "description": "JSON-first family cluster: StealC v2, Acreed, Stealerium. All three emit pc_info.json + log_info.json; single-folder disambiguation is not reliable without BuildID prefix or C2 telemetry. Catalog them as one logical family \"json_v2\" and let a downstream classifier sub-tag by log_info.BuildID (dedicated rule, to be added).\n",
+    "match": {
+      "type": "folder",
+      "requires": [
+        "pc_info.json"
+      ],
+      "forbids": [
+        "information.txt",
+        "System.txt",
+        "UserInformation.txt"
+      ],
+      "optional": [
+        "log_info.json",
+        "passwords.tsv",
+        "screen.jpg",
+        "Autofill/",
+        "Cookies/",
+        "Software/"
+      ],
+      "min_score": 2
+    }
+  },
+  {
+    "id": "json_v2_log_info",
+    "version": 1,
+    "layer": "content",
+    "family": "json_v2",
+    "priority": 110,
+    "path_glob": "log_info.json",
+    "description": "Exfil manifest metadata. Priority 110 (above pc_info at 100) so BuildID, counts, and CreatedOnUtc override anything of the same name from pc_info. BuildID prefix is what a later sub-tag rule should key off to split json_v2 into stealc_v2 / acreed / stealerium.\n",
+    "match": {
+      "type": "json",
+      "requires_keys": [
+        "BuildID"
+      ]
+    },
+    "extract": {
+      "paths": {
+        "build_id": "$.BuildID",
+        "is_duplicate": "$.IsDuplicate",
+        "browser_count": "$.BrowserCount",
+        "cookie_count": "$.CookiesCount",
+        "wallet_count": "$.WalletCount",
+        "password_count": "$.PasswordsCount",
+        "messengers": "$.Messengers",
+        "exfil_at": "$.CreatedOnUtc"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "date_parse",
+        "field": "exfil_at",
+        "format": "iso8601"
+      }
+    ]
+  },
+  {
+    "id": "json_v2_pc_info",
+    "version": 1,
+    "layer": "content",
+    "family": "json_v2",
+    "priority": 100,
+    "path_glob": "pc_info.json",
+    "description": "Victim metadata from StealC-v2 / Acreed / Stealerium pc_info.json. Top level is a flat object; GPU and LocalAdapterIpList are arrays, which flow through JSONPath-lite as JSON-stringified blobs (good for raw retention, searchable downstream). LocalTime is \"YYYY-MM-DD HH:MM:SS\" without a timezone: we parse it iso8601 (Python's fromisoformat + JS's Date.parse both accept the space separator).\n",
+    "match": {
+      "type": "json",
+      "requires_keys": [
+        "PcName",
+        "Os",
+        "Ip"
+      ]
+    },
+    "extract": {
+      "paths": {
+        "hostname": "$.PcName",
+        "os": "$.Os",
+        "ip": "$.Ip",
+        "country": "$.Country",
+        "city": "$.City",
+        "zip_code": "$.ZipCode",
+        "ram": "$.RAM",
+        "cpu_cores": "$.CpuCores",
+        "arch": "$.Arch",
+        "screen": "$.ScreenSize",
+        "local_time": "$.LocalTime",
+        "is_elevated": "$.IsElevator",
+        "gpu_list": "$.GPU",
+        "adapter_ips": "$.LocalAdapterIpList",
+        "process_list": "$.ProcessList"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "lowercase",
+        "field": "country"
+      },
+      {
+        "verb": "date_parse",
+        "field": "local_time",
+        "format": "iso8601"
+      }
+    ]
+  },
+  {
+    "id": "lumma_container",
+    "version": 1,
+    "layer": "container",
+    "family": "lumma",
+    "priority": 100,
+    "description": "Lumma victim-folder predicate. Clean match: System.txt present AND at least two of the native Lumma sidecar files are there. Rejects Raccoon (which can also ship System.txt) via the min_score; a bare System.txt without sidecars falls through to raccoon_container.\n",
+    "match": {
+      "type": "folder",
+      "requires": [
+        "System.txt"
+      ],
+      "forbids": [
+        "pc_info.json",
+        "UserInformation.txt",
+        "information.txt"
+      ],
+      "optional": [
+        "Clipboard.txt",
+        "Environment.txt",
+        "ProcessList.txt",
+        "BrowserSummary.txt",
+        "GoogleTokens.txt",
+        "Domains.txt",
+        "All Passwords.txt"
+      ],
+      "min_score": 3
+    }
+  },
+  {
+    "id": "lumma_system_txt",
+    "version": 1,
+    "layer": "content",
+    "family": "lumma",
+    "priority": 100,
+    "path_glob": "System.txt",
+    "description": "Lumma victim header. Native shape is \"- Key: Value\" (dash prefix, then colon-space). We key the extract map by the literal \"- Key\" so the dash is part of the lookup; case-insensitive match handles the rare all-caps/lowercased variants. HWID uniqueness (UUID-style) is the Lumma-vs-Raccoon tiebreak downstream; we extract it as-is here.\n",
+    "match": {
+      "type": "keyvalue",
+      "separator": ": ",
+      "strip_whitespace": true,
+      "requires_keys": [
+        "- HWID"
+      ]
+    },
+    "extract": {
+      "keys": {
+        "- HWID": "hwid",
+        "- Hostname": "hostname",
+        "- User": "user",
+        "- OS Version": "os",
+        "- Language": "language",
+        "- Local Date": "local_date",
+        "- Install Date": "install_date",
+        "- Time Zone": "time_zone",
+        "- Elevated": "elevated",
+        "- RAM Size": "ram",
+        "- CPU Vendor": "cpu_vendor",
+        "- CPU Name": "cpu",
+        "- CPU Threads": "cpu_threads",
+        "- GPU": "gpu"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "strip_whitespace",
+        "field": "hwid"
+      },
+      {
+        "verb": "uppercase",
+        "field": "hwid"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "cpu_threads"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "ram"
+      },
+      {
+        "verb": "replace_re2",
+        "field": "cpu",
+        "pattern": "\\s+",
+        "replacement": " "
+      },
+      {
+        "verb": "date_parse",
+        "field": "install_date",
+        "format": "iso8601"
+      },
+      {
+        "verb": "date_parse",
+        "field": "local_date",
+        "format": "iso8601"
+      }
+    ]
+  },
+  {
+    "id": "passwords_tsv",
+    "version": 1,
+    "layer": "content",
+    "family": "json_v2",
+    "priority": 50,
+    "path_glob": "passwords.tsv",
+    "description": "Per-victim TSV credentials file shipped by the json_v2 cluster (StealC v2 / Acreed / Stealerium). Tab-separated `url \\t username \\t password` per line. This rule only captures the FIRST row as a sample (the DELIMITER matcher is single-row by design); the pipeline's ulpextract pass remains the authoritative credential ingester for the full file. Here it serves as a sanity probe that the archive is well-formed before a victim dossier is committed.\n",
+    "match": {
+      "type": "delimiter",
+      "separator": "\t",
+      "min_columns": 3,
+      "skip_blank": true
+    },
+    "extract": {
+      "columns": {
+        "0": "sample_url",
+        "1": "sample_user",
+        "2": "sample_password"
+      }
+    }
+  },
+  {
+    "id": "redline_container",
+    "version": 1,
+    "layer": "container",
+    "family": "redline",
+    "priority": 100,
+    "description": "RedLine victim-folder predicate. UserInformation.txt is specific enough on its own; the Browsers/ subdir is the second-highest-signal marker. Builds ship either \"UserInformation.txt\" or \"User Information.txt\" (space is build-dependent); we require only the no-space form here and leave the spaced variant to a sibling rule if we start seeing it in intake.\n",
+    "match": {
+      "type": "folder",
+      "requires": [
+        "UserInformation.txt"
+      ],
+      "forbids": [
+        "pc_info.json",
+        "System.txt",
+        "information.txt"
+      ],
+      "optional": [
+        "Browsers/",
+        "Passwords.txt",
+        "InstalledSoftware.txt",
+        "Screenshot.jpg"
+      ],
+      "min_score": 2
+    }
+  },
+  {
+    "id": "redline_user_information_txt",
+    "version": 1,
+    "layer": "content",
+    "family": "redline",
+    "priority": 100,
+    "path_glob": "UserInformation.txt",
+    "description": "RedLine header. Plain \"Key: Value\" lines; no dash prefix, no INI sections. Uptime, Keyboards, and LCID-tagged Language are the RedLine-specific fingerprint keys (none of Lumma/Vidar/StealC emit all three). RAM arrives like \"16384 MB\"; int_from_string strips \"MB\".\n",
+    "match": {
+      "type": "keyvalue",
+      "separator": ": ",
+      "strip_whitespace": true,
+      "requires_keys": [
+        "Computer",
+        "User",
+        "IP"
+      ]
+    },
+    "extract": {
+      "keys": {
+        "Computer": "hostname",
+        "User": "user",
+        "IP": "ip",
+        "Country": "country",
+        "OS": "os",
+        "CPU": "cpu",
+        "RAM": "ram",
+        "Screen": "screen",
+        "Language": "language",
+        "Keyboards": "keyboards",
+        "Uptime": "uptime_minutes",
+        "Path": "payload_path",
+        "AV": "av"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "strip_whitespace",
+        "field": "hostname"
+      },
+      {
+        "verb": "lowercase",
+        "field": "country"
+      },
+      {
+        "verb": "replace_re2",
+        "field": "cpu",
+        "pattern": "\\s+",
+        "replacement": " "
+      },
+      {
+        "verb": "int_from_string",
+        "field": "ram"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "uptime_minutes"
+      }
+    ]
+  },
+  {
+    "id": "stealc_container",
+    "version": 1,
+    "layer": "container",
+    "family": "stealc",
+    "priority": 100,
+    "description": "StealC v1 victim-folder predicate. information.txt is the hinge; Autofill/ + Cookies/ + History/ tree confirms it. Vidar ships the same file name under repack, so a bare information.txt without the grabber dirs falls through to a lower-priority Vidar probe later.\n",
+    "match": {
+      "type": "folder",
+      "requires": [
+        "information.txt"
+      ],
+      "forbids": [
+        "pc_info.json",
+        "System.txt",
+        "UserInformation.txt"
+      ],
+      "optional": [
+        "Autofill/",
+        "Cookies/",
+        "History/",
+        "Google Accounts/",
+        "GoogleAccounts/",
+        "passwords.txt",
+        "Soft/",
+        "Software/"
+      ],
+      "min_score": 3
+    }
+  },
+  {
+    "id": "stealc_information_header",
+    "version": 1,
+    "layer": "content",
+    "family": "stealc",
+    "priority": 90,
+    "path_glob": "information.txt",
+    "description": "StealC v1 information.txt pre-section header. Plain \"Key: Value\" lines BEFORE the [Hardware] / [Software] INI sections. A second rule (stealc_information_sections, priority 100) handles the INI body; the two rules extract disjoint field sets and merge.\n",
+    "match": {
+      "type": "keyvalue",
+      "separator": ": ",
+      "strip_whitespace": true,
+      "requires_keys": [
+        "User Name"
+      ]
+    },
+    "extract": {
+      "keys": {
+        "Windows": "os",
+        "Computer Name": "hostname",
+        "User Name": "user",
+        "Display Resolution": "screen",
+        "Local Time": "local_time",
+        "Antivirus": "av"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "strip_whitespace",
+        "field": "hostname"
+      },
+      {
+        "verb": "date_parse",
+        "field": "local_time",
+        "format": "iso8601"
+      }
+    ]
+  },
+  {
+    "id": "stealc_information_sections",
+    "version": 1,
+    "layer": "content",
+    "family": "stealc",
+    "priority": 100,
+    "path_glob": "information.txt",
+    "description": "StealC v1 [Hardware] section extraction. The [Software] section is a bare program list (no `=` separator), so we don't try to parse it here; a dedicated software-inventory rule can lift it later via delimiter type if that signal becomes useful.\n",
+    "match": {
+      "type": "keyvalue_ini",
+      "requires_sections": [
+        "Hardware"
+      ]
+    },
+    "extract": {
+      "keys": {
+        "Hardware.Processor": "cpu",
+        "Hardware.Cores": "cpu_cores",
+        "Hardware.Threads": "cpu_threads",
+        "Hardware.RAM": "ram",
+        "Hardware.VideoCard": "gpu"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "replace_re2",
+        "field": "cpu",
+        "pattern": "\\s+",
+        "replacement": " "
+      },
+      {
+        "verb": "int_from_string",
+        "field": "cpu_cores"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "cpu_threads"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "ram"
+      }
+    ]
+  }
+]
