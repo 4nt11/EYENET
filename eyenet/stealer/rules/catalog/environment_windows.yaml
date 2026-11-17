@@ -1,0 +1,65 @@
+id: environment_windows
+version: 1
+layer: content
+family: victim_environment
+priority: 75
+path_glob: "**Environment.txt"
+description: >
+  Windows process-environment dump from the stealer's own
+  GetEnvironmentStrings call. 'KEY=VALUE' per line. Noise-heavy at
+  surface (OneDrive paths, ProgramFiles, PATHEXT) but the specific
+  rows below are credential-grade CTI:
+
+    COMPUTERNAME / USERNAME / USERDOMAIN / USERPROFILE
+                            victim identity + AD binding. When
+                            USERDOMAIN == COMPUTERNAME the host is
+                            NOT AD-joined (home machine). When they
+                            differ, the host is on a corporate
+                            Active Directory domain - escalate
+                            triage priority.
+
+    LOGONSERVER             '\\\\COMPUTERNAME' == local logon only.
+                            A real \\\\DC-01 style value == domain-
+                            joined host, lateral-movement target.
+
+    OneDrive / OneDriveCommercial
+                            Microsoft 365 account bound to the
+                            profile. 'OneDriveCommercial' means a
+                            business M365 tenant.
+
+    Path                    the ENTIRE dev / admin toolchain
+                            (Python, Node, Git, docker, kubectl,
+                            Tailscale, SSH, SQL Server tools, etc).
+                            Downstream classifier parses this on
+                            ';' and flags lateral-tooling signals.
+
+    NUMBER_OF_PROCESSORS /
+    PROCESSOR_IDENTIFIER    hardware fingerprint (cross-correlates
+                            with Info.txt's CPU field)
+
+  We do not extract PATH-based 'dev detection' here because that is
+  a classifier-tier semantic job, not a DSL extraction. The raw
+  Path string is enough.
+match:
+  type: keyvalue
+  separator: "="
+  strip_whitespace: true
+  requires_keys:
+    - COMPUTERNAME
+    - USERNAME
+extract:
+  keys:
+    COMPUTERNAME: env_computer_name
+    USERNAME: env_user_name
+    USERDOMAIN: env_user_domain
+    USERPROFILE: env_user_profile
+    APPDATA: env_appdata
+    LOCALAPPDATA: env_localappdata
+    LOGONSERVER: env_logon_server
+    OneDrive: env_onedrive
+    OneDriveCommercial: env_onedrive_commercial
+    Path: env_path
+    NUMBER_OF_PROCESSORS: env_cpu_count
+    PROCESSOR_IDENTIFIER: env_cpu_identifier
+    SESSIONNAME: env_session_name
+    PROCESSOR_ARCHITECTURE: env_cpu_arch

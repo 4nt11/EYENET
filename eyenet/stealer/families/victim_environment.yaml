@@ -1,0 +1,67 @@
+slug: victim_environment
+name: Windows process environment (Environment.txt)
+status: active
+first_seen_year: 2019
+aliases: [env, envvars, windows-env]
+signature_files:
+  - Environment.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer calls GetEnvironmentStrings and
+    dumps the result
+references:
+  - title: Win32 GetEnvironmentStrings API
+    url: https://learn.microsoft.com/en-us/windows/win32/api/processenv/nf-processenv-getenvironmentstrings
+notes: >
+  Windows process-env dump, 'KEY=VALUE' per line. Noise-heavy at
+  surface but a handful of fields are CTI-grade:
+
+    COMPUTERNAME / USERNAME / USERDOMAIN / USERPROFILE
+                  victim identity + AD binding.
+                  USERDOMAIN == COMPUTERNAME: home machine, no AD.
+                  USERDOMAIN != COMPUTERNAME: corporate domain
+                  host, escalate triage priority.
+
+    LOGONSERVER   '\\\\COMPUTERNAME' == local logon only.
+                  '\\\\DC-01' style == domain-joined, lateral
+                  movement target.
+
+    OneDrive /
+    OneDriveCommercial
+                  Microsoft 365 account bound to the profile. The
+                  commercial variant means a business M365 tenant,
+                  enterprise mail + SharePoint drive + Teams access
+                  via SSO replay.
+
+    Path          downstream classifier parses on ';' and flags
+                  high-value dev / lateral tooling: Python, Node,
+                  Git, Docker, kubectl, aws cli, gcloud, Azure CLI,
+                  Tailscale, SSH, SQL Server, MySQL, VS Code,
+                  JetBrains, dotnet, ffmpeg, cargo, go.
+
+    NUMBER_OF_PROCESSORS /
+    PROCESSOR_IDENTIFIER
+                  hardware fingerprint, cross-correlates with
+                  Info.txt.
+
+  Khazan2 corpus sweep: 55/55 files matched (100% schema coverage).
+  Identity shape of the corpus: 0 AD-joined hosts (all BYOD, even
+  the Office LTSC corporate-licensed ones from Software.txt),
+  50/55 have personal OneDrive, 0 have OneDriveCommercial.
+
+  Dev-stack signal distribution on Path:
+     34  .NET SDK          34/55 == 62%
+     10  Python
+      7  VS Code
+      6  Git
+      6  Node.js
+      3  MySQL
+      2  Tailscale         !! lateral-movement signal
+      2  SQL Server
+      1  Docker
+      1  PuTTY
+
+  The two Tailscale hits are the operationally juicy ones: those
+  victims have a mesh network with at least one other reachable
+  host. A stolen Tailscale node key + the running tailscaled gets
+  the attacker access to every machine on the victim's tailnet.
