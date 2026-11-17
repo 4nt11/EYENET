@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from eyenet.stealer.families import valid_slugs, validate_rule_family
 from eyenet.stealer.rules.types import RuleSpec
 
 _CATALOG_DIR = Path(__file__).resolve().parent
@@ -29,6 +30,7 @@ def load_catalog() -> list[RuleSpec]:
     """
     rules: list[RuleSpec] = []
     seen: set[str] = set()
+    known_families = valid_slugs()
     for p in sorted(_CATALOG_DIR.glob("*.yaml")):
         rule = yaml.safe_load(p.read_text(encoding="utf-8"))
         if not isinstance(rule, dict) or "id" not in rule:
@@ -37,5 +39,8 @@ def load_catalog() -> list[RuleSpec]:
         if rid in seen:
             raise ValueError(f"{p.name}: duplicate rule id {rid!r}")
         seen.add(rid)
+        fam = rule.get("family")
+        if fam:
+            validate_rule_family(rid, fam, slugs=known_families)
         rules.append(rule)
     return rules

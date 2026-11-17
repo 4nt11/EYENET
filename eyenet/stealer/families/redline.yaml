@@ -1,0 +1,34 @@
+slug: redline
+name: RedLine Stealer
+status: dormant
+first_seen_year: 2020
+aliases: [RedLine, Red Line]
+signature_files:
+  - UserInformation.txt
+  - User Information.txt
+  - Passwords.txt
+  - Clipboard.txt
+  - InstalledSoftware.txt
+  - ProcessList.txt
+  - Screenshot.jpg
+loaders:
+  - SmokeLoader
+  - PrivateLoader
+  - GuLoader
+  - fake-installer campaigns (cracked software bait)
+distribution_channels:
+  - Russian forums
+  - Telegram subscription brokers
+references:
+  - title: eSentire TRU RedLine analysis
+    url: https://www.esentire.com/blog/esentire-threat-intelligence-malware-analysis-redline-stealer
+  - title: Europol Operation Magnus (Oct 2024, RedLine + Meta takedown)
+    url: https://www.europol.europa.eu/media-press/newsroom/
+  - title: Malpedia win.redline_stealer
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.redline_stealer
+notes: >
+  Operation Magnus (Oct 2024) seized core infrastructure. Still appears
+  in log dumps through 2026 but net new infections dropped sharply.
+  Fingerprint keys: Uptime, Keyboards, Language with [0xNNNN] LCID.
+  Per-browser passwords live in Browsers/<Browser>/Passwords.txt
+  (capital P), the most specific signature.

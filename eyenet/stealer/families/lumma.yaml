@@ -1,0 +1,34 @@
+slug: lumma
+name: Lumma Stealer
+status: active
+first_seen_year: 2022
+aliases: [LummaC2, Lumma]
+signature_files:
+  - System.txt
+  - Clipboard.txt
+  - Environment.txt
+  - ProcessList.txt
+  - BrowserSummary.txt
+  - GoogleTokens.txt
+  - All Passwords.txt
+loaders:
+  - SmokeLoader
+  - Amadey
+  - GuLoader
+  - PrivateLoader
+distribution_channels:
+  - Russian forums (XSS, exploit.in)
+  - Telegram marketplace (varies by broker)
+references:
+  - title: eSentire TRU Lumma analysis
+    url: https://www.esentire.com/blog/lumma-stealer
+  - title: Malpedia win.lumma_stealer
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.lumma_stealer
+  - title: Microsoft + DOJ takedown announcement (May 2025)
+    url: https://blogs.microsoft.com/on-the-issues/2025/05/21/lumma-takedown/
+notes: >
+  Native builds start with a "Lumma Stealer Report" banner; repackers
+  (Khazan et al.) overwrite the banner with their channel ads. HWID is
+  UUID-style (vs Raccoon's 32-hex). DOJ + Microsoft takedown May 2025;
+  infrastructure substantially rebuilt by Q3 2025, treat as active.
+  Native info file shape is "- Key: Value" dash prefix.

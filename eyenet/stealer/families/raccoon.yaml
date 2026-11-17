@@ -1,0 +1,26 @@
+slug: raccoon
+name: Raccoon Stealer
+status: dormant
+first_seen_year: 2019
+aliases: [Raccoon, Racealer, Raccoon v2, RecordBreaker]
+signature_files:
+  - System.txt
+  - machineinfo.txt
+loaders:
+  - SmokeLoader
+  - fake-installer campaigns
+distribution_channels:
+  - Russian forums
+references:
+  - title: DOJ Raccoon operator indictment (2022)
+    url: https://www.justice.gov/opa/pr/us-and-international-partners-dismantle-raccoon-infostealer
+  - title: Malpedia win.raccoon
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.raccoon
+notes: >
+  v1 died with the 2022 arrest of the primary operator. v2 (sometimes
+  called RecordBreaker) appeared mid-2022 and continued through 2024.
+  Both v1 and v2 ship System.txt and collide with Lumma on filename;
+  tiebreak is HWID shape (Raccoon: 32-hex; Lumma: UUID-style) and
+  the per-browser-profile directory layout (Raccoon writes
+  Browsers/<Browser>/<Profile>_pws.txt, Lumma writes
+  Chrome/<Profile>/Passwords.txt).

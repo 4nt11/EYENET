@@ -1,0 +1,422 @@
+[
+  {
+    "slug": "acr",
+    "name": "ACR Stealer",
+    "status": "new",
+    "first_seen_year": 2024,
+    "aliases": [
+      "ACR",
+      "ACRStealer"
+    ],
+    "signature_files": [
+      "Info.txt"
+    ],
+    "loaders": [
+      "unknown (not yet characterized in public reporting)"
+    ],
+    "distribution_channels": [
+      "Russian forums (observed in XSS marketplace listings)"
+    ],
+    "references": [
+      {
+        "title": "AhnLab ASEC ACR Stealer disclosure (2024)",
+        "url": "https://asec.ahnlab.com/en/68153/"
+      }
+    ],
+    "notes": "Newly discovered family. Info.txt is YAML-shaped (not INI, not plain keyvalue), which is unusual in this ecosystem and was the hinge that led us to add YAML support to the rule engine. Observed in Khazan intake with ~57 folders carrying the YAML Info.txt. Dead-drop resolver (DDR) technique for C2 fetch. No rules in our catalog yet; add when we see enough samples to characterize the output shape stably across builds.\n"
+  },
+  {
+    "slug": "combolist",
+    "name": "Combolist (non-stealer drop)",
+    "status": "active",
+    "first_seen_year": 0,
+    "aliases": [
+      "combolist",
+      "combo",
+      "ULP",
+      "URL-login-password"
+    ],
+    "signature_files": [],
+    "loaders": [],
+    "distribution_channels": [
+      "Forum dumps (BreachForums, XSS, exploit.in)",
+      "Telegram leak channels",
+      "Open-dir aggregators"
+    ],
+    "references": [
+      {
+        "title": "Have I Been Pwned combolist methodology",
+        "url": "https://www.troyhunt.com/combo-lists-and-the-dangers-of-credential-stuffing/"
+      }
+    ],
+    "notes": "Meta-family, not a stealer. Flat url:user:pass (or ;/|-separated) files that aggregate credentials from many sources and campaigns. Our combolist_container rule fires as the L1 fallback when no stealer family matches; the per-shape probes (combolist_ulp_colon, _semicolon, _pipe, _any_scheme, _schemeless, _email_colon, _android, _ulpextract_tsv) classify the row format. ulpextract remains the authoritative per-row credential ingester.\n"
+  },
+  {
+    "slug": "json_v2",
+    "name": "JSON-first cluster (StealC v2 / Acreed / Stealerium)",
+    "status": "active",
+    "first_seen_year": 2025,
+    "aliases": [
+      "StealC v2",
+      "StealC 2.0",
+      "Acreed",
+      "Stealerium"
+    ],
+    "signature_files": [
+      "pc_info.json",
+      "log_info.json",
+      "passwords.tsv",
+      "screen.jpg",
+      "Autofill/",
+      "Cookies/",
+      "Software/"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "Amadey",
+      "fake-installer campaigns"
+    ],
+    "distribution_channels": [
+      "Russian forums (XSS, exploit.in)",
+      "Telegram subscription brokers"
+    ],
+    "references": [
+      {
+        "title": "eSentire StealC v2 analysis (2025)",
+        "url": "https://www.esentire.com/blog/stealc-v2-analysis"
+      },
+      {
+        "title": "Flashpoint StealC 2.0 marketplace advertisement",
+        "url": "https://flashpoint.io/blog/stealc-v2/"
+      }
+    ],
+    "notes": "Synthetic family in our catalog: we lump StealC v2 / Acreed / Stealerium because single-folder disambiguation is not reliable without BuildID prefix inspection or C2 telemetry. Sub-tagging rule keyed off log_info.BuildID is a follow-up. All three emit the same pc_info.json + log_info.json + passwords.tsv surface.\n"
+  },
+  {
+    "slug": "lumma",
+    "name": "Lumma Stealer",
+    "status": "active",
+    "first_seen_year": 2022,
+    "aliases": [
+      "LummaC2",
+      "Lumma"
+    ],
+    "signature_files": [
+      "System.txt",
+      "Clipboard.txt",
+      "Environment.txt",
+      "ProcessList.txt",
+      "BrowserSummary.txt",
+      "GoogleTokens.txt",
+      "All Passwords.txt"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "Amadey",
+      "GuLoader",
+      "PrivateLoader"
+    ],
+    "distribution_channels": [
+      "Russian forums (XSS, exploit.in)",
+      "Telegram marketplace (varies by broker)"
+    ],
+    "references": [
+      {
+        "title": "eSentire TRU Lumma analysis",
+        "url": "https://www.esentire.com/blog/lumma-stealer"
+      },
+      {
+        "title": "Malpedia win.lumma_stealer",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.lumma_stealer"
+      },
+      {
+        "title": "Microsoft + DOJ takedown announcement (May 2025)",
+        "url": "https://blogs.microsoft.com/on-the-issues/2025/05/21/lumma-takedown/"
+      }
+    ],
+    "notes": "Native builds start with a \"Lumma Stealer Report\" banner; repackers (Khazan et al.) overwrite the banner with their channel ads. HWID is UUID-style (vs Raccoon's 32-hex). DOJ + Microsoft takedown May 2025; infrastructure substantially rebuilt by Q3 2025, treat as active. Native info file shape is \"- Key: Value\" dash prefix.\n"
+  },
+  {
+    "slug": "meta",
+    "name": "Meta Stealer",
+    "status": "retired",
+    "first_seen_year": 2022,
+    "aliases": [
+      "Meta",
+      "MetaStealer"
+    ],
+    "signature_files": [
+      "UserInformation.txt"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "PrivateLoader"
+    ],
+    "distribution_channels": [
+      "Russian forums"
+    ],
+    "references": [
+      {
+        "title": "Europol Operation Magnus (Oct 2024, RedLine + Meta takedown)",
+        "url": "https://www.europol.europa.eu/media-press/newsroom/"
+      },
+      {
+        "title": "Flashpoint Meta Stealer profile",
+        "url": "https://flashpoint.io/blog/meta-stealer/"
+      }
+    ],
+    "notes": "Direct RedLine fork that reused most of the UserInformation.txt surface. Taken down alongside RedLine in Operation Magnus (Oct 2024). Log dumps from early 2024 and prior still circulate; new infections effectively zero. Our redline_container rule will also match Meta samples by filename; a disambiguating rule off the actor-handle string inside UserInformation.txt is a possible follow-up.\n"
+  },
+  {
+    "slug": "mystic",
+    "name": "Mystic Stealer",
+    "status": "active",
+    "first_seen_year": 2023,
+    "aliases": [
+      "Mystic",
+      "MysticStealer"
+    ],
+    "signature_files": [
+      "information.txt"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "PrivateLoader"
+    ],
+    "distribution_channels": [
+      "Russian forums (XSS)",
+      "Telegram (initial release channel)"
+    ],
+    "references": [
+      {
+        "title": "Zscaler ThreatLabz Mystic Stealer breakdown",
+        "url": "https://www.zscaler.com/blogs/security-research/mystic-stealer"
+      },
+      {
+        "title": "Malpedia win.mystic_stealer",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.mystic_stealer"
+      }
+    ],
+    "notes": "Django-based control panel (unusual; most crimeware panels are PHP). Output surface overlaps StealC and Vidar (information.txt filename); Mystic's distinguisher is the C2 handshake protocol, not the on-disk files. Our catalog has no Mystic-specific rule; samples that hit our stealc_container but fail the StealC [Hardware] INI probe fall back to the generic combolist handling.\n"
+  },
+  {
+    "slug": "opus",
+    "name": "Opus (WEB RAT)",
+    "status": "new",
+    "first_seen_year": 2026,
+    "aliases": [
+      "Opus",
+      "WEB RAT",
+      "WEB RAT Opus"
+    ],
+    "signature_files": [
+      "UserInformation.txt",
+      "worklog.txt",
+      "Clients/DiscordTokens.txt",
+      "Clients/SteamTokens.txt",
+      "Clients/Roblox.txt",
+      "Clients/MAX.txt",
+      "Browsers/",
+      "Extensions/",
+      "Wallets/",
+      "Telegram/",
+      "Files/"
+    ],
+    "loaders": [
+      "direct operator deploy (RAT, not pay-per-install)"
+    ],
+    "distribution_channels": [
+      "private operator panel (/api/logs/download serves per-HWID zips)",
+      "closed Russian-language brokers"
+    ],
+    "references": [],
+    "notes": "Rust stub (\"Opus\"). Per-HWID zip layout served from the operator panel at /api/logs/download. Distinctive: ships UserInformation.txt (filename clash with RedLine) BUT has worklog.txt, Clients/MAX.txt (ru MAX messenger), and Telegram/ with tdata + AyuGram / Kotatogram / Telegram UWP forks, which no other family emits together. FileGrabber output in Files/ is operator-configurable via the panel's `logcollector`. Wallet coverage is chromium extensions (Phantom, Binance, Bitapp, BoltX, ...) plus on-disk %LOCALAPPDATA% wallet dirs zipped under Wallets/. Operator has API docs + an account; a dedicated dossier rule can extract system/user recon from UserInformation.txt safely because the Opus container rule disambiguates vs RedLine first.\n"
+  },
+  {
+    "slug": "raccoon",
+    "name": "Raccoon Stealer",
+    "status": "dormant",
+    "first_seen_year": 2019,
+    "aliases": [
+      "Raccoon",
+      "Racealer",
+      "Raccoon v2",
+      "RecordBreaker"
+    ],
+    "signature_files": [
+      "System.txt",
+      "machineinfo.txt"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "fake-installer campaigns"
+    ],
+    "distribution_channels": [
+      "Russian forums"
+    ],
+    "references": [
+      {
+        "title": "DOJ Raccoon operator indictment (2022)",
+        "url": "https://www.justice.gov/opa/pr/us-and-international-partners-dismantle-raccoon-infostealer"
+      },
+      {
+        "title": "Malpedia win.raccoon",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.raccoon"
+      }
+    ],
+    "notes": "v1 died with the 2022 arrest of the primary operator. v2 (sometimes called RecordBreaker) appeared mid-2022 and continued through 2024. Both v1 and v2 ship System.txt and collide with Lumma on filename; tiebreak is HWID shape (Raccoon: 32-hex; Lumma: UUID-style) and the per-browser-profile directory layout (Raccoon writes Browsers/<Browser>/<Profile>_pws.txt, Lumma writes Chrome/<Profile>/Passwords.txt).\n"
+  },
+  {
+    "slug": "redline",
+    "name": "RedLine Stealer",
+    "status": "dormant",
+    "first_seen_year": 2020,
+    "aliases": [
+      "RedLine",
+      "Red Line"
+    ],
+    "signature_files": [
+      "UserInformation.txt",
+      "User Information.txt",
+      "Passwords.txt",
+      "Clipboard.txt",
+      "InstalledSoftware.txt",
+      "ProcessList.txt",
+      "Screenshot.jpg"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "PrivateLoader",
+      "GuLoader",
+      "fake-installer campaigns (cracked software bait)"
+    ],
+    "distribution_channels": [
+      "Russian forums",
+      "Telegram subscription brokers"
+    ],
+    "references": [
+      {
+        "title": "eSentire TRU RedLine analysis",
+        "url": "https://www.esentire.com/blog/esentire-threat-intelligence-malware-analysis-redline-stealer"
+      },
+      {
+        "title": "Europol Operation Magnus (Oct 2024, RedLine + Meta takedown)",
+        "url": "https://www.europol.europa.eu/media-press/newsroom/"
+      },
+      {
+        "title": "Malpedia win.redline_stealer",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.redline_stealer"
+      }
+    ],
+    "notes": "Operation Magnus (Oct 2024) seized core infrastructure. Still appears in log dumps through 2026 but net new infections dropped sharply. Fingerprint keys: Uptime, Keyboards, Language with [0xNNNN] LCID. Per-browser passwords live in Browsers/<Browser>/Passwords.txt (capital P), the most specific signature.\n"
+  },
+  {
+    "slug": "rhadamanthys",
+    "name": "Rhadamanthys",
+    "status": "active",
+    "first_seen_year": 2022,
+    "aliases": [
+      "Rhadamanthys",
+      "RADMAN"
+    ],
+    "signature_files": [
+      "System_Info.txt",
+      "Victim_Info.txt"
+    ],
+    "loaders": [
+      "GuLoader",
+      "fake-installer campaigns",
+      "malvertising via Google Ads"
+    ],
+    "distribution_channels": [
+      "Russian forums"
+    ],
+    "references": [
+      {
+        "title": "Check Point Rhadamanthys technical breakdown",
+        "url": "https://research.checkpoint.com/2023/rhadamanthys-v0-5-0-a-deep-dive-into-the-stealers-components/"
+      },
+      {
+        "title": "Malpedia win.rhadamanthys",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.rhadamanthys"
+      }
+    ],
+    "notes": "Multi-component architecture with modular grabber plugins. Known for aggressive crypto-wallet and messenger coverage. No rules shipped in our catalog yet; Rhadamanthys samples rare in our Khazan intake (Khazan is mostly a stealer-RESELLER channel, not a Rhadamanthys licensing channel). Add rules when a Rhadamanthys-first source appears.\n"
+  },
+  {
+    "slug": "stealc",
+    "name": "StealC (v1)",
+    "status": "active",
+    "first_seen_year": 2023,
+    "aliases": [
+      "StealC",
+      "Steal-C",
+      "SC",
+      "StealC v1"
+    ],
+    "signature_files": [
+      "information.txt",
+      "passwords.txt",
+      "Autofill/",
+      "Cookies/",
+      "History/",
+      "Google Accounts/",
+      "GoogleAccounts/",
+      "Credit Cards/"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "Amadey",
+      "PrivateLoader",
+      "fake-installer campaigns"
+    ],
+    "distribution_channels": [
+      "Russian forums (XSS, exploit.in)",
+      "Direct seller account (\"Plymouth\")"
+    ],
+    "references": [
+      {
+        "title": "SentinelOne, StealC a copycat of Vidar and Raccoon",
+        "url": "https://www.sentinelone.com/labs/stealc-a-copycat-of-vidar-and-raccoon/"
+      },
+      {
+        "title": "Malpedia win.stealc",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.stealc"
+      }
+    ],
+    "notes": "Original v1 line continues alongside the unrelated v2 rewrite (which is JSON-first and ships as the json_v2 cluster in our catalog). information.txt has a plain \"Key: Value\" header BLOCK followed by [Hardware] and [Software] INI sections. [Software] is a bare program list, no `=` separator.\n"
+  },
+  {
+    "slug": "vidar",
+    "name": "Vidar Stealer",
+    "status": "active",
+    "first_seen_year": 2018,
+    "aliases": [
+      "Vidar",
+      "VidarStealer"
+    ],
+    "signature_files": [
+      "information.txt"
+    ],
+    "loaders": [
+      "SmokeLoader",
+      "PrivateLoader",
+      "Fallout Exploit Kit (historical)"
+    ],
+    "distribution_channels": [
+      "Russian forums",
+      "Pay-per-install services"
+    ],
+    "references": [
+      {
+        "title": "Malpedia win.vidar",
+        "url": "https://malpedia.caad.fkie.fraunhofer.de/details/win.vidar"
+      },
+      {
+        "title": "Fumik0 Vidar technical breakdown",
+        "url": "https://fumik0.com/2018/12/28/lets-dig-into-vidar-an-arkei-copycat-forked-stealer/"
+      }
+    ],
+    "notes": "Forked from Arkei, which in turn forked from an earlier commodity codebase. StealC is a Vidar clone and reuses the same output surface (information.txt). In practice, repackers normalize these so hard that single-folder disambiguation fails; our stealc_container rule tags them stealc_or_vidar when the banner dominates and leaves Vidar-specific disambiguation to a wallet-dir probe (not yet built). Vidar 10.x shipped 2025; 2026 builds in wild.\n"
+  }
+]

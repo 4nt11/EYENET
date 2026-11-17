@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
 
   const TABS = [
+    { href: '/tuning/stealer/families',  label: 'Families' },
     { href: '/tuning/stealer',           label: 'Rules library' },
     { href: '/tuning/stealer/workbench', label: 'Workbench' },
     { href: '/tuning/stealer/failures',  label: 'Parse failures' },

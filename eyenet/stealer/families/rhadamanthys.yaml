@@ -1,0 +1,26 @@
+slug: rhadamanthys
+name: Rhadamanthys
+status: active
+first_seen_year: 2022
+aliases: [Rhadamanthys, RADMAN]
+signature_files:
+  - System_Info.txt
+  - Victim_Info.txt
+loaders:
+  - GuLoader
+  - fake-installer campaigns
+  - malvertising via Google Ads
+distribution_channels:
+  - Russian forums
+references:
+  - title: Check Point Rhadamanthys technical breakdown
+    url: https://research.checkpoint.com/2023/rhadamanthys-v0-5-0-a-deep-dive-into-the-stealers-components/
+  - title: Malpedia win.rhadamanthys
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.rhadamanthys
+notes: >
+  Multi-component architecture with modular grabber plugins. Known for
+  aggressive crypto-wallet and messenger coverage. No rules shipped in
+  our catalog yet; Rhadamanthys samples rare in our Khazan intake
+  (Khazan is mostly a stealer-RESELLER channel, not a Rhadamanthys
+  licensing channel). Add rules when a Rhadamanthys-first source
+  appears.

@@ -1,0 +1,33 @@
+slug: stealc
+name: StealC (v1)
+status: active
+first_seen_year: 2023
+aliases: [StealC, Steal-C, SC, StealC v1]
+signature_files:
+  - information.txt
+  - passwords.txt
+  - Autofill/
+  - Cookies/
+  - History/
+  - Google Accounts/
+  - GoogleAccounts/
+  - Credit Cards/
+loaders:
+  - SmokeLoader
+  - Amadey
+  - PrivateLoader
+  - fake-installer campaigns
+distribution_channels:
+  - Russian forums (XSS, exploit.in)
+  - Direct seller account ("Plymouth")
+references:
+  - title: SentinelOne, StealC a copycat of Vidar and Raccoon
+    url: https://www.sentinelone.com/labs/stealc-a-copycat-of-vidar-and-raccoon/
+  - title: Malpedia win.stealc
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.stealc
+notes: >
+  Original v1 line continues alongside the unrelated v2 rewrite (which
+  is JSON-first and ships as the json_v2 cluster in our catalog).
+  information.txt has a plain "Key: Value" header BLOCK followed by
+  [Hardware] and [Software] INI sections. [Software] is a bare
+  program list, no `=` separator.

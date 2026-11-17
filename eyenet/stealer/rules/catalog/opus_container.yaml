@@ -1,0 +1,31 @@
+id: opus_container
+version: 1
+layer: container
+family: opus
+priority: 110
+description: >
+  Opus (WEB RAT) victim-folder predicate. Priority 110 so it beats the
+  RedLine container (100) on the UserInformation.txt collision. Opus
+  ALWAYS ships worklog.txt + a Clients/ dir with at least one of the
+  four messenger files; neither RedLine nor any other family emits both.
+  Telegram/ (the tdata + forks dir) is a strong secondary signal.
+match:
+  type: folder
+  requires:
+    - UserInformation.txt
+    - worklog.txt
+  forbids:
+    - pc_info.json
+    - System.txt
+    - information.txt
+  optional:
+    - Clients/DiscordTokens.txt
+    - Clients/SteamTokens.txt
+    - Clients/Roblox.txt
+    - Clients/MAX.txt
+    - Telegram/
+    - Extensions/
+    - Wallets/
+    - Files/
+    - Browsers/
+  min_score: 3

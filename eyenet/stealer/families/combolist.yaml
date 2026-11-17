@@ -1,0 +1,22 @@
+slug: combolist
+name: Combolist (non-stealer drop)
+status: active
+first_seen_year: 0
+aliases: [combolist, combo, ULP, URL-login-password]
+signature_files: []
+loaders: []
+distribution_channels:
+  - Forum dumps (BreachForums, XSS, exploit.in)
+  - Telegram leak channels
+  - Open-dir aggregators
+references:
+  - title: Have I Been Pwned combolist methodology
+    url: https://www.troyhunt.com/combo-lists-and-the-dangers-of-credential-stuffing/
+notes: >
+  Meta-family, not a stealer. Flat url:user:pass (or ;/|-separated)
+  files that aggregate credentials from many sources and campaigns.
+  Our combolist_container rule fires as the L1 fallback when no
+  stealer family matches; the per-shape probes (combolist_ulp_colon,
+  _semicolon, _pipe, _any_scheme, _schemeless, _email_colon,
+  _android, _ulpextract_tsv) classify the row format. ulpextract
+  remains the authoritative per-row credential ingester.

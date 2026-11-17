@@ -1,0 +1,31 @@
+slug: json_v2
+name: JSON-first cluster (StealC v2 / Acreed / Stealerium)
+status: active
+first_seen_year: 2025
+aliases: [StealC v2, StealC 2.0, Acreed, Stealerium]
+signature_files:
+  - pc_info.json
+  - log_info.json
+  - passwords.tsv
+  - screen.jpg
+  - Autofill/
+  - Cookies/
+  - Software/
+loaders:
+  - SmokeLoader
+  - Amadey
+  - fake-installer campaigns
+distribution_channels:
+  - Russian forums (XSS, exploit.in)
+  - Telegram subscription brokers
+references:
+  - title: eSentire StealC v2 analysis (2025)
+    url: https://www.esentire.com/blog/stealc-v2-analysis
+  - title: Flashpoint StealC 2.0 marketplace advertisement
+    url: https://flashpoint.io/blog/stealc-v2/
+notes: >
+  Synthetic family in our catalog: we lump StealC v2 / Acreed /
+  Stealerium because single-folder disambiguation is not reliable
+  without BuildID prefix inspection or C2 telemetry. Sub-tagging rule
+  keyed off log_info.BuildID is a follow-up. All three emit the same
+  pc_info.json + log_info.json + passwords.tsv surface.

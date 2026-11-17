@@ -1,0 +1,22 @@
+slug: acr
+name: ACR Stealer
+status: new
+first_seen_year: 2024
+aliases: [ACR, ACRStealer]
+signature_files:
+  - Info.txt
+loaders:
+  - unknown (not yet characterized in public reporting)
+distribution_channels:
+  - Russian forums (observed in XSS marketplace listings)
+references:
+  - title: AhnLab ASEC ACR Stealer disclosure (2024)
+    url: https://asec.ahnlab.com/en/68153/
+notes: >
+  Newly discovered family. Info.txt is YAML-shaped (not INI, not plain
+  keyvalue), which is unusual in this ecosystem and was the hinge that
+  led us to add YAML support to the rule engine. Observed in Khazan
+  intake with ~57 folders carrying the YAML Info.txt. Dead-drop
+  resolver (DDR) technique for C2 fetch. No rules in our catalog yet;
+  add when we see enough samples to characterize the output shape
+  stably across builds.

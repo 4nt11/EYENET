@@ -1,7 +1,7 @@
 id: combolist_schemeless
 version: 1
 layer: content
-family: combolist_schemeless
+family: combolist
 priority: 12
 path_glob: "**/*.txt"
 requires_container_family: combolist

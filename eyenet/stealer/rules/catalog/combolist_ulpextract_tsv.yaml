@@ -1,7 +1,7 @@
 id: combolist_ulpextract_tsv
 version: 1
 layer: content
-family: combolist_ulpextract_output
+family: combolist
 priority: 40
 path_glob: "**/*.tsv"
 requires_container_family: combolist

@@ -1,7 +1,7 @@
 id: combolist_ulp_pipe
 version: 1
 layer: content
-family: combolist_ulp_pipe
+family: combolist
 priority: 20
 path_glob: "**/*.txt"
 requires_container_family: combolist

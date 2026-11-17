@@ -1,0 +1,50 @@
+id: opus_user_information_txt
+version: 1
+layer: content
+family: opus
+priority: 100
+path_glob: UserInformation.txt
+requires_container_family: opus
+description: >
+  Opus (WEB RAT) system/user recon file. Filename collides with RedLine's
+  but the container-family gate ensures this rule only fires inside an
+  Opus drop. Opus's Rust stub bundles screen + userinfo in a single file;
+  starting shape is a conservative keyvalue map against the fields the
+  operator says they see consistently. Refine from the operator's API
+  docs when ready; this rule is intentionally wide so unseen keys
+  survive as ignored, not break the pipeline.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - HWID
+extract:
+  keys:
+    HWID: hwid
+    Computer: hostname
+    ComputerName: hostname
+    User: user
+    UserName: user
+    OS: os
+    OSVersion: os
+    IP: ip
+    Country: country
+    City: city
+    Screen: screen
+    Resolution: screen
+    Language: language
+    Keyboards: keyboards
+    CPU: cpu
+    RAM: ram
+    GPU: gpu
+    LocalTime: local_time
+    Build: build
+    BuildID: build
+normalize:
+  - { verb: strip_whitespace, field: hwid }
+  - { verb: uppercase,        field: hwid }
+  - { verb: lowercase,        field: country }
+  - { verb: replace_re2,      field: cpu, pattern: '\s+', replacement: ' ' }
+  - { verb: int_from_string,  field: ram }
+  - { verb: date_parse,       field: local_time, format: iso8601 }

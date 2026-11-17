@@ -1,0 +1,27 @@
+slug: vidar
+name: Vidar Stealer
+status: active
+first_seen_year: 2018
+aliases: [Vidar, VidarStealer]
+signature_files:
+  - information.txt
+loaders:
+  - SmokeLoader
+  - PrivateLoader
+  - Fallout Exploit Kit (historical)
+distribution_channels:
+  - Russian forums
+  - Pay-per-install services
+references:
+  - title: Malpedia win.vidar
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.vidar
+  - title: Fumik0 Vidar technical breakdown
+    url: https://fumik0.com/2018/12/28/lets-dig-into-vidar-an-arkei-copycat-forked-stealer/
+notes: >
+  Forked from Arkei, which in turn forked from an earlier commodity
+  codebase. StealC is a Vidar clone and reuses the same output
+  surface (information.txt). In practice, repackers normalize these
+  so hard that single-folder disambiguation fails; our stealc_container
+  rule tags them stealc_or_vidar when the banner dominates and leaves
+  Vidar-specific disambiguation to a wallet-dir probe (not yet built).
+  Vidar 10.x shipped 2025; 2026 builds in wild.

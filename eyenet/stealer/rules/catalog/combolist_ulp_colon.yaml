@@ -1,7 +1,7 @@
 id: combolist_ulp_colon
 version: 1
 layer: content
-family: combolist_ulp_colon
+family: combolist
 priority: 10
 path_glob: "**/*.txt"
 requires_container_family: combolist

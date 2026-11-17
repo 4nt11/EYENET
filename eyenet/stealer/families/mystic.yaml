@@ -1,0 +1,25 @@
+slug: mystic
+name: Mystic Stealer
+status: active
+first_seen_year: 2023
+aliases: [Mystic, MysticStealer]
+signature_files:
+  - information.txt
+loaders:
+  - SmokeLoader
+  - PrivateLoader
+distribution_channels:
+  - Russian forums (XSS)
+  - Telegram (initial release channel)
+references:
+  - title: Zscaler ThreatLabz Mystic Stealer breakdown
+    url: https://www.zscaler.com/blogs/security-research/mystic-stealer
+  - title: Malpedia win.mystic_stealer
+    url: https://malpedia.caad.fkie.fraunhofer.de/details/win.mystic_stealer
+notes: >
+  Django-based control panel (unusual; most crimeware panels are PHP).
+  Output surface overlaps StealC and Vidar (information.txt filename);
+  Mystic's distinguisher is the C2 handshake protocol, not the on-disk
+  files. Our catalog has no Mystic-specific rule; samples that hit our
+  stealc_container but fail the StealC [Hardware] INI probe fall back
+  to the generic combolist handling.

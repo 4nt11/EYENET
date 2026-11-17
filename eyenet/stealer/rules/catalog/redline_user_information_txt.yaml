@@ -4,6 +4,7 @@ layer: content
 family: redline
 priority: 100
 path_glob: UserInformation.txt
+requires_container_family: redline
 description: >
   RedLine header. Plain "Key: Value" lines; no dash prefix, no INI
   sections. Uptime, Keyboards, and LCID-tagged Language are the

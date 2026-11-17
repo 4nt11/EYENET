@@ -1,0 +1,24 @@
+slug: meta
+name: Meta Stealer
+status: retired
+first_seen_year: 2022
+aliases: [Meta, MetaStealer]
+signature_files:
+  - UserInformation.txt
+loaders:
+  - SmokeLoader
+  - PrivateLoader
+distribution_channels:
+  - Russian forums
+references:
+  - title: Europol Operation Magnus (Oct 2024, RedLine + Meta takedown)
+    url: https://www.europol.europa.eu/media-press/newsroom/
+  - title: Flashpoint Meta Stealer profile
+    url: https://flashpoint.io/blog/meta-stealer/
+notes: >
+  Direct RedLine fork that reused most of the UserInformation.txt
+  surface. Taken down alongside RedLine in Operation Magnus (Oct 2024).
+  Log dumps from early 2024 and prior still circulate; new infections
+  effectively zero. Our redline_container rule will also match Meta
+  samples by filename; a disambiguating rule off the actor-handle
+  string inside UserInformation.txt is a possible follow-up.

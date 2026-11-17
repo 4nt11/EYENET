@@ -3,7 +3,7 @@
     "id": "combolist_android",
     "version": 1,
     "layer": "content",
-    "family": "combolist_android_app",
+    "family": "combolist",
     "priority": 30,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -26,7 +26,7 @@
     "id": "combolist_any_scheme",
     "version": 1,
     "layer": "content",
-    "family": "combolist_ulp_any_scheme",
+    "family": "combolist",
     "priority": 15,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -61,7 +61,7 @@
     "id": "combolist_email_colon",
     "version": 1,
     "layer": "content",
-    "family": "combolist_email_pass",
+    "family": "combolist",
     "priority": 25,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -82,7 +82,7 @@
     "id": "combolist_schemeless",
     "version": 1,
     "layer": "content",
-    "family": "combolist_schemeless",
+    "family": "combolist",
     "priority": 12,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -104,7 +104,7 @@
     "id": "combolist_ulp_colon",
     "version": 1,
     "layer": "content",
-    "family": "combolist_ulp_colon",
+    "family": "combolist",
     "priority": 10,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -132,7 +132,7 @@
     "id": "combolist_ulp_pipe",
     "version": 1,
     "layer": "content",
-    "family": "combolist_ulp_pipe",
+    "family": "combolist",
     "priority": 20,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -160,7 +160,7 @@
     "id": "combolist_ulp_semicolon",
     "version": 1,
     "layer": "content",
-    "family": "combolist_ulp_semicolon",
+    "family": "combolist",
     "priority": 20,
     "path_glob": "**/*.txt",
     "requires_container_family": "combolist",
@@ -188,7 +188,7 @@
     "id": "combolist_ulpextract_tsv",
     "version": 1,
     "layer": "content",
-    "family": "combolist_ulpextract_output",
+    "family": "combolist",
     "priority": 40,
     "path_glob": "**/*.tsv",
     "requires_container_family": "combolist",
@@ -416,6 +416,109 @@
     ]
   },
   {
+    "id": "opus_container",
+    "version": 1,
+    "layer": "container",
+    "family": "opus",
+    "priority": 110,
+    "description": "Opus (WEB RAT) victim-folder predicate. Priority 110 so it beats the RedLine container (100) on the UserInformation.txt collision. Opus ALWAYS ships worklog.txt + a Clients/ dir with at least one of the four messenger files; neither RedLine nor any other family emits both. Telegram/ (the tdata + forks dir) is a strong secondary signal.\n",
+    "match": {
+      "type": "folder",
+      "requires": [
+        "UserInformation.txt",
+        "worklog.txt"
+      ],
+      "forbids": [
+        "pc_info.json",
+        "System.txt",
+        "information.txt"
+      ],
+      "optional": [
+        "Clients/DiscordTokens.txt",
+        "Clients/SteamTokens.txt",
+        "Clients/Roblox.txt",
+        "Clients/MAX.txt",
+        "Telegram/",
+        "Extensions/",
+        "Wallets/",
+        "Files/",
+        "Browsers/"
+      ],
+      "min_score": 3
+    }
+  },
+  {
+    "id": "opus_user_information_txt",
+    "version": 1,
+    "layer": "content",
+    "family": "opus",
+    "priority": 100,
+    "path_glob": "UserInformation.txt",
+    "requires_container_family": "opus",
+    "description": "Opus (WEB RAT) system/user recon file. Filename collides with RedLine's but the container-family gate ensures this rule only fires inside an Opus drop. Opus's Rust stub bundles screen + userinfo in a single file; starting shape is a conservative keyvalue map against the fields the operator says they see consistently. Refine from the operator's API docs when ready; this rule is intentionally wide so unseen keys survive as ignored, not break the pipeline.\n",
+    "match": {
+      "type": "keyvalue",
+      "separator": ": ",
+      "strip_whitespace": true,
+      "requires_keys": [
+        "HWID"
+      ]
+    },
+    "extract": {
+      "keys": {
+        "HWID": "hwid",
+        "Computer": "hostname",
+        "ComputerName": "hostname",
+        "User": "user",
+        "UserName": "user",
+        "OS": "os",
+        "OSVersion": "os",
+        "IP": "ip",
+        "Country": "country",
+        "City": "city",
+        "Screen": "screen",
+        "Resolution": "screen",
+        "Language": "language",
+        "Keyboards": "keyboards",
+        "CPU": "cpu",
+        "RAM": "ram",
+        "GPU": "gpu",
+        "LocalTime": "local_time",
+        "Build": "build",
+        "BuildID": "build"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "strip_whitespace",
+        "field": "hwid"
+      },
+      {
+        "verb": "uppercase",
+        "field": "hwid"
+      },
+      {
+        "verb": "lowercase",
+        "field": "country"
+      },
+      {
+        "verb": "replace_re2",
+        "field": "cpu",
+        "pattern": "\\s+",
+        "replacement": " "
+      },
+      {
+        "verb": "int_from_string",
+        "field": "ram"
+      },
+      {
+        "verb": "date_parse",
+        "field": "local_time",
+        "format": "iso8601"
+      }
+    ]
+  },
+  {
     "id": "passwords_tsv",
     "version": 1,
     "layer": "content",
@@ -470,6 +573,7 @@
     "family": "redline",
     "priority": 100,
     "path_glob": "UserInformation.txt",
+    "requires_container_family": "redline",
     "description": "RedLine header. Plain \"Key: Value\" lines; no dash prefix, no INI sections. Uptime, Keyboards, and LCID-tagged Language are the RedLine-specific fingerprint keys (none of Lumma/Vidar/StealC emit all three). RAM arrives like \"16384 MB\"; int_from_string strips \"MB\".\n",
     "match": {
       "type": "keyvalue",

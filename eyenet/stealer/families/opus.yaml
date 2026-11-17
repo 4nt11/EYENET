@@ -1,0 +1,35 @@
+slug: opus
+name: Opus (WEB RAT)
+status: new
+first_seen_year: 2026
+aliases: [Opus, WEB RAT, WEB RAT Opus]
+signature_files:
+  - UserInformation.txt
+  - worklog.txt
+  - Clients/DiscordTokens.txt
+  - Clients/SteamTokens.txt
+  - Clients/Roblox.txt
+  - Clients/MAX.txt
+  - Browsers/
+  - Extensions/
+  - Wallets/
+  - Telegram/
+  - Files/
+loaders:
+  - direct operator deploy (RAT, not pay-per-install)
+distribution_channels:
+  - private operator panel (/api/logs/download serves per-HWID zips)
+  - closed Russian-language brokers
+references: []
+notes: >
+  Rust stub ("Opus"). Per-HWID zip layout served from the operator panel
+  at /api/logs/download. Distinctive: ships UserInformation.txt (filename
+  clash with RedLine) BUT has worklog.txt, Clients/MAX.txt (ru MAX
+  messenger), and Telegram/ with tdata + AyuGram / Kotatogram / Telegram
+  UWP forks, which no other family emits together. FileGrabber output
+  in Files/ is operator-configurable via the panel's `logcollector`.
+  Wallet coverage is chromium extensions (Phantom, Binance, Bitapp,
+  BoltX, ...) plus on-disk %LOCALAPPDATA% wallet dirs zipped under
+  Wallets/. Operator has API docs + an account; a dedicated dossier
+  rule can extract system/user recon from UserInformation.txt safely
+  because the Opus container rule disambiguates vs RedLine first.
