@@ -1,0 +1,33 @@
+slug: victim_downloads
+name: Browser download history (Download History - *.txt)
+status: active
+first_seen_year: 2019
+aliases: [downloads, download-history]
+signature_files:
+  - Download History.txt
+  - Download History - *.txt
+loaders: []
+distribution_channels:
+  - sibling of History.txt in every Chromium-family stealer dump
+references:
+  - title: Chromium History schema (downloads table)
+    url: https://source.chromium.org/chromium/chromium/src/+/main:components/history/core/browser/download_database.cc
+notes: >
+  Three-line records 'URL:' / 'FILE NAME:' / 'TIME:' (ISO-8601)
+  separated by blank lines. One record per file the victim downloaded.
+
+  URL may be empty when referrer was stripped (href.li redirects,
+  javascript-initiated downloads). FILE NAME is always present.
+
+  CTI uses:
+    * infection-vector reconstruction (the row ~1 min before the
+      stealer's first callback is almost always the vector)
+    * pirated-software / cracked-game lifestyle fingerprint
+    * cross-victim campaign clustering (same FILE NAME across many
+      victims == shared drop URL)
+    * sensitive doc exfil hints (PDFs / DOCX from cloud viewers)
+
+  Khazan2 corpus sweep: 33,742 rows across 61 files. 21,344 (~63%)
+  have empty URL (href.li-stripped or js-triggered). 918 rows match
+  the 'infection vector' heuristic (shortener-redirect + archive/
+  exe suffix) - about 15 suspicious downloads per victim folder.

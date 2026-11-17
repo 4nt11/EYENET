@@ -1,0 +1,15 @@
+id: discord_tokens_plain
+version: 1
+layer: content
+family: discord_tokens
+priority: 85
+path_glob: tokens.txt
+description: >
+  Discord token shape parity fixture. Verifies the three-segment
+  pattern captures a well-formed token and ignores a shorter noise
+  line that happens to share two dots.
+match:
+  type: regex
+  pattern: '(?m)^(?P<discord_token>[A-Za-z0-9_-]{24,28}\.[A-Za-z0-9_-]{6,8}\.[A-Za-z0-9_-]{25,45})$'
+extract:
+  fields: [discord_token]

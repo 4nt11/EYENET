@@ -1,0 +1,2 @@
+# synth_fixture_login | SteamID: 76561199000000001 | Persona: Fixture Persona Name
+synth_fixture_login.eyJhbGciOiAiRWREU0EiLCJ0eXAiOiAiSldUIn0.eyJpc3MiOiJzdGVhbSIsInN1YiI6Ijc2NTYxMTk5MDAwMDAwMDAxIn0.synthetic_signature_fixture_only_not_a_grant

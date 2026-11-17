@@ -1,0 +1,38 @@
+id: download_history_block
+version: 1
+layer: content
+family: victim_downloads
+priority: 80
+path_glob: "**Download History*.txt"
+description: >
+  Chromium / Edge download-history dump. Three-line records 'URL:' /
+  'FILE NAME:' / 'TIME:' (ISO-8601) separated by blank lines. One
+  record per downloaded file.
+
+  Highest-value corner of the whole victim folder for incident-
+  response reconstruction: this is the EXACT list of files the
+  victim pulled off the internet, in order, by millisecond, with
+  the originating URL. The row whose timestamp sits ~1 minute
+  before the stealer's first callback is almost always the
+  infection vector itself.
+
+  URL field can be empty when the download was browser-initiated
+  but with the referrer stripped (href.li redirects, some
+  javascript-triggered downloads). The FILE NAME is always present.
+
+  CTI uses:
+    * infection-vector reconstruction (what did they download, from
+      where, when)
+    * pirated-software / cracked-game lifestyle fingerprint
+    * sensitive-doc exfil hints (PDFs, DOCX from cloud viewers)
+    * cross-victim campaign clustering (same filename across many
+      victims == shared drop URL)
+match:
+  type: regex
+  pattern: '(?m)^URL:\s*(?P<download_url>[^\n]*)\nFILE NAME:\s*(?P<download_filename>[^\n]+)\nTIME:\s*(?P<download_time>[^\n]+)$'
+extract:
+  fields: [download_url, download_filename, download_time]
+normalize:
+  - field: download_time
+    verb: date_parse
+    format: iso8601

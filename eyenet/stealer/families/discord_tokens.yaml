@@ -1,0 +1,33 @@
+slug: discord_tokens
+name: Discord authentication tokens (tokens.txt)
+status: active
+first_seen_year: 2018
+aliases: [discord, discord-session, chat-token]
+signature_files:
+  - tokens.txt
+  - Tokens.txt
+  - Discord/tokens.txt
+loaders: []
+distribution_channels:
+  - every stealer that pivots the Discord desktop app or Chromium
+    LocalStorage grab
+references:
+  - title: Discord token format reference
+    url: https://discord.com/developers/docs/reference
+notes: >
+  Discord session tokens in the three-segment shape:
+    <base64url user_id>.<base64url mint_time>.<hmac_signature>
+
+  Segment 1 base64-decodes to the 19-digit Discord snowflake user ID.
+  Segment 2 is the token-mint timestamp in seconds since Discord
+  epoch 2015-01-01 (useful for staleness scoring). Segment 3 is the
+  HMAC that Discord validates server-side.
+
+  Replay: paste the token into the Discord web-client localStorage
+  key 'token' and the attacker is logged in as the victim without
+  MFA or email prompt until Discord detects anomalous usage.
+
+  Khazan2 corpus sweep: 280 tokens across 201 files, 215 unique
+  Discord snowflake user IDs. Several victims expose 2-3 tokens
+  (web + desktop + mobile session concurrents). De-dupe downstream
+  on the user_id.

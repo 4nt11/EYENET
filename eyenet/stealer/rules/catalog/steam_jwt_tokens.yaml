@@ -1,0 +1,34 @@
+id: steam_jwt_tokens
+version: 1
+layer: content
+family: steam_tokens
+priority: 90
+path_glob: "**steam_tokens*.txt"
+description: >
+  Steam JWT auth-token dump. Each account is a two-line record: a
+  header comment with the username + SteamID + persona display, then
+  the token itself prefixed with '<username>.' .
+
+    # user_login | SteamID: 76561198XXXXXXXXX | Persona: Display Name
+    user_login.<base64 header>.<base64 payload>.<base64 sig>
+
+  The header comment is pre-parsed and shipped by the stealer. The
+  JWT payload decodes to:
+    iss: 'steam'
+    sub: SteamID
+    aud: ['client','web','renew','derive']
+    exp: expiry epoch
+    ip_subject: the LOGIN IP of the victim at token mint time
+    ip_confirmer: the Steam service IP
+
+  Replay: drop the token into the Steam web-login cookie and the
+  attacker is logged in as the victim. The ip_subject field is a
+  bonus victim-ISP geolocation signal.
+
+  Rule captures the header triple + the token line as three fields.
+  Regex expects CRLF-tolerant records.
+match:
+  type: regex
+  pattern: '(?m)^#\s*(?P<steam_login>\S+)\s*\|\s*SteamID:\s*(?P<steam_id>\d+)\s*\|\s*Persona:\s*(?P<steam_persona>[^\n\r]+?)\s*\r?\n[^\s.]+\.(?P<steam_jwt>[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$'
+extract:
+  fields: [steam_login, steam_id, steam_persona, steam_jwt]

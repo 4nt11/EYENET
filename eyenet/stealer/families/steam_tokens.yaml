@@ -1,0 +1,40 @@
+slug: steam_tokens
+name: Steam JWT auth tokens (steam_tokens.txt)
+status: active
+first_seen_year: 2023
+aliases: [steam-jwt, steam-login, steamloginsecure-jwt]
+signature_files:
+  - steam_tokens.txt
+  - Steam/tokens.txt
+loaders: []
+distribution_channels:
+  - Chromium-family + Lumma + StealC stealers that walk the Steam
+    client state directory
+references:
+  - title: Steam JWT auth token discussion
+    url: https://help.steampowered.com/
+notes: >
+  Two-line record: a header comment carrying login + SteamID +
+  persona, followed by the token line that starts with
+  '<username>.' then the three-segment JWT:
+
+    # user_login | SteamID: 76561198XXXXXXXXX | Persona: Display
+    user_login.<base64 header>.<base64 payload>.<base64 sig>
+
+  The JWT payload decodes to:
+    iss         'steam'
+    sub         SteamID
+    aud         ['client','web','renew','derive']
+    exp         expiry epoch
+    iat         issue epoch
+    ip_subject  the LOGIN IP of the victim at mint time
+    ip_confirmer  Steam service IP
+
+  Replay: drop the token into the Steam web-login cookie and the
+  attacker is logged in as the victim. The ip_subject field is a
+  bonus victim-ISP geolocation signal that pairs with Info.txt
+  egress IP for triangulation.
+
+  Khazan2 corpus sweep: 63 JWTs across 67 files, 63 unique
+  SteamIDs. Typical: exactly one token per victim (unlike Discord
+  which concurrent-mints across devices).

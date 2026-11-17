@@ -1,0 +1,38 @@
+id: discord_tokens_plain
+version: 1
+layer: content
+family: discord_tokens
+priority: 85
+path_glob: "**tokens*.txt"
+description: >
+  Discord authentication tokens, one per line. Format is the Discord
+  session-token triple:
+
+    <base64url user_id>.<base64url timestamp>.<hmac_signature>
+
+  The first dotted segment decodes to the victim's Discord snowflake
+  user ID (19 digits typical). The second segment is the token creation
+  timestamp (seconds since Discord epoch 2015-01-01). The third is the
+  HMAC that Discord validates server-side.
+
+  Replay: paste the token into the Discord web-client localStorage key
+  'token' and the attacker is logged in as the victim without MFA or
+  email prompt until Discord detects anomalous use.
+
+  CTI uses:
+    * mass Discord account takeover
+    * nitro / server-admin / bot-owner escalation
+    * pivot into connected services (Steam / Spotify / Twitch linked
+      accounts)
+    * DM archive exfiltration (private / financial / dev-channel
+      conversations)
+
+  Rule anchors on the three-segment token shape. The exact segment
+  lengths are: 24-28 chars (user_id), 6-7 chars (timestamp),
+  27 chars (hmac). We allow a loose range to catch legacy and
+  oauth-renewed tokens.
+match:
+  type: regex
+  pattern: '(?m)^(?P<discord_token>[A-Za-z0-9_-]{24,28}\.[A-Za-z0-9_-]{6,8}\.[A-Za-z0-9_-]{25,45})$'
+extract:
+  fields: [discord_token]
