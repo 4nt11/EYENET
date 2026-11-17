@@ -1,0 +1,41 @@
+id: brute_wordlist
+version: 1
+layer: content
+family: victim_wordlist
+priority: 75
+path_glob: "**Brute*.txt"
+description: >
+  The stealer's per-victim bruteforce wordlist. Every password, token,
+  hex string, numeric PIN, and short autofill value the stealer saw
+  while harvesting the browser Login Data + autofill + cookies +
+  sticky notes gets deduplicated into this one file. One credential
+  candidate per line.
+
+  Why the operator cares: a victim's password habits cluster. If the
+  wordlist shows 'Mozaiek1983!', 'MozaiekMozaiek1983', 'Mozaiek1!',
+  the victim reuses the 'Mozaiek' stem everywhere, and credential-
+  stuffing the same patterns against Gmail / Chase / Binance / etc.
+  works even when the stealer did not grab direct creds for those
+  sites. Gold for lateral spray.
+
+  Khazan2 corpus holds roughly 7,138 candidate lines archive-wide.
+  Many duplicate cross-victim (shared source password of the year on
+  a popular forum); de-dupe at ingest.
+
+  Rejects:
+    pure JSON shells ({"version":1,"accountData":{}})  noise
+    1-2 char lines                                     useless
+
+  Google OAuth refresh tokens ('1//0...' prefix) ARE kept here as
+  candidates because operators occasionally reuse the refresh-token
+  substring as a cross-victim join key, and the dedup downstream
+  handles redundancy with Restore_*.txt.
+match:
+  type: regex
+  pattern: '(?m)^(?P<candidate>\S.*)$'
+reject_patterns:
+  - '^\{.*\}$'
+  - '^\[.*\]$'
+  - '^.{1,2}$'
+extract:
+  fields: [candidate]

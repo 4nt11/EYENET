@@ -1,0 +1,20 @@
+id: brute_wordlist
+version: 1
+layer: content
+family: victim_wordlist
+priority: 75
+path_glob: Brute.txt
+description: >
+  Brute.txt per-victim wordlist parity fixture. Verifies the regex
+  captures one candidate per line, that reject_patterns drop the
+  pure-JSON shell and 1-2 char lines, and that the first non-rejected
+  candidate populates fields.candidate.
+match:
+  type: regex
+  pattern: '(?m)^(?P<candidate>\S.*)$'
+reject_patterns:
+  - '^\{.*\}$'
+  - '^\[.*\]$'
+  - '^.{1,2}$'
+extract:
+  fields: [candidate]

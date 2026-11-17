@@ -1,0 +1,35 @@
+slug: victim_wordlist
+name: Per-victim credential wordlist (Brute.txt)
+status: active
+first_seen_year: 2019
+aliases: [brute, wordlist, personal-dict]
+signature_files:
+  - Brute.txt
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer produces one alongside the main
+    credential dumps
+references:
+  - title: Credential-stuffing tradecraft (OpenBullet / SilverBullet)
+    url: https://owasp.org/www-community/attacks/Credential_stuffing
+notes: >
+  The stealer scrapes every password, API token, hex secret, numeric
+  PIN, and short autofill value it saw while harvesting the browser
+  Login Data + autofill + cookies + sticky notes, then deduplicates
+  into Brute.txt. One credential candidate per line.
+
+  The operator playbook: feed the wordlist into credential-stuffing
+  attacks against sites the stealer did NOT directly compromise
+  (Gmail, Chase, Binance, insurance portals). Victims reuse password
+  stems, so a stealer log that holds 'Mozaiek1983!' +
+  'MozaiekMozaiek1983' + 'Mozaiek1!' almost guarantees 'Mozaiek' +
+  current-year variations will crack their email or bank.
+
+  Khazan2 corpus: ~7,184 credential candidates archive-wide across
+  173 Brute.txt files, median length 10-19 chars (standard password
+  territory), 586 long tokens (20+ chars) that include OAuth refresh
+  tokens, API keys, and hex secrets.
+
+  Downstream dedupe is the operator's problem: identical candidates
+  cross-victim are extremely common (shared 'password of the year'
+  circulated on forums).
