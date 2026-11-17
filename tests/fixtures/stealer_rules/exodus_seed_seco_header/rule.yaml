@@ -1,0 +1,17 @@
+id: exodus_seed_seco_header
+version: 1
+layer: content
+family: exodus_wallet
+priority: 95
+path_glob: seed.seco
+description: >
+  First DSL rule against a binary wallet file. Verifies that the
+  Exodus seco header parses via plain regex because all bytes in
+  the header region are ASCII-safe (< 0x80). Test input embeds the
+  length-byte structure inline using octal escapes that resolve
+  to the exact bytes the real Exodus binary writes.
+match:
+  type: regex
+  pattern: 'SECO.{0,16}seco-(?P<seco_scheme>v\d-[\w-]+).{1,2}(?P<seco_vendor>Exodus|Electrum|Atomic)\x06(?P<seco_version>[\d.]+)'
+extract:
+  fields: [seco_scheme, seco_vendor, seco_version]

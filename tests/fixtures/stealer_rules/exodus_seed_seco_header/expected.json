@@ -1,0 +1,8 @@
+{
+  "family": null,
+  "fields": {
+    "seco_scheme": "v0-scrypt-aes",
+    "seco_vendor": "Exodus",
+    "seco_version": "99.0.0"
+  }
+}
