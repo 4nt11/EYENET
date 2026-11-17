@@ -1,0 +1,17 @@
+id: bookmarks_url_list
+version: 1
+layer: content
+family: browser_bookmarks
+priority: 70
+path_glob: "**Bmas**"
+description: >
+  Opus / vowel-stripped browser bookmarks under Browsers/Bmas/*.txt.
+  Flat URL list, one bookmark per line. Captures operator-interest
+  signal: which banks, exchanges, admin panels, internal corp URLs
+  the victim had saved. Regex pulls one URL per record; bulkParse
+  returns one record per bookmark.
+match:
+  type: regex
+  pattern: '(?P<url>https?://[^\s\n]+)'
+extract:
+  fields: [url]

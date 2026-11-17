@@ -1,0 +1,17 @@
+id: autofills_name_value
+version: 1
+layer: content
+family: browser_autofills
+priority: 70
+path_glob: "**AtFs**"
+description: >
+  Opus / vowel-stripped autofill dumps under Browsers/AtFs/*.txt.
+  Name/Value blocks separated by '===============' divider. Captures
+  what's likely KYC-grade PII for the victim (seen with CPF / CEP /
+  DataNascimento / DataEmissaoIdentidade / CPFRepresentante in the
+  Brazilian victim 6627).
+match:
+  type: regex
+  pattern: 'Name:\s*(?P<name>[^\n]*)\nValue:\s*(?P<value>[^\n]*)'
+extract:
+  fields: [name, value]

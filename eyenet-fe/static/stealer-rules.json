@@ -1,5 +1,42 @@
 [
   {
+    "id": "autofills_name_value",
+    "version": 1,
+    "layer": "content",
+    "family": "browser_autofills",
+    "priority": 70,
+    "path_glob": "**AtFs**",
+    "description": "Opus / vowel-stripped autofill dumps under Browsers/AtFs/*.txt. Name/Value blocks separated by '===============' divider. Captures what's likely KYC-grade PII for the victim (seen with CPF / CEP / DataNascimento / DataEmissaoIdentidade / CPFRepresentante in the Brazilian victim 6627).\n",
+    "match": {
+      "type": "regex",
+      "pattern": "Name:\\s*(?P<name>[^\\n]*)\\nValue:\\s*(?P<value>[^\\n]*)"
+    },
+    "extract": {
+      "fields": [
+        "name",
+        "value"
+      ]
+    }
+  },
+  {
+    "id": "bookmarks_url_list",
+    "version": 1,
+    "layer": "content",
+    "family": "browser_bookmarks",
+    "priority": 70,
+    "path_glob": "**Bmas**",
+    "description": "Opus / vowel-stripped browser bookmarks under Browsers/Bmas/*.txt. Flat URL list, one bookmark per line. Captures operator-interest signal: which banks, exchanges, admin panels, internal corp URLs the victim had saved. Regex pulls one URL per record; bulkParse returns one record per bookmark.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "(?P<url>https?://[^\\s\\n]+)"
+    },
+    "extract": {
+      "fields": [
+        "url"
+      ]
+    }
+  },
+  {
     "id": "combolist_android",
     "version": 1,
     "layer": "content",
@@ -206,6 +243,26 @@
         "2": "user",
         "3": "password"
       }
+    }
+  },
+  {
+    "id": "credentials_windows",
+    "version": 1,
+    "layer": "content",
+    "family": "windows_credentials",
+    "priority": 80,
+    "path_glob": "**CredentialsWindows*",
+    "description": "Windows Credential Manager export (DPAPI-unwrapped). Blocks are Target / User / Pass separated by blank lines. Pass may be either a plaintext password OR a long base64/JWT token (OAuth refresh, Xbox Live auth, OneDrive, etc.); operator should treat anything in the Pass field as sensitive regardless of apparent shape. User is often 'N/A' when the credential is a bearer token with no explicit user.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "Target:\\s*(?P<target>[^\\n]*)\\nUser:\\s*(?P<user>[^\\n]*)\\nPass:\\s*(?P<password>[^\\n]*)"
+    },
+    "extract": {
+      "fields": [
+        "target",
+        "user",
+        "password"
+      ]
     }
   },
   {
@@ -570,6 +627,68 @@
         "format": "iso8601"
       }
     ]
+  },
+  {
+    "id": "passwords_block_divider",
+    "version": 1,
+    "layer": "content",
+    "family": "browser_passwords",
+    "priority": 80,
+    "path_glob": "**assword*",
+    "description": "RedLine Passwords.txt block shape. Keys: URL, Username, Password. Blocks separated by 15 '=' chars on their own line. No Soft/SOFT field (RedLine stores the browser elsewhere). Fires alongside the two block-shape rules; only one anchors in any given file.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "URL:\\s*(?P<url>[^\\n]*)\\nUsername:\\s*(?P<username>[^\\n]*)\\nPassword:\\s*(?P<password>[^\\n]*)"
+    },
+    "extract": {
+      "fields": [
+        "url",
+        "username",
+        "password"
+      ]
+    }
+  },
+  {
+    "id": "passwords_block_title",
+    "version": 1,
+    "layer": "content",
+    "family": "browser_passwords",
+    "priority": 80,
+    "path_glob": "**assword*",
+    "description": "Title-case passwords.txt block format. 402 of 439 Khazan victims ship this shape (dominant). Blocks separated by blank lines. Keys: Soft, Host, Login, Password. Host may contain either https:// URLs OR android://<hash>@<pkg>/ app references. REGEX matcher is single-shot per call; bulkParse iterates every block when the Workbench asks for all records.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "Soft:\\s*(?P<soft>[^\\n]*)\\nHost:\\s*(?P<host>[^\\n]*)\\nLogin:\\s*(?P<login>[^\\n]*)\\nPassword:\\s*(?P<password>[^\\n]*)"
+    },
+    "extract": {
+      "fields": [
+        "soft",
+        "host",
+        "login",
+        "password"
+      ]
+    }
+  },
+  {
+    "id": "passwords_block_upper",
+    "version": 1,
+    "layer": "content",
+    "family": "browser_passwords",
+    "priority": 80,
+    "path_glob": "**assword*",
+    "description": "UPPERCASE passwords.txt block format. 37 of 439 Khazan victims ship this (json_v2 cluster: StealC v2 / Acreed / Stealerium). Often BOM-prefixed. Keys: SOFT, URL, USER, PASS. Fires in parallel with passwords_block_title; whichever shape matches a given file wins because the other regex simply won't find its anchor.\n",
+    "match": {
+      "type": "regex",
+      "pattern": "SOFT:\\s*(?P<soft>[^\\n]*)\\nURL:\\s*(?P<url>[^\\n]*)\\nUSER:\\s*(?P<user>[^\\n]*)\\nPASS:\\s*(?P<password>[^\\n]*)"
+    },
+    "extract": {
+      "fields": [
+        "soft",
+        "url",
+        "user",
+        "password"
+      ]
+    }
   },
   {
     "id": "passwords_tsv",

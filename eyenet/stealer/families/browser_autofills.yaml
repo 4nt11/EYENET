@@ -1,0 +1,29 @@
+slug: browser_autofills
+name: Browser autofill entries
+status: active
+first_seen_year: 2020
+aliases: [autofills, AtFs]
+signature_files:
+  - Browsers/AtFs/
+  - Autofill/
+  - Autofills/
+loaders: []
+distribution_channels:
+  - inside stealer-log drops
+references:
+  - title: Chromium autofill schema
+    url: https://chromium.googlesource.com/chromium/src/+/HEAD/components/autofill/
+notes: >
+  Browser form-autofill entries: Name = form field name, Value = user
+  input. Captures everything an operator can later use to impersonate
+  the victim at signup / KYC / shipping: CPF, CEP, DataNascimento,
+  phone numbers, addresses, credit card holder names, shipping names.
+
+  Dominant shape in Khazan intake:
+    Name: <field>
+    Value: <input>
+    ===============
+
+  Opus WEB RAT writes the same data under Browsers/AtFs/<browser>_<profile>.txt
+  with the vowel-stripped 'AtFs' dir name. StealC v1 writes under
+  Autofill/ with Title-case 'Chrome_<Profile>.txt' filenames.

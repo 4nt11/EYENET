@@ -1,0 +1,21 @@
+slug: browser_bookmarks
+name: Browser bookmarks
+status: active
+first_seen_year: 2020
+aliases: [bookmarks, Bmas]
+signature_files:
+  - Browsers/Bmas/
+  - Bookmarks/
+loaders: []
+distribution_channels:
+  - inside stealer-log drops
+references: []
+notes: >
+  Flat URL list, one bookmark per line. No title / folder metadata
+  (the stealer flattens Chrome's bookmarks.json structure to just the
+  URLs). Useful signal for operator interest-profiling: which banks,
+  which crypto exchanges, which internal corp URLs, which admin
+  panels the victim had saved.
+
+  Opus writes Browsers/Bmas/<browser>_<profile>.txt (vowel-stripped).
+  Older stealers write under Bookmarks/ with Title-case filenames.

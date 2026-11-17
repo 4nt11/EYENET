@@ -26,6 +26,78 @@
     "notes": "Newly discovered family. Info.txt is YAML-shaped (not INI, not plain keyvalue), which is unusual in this ecosystem and was the hinge that led us to add YAML support to the rule engine. Observed in Khazan intake with ~57 folders carrying the YAML Info.txt. Dead-drop resolver (DDR) technique for C2 fetch. No rules in our catalog yet; add when we see enough samples to characterize the output shape stably across builds.\n"
   },
   {
+    "slug": "browser_autofills",
+    "name": "Browser autofill entries",
+    "status": "active",
+    "first_seen_year": 2020,
+    "aliases": [
+      "autofills",
+      "AtFs"
+    ],
+    "signature_files": [
+      "Browsers/AtFs/",
+      "Autofill/",
+      "Autofills/"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealer-log drops"
+    ],
+    "references": [
+      {
+        "title": "Chromium autofill schema",
+        "url": "https://chromium.googlesource.com/chromium/src/+/HEAD/components/autofill/"
+      }
+    ],
+    "notes": "Browser form-autofill entries: Name = form field name, Value = user input. Captures everything an operator can later use to impersonate the victim at signup / KYC / shipping: CPF, CEP, DataNascimento, phone numbers, addresses, credit card holder names, shipping names.\nDominant shape in Khazan intake:\n  Name: <field>\n  Value: <input>\n  ===============\n\nOpus WEB RAT writes the same data under Browsers/AtFs/<browser>_<profile>.txt with the vowel-stripped 'AtFs' dir name. StealC v1 writes under Autofill/ with Title-case 'Chrome_<Profile>.txt' filenames.\n"
+  },
+  {
+    "slug": "browser_bookmarks",
+    "name": "Browser bookmarks",
+    "status": "active",
+    "first_seen_year": 2020,
+    "aliases": [
+      "bookmarks",
+      "Bmas"
+    ],
+    "signature_files": [
+      "Browsers/Bmas/",
+      "Bookmarks/"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealer-log drops"
+    ],
+    "references": [],
+    "notes": "Flat URL list, one bookmark per line. No title / folder metadata (the stealer flattens Chrome's bookmarks.json structure to just the URLs). Useful signal for operator interest-profiling: which banks, which crypto exchanges, which internal corp URLs, which admin panels the victim had saved.\nOpus writes Browsers/Bmas/<browser>_<profile>.txt (vowel-stripped). Older stealers write under Bookmarks/ with Title-case filenames.\n"
+  },
+  {
+    "slug": "browser_passwords",
+    "name": "Browser-saved passwords",
+    "status": "active",
+    "first_seen_year": 2020,
+    "aliases": [
+      "passwords.txt",
+      "saved-passwords"
+    ],
+    "signature_files": [
+      "passwords.txt",
+      "Passwords.txt",
+      "Browsers/Passwords/"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside every stealer family's drop"
+    ],
+    "references": [
+      {
+        "title": "Chromium Login Data format (sqlite3 source)",
+        "url": "https://chromium.googlesource.com/chromium/src/+/HEAD/components/password_manager/core/browser/"
+      }
+    ],
+    "notes": "Meta-family for the plain-text password dumps every stealer ships. Three distinct block shapes seen in Khazan intake:\n\n  A. Title-case + blank-line separator: Soft / Host / Login / Password\n     (402 of 439 victims; StealC v1, Lumma, Opus, most others)\n  B. UPPERCASE + blank-line separator: SOFT / URL / USER / PASS\n     (37 victims; json_v2 cluster = StealC v2 / Acreed / Stealerium)\n  C. Title-case + '===============' divider: URL / Username / Password\n     (RedLine Passwords.txt)\n\nVariants A + B may include android://hash@pkg/ URLs in the host slot when the credential came from a mobile app login. All three shapes may contain empty Login / USER values and empty Password / PASS values (stealer captured the record anyway).\n"
+  },
+  {
     "slug": "combolist",
     "name": "Combolist (non-stealer drop)",
     "status": "active",
@@ -465,5 +537,33 @@
       }
     ],
     "notes": "Forked from Arkei, which in turn forked from an earlier commodity codebase. StealC is a Vidar clone and reuses the same output surface (information.txt). In practice, repackers normalize these so hard that single-folder disambiguation fails; our stealc_container rule tags them stealc_or_vidar when the banner dominates and leaves Vidar-specific disambiguation to a wallet-dir probe (not yet built). Vidar 10.x shipped 2025; 2026 builds in wild.\n"
+  },
+  {
+    "slug": "windows_credentials",
+    "name": "Windows credential manager export",
+    "status": "active",
+    "first_seen_year": 2020,
+    "aliases": [
+      "credentials-windows",
+      "DPAPI-credentials"
+    ],
+    "signature_files": [
+      "CredentialsWindows.txt"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealer-log drops (anything that calls CredEnumerate + DPAPI unwrap)"
+    ],
+    "references": [
+      {
+        "title": "Windows Credential Manager (Microsoft Learn)",
+        "url": "https://learn.microsoft.com/en-us/windows/win32/secauthn/credential-manager"
+      },
+      {
+        "title": "DPAPI master key extraction (SharpDPAPI)",
+        "url": "https://github.com/GhostPack/SharpDPAPI"
+      }
+    ],
+    "notes": "Export of the victim's Windows Credential Manager (DPAPI-unwrapped). Covers: domain credentials, Microsoft account tokens, OneDrive refresh tokens, Xbox Live auth (seen with 'Target: MCLMS|...' + base64 JWT in the Pass field), stored credentials for mapped network drives, mstsc RDP saved creds, Outlook / Thunderbird SMTP passwords, and anything a victim app wrote via CredWrite().\nDominant shape:\n  Target: <credential-target-name>\n  User: <username or N/A>\n  Pass: <base64 blob OR plaintext password>\n  <blank line>\n\nHigh-value evidence; the Pass field often holds long base64/JWT tokens and passwords should be treated as plaintext even when they look like garbage (they frequently are OAuth refresh tokens).\n"
   }
 ]
