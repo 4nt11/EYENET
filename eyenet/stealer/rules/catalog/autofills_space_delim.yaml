@@ -1,0 +1,32 @@
+id: autofills_space_delim
+version: 1
+layer: content
+family: victim_autofills
+priority: 70
+path_glob: "**Autofill/**.txt"
+description: >
+  json_v2-cluster (StealC v2 / Acreed / Stealerium) autofill format:
+  one line per form submission, key and value separated by a SPACE
+  (not by the title-cased 'FORM: / VALUE:' block shape).
+
+    filter[search_server_name] cars
+    email chaseheat2@gmail.com
+    s coast to coast
+    key21 walkitoff
+    ssidname21 TheForce-5G
+
+  Key = first whitespace-separated token. Value = everything after
+  the first space (preserves internal spaces). Sits under
+  '<root>/Autofill/<Browser>_<Profile>.txt' - sibling of the
+  FORM/VALUE block rule which handles the other cluster.
+
+  Same CTI payload as autofills_form_value_block: names, emails,
+  phones, addresses, national IDs, VAT numbers, search queries,
+  ecommerce workflow data, Wi-Fi SSIDs + plaintext PSKs ('key21
+  walkitoff', 'ssidname21 TheForce-5G' = the victim's router's
+  guest network credentials sitting in cleartext).
+match:
+  type: regex
+  pattern: '(?m)^(?P<form_key>\S+)[ \t]+(?P<form_value>\S.*?)[ \t]*$'
+extract:
+  fields: [form_key, form_value]

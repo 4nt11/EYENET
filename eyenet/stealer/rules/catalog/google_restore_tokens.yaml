@@ -3,7 +3,7 @@ version: 1
 layer: content
 family: google_oauth_tokens
 priority: 90
-path_glob: "**estore*.txt"
+path_glob: "**/*.txt"
 description: >
   Chromium-family 'Restore_<Browser>_<Profile>.txt' files. One line per
   signed-in Google account: '<refresh_token>:<gaia_id>'.
@@ -26,7 +26,7 @@ description: >
   invalid_refresh_token rows because the gaia_id itself is CTI.
 match:
   type: regex
-  pattern: '(?m)^(?P<refresh_token>[^\n:]+):(?P<gaia_id>\d+)$'
+  pattern: '(?m)^(?P<refresh_token>(?:1//0[A-Za-z0-9_-]+)|invalid_refresh_token):(?P<gaia_id>\d{15,25})$'
 reject_patterns:
   - "^fake-"
 extract:
