@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -23,6 +24,24 @@ _FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "mybb_thread.html"
 _THREAD_URL = "Thread-demo-leak--42"
 _LOGGED_IN_INDEX = "<html><body><a href='member.php?action=logout'>Log Out</a></body></html>"
 _GUEST_INDEX = "<html><body><form action='member.php?action=do_login'>Login</form></body></html>"
+
+
+async def _seed_identity(storage: object, name: str) -> None:
+    """Insert the identity-pool entry into storage so the forum collector's
+    on_subscribe standalone-tests path can find a matching DB row.
+
+    forum/real.py no longer auto-upserts a `forum:{identity}` source for
+    historical reasons (it would silently create a parallel source when the
+    operator bound the identity to a non-conventionally-named source), so
+    tests must now seed the row explicitly. Matches the setup pattern used
+    by test_forum_discovery.py.
+    """
+    sid = await storage.upsert_source(  # type: ignore[attr-defined]
+        kind=SourceKind.FORUM, display_name=f"forum:{name}", created_at=datetime.now(UTC)
+    )
+    await storage.create_identity(  # type: ignore[attr-defined]
+        name=name, source_id=sid, session_path=f"/dev/null/{name}"
+    )
 
 
 def _pool(tmp_path: Path, name: str) -> FileIdentityPool:
@@ -58,6 +77,7 @@ async def test_ingests_and_publishes(tmp_path: Path) -> None:
     pool = _pool(tmp_path, "alpha_forum")
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_identity(storage, "alpha_forum")
 
     captured: list[bytes] = []
 
@@ -115,6 +135,7 @@ async def test_blank_author_post_is_refused(tmp_path: Path) -> None:
     pool = _pool(tmp_path, "blank_forum")
     bus = MemoryBus()
     storage = get_repository(data_dir=tmp_path / "data")
+    await _seed_identity(storage, "blank_forum")
     captured: list[bytes] = []
 
     async def _recorder(_s: str, payload: bytes, _h: dict[str, str]) -> None:

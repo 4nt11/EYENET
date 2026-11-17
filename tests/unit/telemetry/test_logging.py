@@ -19,11 +19,26 @@ def _provider() -> None:
 
 
 def _render_event(event: dict[str, object]) -> str | dict[str, object]:
+    """Walk the configured structlog processors up to the stdlib bridge, then
+    render as JSON.
+
+    ``configure_logging`` ends its structlog chain with
+    ``structlog.stdlib.ProcessorFormatter.wrap_for_formatter`` so stdlib's
+    handler owns the final rendering. That wrapper returns an ``(args,
+    kwargs)`` tuple, not an event dict, so iterating the whole chain would
+    hand a tuple to the next processor and crash. We stop before the bridge
+    and apply JSONRenderer ourselves to verify the schema the application
+    observes at log time.
+    """
     chain = structlog.get_config()["processors"]
     out: object = event
+    logger = structlog.get_logger()
     for proc in chain:
-        out = proc(structlog.get_logger(), "info", out)
-    return out  # type: ignore[return-value]
+        if getattr(proc, "__name__", "") == "wrap_for_formatter":
+            break  # the stdlib bridge; hand-off to the application formatter
+        out = proc(logger, "info", out)
+    rendered = structlog.processors.JSONRenderer()(logger, "info", out)  # type: ignore[arg-type]
+    return rendered  # type: ignore[no-any-return]
 
 
 @pytest.mark.unit
