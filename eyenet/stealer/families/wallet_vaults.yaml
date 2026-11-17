@@ -1,0 +1,69 @@
+slug: wallet_vaults
+name: Browser-extension wallet vaults (LevelDB-extracted)
+status: active
+first_seen_year: 2020
+aliases: [metamask, phantom, ronin, trust-wallet, browser-wallets]
+signature_files:
+  - Local Extension Settings/nkbihfbeogaeaoehlefnkodbefgpgknn
+  - Local Extension Settings/bfnaelmomeimhlpmgjnjophhpkkoljpa
+  - Local Extension Settings/fnjhmkhhmkbjkkabndcnnogagogbneec
+  - IndexedDB/chrome-extension_*_0.indexeddb.leveldb
+loaders: []
+distribution_channels:
+  - every Chromium-family stealer walks the User Data profile for
+    known wallet extension ids and dumps the LevelDB directory wholesale
+references:
+  - title: 'Gotractor extract-wallets subcommand'
+    url: eyenet/stealer/gotractor/wallets/
+  - title: 'MetaMask vault format reference'
+    url: https://github.com/MetaMask/browser-passworder
+notes: >
+  Umbrella family for records emitted by the gotractor extract-wallets
+  pass. The emitter is binary (goleveldb + idb_cmp1 custom comparator),
+  not a regex DSL rule, so artifacts under this family do not
+  originate from eyenet/stealer/rules/catalog/. They land in
+  stealer.extracted_records alongside DSL records with rule_id prefix
+  'wallet_vault_leveldb:<wallet_family>:<shape>'.
+
+  Vault shapes emitted:
+
+    metamask_vault     {data, iv, salt} base64 - classic Metamask /
+                       MetaMask-forks encrypted vault. PBKDF2-SHA256
+                       (10k-600k iterations) + AES-GCM. Downstream
+                       target for hashcat / btcrecover.
+
+    phantom_vault      {content: {encrypted, kdf, iterations, salt,
+                       nonce}} - Phantom's wrapping around AES-GCM
+                       with scrypt KDF. Multiple vault entries per
+                       victim (seed, client-jwt cache, integrity
+                       check, seed cache).
+
+    encrypted_blob     generic {encrypted, salt|iv|nonce} fallback.
+                       Catches wallet variants whose vault schema
+                       does not match the two primary shapes.
+
+    public_accounts    cleartext public-address + balance list.
+                       NOT encrypted. Operator-grade OSINT: links the
+                       victim identity to Bitcoin / EVM / Solana
+                       public addresses + balance snapshots. Pair
+                       with blockchain-explorer queries for a current
+                       picture of the wallet.
+
+  Covered wallets (extension catalog in gotractor/wallets/catalog.go):
+    MetaMask (both legacy + current extension ids), Ronin, Phantom,
+    Trust Wallet, Binance Chain, TronLink, Yoroi, Rabby, Coinbase
+    Wallet, Kaikas, Wombat, Argent X, TON Wallet. Adding a wallet
+    there is sufficient to pick it up on the next extraction run.
+
+  Khazan2 corpus live result: 7 vaults extracted from 1 Phantom
+  victim (4 phantom_vault, 2 public_accounts revealing German-speaker
+  with 'Konto 1' / 'DavidDei' accounts and ~15 SOL balance visible,
+  1 encrypted_blob wrapping the master encryption key). Other 3
+  wallet dirs (2 Metamask IndexedDB + 1 Ronin) had the extension
+  installed but no actual wallet state - correctly emitted zero
+  records.
+
+  Decryption is downstream and strictly opt-in: hashcat / btcrecover
+  consume the vault_payload string from the fields column and brute-
+  force the password offline. The Brute.txt per-victim wordlist is
+  the first-shot candidate set.

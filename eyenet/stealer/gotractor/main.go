@@ -235,9 +235,22 @@ func envOr(k, def string) string {
 
 // runExtractWallets walks a victim folder for known wallet LevelDB
 // directories, opens each read-only, and emits one JSON line per
-// extracted vault to the writer. Errors per directory are logged
-// but do not abort the walk - a stealer dump often has half-grabbed
-// extension directories.
+// extracted vault to the writer. Record shape matches the DSL
+// records emitter so the pipeline consumer ingests both uniformly:
+//
+//   {"rule_id": "wallet_vault_leveldb:<family>:<shape>",
+//    "family":  "<wallet_family>",
+//    "file_path": "<leveldb dir>",
+//    "fields": {wallet_name, extension_id, extension_storage,
+//               vault_key, vault_shape, vault_payload}}
+//
+// vault_payload is the JSON-stringified decoded payload for
+// downstream consumers that want to re-parse it (hashcat vault
+// format converters, address classifiers). It is a string per the
+// pipeline's Map(String, String) fields column.
+//
+// Errors per directory go to stderr but do not abort the walk; a
+// stealer dump often has half-grabbed extension directories.
 func runExtractWallets(root string, w *os.File) error {
 	hits, err := wallets.FindWalletDirs(root)
 	if err != nil {
@@ -254,7 +267,20 @@ func runExtractWallets(root string, w *os.File) error {
 		}
 		okCount++
 		for _, r := range recs {
-			if err := enc.Encode(r); err != nil {
+			rec := map[string]any{
+				"rule_id":   "wallet_vault_leveldb:" + r.WalletFamily + ":" + r.Shape,
+				"family":    r.WalletFamily,
+				"file_path": r.SourceDir,
+				"fields": map[string]string{
+					"wallet_name":       r.WalletName,
+					"extension_id":      r.ExtensionID,
+					"extension_storage": string(h.Kind),
+					"vault_key":         r.VaultKey,
+					"vault_shape":       r.Shape,
+					"vault_payload":     string(r.Payload),
+				},
+			}
+			if err := enc.Encode(rec); err != nil {
 				fmt.Fprintf(os.Stderr, "encode vault %s/%s: %v\n", h.Extension.Name, r.VaultKey, err)
 				continue
 			}
