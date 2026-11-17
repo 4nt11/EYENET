@@ -1,0 +1,15 @@
+id: skid_toolkit_ddos_python
+version: 1
+layer: content
+family: skid_toolkit
+priority: 50
+path_glob: "**/*.py"
+description: >
+  Skid DDoS toolkit detection. Case-insensitive word-bounded match
+  on a short allowlist of well-known layer-7 flooder names. Verifies
+  word boundaries work (cHOICe, sHULKing, etc. must NOT match).
+match:
+  type: regex
+  pattern: '(?i)\b(?P<ddos_tool>fsociety|slowloris|goldeneye|torshammer|saphyra|l3m0n|mhddos|r4v3n|xerxes|hyenae)\b'
+extract:
+  fields: [ddos_tool]

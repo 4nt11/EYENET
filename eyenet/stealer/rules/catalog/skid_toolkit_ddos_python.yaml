@@ -1,0 +1,32 @@
+id: skid_toolkit_ddos_python
+version: 1
+layer: content
+family: skid_toolkit
+priority: 50
+path_glob: "**/*.py"
+description: >
+  The 'skid got owned' tell. Matches well-known layer-7 DDoS script
+  names inside any .py file grabbed from the victim's disk. When this
+  anchors, the victim is themselves a would-be attacker whose own
+  toolkit got exfiltrated by whichever stealer landed on them. High
+  signal for triage de-prioritization (skiddies carry little intel
+  beyond the lulz) AND for attribution: the tool name, its forked
+  author handle (often leaked in a GITHUB: line), and the language
+  of the comments cluster victims to small online communities.
+
+  Signatures covered: fsociety (Mr. Robot LARPware, Indonesian +
+  Pakistani forks dominant), slowloris (classic slow-HTTP), the
+  GoldenEye / HULK / Torshammer trio (Python DDoS staples 2014+),
+  Saphyra (Turkish fork), L3M0N / L3MON (botnet-ish wrapper), MHDDoS
+  (large multi-method toolkit), R4V3N / Xerxes / Hyenae (lower-skill
+  forks). All word-bounded to avoid cHOICe / sHULKing / etc. false
+  positives.
+
+  Fires on the first match in a file; the Workbench walks every
+  match for an operator to confirm the signal is the whole file
+  and not an unrelated string.
+match:
+  type: regex
+  pattern: '(?i)\b(?P<ddos_tool>fsociety|slowloris|goldeneye|torshammer|saphyra|l3m0n|mhddos|r4v3n|xerxes|hyenae)\b'
+extract:
+  fields: [ddos_tool]

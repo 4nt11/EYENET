@@ -1,0 +1,45 @@
+slug: skid_toolkit
+name: Script-kiddie offensive toolkit
+status: active
+first_seen_year: 2014
+aliases: [skiddie, skid, fsociety, ddoser]
+signature_files: []
+loaders: []
+distribution_channels:
+  - the victim's own 'hacking' folder, grabbed by the stealer that
+    got them while they were running their tools
+references:
+  - title: Mr. Robot / fsociety cultural reference
+    url: https://en.wikipedia.org/wiki/Mr._Robot
+notes: >
+  The 'skid got owned' tell. These scripts are LAYER-7 flooders and
+  low-grade attack toys that circulate on GitHub as 'hacking toolkits'
+  for people who want to feel like Elliot Alderson. When one of them
+  shows up in a stealer log, the victim was running it on their own
+  machine, got infected, and their toolkit was exfiltrated alongside
+  their creds. Delicious.
+
+  CTI uses:
+
+    triage de-prioritization  skiddies carry little durable intel;
+                              push them down the queue.
+    attribution               tool forks leak the author GitHub handle
+                              and comment language. A victim running
+                              Pyscodes-pro's FSOCIETY-v2 with
+                              Indonesian log strings is cluster-able
+                              with other victims in that online
+                              community.
+    co-victim mapping         if a DDoS tool shows up in victim A AND
+                              victim B, they likely downloaded from
+                              the same forum thread or Telegram
+                              channel - a social-graph edge.
+
+  Toolkits covered at rule-level today (Python only):
+    fsociety, slowloris, goldeneye, torshammer, saphyra, l3m0n /
+    l3mon, mhddos, r4v3n, xerxes, hyenae.
+
+  Future expansions: .js (clusterddos, cyclone), .bat (classic
+  'ddos.bat' loops), .ps1 (invoke-ddos), compiled .exe skid
+  binaries (IoC-based rather than signature).
+
+  Khazan2 corpus sweep: 3 fsociety script hits across 1 victim.
