@@ -187,6 +187,162 @@ _RECORDS_COLUMNS = [
 ]
 
 
+# v1.3.3 per-victim profile roll-up. ONE row per (archive_sha256, victim_folder)
+# that the FE lists + filters + opens in a detail drawer. Cheap enough to
+# query without FINAL because archive_sha256 is the sort-key prefix.
+#
+# Why AggregatingMergeTree + SimpleAggregateFunction:
+#   - The pipeline inserts into extracted_records in batches of ~1000 rows.
+#     For a Khazan archive (~200k records across ~450 victims) that is many
+#     MV firings per archive. Each MV firing produces one row per
+#     (archive, victim) touched in the batch.
+#   - SAF(sum, UInt32) on counts: batches add together on background merge.
+#   - SAF(max, String) on identity fields: lexicographic max selects a
+#     non-empty value over an empty one. '' < 'BR' so 'BR' wins. Non-empty
+#     always beats empty. Behaves correctly even if only some batches had
+#     a userinfo record for the victim.
+#   - SAF(max, UInt8) on presence flags: once a batch sees '1', the merge
+#     keeps '1' forever.
+#
+# Victim_folder is derived by the MV from file_path using the segment-[2]
+# split (Khazan archive structure is <channel_wrapper>/<victim>/<content>).
+# The extracted_records.victim_folder column itself is currently set to the
+# random temp extraction dir name by the pipeline, which does not
+# distinguish victims. Fix is pending; MV bypasses by deriving directly.
+_VICTIM_PROFILES: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.victim_profiles
+    (
+        archive_sha256         FixedString(64),
+        victim_folder          String,
+        source                 SimpleAggregateFunction(max, LowCardinality(String)),
+        country                SimpleAggregateFunction(max, LowCardinality(String)),
+        egress_ip              SimpleAggregateFunction(max, String),
+        user_name              SimpleAggregateFunction(max, String),
+        computer_name          SimpleAggregateFunction(max, String),
+        os_version             SimpleAggregateFunction(max, String),
+        traffic_affid          SimpleAggregateFunction(max, LowCardinality(String)),
+        build_version          SimpleAggregateFunction(max, LowCardinality(String)),
+        payload_md5            SimpleAggregateFunction(max, String),
+        work_dir               SimpleAggregateFunction(max, String),
+        creds_count            SimpleAggregateFunction(sum, UInt32),
+        cookies_count          SimpleAggregateFunction(sum, UInt32),
+        autofills_count        SimpleAggregateFunction(sum, UInt32),
+        history_count          SimpleAggregateFunction(sum, UInt32),
+        downloads_count        SimpleAggregateFunction(sum, UInt32),
+        processes_count        SimpleAggregateFunction(sum, UInt32),
+        software_count         SimpleAggregateFunction(sum, UInt32),
+        discord_tokens_count   SimpleAggregateFunction(sum, UInt32),
+        steam_tokens_count     SimpleAggregateFunction(sum, UInt32),
+        google_refresh_count   SimpleAggregateFunction(sum, UInt32),
+        localstorage_jwt_count SimpleAggregateFunction(sum, UInt32),
+        wallet_vaults_count    SimpleAggregateFunction(sum, UInt32),
+        has_corporate_marker   SimpleAggregateFunction(max, UInt8),
+        has_webmail_leak       SimpleAggregateFunction(max, UInt8),
+        has_wallet             SimpleAggregateFunction(max, UInt8),
+        has_crypter_banner     SimpleAggregateFunction(max, UInt8),
+        webmail_identity       SimpleAggregateFunction(max, String),
+        first_corporate_marker SimpleAggregateFunction(max, String),
+        first_wallet_family    SimpleAggregateFunction(max, LowCardinality(String)),
+        INDEX idx_country country TYPE set(0) GRANULARITY 1,
+        INDEX idx_affid traffic_affid TYPE set(0) GRANULARITY 1,
+        INDEX idx_has_wallet has_wallet TYPE set(0) GRANULARITY 1,
+        INDEX idx_has_corporate has_corporate_marker TYPE set(0) GRANULARITY 1
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY (archive_sha256, victim_folder)
+    {storage_policy_clause}
+    """,
+    # MV reads only the batch being inserted. Fields the batch does not
+    # contribute leave empty strings / zeros which SAF's lexicographic max
+    # discards in favour of non-empty values from other batches.
+    # victim_folder='' rows (files at the archive root with no victim
+    # subdirectory) are filtered out so the UI never shows a phantom "empty
+    # victim" row.
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_profiles_mv
+    TO {db}.victim_profiles AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        max(source) AS source,
+        max(fields['ui_country']) AS country,
+        max(if(fields['ui_egress_ip'] != '', fields['ui_egress_ip'], fields['build_egress_ip'])) AS egress_ip,
+        max(coalesce(nullIf(fields['ui_user_name'], ''), nullIf(fields['os_user_name'], ''), nullIf(fields['env_user_name'], ''), '')) AS user_name,
+        max(coalesce(nullIf(fields['ui_computer'], ''), nullIf(fields['os_computer_name'], ''), nullIf(fields['env_computer_name'], ''), '')) AS computer_name,
+        max(coalesce(nullIf(fields['ui_os'], ''), nullIf(fields['os_version'], ''), '')) AS os_version,
+        max(fields['ui_traffic_affid']) AS traffic_affid,
+        max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
+        max(fields['ui_payload_md5']) AS payload_md5,
+        max(fields['ui_work_dir']) AS work_dir,
+        toUInt32(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
+        toUInt32(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
+        toUInt32(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
+        toUInt32(countIf(rule_id = 'history_url_title_block')) AS history_count,
+        toUInt32(countIf(rule_id = 'download_history_block')) AS downloads_count,
+        toUInt32(countIf(rule_id LIKE 'processes_%')) AS processes_count,
+        toUInt32(countIf(rule_id = 'software_installed_list')) AS software_count,
+        toUInt32(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
+        toUInt32(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
+        toUInt32(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
+        toUInt32(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
+        toUInt32(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
+        maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
+        maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
+        maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
+        maxIf(toUInt8(1), rule_id = 'aware_crypter_banner') AS has_crypter_banner,
+        maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
+        maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
+        maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
+    FROM {db}.extracted_records
+    WHERE splitByChar('/', file_path)[2] != ''
+    GROUP BY archive_sha256, victim_folder
+    """,
+    # Idempotent backfill with NOT EXISTS gate. First-run on an existing
+    # extracted_records populates all historical rows; subsequent calls on
+    # each pipeline run are no-ops.
+    """
+    INSERT INTO {db}.victim_profiles
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        max(source) AS source,
+        max(fields['ui_country']) AS country,
+        max(if(fields['ui_egress_ip'] != '', fields['ui_egress_ip'], fields['build_egress_ip'])) AS egress_ip,
+        max(coalesce(nullIf(fields['ui_user_name'], ''), nullIf(fields['os_user_name'], ''), nullIf(fields['env_user_name'], ''), '')) AS user_name,
+        max(coalesce(nullIf(fields['ui_computer'], ''), nullIf(fields['os_computer_name'], ''), nullIf(fields['env_computer_name'], ''), '')) AS computer_name,
+        max(coalesce(nullIf(fields['ui_os'], ''), nullIf(fields['os_version'], ''), '')) AS os_version,
+        max(fields['ui_traffic_affid']) AS traffic_affid,
+        max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
+        max(fields['ui_payload_md5']) AS payload_md5,
+        max(fields['ui_work_dir']) AS work_dir,
+        toUInt32(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
+        toUInt32(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
+        toUInt32(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
+        toUInt32(countIf(rule_id = 'history_url_title_block')) AS history_count,
+        toUInt32(countIf(rule_id = 'download_history_block')) AS downloads_count,
+        toUInt32(countIf(rule_id LIKE 'processes_%')) AS processes_count,
+        toUInt32(countIf(rule_id = 'software_installed_list')) AS software_count,
+        toUInt32(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
+        toUInt32(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
+        toUInt32(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
+        toUInt32(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
+        toUInt32(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
+        maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
+        maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
+        maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
+        maxIf(toUInt8(1), rule_id = 'aware_crypter_banner') AS has_crypter_banner,
+        maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
+        maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
+        maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
+    FROM {db}.extracted_records
+    WHERE splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_profiles)
+    GROUP BY archive_sha256, victim_folder
+    """,
+)
+
+
 class ClickHouseRecordsSink:
     """Connection + schema + batched insert for ``<db>.extracted_records``.
 
@@ -214,6 +370,11 @@ class ClickHouseRecordsSink:
                 storage_policy_clause=_storage_policy_clause(),
             )
         )
+        # v1.3.3 per-victim profile roll-up (table + MV + idempotent backfill).
+        for stmt in _VICTIM_PROFILES:
+            client.command(
+                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause())
+            )
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)
@@ -407,6 +568,17 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
     "sample_head_ngram sample_head TYPE ngrambf_v1(4, 65536, 3, 0) GRANULARITY 1",
     "ALTER TABLE {db}.file_audit ADD INDEX IF NOT EXISTS "
     "rel_path_tokens rel_path TYPE tokenbf_v1(16384, 3, 0) GRANULARITY 1",
+    # v1.3.3 per-victim column. Derived from the second path segment
+    # (Khazan archive structure is <channel_wrapper>/<victim>/<content>).
+    # MATERIALIZED columns compute on INSERT and are NULL-safe on existing
+    # rows until ALTER TABLE ... MATERIALIZE COLUMN runs (the next DDL).
+    # Skip index enables cheap (archive_sha256, victim_folder) filters for
+    # the FE drawer's file-tree query.
+    "ALTER TABLE {db}.file_audit ADD COLUMN IF NOT EXISTS "
+    "victim_folder String MATERIALIZED splitByChar('/', rel_path)[2]",
+    "ALTER TABLE {db}.file_audit MATERIALIZE COLUMN victim_folder",
+    "ALTER TABLE {db}.file_audit ADD INDEX IF NOT EXISTS "
+    "victim_folder_set victim_folder TYPE set(0) GRANULARITY 1",
 )
 
 
