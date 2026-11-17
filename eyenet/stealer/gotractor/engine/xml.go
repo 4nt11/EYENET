@@ -339,7 +339,7 @@ type xmlKV struct {
 	el  *xmlElement
 }
 
-var xmlPathSeg = regexp.MustCompile(`\.(\w+)`)
+var xmlPathSeg = regexp.MustCompile(`\.([\w-]+)`)
 
 func xmlPivotChildren(root *xmlElement, pivotExpr string) []xmlKV {
 	if !strings.HasPrefix(pivotExpr, "$") {

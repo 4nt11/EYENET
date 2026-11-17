@@ -198,7 +198,7 @@ export function matchRegex(m, ex, input) {
 export function matchTemplate(m, ex, input) {
   // Compile fixed literals + named holes into a non-greedy regex.
   const holes = [];
-  const compiled = m.template.replace(/\{(\w+)\}|([^{]+)/g, (_, hole, lit) => {
+  const compiled = m.template.replace(/\.([\w-]+)\}|([^{]+)/g, (_, hole, lit) => {
     if (hole) {
       holes.push(hole);
       return `(?<${hole}>.*?)`;
@@ -306,7 +306,7 @@ function* pivotChildren(doc, pivotExpr) {
   if (!pivotExpr.startsWith('$')) return;
   let cur = doc;
   const rest = pivotExpr.slice(1);
-  for (const tok of rest.matchAll(/\.(\w+)|\[(\d+)\]/g)) {
+  for (const tok of rest.matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
     if (cur == null || typeof cur !== 'object') return;
     cur = tok[1] !== undefined ? cur[tok[1]] : null; // numeric index invalid for VDF
     if (cur == null) return;
@@ -342,7 +342,7 @@ function extractPathsVdf(doc, paths) {
 function evalPathLocal(doc, expr) {
   if (!expr?.startsWith('$')) return null;
   let cur = doc;
-  for (const tok of expr.slice(1).matchAll(/\.(\w+)|\[(\d+)\]/g)) {
+  for (const tok of expr.slice(1).matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
     if (cur == null || typeof cur !== 'object') return null;
     cur = tok[1] !== undefined ? cur[tok[1]] : null;
   }
@@ -464,7 +464,7 @@ function checkXmlRequires(root, required) {
 function* xmlPivotChildren(root, pivotExpr) {
   if (!pivotExpr.startsWith('$')) return;
   const steps = [];
-  for (const tok of pivotExpr.slice(1).matchAll(/\.(\w+)/g)) steps.push(tok[1]);
+  for (const tok of pivotExpr.slice(1).matchAll(/\.([\w-]+)/g)) steps.push(tok[1]);
   if (steps.length === 0) return;
   let cur = root;
   let rest = steps[0] === root.name ? steps.slice(1) : steps;
@@ -496,7 +496,7 @@ function xmlEvalPath(el, expr) {
     expr = expr.slice(0, i);
   }
   let cur = el;
-  for (const tok of expr.slice(1).matchAll(/\.(\w+)/g)) {
+  for (const tok of expr.slice(1).matchAll(/\.([\w-]+)/g)) {
     const next = cur.children.find((c) => c.name === tok[1]);
     if (!next) return null;
     cur = next;
@@ -748,7 +748,7 @@ function evalPath(doc, expr) {
   if (!expr.startsWith('$')) return undefined;
   let cur = doc;
   const rest = expr.slice(1);
-  for (const tok of rest.matchAll(/\.(\w+)|\[(\d+)\]/g)) {
+  for (const tok of rest.matchAll(/\.([\w-]+)|\[(\d+)\]/g)) {
     if (cur == null) return undefined;
     cur = tok[1] !== undefined ? cur[tok[1]] : cur[Number.parseInt(tok[2], 10)];
   }

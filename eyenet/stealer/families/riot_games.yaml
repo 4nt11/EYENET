@@ -1,0 +1,26 @@
+slug: riot_games
+name: Riot Games (League / Valorant / Legends of Runeterra)
+status: active
+first_seen_year: 2017
+aliases: [riot, riot-client, league, valorant]
+signature_files:
+  - RiotGamesPrivateSettings.yaml
+  - Riot Games/RiotClientPrivateSettings.yaml
+loaders: []
+distribution_channels:
+  - inside stealers that grab %LOCALAPPDATA%/Riot Games
+references:
+  - title: Riot Client config paths (community)
+    url: https://help.riotgames.com/hc/en-us/articles/360028536491
+notes: >
+  RiotGamesPrivateSettings.yaml stores the Riot Client's RSO
+  (Riot Sign On) session cookies: 'tdid' (device ID + JWT),
+  'ssid' (session ID), 'csid' (CSRF). These cookies grant access
+  to all Riot Games (League of Legends, Valorant, TFT, Legends of
+  Runeterra, Wild Rift) without password or 2FA. YAML format with
+  the cookie values at
+  rso-authenticator.<name>.value as JWT / opaque tokens.
+
+  Riot cookies expire ~90 days but are silently refreshed by any
+  logged-in client, so a captured session often remains valid long
+  after the stealer run.

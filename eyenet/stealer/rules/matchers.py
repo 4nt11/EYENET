@@ -925,7 +925,7 @@ def match_keyvalue_ini(
 #  JSONPath-lite: $.a.b[0].c                                             #
 # --------------------------------------------------------------------- #
 
-_PATH_TOKEN = re2.compile(r"\.(\w+)|\[(\d+)\]")
+_PATH_TOKEN = re2.compile(r"\.([\w-]+)|\[(\d+)\]")
 
 
 def _extract_paths(doc: Any, paths: dict[str, str]) -> dict[str, Any]:

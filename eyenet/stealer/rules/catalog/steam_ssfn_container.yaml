@@ -1,0 +1,15 @@
+id: steam_ssfn_container
+version: 1
+layer: container
+family: steam_accounts
+priority: 40
+description: >
+  Sidecar presence probe for Steam ssfn* session files. Pair with a
+  loginusers.vdf entry where RememberPassword=1 for silent session
+  takeover (no account password / Steam Guard prompt). Priority 40
+  so the primary stealer family still wins; this just surfaces the
+  session-material inventory.
+match:
+  type: folder
+  predicate:
+    glob: "**/ssfn*"

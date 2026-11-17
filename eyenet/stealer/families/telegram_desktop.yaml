@@ -1,0 +1,35 @@
+slug: telegram_desktop
+name: Telegram Desktop session
+status: active
+first_seen_year: 2014
+aliases: [tdata, telegram, telegram-desktop]
+signature_files:
+  - tdata/
+  - Telegram/tdata/
+  - Telegram UWP/tdata/
+loaders: []
+distribution_channels:
+  - inside every stealer that targets Telegram Desktop
+references:
+  - title: Telegram Desktop tdata format (community)
+    url: https://github.com/geoscripting/tdata-reader
+notes: >
+  Telegram Desktop stores its session state under %APPDATA%/Telegram
+  Desktop/tdata/ (or the UWP sideload path 'Telegram UWP/tdata/').
+  The directory contains encrypted session blobs:
+
+    D877F783D5D3EF8C*   the primary session file
+    map*                encrypted state map
+    key_datas           session keys
+
+  A COPY of tdata (verbatim, no decryption) + the victim's local
+  passcode = silent takeover of their Telegram account on another
+  machine; Telegram Desktop will accept the session as valid. No
+  2FA prompt. No login SMS. One of the highest-value credential
+  targets in a stealer log.
+
+  Observed in the khazan archive under Applications/Telegram/,
+  Applications/Telegram UWP/, and Soft/Telegram/ (StealC v1-style
+  vowel-stripped variants: Apps/Tlg/, Soft/Tel/). Fork-aware
+  path variants (AyuGram, Kotatogram) ship under similarly named
+  dirs and share the tdata format.

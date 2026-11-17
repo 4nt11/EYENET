@@ -60,7 +60,7 @@ func IterVDF(m map[string]any, ex map[string]any, text string) <-chan map[string
 	return ch
 }
 
-var vdfPathToken = regexp.MustCompile(`\.(\w+)|\[(\d+)\]`)
+var vdfPathToken = regexp.MustCompile(`\.([\w-]+)|\[(\d+)\]`)
 
 // pivotChildren walks the pivot path and yields a map of (key, value)
 // pairs when the resolved node is a VDF object (map[string]any). Returns

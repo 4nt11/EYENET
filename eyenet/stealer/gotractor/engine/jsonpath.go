@@ -127,7 +127,7 @@ func marshalOrdered(v any) ([]byte, error) {
 // JSONPath-lite: '$.a.b[0].c' walk. Byte-parity with the Python and
 // JS impls. Returns nil when any step in the path is missing or the
 // current node has the wrong shape (map vs list). Numeric indices only.
-var pathToken = regexp.MustCompile(`\.(\w+)|\[(\d+)\]`)
+var pathToken = regexp.MustCompile(`\.([\w-]+)|\[(\d+)\]`)
 
 func evalPath(doc any, expr string) any {
 	if len(expr) == 0 || expr[0] != '$' {

@@ -175,6 +175,32 @@
     "notes": "Meta-family for the de-facto cookie.txt format. Tab-separated with seven columns: domain, include_subdomains, path, secure, expires, name, value. Lines starting with # are comments and blank lines are skipped. Every stealer family ships cookies in this format somewhere under Browsers/ or Cookies/; our Netscape probe rule classifies the file shape regardless of which stealer produced it.\n"
   },
   {
+    "slug": "exodus_wallet",
+    "name": "Exodus cryptocurrency wallet",
+    "status": "active",
+    "first_seen_year": 2016,
+    "aliases": [
+      "exodus",
+      "seco"
+    ],
+    "signature_files": [
+      "seed.seco",
+      "storage.seco",
+      "Exodus/exodus.wallet/seed.seco"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealers that grab %APPDATA%/Exodus"
+    ],
+    "references": [
+      {
+        "title": "Exodus wallet (official)",
+        "url": "https://www.exodus.com/"
+      }
+    ],
+    "notes": "Exodus is one of the two most-targeted hot wallets in stealer logs (alongside MetaMask). Its data dir is %APPDATA%/Exodus/exodus.wallet/ on Windows, with:\n\n  seed.seco        the encrypted BIP39 seed. Binary file with a\n                   literal 'SECO' magic + 'seco-v0-scrypt-aes' +\n                   Exodus version string ('26.7.1' etc.) in the\n                   first ~64 bytes, followed by a scrypt-aes-256-gcm\n                   ciphertext. The user's wallet password decrypts\n                   it; GPU-cracking offline is tractable for weak\n                   passwords.\n  storage.seco     app state (addresses, balances, etc.), same\n                   format.\n\nPresence of seed.seco alone is the high-signal CTI inventory marker: the victim has an Exodus wallet with real funds behind it. Decryption is pipeline-side.\n"
+  },
+  {
     "slug": "filezilla",
     "name": "FileZilla FTP client saved sites",
     "status": "active",
@@ -518,6 +544,33 @@
     "notes": "Multi-component architecture with modular grabber plugins. Known for aggressive crypto-wallet and messenger coverage. No rules shipped in our catalog yet; Rhadamanthys samples rare in our Khazan intake (Khazan is mostly a stealer-RESELLER channel, not a Rhadamanthys licensing channel). Add rules when a Rhadamanthys-first source appears.\n"
   },
   {
+    "slug": "riot_games",
+    "name": "Riot Games (League / Valorant / Legends of Runeterra)",
+    "status": "active",
+    "first_seen_year": 2017,
+    "aliases": [
+      "riot",
+      "riot-client",
+      "league",
+      "valorant"
+    ],
+    "signature_files": [
+      "RiotGamesPrivateSettings.yaml",
+      "Riot Games/RiotClientPrivateSettings.yaml"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside stealers that grab %LOCALAPPDATA%/Riot Games"
+    ],
+    "references": [
+      {
+        "title": "Riot Client config paths (community)",
+        "url": "https://help.riotgames.com/hc/en-us/articles/360028536491"
+      }
+    ],
+    "notes": "RiotGamesPrivateSettings.yaml stores the Riot Client's RSO (Riot Sign On) session cookies: 'tdid' (device ID + JWT), 'ssid' (session ID), 'csid' (CSRF). These cookies grant access to all Riot Games (League of Legends, Valorant, TFT, Legends of Runeterra, Wild Rift) without password or 2FA. YAML format with the cookie values at rso-authenticator.<name>.value as JWT / opaque tokens.\nRiot cookies expire ~90 days but are silently refreshed by any logged-in client, so a captured session often remains valid long after the stealer run.\n"
+  },
+  {
     "slug": "stealc",
     "name": "StealC (v1)",
     "status": "active",
@@ -590,6 +643,33 @@
       }
     ],
     "notes": "loginusers.vdf lives at Steam/config/loginusers.vdf on Windows (or in the vowel-stripped Software/Stam/ sidecar that json_v2 stealers emit). Lists every account that has touched this Steam install, keyed by SteamID64 (76561198*), with AccountName + PersonaName + Timestamp + AutoLogin + RememberPassword flags. The RememberPassword flag paired with a captured ssfn* session file = session-takeover without the account password.\n"
+  },
+  {
+    "slug": "telegram_desktop",
+    "name": "Telegram Desktop session",
+    "status": "active",
+    "first_seen_year": 2014,
+    "aliases": [
+      "tdata",
+      "telegram",
+      "telegram-desktop"
+    ],
+    "signature_files": [
+      "tdata/",
+      "Telegram/tdata/",
+      "Telegram UWP/tdata/"
+    ],
+    "loaders": [],
+    "distribution_channels": [
+      "inside every stealer that targets Telegram Desktop"
+    ],
+    "references": [
+      {
+        "title": "Telegram Desktop tdata format (community)",
+        "url": "https://github.com/geoscripting/tdata-reader"
+      }
+    ],
+    "notes": "Telegram Desktop stores its session state under %APPDATA%/Telegram Desktop/tdata/ (or the UWP sideload path 'Telegram UWP/tdata/'). The directory contains encrypted session blobs:\n\n  D877F783D5D3EF8C*   the primary session file\n  map*                encrypted state map\n  key_datas           session keys\n\nA COPY of tdata (verbatim, no decryption) + the victim's local passcode = silent takeover of their Telegram account on another machine; Telegram Desktop will accept the session as valid. No 2FA prompt. No login SMS. One of the highest-value credential targets in a stealer log.\nObserved in the khazan archive under Applications/Telegram/, Applications/Telegram UWP/, and Soft/Telegram/ (StealC v1-style vowel-stripped variants: Apps/Tlg/, Soft/Tel/). Fork-aware path variants (AyuGram, Kotatogram) ship under similarly named dirs and share the tdata format.\n"
   },
   {
     "slug": "vidar",

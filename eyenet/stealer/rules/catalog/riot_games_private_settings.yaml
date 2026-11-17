@@ -1,0 +1,28 @@
+id: riot_games_private_settings
+version: 1
+layer: content
+family: riot_games
+priority: 90
+path_glob: "**RiotGamesPrivateSettings.yaml"
+description: >
+  Riot Client session cookies. Three cookies grant full RSO (Riot
+  Sign On) access, bypassing password + 2FA across every Riot title
+  (League / Valorant / TFT / LoR / Wild Rift): tdid, ssid, csid.
+  Each stored under rso-authenticator.<name> as a cookie object with
+  value / expiryTime / domain / path.
+match:
+  type: yaml
+  requires_keys: [rso-authenticator]
+extract:
+  paths:
+    tdid_value: $.rso-authenticator.tdid.value
+    tdid_expires: $.rso-authenticator.tdid.expiryTime
+    ssid_value: $.rso-authenticator.ssid.value
+    ssid_expires: $.rso-authenticator.ssid.expiryTime
+    csid_value: $.rso-authenticator.csid.value
+    csid_expires: $.rso-authenticator.csid.expiryTime
+    sub_value: $.rso-authenticator.sub.value
+normalize:
+  - { verb: int_from_string, field: tdid_expires }
+  - { verb: int_from_string, field: ssid_expires }
+  - { verb: int_from_string, field: csid_expires }

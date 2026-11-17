@@ -1,0 +1,19 @@
+id: exodus_wallet_container
+version: 1
+layer: container
+family: exodus_wallet
+priority: 40
+description: >
+  Sidecar presence probe for an Exodus wallet in the victim folder.
+  Priority 40 (below the primary stealer-family containers at 100+)
+  so json_v2 / lumma / redline / stealc still win the family verdict;
+  this rule shows up in the trace as a matched sidecar so an analyst
+  knows the victim has Exodus installed. The seed.seco binary IS
+  encrypted but having it + a weak passphrase = funds-at-risk.
+match:
+  type: folder
+  predicate:
+    or:
+      - path: seed.seco
+      - glob: "**/seed.seco"
+      - glob: "**/storage.seco"

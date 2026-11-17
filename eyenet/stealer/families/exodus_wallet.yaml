@@ -1,0 +1,33 @@
+slug: exodus_wallet
+name: Exodus cryptocurrency wallet
+status: active
+first_seen_year: 2016
+aliases: [exodus, seco]
+signature_files:
+  - seed.seco
+  - storage.seco
+  - Exodus/exodus.wallet/seed.seco
+loaders: []
+distribution_channels:
+  - inside stealers that grab %APPDATA%/Exodus
+references:
+  - title: Exodus wallet (official)
+    url: https://www.exodus.com/
+notes: >
+  Exodus is one of the two most-targeted hot wallets in stealer logs
+  (alongside MetaMask). Its data dir is %APPDATA%/Exodus/exodus.wallet/
+  on Windows, with:
+
+    seed.seco        the encrypted BIP39 seed. Binary file with a
+                     literal 'SECO' magic + 'seco-v0-scrypt-aes' +
+                     Exodus version string ('26.7.1' etc.) in the
+                     first ~64 bytes, followed by a scrypt-aes-256-gcm
+                     ciphertext. The user's wallet password decrypts
+                     it; GPU-cracking offline is tractable for weak
+                     passwords.
+    storage.seco     app state (addresses, balances, etc.), same
+                     format.
+
+  Presence of seed.seco alone is the high-signal CTI inventory
+  marker: the victim has an Exodus wallet with real funds behind it.
+  Decryption is pipeline-side.

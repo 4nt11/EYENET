@@ -1,0 +1,18 @@
+id: telegram_tdata_container
+version: 1
+layer: container
+family: telegram_desktop
+priority: 40
+description: >
+  Sidecar presence probe for Telegram Desktop tdata/ session dir.
+  Priority 40 so the primary stealer family wins; this surfaces in
+  the trace so an analyst immediately sees 'this drop has a Telegram
+  session'. The D877F783D5D3EF8C file is the primary tdata session
+  blob; its presence alone (no decryption needed) is the signal.
+match:
+  type: folder
+  predicate:
+    or:
+      - glob: "**/tdata/D877F783D5D3EF8C*"
+      - glob: "**/tdata/key_datas"
+      - glob: "**/tdata/map*"

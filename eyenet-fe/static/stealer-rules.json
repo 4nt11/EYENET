@@ -322,6 +322,30 @@
     }
   },
   {
+    "id": "exodus_wallet_container",
+    "version": 1,
+    "layer": "container",
+    "family": "exodus_wallet",
+    "priority": 40,
+    "description": "Sidecar presence probe for an Exodus wallet in the victim folder. Priority 40 (below the primary stealer-family containers at 100+) so json_v2 / lumma / redline / stealc still win the family verdict; this rule shows up in the trace as a matched sidecar so an analyst knows the victim has Exodus installed. The seed.seco binary IS encrypted but having it + a weak passphrase = funds-at-risk.\n",
+    "match": {
+      "type": "folder",
+      "predicate": {
+        "or": [
+          {
+            "path": "seed.seco"
+          },
+          {
+            "glob": "**/seed.seco"
+          },
+          {
+            "glob": "**/storage.seco"
+          }
+        ]
+      }
+    }
+  },
+  {
     "id": "filezilla_sitemanager",
     "version": 1,
     "layer": "content",
@@ -1013,6 +1037,46 @@
     ]
   },
   {
+    "id": "riot_games_private_settings",
+    "version": 1,
+    "layer": "content",
+    "family": "riot_games",
+    "priority": 90,
+    "path_glob": "**RiotGamesPrivateSettings.yaml",
+    "description": "Riot Client session cookies. Three cookies grant full RSO (Riot Sign On) access, bypassing password + 2FA across every Riot title (League / Valorant / TFT / LoR / Wild Rift): tdid, ssid, csid. Each stored under rso-authenticator.<name> as a cookie object with value / expiryTime / domain / path.\n",
+    "match": {
+      "type": "yaml",
+      "requires_keys": [
+        "rso-authenticator"
+      ]
+    },
+    "extract": {
+      "paths": {
+        "tdid_value": "$.rso-authenticator.tdid.value",
+        "tdid_expires": "$.rso-authenticator.tdid.expiryTime",
+        "ssid_value": "$.rso-authenticator.ssid.value",
+        "ssid_expires": "$.rso-authenticator.ssid.expiryTime",
+        "csid_value": "$.rso-authenticator.csid.value",
+        "csid_expires": "$.rso-authenticator.csid.expiryTime",
+        "sub_value": "$.rso-authenticator.sub.value"
+      }
+    },
+    "normalize": [
+      {
+        "verb": "int_from_string",
+        "field": "tdid_expires"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "ssid_expires"
+      },
+      {
+        "verb": "int_from_string",
+        "field": "csid_expires"
+      }
+    ]
+  },
+  {
     "id": "stealc_container",
     "version": 1,
     "layer": "container",
@@ -1157,5 +1221,43 @@
         "field": "last_login"
       }
     ]
+  },
+  {
+    "id": "steam_ssfn_container",
+    "version": 1,
+    "layer": "container",
+    "family": "steam_accounts",
+    "priority": 40,
+    "description": "Sidecar presence probe for Steam ssfn* session files. Pair with a loginusers.vdf entry where RememberPassword=1 for silent session takeover (no account password / Steam Guard prompt). Priority 40 so the primary stealer family still wins; this just surfaces the session-material inventory.\n",
+    "match": {
+      "type": "folder",
+      "predicate": {
+        "glob": "**/ssfn*"
+      }
+    }
+  },
+  {
+    "id": "telegram_tdata_container",
+    "version": 1,
+    "layer": "container",
+    "family": "telegram_desktop",
+    "priority": 40,
+    "description": "Sidecar presence probe for Telegram Desktop tdata/ session dir. Priority 40 so the primary stealer family wins; this surfaces in the trace so an analyst immediately sees 'this drop has a Telegram session'. The D877F783D5D3EF8C file is the primary tdata session blob; its presence alone (no decryption needed) is the signal.\n",
+    "match": {
+      "type": "folder",
+      "predicate": {
+        "or": [
+          {
+            "glob": "**/tdata/D877F783D5D3EF8C*"
+          },
+          {
+            "glob": "**/tdata/key_datas"
+          },
+          {
+            "glob": "**/tdata/map*"
+          }
+        ]
+      }
+    }
   }
 ]
