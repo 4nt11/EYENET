@@ -264,11 +264,11 @@
     "family": "json_v2",
     "priority": 110,
     "path_glob": "log_info.json",
-    "description": "Exfil manifest metadata. Priority 110 (above pc_info at 100) so BuildID, counts, and CreatedOnUtc override anything of the same name from pc_info. BuildID prefix is what a later sub-tag rule should key off to split json_v2 into stealc_v2 / acreed / stealerium.\n",
+    "description": "Exfil manifest metadata. Priority 110 (above pc_info at 100) so counts + CreatedOnUtc override anything of the same name from pc_info. BuildID observed in some sub-variants but NOT in Khazan intake (2026-11), so required key is now CreatedOnUtc which is universal across StealC v2 / Acreed / Stealerium builds seen so far. IsHaveGrabberFiles is the signal that the drop ships the Gabb file-grabber sidecar: integer > 0 = present, 0 = absent.\n",
     "match": {
       "type": "json",
       "requires_keys": [
-        "BuildID"
+        "CreatedOnUtc"
       ]
     },
     "extract": {
@@ -278,8 +278,13 @@
         "browser_count": "$.BrowserCount",
         "cookie_count": "$.CookiesCount",
         "wallet_count": "$.WalletCount",
+        "wallet_ext_count": "$.ExtensionsWalletCount",
         "password_count": "$.PasswordsCount",
+        "form_count": "$.FormsCount",
+        "credit_card_count": "$.CreditCardsCount",
+        "pm_ext_count": "$.PMExtCount",
         "messengers": "$.Messengers",
+        "grabber_bytes": "$.IsHaveGrabberFiles",
         "exfil_at": "$.CreatedOnUtc"
       }
     },
