@@ -343,6 +343,222 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 )
 
 
+# v1.3.3 per-victim DOMAIN index. One row per (archive_sha256, victim_folder,
+# domain, source_kind) with a running count. The whole point of this table
+# is detection economics: a future monitored-domain watchlist joins against
+# this instead of against extracted_records, so
+#
+#   WHERE domain LIKE '%acme-corp.com%'
+#
+# scans a tiny indexed micro-MV and returns victim counts + hit domains in
+# sub-ms, no matter how big extracted_records grows. The detail drilldown
+# (actual cred row, actual cookie value) falls through to extracted_records
+# only when the operator opens the drawer.
+#
+# ORDER BY puts `domain` first so detection queries get contiguous granule
+# scans. The bloom-filter skip index accelerates substring matches on top
+# of the sort-order pruning.
+#
+# Six MVs feed this table from six distinct source rule categories. Each MV
+# fires on every INSERT into extracted_records and writes partial counts;
+# SimpleAggregateFunction(sum, UInt32) adds them on background merge.
+_VICTIM_DOMAINS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.victim_domains
+    (
+        archive_sha256 FixedString(64),
+        victim_folder  String,
+        domain         String,
+        source_kind    LowCardinality(String),
+        count          SimpleAggregateFunction(sum, UInt32),
+        INDEX idx_domain_bf domain TYPE bloom_filter() GRANULARITY 1
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY (domain, archive_sha256, victim_folder, source_kind)
+    {storage_policy_clause}
+    """,
+    # cookies -> one domain per cookie row
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_domains_cookies_mv
+    TO {db}.victim_domains AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(fields['cookie_domain']) AS domain,
+        'cookie' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id = 'cookies_netscape_tsv'
+      AND fields['cookie_domain'] != ''
+      AND splitByChar('/', file_path)[2] != ''
+    """,
+    # passwords -> parse host column via CH's domain() function
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_domains_creds_mv
+    TO {db}.victim_domains AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(domain(fields['host'])) AS domain,
+        'credential' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id LIKE 'passwords_%'
+      AND domain(fields['host']) != ''
+      AND splitByChar('/', file_path)[2] != ''
+    """,
+    # browser history visits
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_domains_history_mv
+    TO {db}.victim_domains AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(domain(fields['visit_url'])) AS domain,
+        'history_visit' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id = 'history_url_title_block'
+      AND domain(fields['visit_url']) != ''
+      AND splitByChar('/', file_path)[2] != ''
+    """,
+    # browser downloads
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_domains_downloads_mv
+    TO {db}.victim_domains AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(domain(fields['download_url'])) AS domain,
+        'download' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id = 'download_history_block'
+      AND domain(fields['download_url']) != ''
+      AND splitByChar('/', file_path)[2] != ''
+    """,
+    # browser localStorage origins
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_domains_localstorage_mv
+    TO {db}.victim_domains AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(domain(fields['ls_domain'])) AS domain,
+        'localstorage' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id IN ('localstorage_block', 'localstorage_jwt_candidates')
+      AND fields['ls_domain'] != ''
+      AND splitByChar('/', file_path)[2] != ''
+    """,
+    # webmail provider from the history_webmail_identity rule
+    # (splits the extracted email on '@' and takes the right-hand side)
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_domains_webmail_mv
+    TO {db}.victim_domains AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(splitByChar('@', fields['webmail_email'])[2]) AS domain,
+        'email_webmail' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id = 'history_webmail_identity'
+      AND fields['webmail_email'] LIKE '%@%'
+      AND splitByChar('/', file_path)[2] != ''
+    """,
+    # Idempotent backfill. One INSERT per source MV so a partial gate wins
+    # per source: if cookies already backfilled but passwords hasn't, we
+    # still pick up the gap. NOT EXISTS probe is per source_kind so adding
+    # a new source later only backfills the new one.
+    """
+    INSERT INTO {db}.victim_domains
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        lowerUTF8(fields['cookie_domain']) AS domain,
+        'cookie' AS source_kind,
+        toUInt32(1) AS count
+    FROM {db}.extracted_records
+    WHERE rule_id = 'cookies_netscape_tsv'
+      AND fields['cookie_domain'] != ''
+      AND splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'cookie')
+    """,
+    """
+    INSERT INTO {db}.victim_domains
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2],
+        lowerUTF8(domain(fields['host'])),
+        'credential',
+        toUInt32(1)
+    FROM {db}.extracted_records
+    WHERE rule_id LIKE 'passwords_%'
+      AND domain(fields['host']) != ''
+      AND splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'credential')
+    """,
+    """
+    INSERT INTO {db}.victim_domains
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2],
+        lowerUTF8(domain(fields['visit_url'])),
+        'history_visit',
+        toUInt32(1)
+    FROM {db}.extracted_records
+    WHERE rule_id = 'history_url_title_block'
+      AND domain(fields['visit_url']) != ''
+      AND splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'history_visit')
+    """,
+    """
+    INSERT INTO {db}.victim_domains
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2],
+        lowerUTF8(domain(fields['download_url'])),
+        'download',
+        toUInt32(1)
+    FROM {db}.extracted_records
+    WHERE rule_id = 'download_history_block'
+      AND domain(fields['download_url']) != ''
+      AND splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'download')
+    """,
+    """
+    INSERT INTO {db}.victim_domains
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2],
+        lowerUTF8(domain(fields['ls_domain'])),
+        'localstorage',
+        toUInt32(1)
+    FROM {db}.extracted_records
+    WHERE rule_id IN ('localstorage_block', 'localstorage_jwt_candidates')
+      AND fields['ls_domain'] != ''
+      AND splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'localstorage')
+    """,
+    """
+    INSERT INTO {db}.victim_domains
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2],
+        lowerUTF8(splitByChar('@', fields['webmail_email'])[2]),
+        'email_webmail',
+        toUInt32(1)
+    FROM {db}.extracted_records
+    WHERE rule_id = 'history_webmail_identity'
+      AND fields['webmail_email'] LIKE '%@%'
+      AND splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'email_webmail')
+    """,
+)
+
+
 class ClickHouseRecordsSink:
     """Connection + schema + batched insert for ``<db>.extracted_records``.
 
@@ -372,6 +588,11 @@ class ClickHouseRecordsSink:
         )
         # v1.3.3 per-victim profile roll-up (table + MV + idempotent backfill).
         for stmt in _VICTIM_PROFILES:
+            client.command(
+                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause())
+            )
+        # v1.3.3 per-victim domain index (detection engine primitive).
+        for stmt in _VICTIM_DOMAINS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause())
             )
