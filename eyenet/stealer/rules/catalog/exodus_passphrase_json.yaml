@@ -1,0 +1,38 @@
+id: exodus_passphrase_json
+version: 1
+layer: content
+family: exodus_wallet
+priority: 95
+path_glob: "**passphrase.json"
+description: >
+  Exodus wallet seed-encryption state. Lives at %APPDATA%/Exodus/
+  exodus.wallet/passphrase.json. Two-key JSON:
+
+    {"passphrase": "<base64>", "system": true|false}
+
+  The 'passphrase' field is the base64-encoded encryption wrapper
+  (NOT the seed itself; the actual seed is in seed.seco). The
+  'system' flag is the attribution key:
+
+    "system": true   wallet uses Windows DPAPI to decrypt.
+                     Attacker needs: passphrase.json + seed.seco +
+                     the victim's DPAPI master key (lives at
+                     %APPDATA%\\Microsoft\\Protect\\<SID>\\<GUID>).
+                     Most stealers grab the Protect folder too, so
+                     this combo is offline-decryptable.
+
+    "system": false  wallet was set with a user-chosen password.
+                     Attacker needs: passphrase.json + seed.seco
+                     + the user's wallet password. Password must
+                     be cracked (GPU + dictionary / Brute.txt
+                     wordlist pivot).
+
+  Pair with the 'system' flag to decide decryption difficulty when
+  triaging crypto theft opportunities per victim.
+match:
+  type: json
+  requires_keys: [passphrase, system]
+extract:
+  paths:
+    exodus_passphrase_wrap: $.passphrase
+    exodus_passphrase_system: $.system

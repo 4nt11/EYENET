@@ -1,0 +1,22 @@
+id: exodus_conf_json
+version: 1
+layer: content
+family: exodus_wallet
+priority: 85
+path_glob: "**exodus.conf.json"
+description: >
+  Exodus wallet config. Lifecycle timestamps and fiat preference.
+  Fields extracted: Exodus version at wallet create/update time,
+  human-readable createdAt / updatedAt (locale TZ leaks through the
+  string), preferred display currency. Older wallets usually carry
+  more transaction history; triage prioritizer field.
+match:
+  type: json
+  requires_keys: [meta, data]
+extract:
+  paths:
+    exodus_version_created: $.meta.exodusVersionCreated
+    exodus_version_updated: $.meta.exodusVersionUpdated
+    exodus_created_at: $.meta.createdAt
+    exodus_updated_at: $.meta.updatedAt
+    exodus_fiat_unit: $.data.fiat.unit
