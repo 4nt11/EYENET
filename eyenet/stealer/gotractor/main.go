@@ -17,32 +17,57 @@
 // Operational modes:
 //   --mode records   (default) emit one JSON per extracted record
 //   --mode summary   emit a single JSON RunResult (family + merged fields + evaluations)
+//   --mode daemon    long-lived; read commands from stdin, emit records
+//                    + reloads + stats on stdout; Prometheus /metrics on
+//                    --metrics-port; fsnotify auto-reload on catalog changes
 //   --mode selftest  run against the shared golden fixtures and exit
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
+	"eyenet.io/stealer/gotractor/daemon"
 	"eyenet.io/stealer/gotractor/engine"
 )
 
 func main() {
 	rulesDir := flag.String("rules-dir", envOr("EYENET_STEALER_RULES_DIR", ""), "catalog YAML directory")
 	familiesDir := flag.String("families-dir", envOr("EYENET_STEALER_FAMILIES_DIR", ""), "family catalog directory")
-	input := flag.String("input", "", "victim folder (or single file) to evaluate")
-	mode := flag.String("mode", "records", "records | summary | selftest")
+	input := flag.String("input", "", "victim folder (or single file) to evaluate (records / summary)")
+	mode := flag.String("mode", "records", "records | summary | daemon | selftest")
 	limit := flag.Int("limit", 100000, "bulkParse record cap per file per rule")
+	metricsPort := flag.Int("metrics-port", 0, "daemon: bind Prometheus /metrics on this port (0 disables)")
 	flag.Parse()
 
 	if *rulesDir == "" || *familiesDir == "" {
 		log.Fatal("--rules-dir and --families-dir are required (or set EYENET_STEALER_RULES_DIR / EYENET_STEALER_FAMILIES_DIR)")
 	}
+
+	if *mode == "daemon" {
+		d, err := daemon.New(*rulesDir, *familiesDir, *limit)
+		if err != nil {
+			log.Fatalf("daemon boot: %v", err)
+		}
+		if *metricsPort > 0 {
+			d.ServeMetrics(*metricsPort)
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		if err := d.Serve(ctx, os.Stdin, os.Stdout); err != nil {
+			log.Fatalf("daemon serve: %v", err)
+		}
+		return
+	}
+
 	rules, _, err := engine.LoadRules(*rulesDir, *familiesDir)
 	if err != nil {
 		log.Fatalf("catalog load: %v", err)
