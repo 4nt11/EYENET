@@ -708,7 +708,6 @@ CREATE TABLE IF NOT EXISTS {db}.file_audit
     file_sha256         FixedString(64),
     heuristic_kind      LowCardinality(String),
     extractor_touched   UInt8    DEFAULT 0,
-    rows_emitted        UInt32   DEFAULT 0,
     approx_banner_hits  UInt32   DEFAULT 0,
     approx_null_pw_hits UInt32   DEFAULT 0,
     sample_head         String,
@@ -727,7 +726,6 @@ _FILE_AUDIT_COLUMNS = [
     "file_sha256",
     "heuristic_kind",
     "extractor_touched",
-    "rows_emitted",
     "approx_banner_hits",
     "approx_null_pw_hits",
     "sample_head",
@@ -880,6 +878,12 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
     "ALTER TABLE {db}.file_audit MATERIALIZE COLUMN victim_folder",
     "ALTER TABLE {db}.file_audit ADD INDEX IF NOT EXISTS "
     "victim_folder_set victim_folder TYPE set(0) GRANULARITY 1",
+    # v1.3.5 drop rows_emitted: never populated by the pipeline (always wrote
+    # 0, with a stale "fill later" TODO from v1.2.6 that never happened). The
+    # drawer's Files tab now derives the per-file row count from
+    # extracted_records via a JOIN in file_tree(), so this column is dead
+    # weight. IF EXISTS keeps the ALTER idempotent for fresh installs.
+    "ALTER TABLE {db}.file_audit DROP COLUMN IF EXISTS rows_emitted",
 )
 
 

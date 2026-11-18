@@ -20,6 +20,15 @@
 
   const shortSha = (s) => (s ? s.slice(0, 8) : '');
   const fmt = (n) => (n ?? 0).toLocaleString();
+  // Human-readable byte formatter: 240 B, 51.5 KB, 3.8 MB, 1.2 GB.
+  const fmtBytes = (n) => {
+    const b = Number(n ?? 0);
+    if (!Number.isFinite(b) || b <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(units.length - 1, Math.floor(Math.log(b) / Math.log(1024)));
+    const v = b / 1024 ** i;
+    return `${i === 0 ? v : v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
+  };
 
   // Family tone: corporate markers + wallet presence drive the border tone.
   const cardTone = (c) => {
@@ -45,10 +54,48 @@
     }
   };
 
-  // Credentials tab: records filtered to password rules.
+  // Credentials tab: records filtered to credential-emitting rules. Different
+  // rules emit different field names (passwords_block_title: soft/host/login,
+  // passwords_block_divider: url/username, credentials_windows: target/user,
+  // etc), so the row renderer coalesces across the known key aliases.
+  const CRED_RULES = /^(passwords_|credentials_|firefox_logins)/;
+  const firstField = (fields, keys) => {
+    for (const k of keys) if (fields?.[k]) return fields[k];
+    return '';
+  };
+  const credUrl = (f) => firstField(f, ['url', 'host', 'target']);
+  const credUser = (f) => firstField(f, ['login', 'username', 'user']);
+  const credPw = (f) => firstField(f, ['password']);
+  const credBrowser = (f) => firstField(f, ['browser', 'soft', 'profile']);
   const creds = $derived(
-    drawerCtx.records.filter((r) => r.rule_id?.startsWith('passwords_')),
+    drawerCtx.records.filter((r) => CRED_RULES.test(r.rule_id ?? '')),
   );
+  // Dedupe files by filename until the pipeline stops writing the ephemeral
+  // extraction root into rel_path (multiple reindex passes produce distinct
+  // rel_paths for the same logical file, so FINAL on file_audit can't
+  // collapse them). Coalesces per-filename instead of first-wins: keep the
+  // max rows_emitted across dupes, OR extractor_touched, prefer the longest
+  // sample_head. "empty" was literally a lie before this: first-wins picked
+  // the pre-extraction pass with rows_emitted=0 even when a later pass saw
+  // 210 records for the same logical file.
+  const dedupedFiles = $derived.by(() => {
+    const byName = new Map();
+    for (const f of drawerCtx.files) {
+      const prev = byName.get(f.filename);
+      if (!prev) {
+        byName.set(f.filename, { ...f });
+        continue;
+      }
+      prev.rows_emitted = Math.max(prev.rows_emitted || 0, f.rows_emitted || 0);
+      prev.extractor_touched = prev.extractor_touched || f.extractor_touched;
+      if ((f.sample_head?.length ?? 0) > (prev.sample_head?.length ?? 0)) {
+        prev.sample_head = f.sample_head;
+        prev.file_sha256 = f.file_sha256;
+      }
+      prev.size_bytes = Math.max(prev.size_bytes || 0, f.size_bytes || 0);
+    }
+    return Array.from(byName.values());
+  });
   const systemRows = $derived(
     drawerCtx.records.filter(
       (r) =>
@@ -59,7 +106,7 @@
   );
 
   const selectedFileRow = $derived(
-    drawerCtx.files.find((f) => f.rel_path === drawerCtx.selectedFile) ?? drawerCtx.files[0],
+    dedupedFiles.find((f) => f.rel_path === drawerCtx.selectedFile) ?? dedupedFiles[0],
   );
 
   const prevPage = () => loadArtifacts({ page: Math.max(1, listCtx.page - 1) });
@@ -259,23 +306,26 @@
             <table class="t">
               <thead>
                 <tr>
-                  <th>NAME</th><th>TYPE</th><th>SIZE</th><th>SIGNAL</th>
+                  <th>NAME</th><th>TYPE</th><th>SIZE</th>
+                  <th title="-- = extractor never opened this file (no rule matched its shape). 0 rows = extractor opened it but no rule content-matched. N rows = N extractions landed.">SIGNAL</th>
                 </tr>
               </thead>
               <tbody>
-                {#each drawerCtx.files as f}
+                {#each dedupedFiles as f}
                   <tr
                     class:picked={drawerCtx.selectedFile === f.rel_path}
                     onclick={() => pickFile(f.rel_path)}
                   >
                     <td class="name">{f.filename}</td>
                     <td>{f.heuristic_kind}</td>
-                    <td>{fmt(f.size_bytes)}</td>
+                    <td>{fmtBytes(f.size_bytes)}</td>
                     <td>
-                      {#if f.extractor_touched}
-                        <span class="hit">{f.rows_emitted} rows</span>
+                      {#if !f.extractor_touched}
+                        <span class="sig sig-skip" title="not inspected (no rule shape matched)">--</span>
+                      {:else if f.rows_emitted > 0}
+                        <span class="sig sig-hit" title="{f.rows_emitted} records extracted">{fmt(f.rows_emitted)} rows</span>
                       {:else}
-                        <span class="muted">--</span>
+                        <span class="sig sig-zero" title="inspected but no records matched; may be a rule-coverage gap">0 rows</span>
                       {/if}
                     </td>
                   </tr>
@@ -286,7 +336,13 @@
               <p class="note">No files indexed for this victim.</p>
             {/if}
           {:else if drawerCtx.tab === 'credentials'}
-            <table class="t">
+            <table class="t t-creds">
+              <colgroup>
+                <col style="width:34%" />
+                <col style="width:26%" />
+                <col style="width:22%" />
+                <col style="width:18%" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>URL</th><th>USERNAME</th><th>PASSWORD</th><th>BROWSER</th>
@@ -295,10 +351,10 @@
               <tbody>
                 {#each creds as c}
                   <tr>
-                    <td class="name">{c.fields.url ?? ''}</td>
-                    <td>{c.fields.username ?? ''}</td>
-                    <td class="pw">{c.fields.password ?? ''}</td>
-                    <td class="muted">{c.fields.app ?? ''}</td>
+                    <td class="name wrap">{credUrl(c.fields)}</td>
+                    <td class="wrap">{credUser(c.fields)}</td>
+                    <td class="pw wrap">{credPw(c.fields)}</td>
+                    <td class="muted wrap">{credBrowser(c.fields)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -338,7 +394,7 @@
                 <span class="muted">SHA-256</span>
                 <span class="mono">{shortSha(selectedFileRow.file_sha256)}</span>
                 <span class="muted">SIZE</span>
-                <span class="mono">{fmt(selectedFileRow.size_bytes)}</span>
+                <span class="mono">{fmtBytes(selectedFileRow.size_bytes)}</span>
               </div>
             {:else}
               <div class="muted">No file selected.</div>
@@ -720,6 +776,35 @@
     border-collapse: collapse;
     font-family: var(--font-mono);
     font-size: var(--fs-12);
+  }
+  /* Credentials table: narrow drawer, long URLs + long browser labels
+     ("Microsoft Edge (Default)") push a layout:auto table way past the
+     available width. Fix the layout so column widths are respected,
+     then let cell content wrap on any boundary via overflow-wrap:anywhere. */
+  .t-creds {
+    table-layout: fixed;
+  }
+  .t-creds td.wrap {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+  /* Signal column tones: skipped files are the most common state and should
+     stay quiet; "empty" (inspected, nothing matched) gets a dim amber hint
+     so it reads as "we looked, there was nothing"; actual hits are accent-
+     colored because that's where the operator's eye goes. */
+  .sig {
+    font-family: var(--font-mono);
+    font-size: var(--fs-11);
+  }
+  .sig-skip {
+    color: var(--text-faint);
+  }
+  .sig-zero {
+    color: var(--warn-text, var(--text-muted));
+  }
+  .sig-hit {
+    color: var(--accent-text);
   }
   .t thead th {
     text-align: left;

@@ -438,7 +438,6 @@ def _write_file_audit(
                     a.file_sha256,
                     a.heuristic_kind,
                     1 if a.rel_path in pw_rel else 0,
-                    0,  # rows_emitted: v1.2.6 cannot count per-file yet; v1.3.0 fills it
                     a.approx_banner_hits,
                     a.approx_null_pw_hits,
                     a.sample_head,

@@ -666,7 +666,7 @@ class StealerArtifactsReader:
         fired, hits = await asyncio.gather(
             self._rows(
                 "SELECT DISTINCT rule_id "  # noqa: S608
-                f"FROM {self._db}.extracted_records "  # nosec B608
+                f"FROM {self._db}.extracted_records FINAL "  # nosec B608
                 "WHERE archive_sha256 = {sha:FixedString(64)} "
                 "  AND splitByChar('/', file_path)[2] = {vf:String}",
                 {"sha": archive_sha256, "vf": victim_folder},
@@ -747,13 +747,28 @@ class StealerArtifactsReader:
         return int(rows[0][0]) if rows else 0
 
     async def file_tree(self, archive_sha256: str, victim_folder: str) -> list[ArtifactFileRow]:
+        # rows_emitted was nuked from file_audit in v1.3.5: the pipeline only
+        # ever wrote 0 for it. The real per-file row count lives in
+        # extracted_records, so LEFT JOIN against a count() GROUP BY file_path
+        # subquery and use that. extractor_touched stays on file_audit and
+        # remains the source of truth for "did the ulpextract pre-pass look
+        # at this file", OR'd with "gotractor emitted anything" via the JOIN.
         rows = await self._rows(
-            "SELECT rel_path, filename, size_bytes, heuristic_kind, "  # noqa: S608
-            "       extractor_touched, rows_emitted, sample_head, file_sha256 "
-            f"FROM {self._db}.file_audit "  # nosec B608
-            "WHERE archive_sha256 = {sha:FixedString(64)} "
-            "  AND victim_folder = {vf:String} "
-            "ORDER BY rel_path",
+            "SELECT fa.rel_path, fa.filename, fa.size_bytes, fa.heuristic_kind, "  # noqa: S608
+            "       (coalesce(er.n, 0) > 0) OR fa.extractor_touched AS touched, "
+            "       coalesce(er.n, 0)                               AS rows_emitted, "
+            "       fa.sample_head, fa.file_sha256 "
+            f"FROM {self._db}.file_audit FINAL AS fa "  # nosec B608
+            "LEFT JOIN ( "
+            "  SELECT file_path, count() AS n "
+            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  WHERE archive_sha256 = {sha:FixedString(64)} "
+            "    AND splitByChar('/', file_path)[2] = {vf:String} "
+            "  GROUP BY file_path "
+            ") AS er ON er.file_path = fa.rel_path "
+            "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
+            "  AND fa.victim_folder = {vf:String} "
+            "ORDER BY fa.rel_path",
             {"sha": archive_sha256, "vf": victim_folder},
         )
         return [
@@ -798,12 +813,12 @@ class StealerArtifactsReader:
 
         total_rows, rows = await asyncio.gather(
             self._rows(
-                f"SELECT count() FROM {self._db}.extracted_records WHERE {where_sql}",  # nosec B608  # noqa: S608
+                f"SELECT count() FROM {self._db}.extracted_records FINAL WHERE {where_sql}",  # nosec B608  # noqa: S608
                 params,
             ),
             self._rows(
                 "SELECT rule_id, family, file_path, fields "  # noqa: S608
-                f"FROM {self._db}.extracted_records "  # nosec B608
+                f"FROM {self._db}.extracted_records FINAL "  # nosec B608
                 f"WHERE {where_sql} "
                 "ORDER BY rule_id, file_path "
                 "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
