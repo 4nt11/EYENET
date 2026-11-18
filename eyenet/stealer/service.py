@@ -20,9 +20,15 @@ from typing import TYPE_CHECKING
 from eyenet.contracts.group import STEALER_LOG_CATEGORY
 from eyenet.contracts.stealer_events import (
     SUBJECT_STEALER_ATTACHMENT_CAPTURED,
+    SUBJECT_STEALER_ATTACHMENT_REINDEX,
+    SUBJECT_STEALER_CORPUS_RECLASSIFY,
+    SUBJECT_STEALER_CORPUS_REINDEX,
     StealerAttachmentCapturedEnvelope,
+    StealerAttachmentReindexEnvelope,
+    StealerCorpusReclassifyEnvelope,
+    StealerCorpusReindexEnvelope,
 )
-from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED
+from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED, STEALER_RUNNING
 from eyenet.service import ServiceBase
 from eyenet.stealer.clickhouse import ClickHouseCredsSink, ClickHouseRecordsSink, FileAuditSink
 from eyenet.stealer.gotractor_client import GotractorDaemon
@@ -65,9 +71,7 @@ class StealerProcessorService(ServiceBase):
         # EYENET_STEALER_RULES_DIR / _FAMILIES_DIR.
         _vendored = Path(__file__).parent / "rules" / "catalog"
         _vendored_families = Path(__file__).parent / "families"
-        self._rules_dir = Path(
-            os.environ.get("EYENET_STEALER_RULES_DIR", str(_vendored))
-        )
+        self._rules_dir = Path(os.environ.get("EYENET_STEALER_RULES_DIR", str(_vendored)))
         self._families_dir = Path(
             os.environ.get("EYENET_STEALER_FAMILIES_DIR", str(_vendored_families))
         )
@@ -79,10 +83,14 @@ class StealerProcessorService(ServiceBase):
         # EYENET_GOTRACTOR_METRICS_PORT (default 9091; 0 disables). The
         # subprocess is started in on_subscribe() so test-time service
         # construction doesn't spawn it.
-        self._gotractor: GotractorDaemon | None = None if _gotractor_disabled else GotractorDaemon(
-            rules_dir=self._rules_dir,
-            families_dir=self._families_dir,
-            metrics_port=int(os.environ.get("EYENET_GOTRACTOR_METRICS_PORT", "9091")) or None,
+        self._gotractor: GotractorDaemon | None = (
+            None
+            if _gotractor_disabled
+            else GotractorDaemon(
+                rules_dir=self._rules_dir,
+                families_dir=self._families_dir,
+                metrics_port=int(os.environ.get("EYENET_GOTRACTOR_METRICS_PORT", "9091")) or None,
+            )
         )
         # Scratch space for the (large) archive extraction; cleaned per-archive.
         self._work_root = Path(
@@ -103,10 +111,30 @@ class StealerProcessorService(ServiceBase):
             self._gotractor.start()
 
         async def _on_captured(_s: str, p: bytes, h: dict[str, str]) -> None:
-            asyncio.create_task(self._process(p, h))  # noqa: RUF006: fire-and-track below
+            asyncio.create_task(self._process(p, h))  # noqa: RUF006  # fire-and-track below
+
+        async def _on_reindex_one(_s: str, p: bytes, h: dict[str, str]) -> None:
+            asyncio.create_task(self._process_reindex_event(p, h))  # noqa: RUF006
+
+        async def _on_corpus_reindex(_s: str, p: bytes, h: dict[str, str]) -> None:
+            asyncio.create_task(self._process_corpus_reindex(p, h))  # noqa: RUF006
+
+        async def _on_corpus_reclassify(_s: str, p: bytes, h: dict[str, str]) -> None:
+            asyncio.create_task(self._process_corpus_reclassify(p, h))  # noqa: RUF006
 
         await self._bus.subscribe(
             SUBJECT_STEALER_ATTACHMENT_CAPTURED, _on_captured, queue_group="stealer"
+        )
+        # Operator-driven ops. queue_group matches so horizontal scale still
+        # processes each event once; the processor's own subscription group.
+        await self._bus.subscribe(
+            SUBJECT_STEALER_ATTACHMENT_REINDEX, _on_reindex_one, queue_group="stealer"
+        )
+        await self._bus.subscribe(
+            SUBJECT_STEALER_CORPUS_REINDEX, _on_corpus_reindex, queue_group="stealer"
+        )
+        await self._bus.subscribe(
+            SUBJECT_STEALER_CORPUS_RECLASSIFY, _on_corpus_reclassify, queue_group="stealer"
         )
         # Boot replay: archives captured while down, or channels marked after capture.
         self._replay_task = asyncio.create_task(self._replay_unprocessed())
@@ -133,8 +161,9 @@ class StealerProcessorService(ServiceBase):
             try:
                 await self._process_attachment(att.id)
             except Exception as exc:
-                _log.error("stealer_processor.replay_item_failed", attachment=str(att.id),
-                           error=str(exc))
+                _log.error(
+                    "stealer_processor.replay_item_failed", attachment=str(att.id), error=str(exc)
+                )
 
     async def _process_attachment(self, attachment_id: UUID) -> None:
         existing = await self._storage.get_stealer_processing(attachment_id)
@@ -165,17 +194,86 @@ class StealerProcessorService(ServiceBase):
             await self._storage.set_stealer_processing(
                 attachment_id, state=STEALER_DONE, creds_extracted=result.creds_inserted
             )
-            _log.info("stealer_processor.done", attachment=str(attachment_id),
-                      creds=result.creds_inserted,
-                      records=result.records_inserted,
-                      gotractor_families=result.gotractor_families,
-                      password_used=bool(result.password_used))
+            _log.info(
+                "stealer_processor.done",
+                attachment=str(attachment_id),
+                creds=result.creds_inserted,
+                records=result.records_inserted,
+                gotractor_families=result.gotractor_families,
+                password_used=bool(result.password_used),
+            )
         else:
             await self._storage.set_stealer_processing(
                 attachment_id, state=STEALER_FAILED, error=result.error
             )
-            _log.warning("stealer_processor.failed", attachment=str(attachment_id),
-                         error=result.error)
+            _log.warning(
+                "stealer_processor.failed", attachment=str(attachment_id), error=result.error
+            )
+
+    async def _process_reindex_event(self, payload: bytes, headers: dict[str, str]) -> None:
+        with attach_from_headers(headers):
+            try:
+                env = StealerAttachmentReindexEnvelope.model_validate_json(payload)
+                _log.info(
+                    "stealer_processor.reindex_one",
+                    attachment=str(env.attachment_id),
+                    requested_by=str(env.requested_by) if env.requested_by else "",
+                )
+                # Clear the processing state so _process_attachment
+                # does not short-circuit on "already done" - operator
+                # asked for a rerun.
+                await self._storage.set_stealer_processing(
+                    env.attachment_id, state=STEALER_RUNNING, error=None
+                )
+                await self._process_attachment(env.attachment_id)
+            except Exception as exc:
+                _log.error("stealer_processor.reindex_one_failed", error=str(exc))
+
+    async def _process_corpus_reindex(self, payload: bytes, headers: dict[str, str]) -> None:
+        with attach_from_headers(headers):
+            try:
+                env = StealerCorpusReindexEnvelope.model_validate_json(payload)
+                limit = env.limit if env.limit > 0 else _REPLAY_LIMIT
+                _log.info(
+                    "stealer_processor.corpus_reindex_start",
+                    limit=limit,
+                    requested_by=str(env.requested_by) if env.requested_by else "",
+                )
+                rows = await self._storage.list_stealer_attachments_for_reindex(
+                    STEALER_LOG_CATEGORY, limit=limit
+                )
+                for att in rows:
+                    try:
+                        await self._storage.set_stealer_processing(
+                            att.id, state=STEALER_RUNNING, error=None
+                        )
+                        await self._process_attachment(att.id)
+                    except Exception as exc:
+                        _log.error(
+                            "stealer_processor.corpus_reindex_item_failed",
+                            attachment=str(att.id),
+                            error=str(exc),
+                        )
+                _log.info("stealer_processor.corpus_reindex_done", processed=len(rows))
+            except Exception as exc:
+                _log.error("stealer_processor.corpus_reindex_failed", error=str(exc))
+
+    async def _process_corpus_reclassify(self, payload: bytes, headers: dict[str, str]) -> None:
+        """Re-score every (archive, victim) pair under the current family
+        catalog without re-extracting. Cheap compared to reindex; writes
+        verdicts to victim_family_verdict via the same path pipeline.py
+        uses on each archive."""
+        with attach_from_headers(headers):
+            try:
+                env = StealerCorpusReclassifyEnvelope.model_validate_json(payload)
+                _log.info(
+                    "stealer_processor.corpus_reclassify_start",
+                    requested_by=str(env.requested_by) if env.requested_by else "",
+                )
+                count = await asyncio.to_thread(_run_corpus_reclassify)
+                _log.info("stealer_processor.corpus_reclassify_done", victims=count)
+            except Exception as exc:
+                _log.error("stealer_processor.corpus_reclassify_failed", error=str(exc))
 
     async def shutdown(self) -> None:
         self._sink.close()
@@ -185,6 +283,49 @@ class StealerProcessorService(ServiceBase):
         if self._gotractor is not None:
             self._gotractor.close()
         await super().shutdown()
+
+
+def _run_corpus_reclassify() -> int:
+    """Sync helper: sweep every (archive, victim) pair and write a
+    verdict row. Mirrors the stealer-reclassify CLI body. Isolated so
+    the async service can off-load to a thread."""
+    from eyenet.stealer.classifier import classify  # noqa: PLC0415
+    from eyenet.stealer.classifier_io import (  # noqa: PLC0415
+        collect_evidence_sync,
+        write_verdict_sync,
+    )
+    from eyenet.stealer.clickhouse import (  # noqa: PLC0415
+        FileAuditSink,
+        clickhouse_db,
+        get_clickhouse_client,
+    )
+
+    client = get_clickhouse_client()
+    db = clickhouse_db()
+    FileAuditSink().ensure_schema()
+    rows = client.query(
+        "SELECT DISTINCT archive_sha256, victim_folder "  # noqa: S608  # nosec B608
+        f"FROM {db}.file_audit FINAL "
+        "WHERE victim_folder != '' "
+        "ORDER BY archive_sha256, victim_folder"
+    ).result_rows
+    processed = 0
+    for sha, vf in rows:
+        sha_s = sha.decode("ascii") if isinstance(sha, bytes) else str(sha)
+        vf_s = str(vf)
+        try:
+            ev = collect_evidence_sync(client, sha_s, vf_s)
+            result = classify(ev)
+            write_verdict_sync(client, sha_s, vf_s, result)
+            processed += 1
+        except Exception as exc:
+            _log.warning(
+                "stealer.corpus_reclassify.victim_failed",
+                archive=sha_s,
+                victim=vf_s,
+                error=str(exc),
+            )
+    return processed
 
 
 __all__ = ["StealerProcessorService"]

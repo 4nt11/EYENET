@@ -273,6 +273,20 @@ class StealerFamilyOverrideOut(ApiSchema):
     updated_at: str
 
 
+class StealerReindexResponse(ApiSchema):
+    """Envelope for the reindex endpoints. ``queued: true`` means the
+    processor will pick up the request via the bus; ``attachment_id``
+    echoes the targeted blob when the endpoint is the per-attachment
+    one, and is empty on the full-corpus endpoint."""
+
+    queued: bool = True
+    attachment_id: str = ""
+
+
+class StealerReclassifyCorpusResponse(ApiSchema):
+    queued: bool = True
+
+
 class StealerFamilyRunnerUp(ApiSchema):
     slug: str
     confidence: float
@@ -501,6 +515,8 @@ __all__ = [
     "StealerFamilyOverrideOut",
     "StealerFamilyRunnerUp",
     "StealerFamilyVerdict",
+    "StealerReclassifyCorpusResponse",
+    "StealerReindexResponse",
     "StealerSearchResponse",
     "StealerStatsResponse",
     "StealerTechnique",

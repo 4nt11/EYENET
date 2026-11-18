@@ -296,6 +296,8 @@ from eyenet.api.v1.stealer.api_list_failures import router as stealer_list_failu
 from eyenet.api.v1.stealer.api_list_family_counts import router as stealer_family_counts_router
 from eyenet.api.v1.stealer.api_list_stealer_families import router as stealer_families_list_router
 from eyenet.api.v1.stealer.api_list_stealer_rules import router as stealer_rules_list_router
+from eyenet.api.v1.stealer.api_reclassify import router as stealer_reclassify_router
+from eyenet.api.v1.stealer.api_reindex import router as stealer_reindex_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
 from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
 from eyenet.api.v1.stealer.api_update_stealer_family import router as stealer_families_update_router
@@ -541,6 +543,10 @@ v1_router.include_router(
 # must register BEFORE the detail route so FastAPI prefers the more
 # specific match.
 v1_router.include_router(stealer_family_override_router)  # PUT/DEL family-override
+# Reclassify endpoints registered BEFORE the detail GET so the literal
+# /{sha}/{folder}/reclassify suffix wins over the greedy {folder:path}.
+v1_router.include_router(stealer_reclassify_router)  # POST reclassify (single + corpus)
+v1_router.include_router(stealer_reindex_router)  # POST reindex (attachment + corpus)
 v1_router.include_router(stealer_get_artifact_router)  # GET /stealer/artifacts/{sha}/{folder}
 v1_router.include_router(stealer_audit_coverage_router)  # GET /stealer/audit/coverage
 v1_router.include_router(stealer_audit_unknown_router)  # GET /stealer/audit/unknown
