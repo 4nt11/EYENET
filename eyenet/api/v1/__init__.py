@@ -167,6 +167,7 @@ from eyenet.api.v1.groups.api_scan_groups import router as groups_scan_router
 # === health / metrics ===
 from eyenet.api.v1.health.api_healthz import router as health_live_router
 from eyenet.api.v1.health.api_readyz import router as health_ready_router
+from eyenet.api.v1.identities.api_bind_identity_proxy import router as identities_bind_proxy_router
 from eyenet.api.v1.identities.api_burn_identity import router as identities_burn_router
 from eyenet.api.v1.identities.api_claim_identity import router as identities_claim_router
 from eyenet.api.v1.identities.api_create_identity import router as identities_create_router
@@ -182,17 +183,11 @@ from eyenet.api.v1.identities.api_qr_password import router as identities_qr_pas
 from eyenet.api.v1.identities.api_qr_relogin import router as identities_qr_relogin_router
 from eyenet.api.v1.identities.api_qr_start import router as identities_qr_start_router
 from eyenet.api.v1.identities.api_qr_status import router as identities_qr_status_router
-from eyenet.api.v1.identities.api_bind_identity_proxy import router as identities_bind_proxy_router
 from eyenet.api.v1.identities.api_release_identity import router as identities_release_router
 from eyenet.api.v1.identities.api_replace_identity_session import (
     router as identities_replace_session_router,
 )
 from eyenet.api.v1.identities.api_update_config import router as identities_update_config_router
-
-# === proxy pools (v1.2.0) ===
-from eyenet.api.v1.proxies.api_bulk_proxies import router as proxies_bulk_router
-from eyenet.api.v1.proxies.api_pool_crud import router as proxy_pool_router
-from eyenet.api.v1.proxies.api_proxy_crud import router as proxies_router
 
 # === identities ===
 from eyenet.api.v1.incidents.api_create_incident_rule import router as incident_rule_create_router
@@ -241,6 +236,11 @@ from eyenet.api.v1.personas.api_list_personas import router as personas_list_rou
 from eyenet.api.v1.personas.api_merge_actors import router as personas_merge_actors_router
 from eyenet.api.v1.personas.api_merge_persona import router as personas_merge_router
 from eyenet.api.v1.personas.api_split_persona import router as personas_split_router
+
+# === proxy pools (v1.2.0) ===
+from eyenet.api.v1.proxies.api_bulk_proxies import router as proxies_bulk_router
+from eyenet.api.v1.proxies.api_pool_crud import router as proxy_pool_router
+from eyenet.api.v1.proxies.api_proxy_crud import router as proxies_router
 
 # === reclassify ===
 from eyenet.api.v1.reclassify.api_reclassify_attachment import (
@@ -516,25 +516,38 @@ v1_router.include_router(stealer_channels_router)  # GET /stealer/channels (read
 v1_router.include_router(groups_mark_category_router)  # POST /groups/{id}/category (admin:stealer)
 v1_router.include_router(stealer_stats_router)  # GET /stealer/stats (read:stealer)
 v1_router.include_router(stealer_search_router)  # GET /stealer/search (read:stealer)
-v1_router.include_router(stealer_list_artifacts_router)         # GET /stealer/artifacts
-v1_router.include_router(stealer_get_artifact_router)           # GET /stealer/artifacts/{sha}/{folder}
-v1_router.include_router(stealer_artifact_files_router)         # GET /stealer/artifacts/{sha}/{folder}/files
-v1_router.include_router(stealer_artifact_records_router)       # GET /stealer/artifacts/{sha}/{folder}/records
-v1_router.include_router(stealer_artifact_domains_router)       # GET /stealer/artifacts/{sha}/{folder}/domains
+v1_router.include_router(stealer_list_artifacts_router)  # GET /stealer/artifacts
+# Child routes BEFORE the greedy {victim_folder:path} detail route; otherwise
+# the detail matcher swallows '/files' etc as part of the folder path and the
+# child routes are unreachable (404 'artifact not found').
+v1_router.include_router(
+    stealer_artifact_files_router
+)  # GET /stealer/artifacts/{sha}/{folder}/files
+v1_router.include_router(
+    stealer_artifact_records_router
+)  # GET /stealer/artifacts/{sha}/{folder}/records
+v1_router.include_router(
+    stealer_artifact_domains_router
+)  # GET /stealer/artifacts/{sha}/{folder}/domains
+v1_router.include_router(stealer_get_artifact_router)  # GET /stealer/artifacts/{sha}/{folder}
 v1_router.include_router(stealer_audit_coverage_router)  # GET /stealer/audit/coverage
-v1_router.include_router(stealer_audit_unknown_router)   # GET /stealer/audit/unknown
-v1_router.include_router(stealer_audit_samples_router)   # GET /stealer/audit/samples
-v1_router.include_router(stealer_audit_search_router)    # GET /stealer/audit/search
-v1_router.include_router(stealer_rules_list_router)      # GET /stealer/rules (read:stealer)
-v1_router.include_router(stealer_rules_get_router)       # GET /stealer/rules/{id} (read:stealer)
-v1_router.include_router(stealer_rules_create_router)    # POST /stealer/rules (write:stealer)
-v1_router.include_router(stealer_rules_update_router)    # PUT /stealer/rules/{id} (write:stealer)
-v1_router.include_router(stealer_rules_delete_router)    # DELETE /stealer/rules/{id} (admin:stealer)
-v1_router.include_router(stealer_families_list_router)   # GET /stealer/families (read:stealer)
-v1_router.include_router(stealer_families_get_router)    # GET /stealer/families/{slug} (read:stealer)
-v1_router.include_router(stealer_families_create_router) # POST /stealer/families (write:stealer)
-v1_router.include_router(stealer_families_update_router) # PUT /stealer/families/{slug} (write:stealer)
-v1_router.include_router(stealer_families_delete_router) # DELETE /stealer/families/{slug} (admin:stealer)
+v1_router.include_router(stealer_audit_unknown_router)  # GET /stealer/audit/unknown
+v1_router.include_router(stealer_audit_samples_router)  # GET /stealer/audit/samples
+v1_router.include_router(stealer_audit_search_router)  # GET /stealer/audit/search
+v1_router.include_router(stealer_rules_list_router)  # GET /stealer/rules (read:stealer)
+v1_router.include_router(stealer_rules_get_router)  # GET /stealer/rules/{id} (read:stealer)
+v1_router.include_router(stealer_rules_create_router)  # POST /stealer/rules (write:stealer)
+v1_router.include_router(stealer_rules_update_router)  # PUT /stealer/rules/{id} (write:stealer)
+v1_router.include_router(stealer_rules_delete_router)  # DELETE /stealer/rules/{id} (admin:stealer)
+v1_router.include_router(stealer_families_list_router)  # GET /stealer/families (read:stealer)
+v1_router.include_router(stealer_families_get_router)  # GET /stealer/families/{slug} (read:stealer)
+v1_router.include_router(stealer_families_create_router)  # POST /stealer/families (write:stealer)
+v1_router.include_router(
+    stealer_families_update_router
+)  # PUT /stealer/families/{slug} (write:stealer)
+v1_router.include_router(
+    stealer_families_delete_router
+)  # DELETE /stealer/families/{slug} (admin:stealer)
 v1_router.include_router(groups_get_router)  # GET /groups/{id} after literal /groups/* routes
 
 # identities + panic

@@ -716,15 +716,32 @@ class StealerArtifactsReader:
         suffix match depending on each row's ``match_type``. Returns 0 if
         the monitored_domains table has no rows (watchlist not seeded yet),
         which is the common early-stage state.
+
+        Split as a UNION ALL of two joins (one per match_type) because
+        ClickHouse 24.x rejects OR-ed conditions mixing columns from both
+        sides of a JOIN unless ``allow_experimental_join_condition=1``.
+        The suffix arm is an implicit cross join filtered by ``endsWith`` --
+        fine while monitored_domains stays small (dozens to low thousands);
+        if the watchlist ever grows into the millions, revisit this.
         """
         rows = await self._rows(
-            "SELECT uniqExact(vd.domain) AS n "  # noqa: S608
-            f"FROM {self._db}.victim_domains AS vd "  # nosec B608
-            f"INNER JOIN {self._db}.monitored_domains AS md "
-            "  ON (md.match_type = 'exact'  AND vd.domain = md.domain) "
-            "  OR (md.match_type = 'suffix' AND endsWith(vd.domain, md.domain)) "
-            "WHERE vd.archive_sha256 = {sha:FixedString(64)} "
-            "  AND vd.victim_folder  = {vf:String}",
+            "SELECT uniqExact(domain) AS n FROM ("  # noqa: S608
+            "  SELECT vd.domain "
+            f"  FROM {self._db}.victim_domains AS vd "  # nosec B608
+            f"  INNER JOIN {self._db}.monitored_domains AS md "
+            "    ON vd.domain = md.domain "
+            "  WHERE md.match_type = 'exact' "
+            "    AND vd.archive_sha256 = {sha:FixedString(64)} "
+            "    AND vd.victim_folder  = {vf:String} "
+            "  UNION ALL "
+            "  SELECT vd.domain "
+            f"  FROM {self._db}.victim_domains AS vd, "  # nosec B608
+            f"       {self._db}.monitored_domains AS md "
+            "  WHERE md.match_type = 'suffix' "
+            "    AND endsWith(vd.domain, md.domain) "
+            "    AND vd.archive_sha256 = {sha:FixedString(64)} "
+            "    AND vd.victim_folder  = {vf:String} "
+            ")",
             {"sha": archive_sha256, "vf": victim_folder},
         )
         return int(rows[0][0]) if rows else 0
