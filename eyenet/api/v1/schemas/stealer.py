@@ -193,6 +193,19 @@ class StealerTechnique(ApiSchema):
     fired_from_rules: list[str]  # which rule_ids triggered this technique
 
 
+class StealerFamilyCount(ApiSchema):
+    """Per-family victim count, keyed by verdict slug. The empty slug is
+    the no-verdict bucket."""
+
+    slug: str
+    count: int
+
+
+class StealerFamilyCountsResponse(ApiSchema):
+    initialized: bool = True
+    items: list[StealerFamilyCount]
+
+
 class StealerFamilyRunnerUp(ApiSchema):
     slug: str
     confidence: float
@@ -409,6 +422,8 @@ __all__ = [
     "StealerFailureShape",
     "StealerFailuresResponse",
     "StealerFailuresStats",
+    "StealerFamilyCount",
+    "StealerFamilyCountsResponse",
     "StealerFamilyRunnerUp",
     "StealerFamilyVerdict",
     "StealerSearchResponse",

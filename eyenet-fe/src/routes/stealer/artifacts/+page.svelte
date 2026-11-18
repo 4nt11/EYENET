@@ -4,6 +4,7 @@
   // System, Audit) and a right-rail SELECTED panel for the file preview /
   // extracted indicators. Backend contract: eyenet.api.v1.stealer.
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import SectionHeader from '$lib/components/SectionHeader.svelte';
   import Button from '$lib/components/Button.svelte';
   import StatTile from '$lib/components/StatTile.svelte';
@@ -345,10 +346,19 @@
             type="button"
             class="tile-btn"
             class:has-verdict={familyVerdict?.slug}
-            onclick={() => (familyPopoverOpen = !familyPopoverOpen)}
+            onclick={(e) => {
+              // Shift-click (or middle-click handled by anchor default)
+              // navigates to the family landing instead of toggling the
+              // popover. Keep the tile dual-use: explore + inspect.
+              if (familyVerdict?.slug && (e.shiftKey || e.metaKey)) {
+                goto(`/stealer/families/${encodeURIComponent(familyVerdict.slug)}`);
+                return;
+              }
+              familyPopoverOpen = !familyPopoverOpen;
+            }}
             aria-expanded={familyPopoverOpen}
             title={familyVerdict?.slug
-              ? `${familyVerdict.slug} @ ${(familyVerdict.confidence * 100).toFixed(0)}%`
+              ? `${familyVerdict.slug} @ ${(familyVerdict.confidence * 100).toFixed(0)}% (shift-click for family page)`
               : 'no confident verdict'}
           >
             <StatTile

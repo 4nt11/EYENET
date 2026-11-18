@@ -290,6 +290,7 @@ from eyenet.api.v1.stealer.api_get_stealer_family import router as stealer_famil
 from eyenet.api.v1.stealer.api_get_stealer_rule import router as stealer_rules_get_router
 from eyenet.api.v1.stealer.api_list_artifacts import router as stealer_list_artifacts_router
 from eyenet.api.v1.stealer.api_list_failures import router as stealer_list_failures_router
+from eyenet.api.v1.stealer.api_list_family_counts import router as stealer_family_counts_router
 from eyenet.api.v1.stealer.api_list_stealer_families import router as stealer_families_list_router
 from eyenet.api.v1.stealer.api_list_stealer_rules import router as stealer_rules_list_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
@@ -540,6 +541,7 @@ v1_router.include_router(stealer_audit_search_router)  # GET /stealer/audit/sear
 # Child route (/samples) before the greedy parent so FastAPI tries it
 # first, same pattern as the artifact drawer routes.
 v1_router.include_router(stealer_failures_stats_router)  # GET /stealer/failures/stats
+v1_router.include_router(stealer_family_counts_router)  # GET /stealer/families/counts
 v1_router.include_router(stealer_failure_samples_router)  # GET /stealer/failures/{sig}/samples
 v1_router.include_router(stealer_list_failures_router)  # GET /stealer/failures
 v1_router.include_router(stealer_rules_list_router)  # GET /stealer/rules (read:stealer)
