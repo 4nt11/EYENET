@@ -1,6 +1,8 @@
 slug: victim_wordlist
 name: Per-victim credential wordlist (Brute.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2019
 aliases: [brute, wordlist, personal-dict]
 signature_files:

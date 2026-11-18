@@ -1,6 +1,8 @@
 slug: rhadamanthys
 name: Rhadamanthys
 status: active
+kind: stealer
+schema: 2
 first_seen_year: 2022
 aliases: [Rhadamanthys, RADMAN]
 signature_files:

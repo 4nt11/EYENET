@@ -1,6 +1,8 @@
 slug: skid_toolkit
 name: Script-kiddie offensive toolkit
 status: active
+kind: tool
+schema: 2
 first_seen_year: 2014
 aliases: [skiddie, skid, fsociety, ddoser]
 signature_files: []

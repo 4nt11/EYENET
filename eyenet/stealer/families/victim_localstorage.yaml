@@ -1,6 +1,8 @@
 slug: victim_localstorage
 name: Browser localStorage dump (LocalStorage.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2019
 aliases: [localstorage, leveldb-ls, web-storage]
 signature_files:

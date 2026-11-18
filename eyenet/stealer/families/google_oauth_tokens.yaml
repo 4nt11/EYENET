@@ -1,6 +1,8 @@
 slug: google_oauth_tokens
 name: Google OAuth refresh tokens (Restore_*.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2020
 aliases: [gaia-tokens, chromium-restore, chrome-restore]
 signature_files:

@@ -1,6 +1,8 @@
 slug: firefox_logins
 name: Firefox saved logins (logins.json + key4.db)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2004
 aliases: [firefox-logins, logins.json, firefox-nss]
 signature_files:

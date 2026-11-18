@@ -1,6 +1,8 @@
 slug: victim_environment
 name: Windows process environment (Environment.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2019
 aliases: [env, envvars, windows-env]
 signature_files:

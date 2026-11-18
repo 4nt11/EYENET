@@ -1,6 +1,8 @@
 slug: vidar_khazan_panel
 name: Vidar stealer distributed through the Khazan Cloud panel
 status: active
+kind: leak_pack
+schema: 2
 first_seen_year: 2026
 aliases: [khazan, khazan-cloud, vidar-khazan]
 signature_files:

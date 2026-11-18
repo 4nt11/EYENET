@@ -1,6 +1,8 @@
 slug: victim_downloads
 name: Browser download history (Download History - *.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2019
 aliases: [downloads, download-history]
 signature_files:

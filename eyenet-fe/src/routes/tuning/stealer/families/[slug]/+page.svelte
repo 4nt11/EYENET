@@ -6,6 +6,17 @@
   import { getFamily, createFamily, updateFamily, deleteFamily } from '$lib/stealerFamiliesApi.svelte.js';
 
   const STATUS_OPTS = ['active', 'new', 'dormant', 'retired', 'suspected'].map((v) => ({ v, l: v }));
+  // Discriminator for the per-victim classifier (Phase 2+). Only
+  // `stealer` entries are classification targets; the rest are metadata
+  // the rule authors lean on. See
+  // development/STEALER_FAMILY_CLASSIFIER_DESIGN.md.
+  const KIND_OPTS = [
+    { v: 'stealer', l: 'stealer (classifier target)' },
+    { v: 'content', l: 'content (rule output shape)' },
+    { v: 'tool', l: 'tool (victim-side app or crypter)' },
+    { v: 'combolist', l: 'combolist' },
+    { v: 'leak_pack', l: 'leak pack' },
+  ];
 
   const slug = $derived($page.params.slug);
   const isNew = $derived(slug === 'new');
@@ -21,6 +32,8 @@
       slug: '',
       name: '',
       status: 'new',
+      kind: 'stealer',
+      schema: 2,
       first_seen_year: new Date().getFullYear(),
       aliases: [],
       signature_files: [],
@@ -131,6 +144,10 @@
             <label>
               <span>Status</span>
               <Dropdown options={STATUS_OPTS} bind:value={family.status} minWidth="100%" />
+            </label>
+            <label>
+              <span>Kind</span>
+              <Dropdown options={KIND_OPTS} bind:value={family.kind} minWidth="100%" />
             </label>
             <label>
               <span>First seen year</span>

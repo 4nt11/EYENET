@@ -34,7 +34,7 @@ async def stealer_families_create(
     _storage: Annotated[BaseRepository, Depends(get_storage)],
     audit: Annotated[AuditEmitter, Depends(get_audit)],
 ) -> StealerFamilyOut:
-    payload = body.model_dump(exclude_none=True)
+    payload = body.model_dump(exclude_none=True, by_alias=True)
     try:
         stored = write_family(payload, allow_overwrite=False)
     except FileExistsError as exc:
@@ -44,8 +44,7 @@ async def stealer_families_create(
     await audit.emit(
         event="eyenet.audit.stealer_family.created",
         subject_kind="stealer_family",
-        subject_id=body.slug,
         system_user_id=current_user.user_id,
-        payload={"name": body.name, "status": body.status},
+        payload={"slug": body.slug, "name": body.name, "status": body.status, "kind": body.kind},
     )
     return StealerFamilyOut.model_validate(stored)

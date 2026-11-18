@@ -1,6 +1,8 @@
 slug: aware_crypter
 name: AWARE Crypter (commercial FUD packer-as-a-service)
 status: active
+kind: tool
+schema: 2
 first_seen_year: 2024
 aliases: [aware, aware-cr1, aware-crypter, fud-crypter-service]
 signature_files:

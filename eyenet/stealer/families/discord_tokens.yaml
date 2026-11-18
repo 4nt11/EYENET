@@ -1,6 +1,8 @@
 slug: discord_tokens
 name: Discord authentication tokens (tokens.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2018
 aliases: [discord, discord-session, chat-token]
 signature_files:

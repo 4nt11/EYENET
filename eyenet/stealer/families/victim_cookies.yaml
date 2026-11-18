@@ -1,6 +1,8 @@
 slug: victim_cookies
 name: Chromium / Firefox cookie jar (Netscape cookies.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2013
 aliases: [cookies, cookiejar, netscape-cookies]
 signature_files:

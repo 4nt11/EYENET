@@ -1,6 +1,8 @@
 slug: victim_autofills
 name: Chromium autofill history (Autofills - *.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2019
 aliases: [autofill, formdata, autofills]
 signature_files:

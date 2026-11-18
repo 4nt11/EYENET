@@ -1,6 +1,8 @@
 slug: telegram_desktop
 name: Telegram Desktop session
 status: active
+kind: tool
+schema: 2
 first_seen_year: 2014
 aliases: [tdata, telegram, telegram-desktop]
 signature_files:

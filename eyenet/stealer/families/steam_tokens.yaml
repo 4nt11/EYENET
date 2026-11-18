@@ -1,6 +1,8 @@
 slug: steam_tokens
 name: Steam JWT auth tokens (steam_tokens.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2023
 aliases: [steam-jwt, steam-login, steamloginsecure-jwt]
 signature_files:

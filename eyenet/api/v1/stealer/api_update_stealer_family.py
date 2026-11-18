@@ -41,7 +41,7 @@ async def stealer_families_update(
         read_family(slug)
     except FileNotFoundError as exc:
         raise ResourceNotFound("stealer_family") from exc
-    payload = body.model_dump(exclude_none=True)
+    payload = body.model_dump(exclude_none=True, by_alias=True)
     try:
         stored = write_family(payload, allow_overwrite=True)
     except ValueError as exc:
@@ -49,8 +49,7 @@ async def stealer_families_update(
     await audit.emit(
         event="eyenet.audit.stealer_family.updated",
         subject_kind="stealer_family",
-        subject_id=slug,
         system_user_id=current_user.user_id,
-        payload={"name": body.name, "status": body.status},
+        payload={"slug": slug, "name": body.name, "status": body.status, "kind": body.kind},
     )
     return StealerFamilyOut.model_validate(stored)

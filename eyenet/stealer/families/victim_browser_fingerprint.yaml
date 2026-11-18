@@ -1,6 +1,8 @@
 slug: victim_browser_fingerprint
 name: Per-browser-profile fingerprint (Summary.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2020
 aliases: [browser-summary, profile-fingerprint, sync-tell]
 signature_files:

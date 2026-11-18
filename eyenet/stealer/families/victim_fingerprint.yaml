@@ -1,6 +1,8 @@
 slug: victim_fingerprint
 name: Victim system fingerprint (Info.txt / System.txt)
 status: active
+kind: content
+schema: 2
 first_seen_year: 2019
 aliases: [info, system, host-info]
 signature_files:

@@ -1,6 +1,8 @@
 slug: combolist
 name: Combolist (non-stealer drop)
 status: active
+kind: combolist
+schema: 2
 first_seen_year: 0
 aliases: [combolist, combo, ULP, URL-login-password]
 signature_files: []

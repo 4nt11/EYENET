@@ -1,6 +1,8 @@
 slug: steam_accounts
 name: Steam saved accounts
 status: active
+kind: content
+schema: 2
 first_seen_year: 2003
 aliases: [steam, loginusers.vdf, valve-data-file]
 signature_files:
