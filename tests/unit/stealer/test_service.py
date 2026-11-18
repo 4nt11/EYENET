@@ -6,7 +6,7 @@ service's state machine, not the subprocess pipeline (that's integration)."""
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -34,7 +34,7 @@ def _svc(storage: BaseRepository) -> StealerProcessorService:
     return StealerProcessorService(bus=MemoryBus(), storage=storage)
 
 
-async def _put_blob(storage: BaseRepository, *, uri: str | None) -> object:
+async def _put_blob(storage: BaseRepository, *, uri: str | None) -> UUID:
     return await storage.put_attachment(
         AttachmentRow(
             message_id=uuid4(),
@@ -56,7 +56,7 @@ async def test_success_marks_done_with_count(
 
     def _fake(**kwargs: object) -> ProcessResult:
         calls.append(kwargs["blob_path"])
-        return ProcessResult(ok=True, creds_inserted=777, password_used="@x")
+        return ProcessResult(ok=True, records_inserted=777, password_used="@x")
 
     monkeypatch.setattr(service_mod, "process_archive", _fake)
     await _svc(storage)._process_attachment(aid)
@@ -77,7 +77,7 @@ async def test_skip_when_already_done(
     def _fake(**_kwargs: object) -> ProcessResult:
         nonlocal called
         called = True
-        return ProcessResult(ok=True, creds_inserted=0, password_used=None)
+        return ProcessResult(ok=True, records_inserted=0, password_used=None)
 
     monkeypatch.setattr(service_mod, "process_archive", _fake)
     await _svc(storage)._process_attachment(aid)
@@ -99,7 +99,7 @@ async def test_pipeline_failure_marks_failed(
     aid = await _put_blob(storage, uri="/blobs/x.rar")
 
     def _fake(**_kwargs: object) -> ProcessResult:
-        return ProcessResult(ok=False, creds_inserted=0, password_used=None, error="bad pw")
+        return ProcessResult(ok=False, records_inserted=0, password_used=None, error="bad pw")
 
     monkeypatch.setattr(service_mod, "process_archive", _fake)
     await _svc(storage)._process_attachment(aid)

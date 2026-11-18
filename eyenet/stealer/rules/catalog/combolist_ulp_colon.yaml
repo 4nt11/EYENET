@@ -23,5 +23,11 @@ reject_patterns:
   - '(?i)\bt\.me/'
   - '(?i)^(null|none|empty|-+|null\s*password)$'
   - '(?i)ht[0-9]ps://'
+normalize:
+  - verb: derive_url_parts
+    field: url
+    host_to: host
+    scheme_to: scheme
+    tld_to: tld
 ttps:
   - T1555.003

@@ -30,5 +30,11 @@ extract:
     time_password_changed: $.timePasswordChanged
     times_used: $.timesUsed
     guid: $.guid
+normalize:
+  - verb: derive_url_parts
+    field: url
+    host_to: host
+    scheme_to: scheme
+    tld_to: tld
 ttps:
   - T1555.003

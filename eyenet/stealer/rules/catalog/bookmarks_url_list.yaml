@@ -15,5 +15,11 @@ match:
   pattern: '(?P<url>https?://[^\s\n]+)'
 extract:
   fields: [url]
+normalize:
+  - verb: derive_url_parts
+    field: url
+    host_to: host
+    scheme_to: scheme
+    tld_to: tld
 ttps:
   - T1217

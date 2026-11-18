@@ -856,7 +856,7 @@ def stealer_reprocess_local(  # pragma: no cover
     import shutil  # noqa: PLC0415
     import tempfile  # noqa: PLC0415
 
-    from eyenet.stealer.clickhouse import ClickHouseCredsSink, FileAuditSink  # noqa: PLC0415
+    from eyenet.stealer.clickhouse import FileAuditSink  # noqa: PLC0415
     from eyenet.stealer.pipeline import process_archive  # noqa: PLC0415
 
     if not password:
@@ -882,7 +882,6 @@ def stealer_reprocess_local(  # pragma: no cover
     stage_blob.symlink_to(archive.resolve())
 
     work_root.mkdir(parents=True, exist_ok=True)
-    sink = ClickHouseCredsSink()
     audit_sink = FileAuditSink()
 
     try:
@@ -893,25 +892,24 @@ def stealer_reprocess_local(  # pragma: no cover
             blob_path=stage_blob,
             password_candidates=list(password),
             work_root=work_root,
-            sink=sink,
             source_label=source_label,
             audit_sink=audit_sink,
         )
     finally:
-        sink.close()
         audit_sink.close()
         shutil.rmtree(stage_root, ignore_errors=True)
 
     typer.echo("--- result ---")
     typer.echo(f"  ok              = {result.ok}")
-    typer.echo(f"  creds_inserted  = {result.creds_inserted}")
+    typer.echo(f"  records_emitted = {result.records_inserted}")
     typer.echo(f"  password_used   = {result.password_used!r}")
     if result.error:
         typer.echo(f"  error           = {result.error}")
     typer.echo("")
     typer.echo("  Inspect the results in ClickHouse:")
     typer.echo(
-        f"    SELECT count() FROM stealer.creds WHERE source = '{source_label}';"  # noqa: S608  # nosec B608
+        "    SELECT count() FROM stealer.extracted_records "  # noqa: S608  # nosec B608
+        f"WHERE source = '{source_label}';"
     )
     typer.echo(
         f"    SELECT * FROM stealer.file_audit WHERE archive_sha256 = '{archive_sha}' LIMIT 20;"  # noqa: S608  # nosec B608
@@ -925,7 +923,6 @@ async def _reindex_one(  # pragma: no cover
     att: Any,
     *,
     storage: Any,
-    creds_sink: Any,
     audit_sink: Any,
     records_sink: Any,
     gotractor: Any,
@@ -947,7 +944,6 @@ async def _reindex_one(  # pragma: no cover
             blob_path=Path(att.storage_uri) if att.storage_uri else Path(),
             password_candidates=candidates,
             work_root=work_root,
-            sink=creds_sink,
             source_label=f"reindex:{att.id}",
             audit_sink=audit_sink,
             records_sink=records_sink,
@@ -960,12 +956,10 @@ async def _reindex_one(  # pragma: no cover
         return False, f"CRASH: {exc}"
     if result.ok:
         await storage.set_stealer_processing(
-            att.id, state=STEALER_DONE, creds_extracted=result.creds_inserted
+            att.id, state=STEALER_DONE, creds_extracted=result.records_inserted
         )
         return True, (
-            f"ok creds={result.creds_inserted}"
-            f" records={result.records_inserted}"
-            f" families={','.join(result.gotractor_families)}"
+            f"ok records={result.records_inserted} families={','.join(result.gotractor_families)}"
         )
     await storage.set_stealer_processing(att.id, state=STEALER_FAILED, error=result.error)
     return False, f"FAIL: {result.error}"
@@ -1006,7 +1000,6 @@ def stealer_reindex(  # noqa: PLR0915  # pragma: no cover
     from eyenet.contracts.group import STEALER_LOG_CATEGORY  # noqa: PLC0415
     from eyenet.models.stealer import STEALER_DONE  # noqa: PLC0415
     from eyenet.stealer.clickhouse import (  # noqa: PLC0415
-        ClickHouseCredsSink,
         ClickHouseRecordsSink,
         FileAuditSink,
     )
@@ -1019,7 +1012,6 @@ def stealer_reindex(  # noqa: PLR0915  # pragma: no cover
         os.environ.get("EYENET_STEALER_RULES_DIR", str(vendored / "rules" / "catalog"))
     )
     families_dir = Path(os.environ.get("EYENET_STEALER_FAMILIES_DIR", str(vendored / "families")))
-    creds_sink = None if dry_run else ClickHouseCredsSink()
     audit_sink = None if dry_run else FileAuditSink()
     records_sink = None if dry_run else ClickHouseRecordsSink()
     gotractor: GotractorDaemon | None = None
@@ -1058,7 +1050,6 @@ def stealer_reindex(  # noqa: PLR0915  # pragma: no cover
                     ok, line = await _reindex_one(
                         att,
                         storage=storage,
-                        creds_sink=creds_sink,
                         audit_sink=audit_sink,
                         records_sink=records_sink,
                         gotractor=gotractor,
@@ -1076,7 +1067,7 @@ def stealer_reindex(  # noqa: PLR0915  # pragma: no cover
     try:
         processed, succeeded, skipped = asyncio.run(_main())
     finally:
-        for closer in (creds_sink, audit_sink, records_sink, gotractor):
+        for closer in (audit_sink, records_sink, gotractor):
             if closer is not None:
                 closer.close()
     verb = "would reindex" if dry_run else "reindexed"

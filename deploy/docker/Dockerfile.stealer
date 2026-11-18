@@ -1,26 +1,22 @@
-# EYENET stealer-log ULP processor image — extends the base with the archive +
-# extraction toolchain for eyenet/stealer/. Opt-in (compose `stealer` profile); the
+# EYENET stealer-log ULP processor image: extends the base with the archive
+# toolchain for eyenet/stealer/. Opt-in (compose `stealer` profile); the
 # core stack ships without it.
 #
 #   docker build -f deploy/docker/Dockerfile.stealer -t eyenet:stealer ../..
 #
-# - ulpextract: the prod Go extractor, built from the in-package source (wheels-in)
-#   into /usr/local/bin and pointed at via EYENET_ULPEXTRACT_BIN.
-# - unar (The Unarchiver, Debian main): ONE extractor for every container a dump ships
-#   in — rar/rar5, 7z, zip, tar, tar.gz/.xz, gz — with password support. Opens the
-#   RAR5-encrypted-data variant 7z cannot, and (unlike unrar) isn't rar-only + is in main.
-# - clickhouse-connect: the creds sink (optional dep, stealer profile only).
+# - gotractor: the rule-driven DSL extractor (records table) + the wallet-
+#   vault LevelDB pass. The stealer processor's daemon mode calls this
+#   binary one-shot per archive via GotractorDaemon.
+# - unar (The Unarchiver, Debian main): ONE extractor for every container a
+#   dump ships in: rar/rar5, 7z, zip, tar, tar.gz/.xz, gz, with password
+#   support. Opens the RAR5-encrypted-data variant 7z cannot, and (unlike
+#   unrar) isn't rar-only + is in main.
+# - clickhouse-connect: the records sink (optional dep, stealer profile only).
 
 FROM golang:1.26-bookworm AS gobuild
-WORKDIR /src/ulp
-COPY eyenet/stealer/ulpextract/ ./
-RUN CGO_ENABLED=0 go build -o /ulpextract ./ulpextract.go
 
-# gotractor: the v1.3.1 rule-driven DSL extractor (records table) + the v1.3.2
-# wallet-vault LevelDB pass. The stealer processor's daemon mode calls this
-# binary one-shot per archive via GotractorDaemon; without it the processor
-# crashes on `on_subscribe` with FileNotFoundError on the gotractor binary.
-# go.mod requires 1.26 (added via syndtr/goleveldb idb_cmp1 comparer work).
+# gotractor: go.mod requires 1.26 (added via syndtr/goleveldb idb_cmp1
+# comparer work).
 WORKDIR /src/gotractor
 COPY eyenet/stealer/gotractor/ ./
 RUN CGO_ENABLED=0 go build -o /gotractor .
@@ -32,12 +28,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends unar \
  && rm -rf /var/lib/apt/lists/*
 RUN /opt/venv/bin/pip install --no-cache-dir 'clickhouse-connect>=0.8'
-COPY --from=gobuild /ulpextract /usr/local/bin/ulpextract
 COPY --from=gobuild /gotractor /usr/local/bin/gotractor
-ENV EYENET_ULPEXTRACT_BIN=/usr/local/bin/ulpextract
 ENV EYENET_GOTRACTOR_BIN=/usr/local/bin/gotractor
-# Re-stamp the version label: FROM eyenet:base carries base's value, baked at base-build
-# time; re-declaring here stamps the stealer image with THIS deploy's version.
+# Re-stamp the version label: FROM eyenet:base carries base's value, baked
+# at base-build time; re-declaring here stamps the stealer image with THIS
+# deploy's version.
 ARG EYENET_VERSION=dev
 LABEL org.opencontainers.image.version=$EYENET_VERSION
 USER eyenet

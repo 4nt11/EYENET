@@ -2,15 +2,21 @@ package engine
 
 import (
 	"net/mail"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // applyNormalize applies the normalize verbs in order, matching the
 // Python / JS semantics: a verb that fails (parse error, no match)
-// DROPS the field silently.
+// DROPS the field silently. The derive_url_parts verb is a special
+// case: it writes SIBLING fields instead of replacing the source
+// field, so URL-structured emits (host, scheme, tld) can be produced
+// from a single raw URL capture.
 func applyNormalize(fields map[string]any, steps []map[string]any) map[string]any {
 	out := make(map[string]any, len(fields))
 	for k, v := range fields {
@@ -18,6 +24,10 @@ func applyNormalize(fields map[string]any, steps []map[string]any) map[string]an
 	}
 	for _, step := range steps {
 		verb, _ := step["verb"].(string)
+		if verb == "derive_url_parts" {
+			applyDeriveURL(out, step)
+			continue
+		}
 		field, _ := step["field"].(string)
 		cur, has := out[field]
 		if !has || cur == nil {
@@ -32,6 +42,58 @@ func applyNormalize(fields map[string]any, steps []map[string]any) map[string]an
 		}
 	}
 	return out
+}
+
+// applyDeriveURL derives the structured parts (registrable host,
+// scheme, TLD) from a raw URL captured in `step.field` and writes them
+// into the sibling field names declared by `host_to`, `scheme_to`, and
+// `tld_to`. Replaces the Python-side URL post-processing that
+// ulpextract used to do; keeping it as a built-in means every rule
+// that captures a URL gets the same canonical shape without a per-
+// rule derivation helper.
+//
+// Behaviour:
+//   - A URL without a scheme is tolerated for parsing (we prepend a
+//     stub) but scheme_to is left unwritten so the operator sees
+//     "no scheme" rather than a fake http://.
+//   - registrable domain comes from EffectiveTLDPlusOne on the public
+//     suffix list; falls back to the raw hostname when the PSL does
+//     not match (unusual, but keeps pathological inputs flowing).
+//   - TLD is the public-suffix segment (e.g. "co.uk", "com", "club").
+//   - Empty source field or parse failure writes nothing silently.
+func applyDeriveURL(fields map[string]any, step map[string]any) {
+	srcField, _ := step["field"].(string)
+	if srcField == "" {
+		return
+	}
+	raw := toString(fields[srcField])
+	if raw == "" {
+		return
+	}
+	toParse := raw
+	hadScheme := strings.Contains(raw, "://")
+	if !hadScheme {
+		toParse = "http://" + raw
+	}
+	u, err := url.Parse(toParse)
+	if err != nil || u.Host == "" {
+		return
+	}
+	host := strings.ToLower(u.Hostname())
+	registrable, errReg := publicsuffix.EffectiveTLDPlusOne(host)
+	if errReg != nil || registrable == "" {
+		registrable = host
+	}
+	tld, _ := publicsuffix.PublicSuffix(host)
+	if hostTo, _ := step["host_to"].(string); hostTo != "" {
+		fields[hostTo] = registrable
+	}
+	if schemeTo, _ := step["scheme_to"].(string); schemeTo != "" && hadScheme {
+		fields[schemeTo] = strings.ToLower(u.Scheme)
+	}
+	if tldTo, _ := step["tld_to"].(string); tldTo != "" {
+		fields[tldTo] = tld
+	}
 }
 
 func runVerb(verb string, step map[string]any, raw string) (any, bool) {

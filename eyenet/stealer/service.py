@@ -30,7 +30,7 @@ from eyenet.contracts.stealer_events import (
 )
 from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED, STEALER_RUNNING
 from eyenet.service import ServiceBase
-from eyenet.stealer.clickhouse import ClickHouseCredsSink, ClickHouseRecordsSink, FileAuditSink
+from eyenet.stealer.clickhouse import ClickHouseRecordsSink, FileAuditSink
 from eyenet.stealer.gotractor_client import GotractorDaemon
 from eyenet.stealer.password import parse_password, password_candidates
 from eyenet.stealer.pipeline import process_archive
@@ -56,19 +56,16 @@ class StealerProcessorService(ServiceBase):
     ) -> None:
         super().__init__(bus=bus, storage=storage)
         self._instance_id = instance_id
-        self._sink = ClickHouseCredsSink()
-        # v1.2.6 observability side channel. One row per file per archive into
-        # stealer.file_audit so operators can SQL-query "what files do we see
-        # that we are not parsing". Separate sink so a schema hiccup on it
-        # cannot break the primary creds insert path.
+        # file_audit observability side channel. One row per file per
+        # archive so operators can SQL-query "what files do we see that
+        # we are not parsing".
         self._audit_sink = FileAuditSink()
-        # v1.3.1 gotractor landing sink. One row per EXTRACTED RECORD into
+        # gotractor landing sink: one row per extracted record into
         # stealer.extracted_records (rule-driven, Map(String,String) fields).
-        # Wired in parallel with the ulpextract creds path; set to None to
-        # disable the DSL leg entirely (ulpextract-only legacy mode) via
-        # EYENET_STEALER_DISABLE_GOTRACTOR=1. Rules + families dirs default
-        # to the vendored catalog paths; prod overrides via
-        # EYENET_STEALER_RULES_DIR / _FAMILIES_DIR.
+        # Set to None via EYENET_STEALER_DISABLE_GOTRACTOR=1 to disable
+        # the DSL leg entirely (test fixture / cold-boot path). Rules +
+        # families dirs default to the vendored catalog paths; prod
+        # overrides via EYENET_STEALER_RULES_DIR / _FAMILIES_DIR.
         _vendored = Path(__file__).parent / "rules" / "catalog"
         _vendored_families = Path(__file__).parent / "families"
         self._rules_dir = Path(os.environ.get("EYENET_STEALER_RULES_DIR", str(_vendored)))
@@ -184,20 +181,22 @@ class StealerProcessorService(ServiceBase):
             blob_path=Path(att.storage_uri),
             password_candidates=candidates,
             work_root=self._work_root,
-            sink=self._sink,
             source_label=f"attachment:{attachment_id}",
             audit_sink=self._audit_sink,
             records_sink=self._records_sink,
             gotractor=self._gotractor,
         )
         if result.ok:
+            # creds_extracted on StealerProcessingTable retains its
+            # historical column name; it now stores the gotractor
+            # emit count (ulpextract is gone). A migration can rename
+            # the column to records_extracted in a follow-up.
             await self._storage.set_stealer_processing(
-                attachment_id, state=STEALER_DONE, creds_extracted=result.creds_inserted
+                attachment_id, state=STEALER_DONE, creds_extracted=result.records_inserted
             )
             _log.info(
                 "stealer_processor.done",
                 attachment=str(attachment_id),
-                creds=result.creds_inserted,
                 records=result.records_inserted,
                 gotractor_families=result.gotractor_families,
                 password_used=bool(result.password_used),
@@ -276,7 +275,6 @@ class StealerProcessorService(ServiceBase):
                 _log.error("stealer_processor.corpus_reclassify_failed", error=str(exc))
 
     async def shutdown(self) -> None:
-        self._sink.close()
         self._audit_sink.close()
         if self._records_sink is not None:
             self._records_sink.close()

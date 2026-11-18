@@ -45,5 +45,10 @@ normalize:
   - field: visit_time
     verb: date_parse
     format: iso8601
+  - verb: derive_url_parts
+    field: visit_url
+    host_to: host
+    scheme_to: scheme
+    tld_to: tld
 ttps:
   - T1217

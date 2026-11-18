@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Locate + invoke the ulpextract Go binary (prod-grade, shipped wheels-in).
+"""Locate + invoke the gotractor Go binary (prod-grade, shipped wheels-in).
 
-The extractor is a batch CLI: file paths in, ``host\\turl\\tlogin\\tpassword\\tscheme\\t
-tld\\tsource\\tip_class`` TSV out. We invoke it as a SUBPROCESS (never gopy/cgo):
-process isolation keeps a panic/OOM on an attacker-controlled archive out of the
-service's address space, and its NumCPU worker pool + streamed stdout pipe straight
-into the ClickHouse insert.
+gotractor is a long-lived daemon speaking newline-delimited JSON on
+stdin/stdout. The Python side writes `{"cmd":"run","input":...}` commands
+and reads back one record per matched rule plus a terminating run_done
+frame. We invoke it as a SUBPROCESS (never gopy/cgo): process isolation
+keeps a panic/OOM on an attacker-controlled archive out of the service's
+address space.
 
-Binary resolution order: ``EYENET_ULPEXTRACT_BIN`` env override → the binary built next
-to the in-package Go source (``eyenet/stealer/ulpextract/ulpextract``, produced by the
-Dockerfile.stealer builder) → ``ulpextract`` on PATH.
+Binary resolution order: `EYENET_GOTRACTOR_BIN` env override, then the
+binary built next to the in-package Go source
+(`eyenet/stealer/gotractor/gotractor`, produced by the Dockerfile.stealer
+builder), then `gotractor` on PATH.
 """
 
 from __future__ import annotations
@@ -18,36 +20,11 @@ import os
 import shutil
 from pathlib import Path
 
-_PKG_BIN = Path(__file__).parent / "ulpextract" / "ulpextract"
 _GOTRACTOR_PKG_BIN = Path(__file__).parent / "gotractor" / "gotractor"
 
 
-def ulpextract_path() -> str:
-    """Absolute path to the ulpextract binary. Raises if it cannot be found."""
-    override = os.environ.get("EYENET_ULPEXTRACT_BIN")
-    if override:
-        if not Path(override).is_file():
-            raise FileNotFoundError(f"EYENET_ULPEXTRACT_BIN points at a missing file: {override}")
-        return override
-    if _PKG_BIN.is_file():
-        return str(_PKG_BIN)
-    on_path = shutil.which("ulpextract")
-    if on_path:
-        return on_path
-    raise FileNotFoundError(
-        "ulpextract binary not found: build it from eyenet/stealer/ulpextract "
-        "(go build -o ulpextract ./ulpextract.go), set EYENET_ULPEXTRACT_BIN, or "
-        "put it on PATH"
-    )
-
-
 def gotractor_path() -> str:
-    """Absolute path to the gotractor binary (DSL rule engine replacement
-    for ulpextract). Resolution order mirrors ulpextract_path():
-    ``EYENET_GOTRACTOR_BIN`` env override, then the binary built next to
-    the in-package Go source (``eyenet/stealer/gotractor/gotractor``),
-    then ``gotractor`` on PATH.
-    """
+    """Absolute path to the gotractor binary. Raises if it cannot be found."""
     override = os.environ.get("EYENET_GOTRACTOR_BIN")
     if override:
         if not Path(override).is_file():
@@ -65,4 +42,4 @@ def gotractor_path() -> str:
     )
 
 
-__all__ = ["gotractor_path", "ulpextract_path"]
+__all__ = ["gotractor_path"]

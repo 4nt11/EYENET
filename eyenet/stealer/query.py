@@ -1,8 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Read side of the ULP corpus: stats + credential search over ClickHouse stealer.creds.
+"""Read side of the ULP corpus: stats + credential search.
 
-Backs the read:stealer API (overview charts + host search). Queries are parameterized
-(clickhouse-connect bound params) so the operator's search term can't inject SQL.
+Reads from ``<db>.extracted_records`` (gotractor's output); the legacy
+``<db>.creds`` table is no longer written to and will be dropped once the
+transition is confirmed healthy. host / scheme / tld are derived at read
+time with ClickHouse's native URL functions (``domain()``, ``protocol()``,
+``topLevelDomain()``) so old records (pre derive_url_parts normalize) are
+still queryable without a reindex.
+
+Backs the read:stealer API (overview charts + host search). Queries are
+parameterized (clickhouse-connect bound params) so the operator's search
+term can't inject SQL.
 """
 
 from __future__ import annotations
@@ -24,13 +32,14 @@ _CH_UNKNOWN_TABLE = 60
 
 
 class StealerCorpusUninitializedError(Exception):
-    """Raised when the corpus table does not exist yet.
+    """Raised when a stealer table does not exist yet.
 
     Semantics: CH is reachable, the DDL just has not been created because
     the stealer-processor has not yet seen a message that triggers
-    ``ClickHouseCredsSink.ensure_schema()``. The API layer turns this into
-    an empty-but-successful response with an ``initialized=False`` marker
-    the dashboard can render as a "add a stealer channel" nudge.
+    ``ClickHouseRecordsSink.ensure_schema()`` or ``FileAuditSink.ensure_schema()``.
+    The API layer turns this into an empty-but-successful response with an
+    ``initialized=False`` marker the dashboard can render as a "add a
+    stealer channel" nudge.
     """
 
 
@@ -74,9 +83,52 @@ class CredRow:
 
 
 class StealerCredsReader:
-    """Aggregate + search queries over ``<db>.creds``. Async: uses
-    clickhouse-connect's AsyncClient so parallel /v1/stealer requests do not
-    fight over a shared sync client the way the legacy readers did."""
+    """Aggregate + search queries over ``<db>.extracted_records``. Reads
+    the credential-emitting families (browser_passwords, windows_credentials,
+    firefox_logins, combolist) and derives host / scheme / tld from the
+    raw url field via ClickHouse's native URL functions; the derive_url_parts
+    normalize verb pre-computes the same at write time, so sargable queries
+    on new emits can use ``fields['host']`` directly.
+
+    Async: uses clickhouse-connect's AsyncClient so parallel /v1/stealer
+    requests do not fight over a shared sync client."""
+
+    # Families whose records carry a (url, login, password) triple that
+    # fits the credential-search surface. Listed as a ClassVar so the
+    # closed set is one place to edit when a new credential-emitting
+    # family lands.
+    _CRED_FAMILIES: ClassVar[list[str]] = [
+        "browser_passwords",
+        "windows_credentials",
+        "firefox_logins",
+        "combolist",
+    ]
+    # Derive host/scheme/tld with ClickHouse URL functions. We canonicalise
+    # BOTH fields['url'] and fields['host'] because some rules capture a
+    # raw URL into the "host" field pre derive_url_parts (e.g.
+    # passwords_block_title), and feeding that straight into the display
+    # yielded entries like 'https://accounts.google.com/' in the
+    # distribution charts. coalesce picks the first non-empty derivation.
+    # New records written post-derive_url_parts land with fields['host']
+    # already registrable and bypass this pathway via the first branch.
+    _HOST_EXPR: ClassVar[str] = (
+        "lower(coalesce("
+        "nullIf(domain(fields['url']), ''), "
+        "nullIf(domain(fields['host']), ''), "
+        "nullIf(fields['host'], ''), ''))"
+    )
+    _SCHEME_EXPR: ClassVar[str] = (
+        "lower(coalesce(nullIf(fields['scheme'], ''), nullIf(protocol(fields['url']), ''), ''))"
+    )
+    _TLD_EXPR: ClassVar[str] = (
+        "coalesce("
+        "nullIf(fields['tld'], ''), "
+        "nullIf(topLevelDomain(fields['url']), ''), "
+        "nullIf(topLevelDomain(fields['host']), ''), '')"
+    )
+    _WHERE_ANY_URL: ClassVar[str] = (
+        "family IN {fams:Array(String)} AND (notEmpty(fields['url']) OR notEmpty(fields['host']))"
+    )
 
     def __init__(self) -> None:
         self._db = clickhouse_db()
@@ -96,41 +148,53 @@ class StealerCredsReader:
         return [Bucket(key=str(r[0]), count=int(r[1])) for r in result.result_rows]
 
     async def stats(self, *, top: int = 20) -> StealerStats:
-        # Fully parameterized: the db is a bound {Identifier}, the limit a bound UInt32,
-        # no string interpolation, so no injection surface even on the (trusted) db name.
-        db: dict[str, object] = {"db": self._db}
-        db_top: dict[str, object] = {"db": self._db, "top": int(top)}
+        """Overview stats computed over extracted_records credential
+        families. Uses CH's URL functions as a fallback so pre-
+        derive_url_parts rows still contribute to host/scheme/tld
+        buckets even without a reindex."""
+        fams: dict[str, object] = {"fams": self._CRED_FAMILIES}
+        fams_top: dict[str, object] = {**fams, "top": int(top)}
+        where = self._WHERE_ANY_URL
+        host_expr = self._HOST_EXPR
+        scheme_expr = self._SCHEME_EXPR
+        tld_expr = self._TLD_EXPR
         try:
             client = await self._c()
             result = await client.query(
-                "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
-                "FROM {db:Identifier}.creds",
-                parameters=db,
+                f"SELECT count(), uniqExact(({host_expr}, fields['login'], fields['password'])), "  # noqa: S608  # nosec B608
+                f"       uniqExact({host_expr}) "
+                f"FROM {self._db}.extracted_records FINAL "
+                f"WHERE {where}",
+                parameters=fams,
             )
             scalars = result.result_rows[0]
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
-                    "stealer.creds table does not exist yet"
+                    "stealer.extracted_records table does not exist yet"
                 ) from exc
             raise
-        # Three distributions run in parallel: three CH queries, one event loop
-        # waiting on all three via gather.
         by_scheme, by_tld, top_hosts = await asyncio.gather(
             self._buckets(
-                "SELECT scheme, count() c FROM {db:Identifier}.creds "
-                "GROUP BY scheme ORDER BY c DESC",
-                db,
+                f"SELECT {scheme_expr} s, count() c "  # noqa: S608  # nosec B608
+                f"FROM {self._db}.extracted_records FINAL "
+                f"WHERE {where} AND notEmpty({scheme_expr}) "
+                "GROUP BY s ORDER BY c DESC",
+                fams,
             ),
             self._buckets(
-                "SELECT tld, count() c FROM {db:Identifier}.creds WHERE tld != '' "
-                "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}",
-                db_top,
+                f"SELECT {tld_expr} t, count() c "  # noqa: S608  # nosec B608
+                f"FROM {self._db}.extracted_records FINAL "
+                f"WHERE {where} AND notEmpty({tld_expr}) "
+                "GROUP BY t ORDER BY c DESC LIMIT {top:UInt32}",
+                fams_top,
             ),
             self._buckets(
-                "SELECT host, count() c FROM {db:Identifier}.creds WHERE host != '' "
-                "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}",
-                db_top,
+                f"SELECT {host_expr} h, count() c "  # noqa: S608  # nosec B608
+                f"FROM {self._db}.extracted_records FINAL "
+                f"WHERE {where} AND notEmpty({host_expr}) "
+                "GROUP BY h ORDER BY c DESC LIMIT {top:UInt32}",
+                fams_top,
             ),
         )
         return StealerStats(
@@ -145,37 +209,47 @@ class StealerCredsReader:
     async def count_host(self, host: str) -> int:
         """Exact count of creds for one host (the enrichment degree)."""
         client = await self._c()
+        host_expr = self._HOST_EXPR
         result = await client.query(
-            "SELECT count() FROM {db:Identifier}.creds WHERE host = {host:String}",
-            parameters={"db": self._db, "host": host},
+            f"SELECT count() FROM {self._db}.extracted_records FINAL "  # noqa: S608  # nosec B608
+            f"WHERE {self._WHERE_ANY_URL} AND {host_expr} = {{host:String}}",
+            parameters={"fams": self._CRED_FAMILIES, "host": host},
         )
         return int(result.result_rows[0][0])
 
     async def search(
         self, *, host: str | None, limit: int, offset: int = 0, exact: bool = False
     ) -> list[CredRow]:
-        where = ""
-        params: dict[str, object] = {"db": self._db, "lim": int(limit), "off": int(offset)}
+        host_expr = self._HOST_EXPR
+        scheme_expr = self._SCHEME_EXPR
+        tld_expr = self._TLD_EXPR
+        host_filter = ""
+        params: dict[str, object] = {
+            "fams": self._CRED_FAMILIES,
+            "lim": int(limit),
+            "off": int(offset),
+        }
         if host and exact:
-            where = "WHERE host = {host:String}"  # graph enrichment: exact host
+            host_filter = f" AND {host_expr} = {{host:String}}"
             params["host"] = host
         elif host:
-            where = "WHERE host ILIKE {pat:String}"  # dashboard: substring
+            host_filter = f" AND {host_expr} ILIKE {{pat:String}}"
             params["pat"] = f"%{host}%"
         try:
             client = await self._c()
             result = await client.query(
-                # `where` is a code constant (not user input); the search term + db + limits
-                # are all bound params, so the f-string only splices our own literal.
-                "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608  # nosec B608
-                f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
+                f"SELECT {host_expr} h, fields['url'] u, fields['login'] l, "  # noqa: S608  # nosec B608
+                f"       fields['password'] p, {scheme_expr} s, {tld_expr} t "
+                f"FROM {self._db}.extracted_records FINAL "
+                f"WHERE {self._WHERE_ANY_URL}{host_filter} "
+                "ORDER BY h LIMIT {lim:UInt32} OFFSET {off:UInt32}",
                 parameters=params,
             )
             rows = result.result_rows
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
-                    "stealer.creds table does not exist yet"
+                    "stealer.extracted_records table does not exist yet"
                 ) from exc
             raise
         return [
