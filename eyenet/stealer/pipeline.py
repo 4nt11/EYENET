@@ -256,6 +256,12 @@ def process_archive(
                 )
         if audit_sink is not None:
             _write_file_audit(audit_sink, dest, blob_path, pw_files, parse_errors)
+            # Classifier pass: now that file_audit + extracted_records are
+            # populated for this archive, score every (archive, victim)
+            # pair against the family catalog and persist the verdict.
+            # Isolated like _write_file_audit: a classifier hiccup must
+            # never propagate out to stealer_processor.done.
+            _classify_archive_victims(blob_path.stem)
         if not pw_files and records == 0:
             return ProcessResult(
                 ok=True,
@@ -485,6 +491,45 @@ def _write_file_audit(
     except Exception as exc:
         # audit side channel; never fail the pipeline
         _log.warning("stealer.file_audit_failed", error=str(exc), error_type=type(exc).__name__)
+
+
+def _classify_archive_victims(archive_sha: str) -> None:
+    """Classify every victim under an archive and persist the verdicts.
+
+    Called after _write_file_audit so the classifier reads a populated
+    file_audit + extracted_records. Failures are swallowed with a WARN
+    log; a verdict-side DB hiccup must not break the attachment done
+    path. Catalog load + CH client are one-shots per archive (cheap,
+    archives arrive seconds apart at most)."""
+    try:
+        from eyenet.stealer.classifier import classify  # noqa: PLC0415
+        from eyenet.stealer.classifier_io import (  # noqa: PLC0415
+            collect_evidence_sync,
+            write_verdict_sync,
+        )
+        from eyenet.stealer.clickhouse import (  # noqa: PLC0415
+            clickhouse_db,
+            get_clickhouse_client,
+        )
+
+        client = get_clickhouse_client()
+        db = clickhouse_db()
+        rows = client.query(
+            "SELECT DISTINCT victim_folder "  # noqa: S608  # nosec B608
+            f"FROM {db}.file_audit FINAL "
+            "WHERE archive_sha256 = %(sha)s "
+            "  AND victim_folder != ''",
+            parameters={"sha": archive_sha},
+        ).result_rows
+        count = 0
+        for (vf,) in rows:
+            ev = collect_evidence_sync(client, archive_sha, str(vf))
+            result = classify(ev)
+            write_verdict_sync(client, archive_sha, str(vf), result)
+            count += 1
+        _log.info("stealer.classifier_written", archive=archive_sha, victims=count)
+    except Exception as exc:
+        _log.warning("stealer.classifier_failed", error=str(exc), error_type=type(exc).__name__)
 
 
 __all__ = ["ProcessResult", "process_archive"]

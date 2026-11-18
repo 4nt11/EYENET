@@ -8,6 +8,7 @@ aliases: [Opus, WEB RAT, WEB RAT Opus]
 signature_files:
   - UserInformation.txt
   - worklog.txt
+signature_paths:
   - Clients/DiscordTokens.txt
   - Clients/SteamTokens.txt
   - Clients/Roblox.txt
@@ -17,6 +18,14 @@ signature_files:
   - Wallets/
   - Telegram/
   - Files/
+antisignature_files:
+  - pc_info.json
+  - log_info.json
+  - information.txt
+  - Information.txt
+# Opus = new (2026), overlap with RedLine on UserInformation.txt alone
+# is a problem; the Clients/*.txt paths are the distinguishing shape.
+confidence_floor: 0.45
 loaders:
   - direct operator deploy (RAT, not pay-per-install)
 distribution_channels:

@@ -7,6 +7,11 @@ first_seen_year: 2024
 aliases: [ACR, ACRStealer]
 signature_files:
   - Info.txt
+antisignature_files:
+  - information.txt
+  - UserInformation.txt
+  - pc_info.json
+confidence_floor: 0.5
 loaders:
   - unknown (not yet characterized in public reporting)
 distribution_channels:

@@ -7,6 +7,24 @@ first_seen_year: 2018
 aliases: [Vidar, VidarStealer]
 signature_files:
   - information.txt
+signature_paths:
+  - Autofills/
+  - Wallets/
+  - Browsers/
+signature_rule_ids:
+  - stealer_info_yaml
+  - information_v29_shape
+  - credentials_windows
+# Observed on live Khazan Cloud (@CloudHesoyam) distribution: the
+# stealer_info_yaml record emits build_tag='mix'. Near ground-truth when
+# present; weight bumped so a build_tag match outweighs file-shape noise.
+build_tag_regex: "^mix$"
+antisignature_files:
+  - pc_info.json       # JSON-first families (StealC v2 / Acreed / Stealerium)
+  - log_info.json
+antisignature_rule_ids:
+  - environment_windows  # Lumma's env_* block; Vidar emits YAML-shaped info
+confidence_floor: 0.35
 loaders:
   - SmokeLoader
   - PrivateLoader

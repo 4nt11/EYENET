@@ -8,6 +8,14 @@ aliases: [Raccoon, Racealer, Raccoon v2, RecordBreaker]
 signature_files:
   - System.txt
   - machineinfo.txt
+antisignature_files:
+  - information.txt
+  - UserInformation.txt
+  - pc_info.json
+antisignature_rule_ids:
+  - stealer_info_yaml
+  - environment_windows
+confidence_floor: 0.45
 loaders:
   - SmokeLoader
   - fake-installer campaigns

@@ -8,12 +8,24 @@ aliases: [StealC, Steal-C, SC, StealC v1]
 signature_files:
   - information.txt
   - passwords.txt
+signature_paths:
   - Autofill/
   - Cookies/
   - History/
   - Google Accounts/
   - GoogleAccounts/
   - Credit Cards/
+signature_rule_ids:
+  - information_v29_shape
+  - passwords_block_divider
+  - cookies_netscape_tsv
+antisignature_files:
+  - pc_info.json      # json_v2 = StealC v2 / Acreed / Stealerium
+  - log_info.json
+  - UserInformation.txt  # RedLine / Meta canonical info file
+antisignature_rule_ids:
+  - environment_windows  # Lumma env_* shape
+confidence_floor: 0.35
 loaders:
   - SmokeLoader
   - Amadey

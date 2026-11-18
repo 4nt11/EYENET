@@ -7,6 +7,15 @@ first_seen_year: 2023
 aliases: [Mystic, MysticStealer]
 signature_files:
   - information.txt
+antisignature_files:
+  - UserInformation.txt
+  - pc_info.json
+  - log_info.json
+# Mystic and Vidar both emit information.txt. Mystic is distinguishable
+# only on a build_tag match or distinct rule_ids we do not currently
+# pattern-match on; conservative floor so weak Mystic matches lose to
+# Vidar.
+confidence_floor: 0.55
 loaders:
   - SmokeLoader
   - PrivateLoader

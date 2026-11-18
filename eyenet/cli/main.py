@@ -1684,5 +1684,91 @@ from eyenet.calibration.cli import app as calibrate_app  # noqa: E402
 app.add_typer(calibrate_app, name="calibrate", help="M5 calibration grid + artifact tooling")
 
 
+@app.command("stealer-reclassify")
+def stealer_reclassify(  # pragma: no cover
+    archive_sha: str | None = typer.Option(
+        None,
+        "--archive-sha",
+        help="Classify only the victims under this archive. Defaults to sweeping the whole corpus.",
+    ),
+    victim_folder: str | None = typer.Option(
+        None,
+        "--victim-folder",
+        help="Classify only this one (archive, victim). Requires --archive-sha.",
+    ),
+    limit: int = typer.Option(
+        0,
+        "--limit",
+        help="Stop after this many victims (0 = no limit). Useful when iterating on YAML signals.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Compute + print verdicts but do NOT persist. Pair with --limit when tuning.",
+    ),
+) -> None:
+    """Sweep stealer.file_audit for (archive, victim) pairs and write a family
+    verdict row per pair into stealer.victim_family_verdict.
+
+    Idempotent: ReplacingMergeTree collapses re-runs on merge. Safe to run
+    after every family YAML edit. No gotractor / ulpextract leg: this touches
+    extracted_records + file_audit only, so a sweep of ~1000 victims is seconds."""
+    from eyenet.stealer.classifier import classify  # noqa: PLC0415
+    from eyenet.stealer.classifier_io import (  # noqa: PLC0415
+        collect_evidence_sync,
+        write_verdict_sync,
+    )
+    from eyenet.stealer.clickhouse import (  # noqa: PLC0415
+        FileAuditSink,
+        clickhouse_db,
+        get_clickhouse_client,
+    )
+
+    client = get_clickhouse_client()
+    db = clickhouse_db()
+
+    # Ensure the verdict table exists on an opt-in run (the sink's
+    # ensure_schema is the single source of truth for the DDL).
+    FileAuditSink().ensure_schema()
+
+    if archive_sha and victim_folder:
+        pairs: list[tuple[str, str]] = [(archive_sha, victim_folder)]
+    else:
+        q = (
+            "SELECT DISTINCT archive_sha256, victim_folder "  # noqa: S608  # nosec B608
+            f"FROM {db}.file_audit FINAL "
+            "WHERE victim_folder != ''"
+        )
+        params: dict[str, object] = {}
+        if archive_sha:
+            q += " AND archive_sha256 = %(sha)s"
+            params["sha"] = archive_sha
+        q += " ORDER BY archive_sha256, victim_folder"
+        rows = client.query(q, parameters=params).result_rows
+        pairs = [(str(a), str(v)) for a, v in rows]
+
+    if limit > 0:
+        pairs = pairs[:limit]
+
+    typer.echo(f"classifying {len(pairs)} victims ...")
+    counts: dict[str, int] = {}
+    for sha, vf in pairs:
+        ev = collect_evidence_sync(client, sha, vf)
+        result = classify(ev)
+        slug = result.verdict.slug if result.verdict else "(no-verdict)"
+        confidence = result.verdict.confidence if result.verdict else 0.0
+        counts[slug] = counts.get(slug, 0) + 1
+        if dry_run:
+            typer.echo(f"  {slug:<16} {confidence:.3f}  {vf[:60]}")
+        else:
+            write_verdict_sync(client, sha, vf, result)
+
+    typer.echo("")
+    typer.echo("counts by verdict:")
+    for slug in sorted(counts, key=counts.get, reverse=True):  # type: ignore[arg-type]
+        typer.echo(f"  {slug:<16} {counts[slug]}")
+    typer.echo(f"done: {len(pairs)} victims, dry_run={dry_run}")
+
+
 if __name__ == "__main__":
     app()

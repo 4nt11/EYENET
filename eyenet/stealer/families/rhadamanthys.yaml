@@ -8,6 +8,12 @@ aliases: [Rhadamanthys, RADMAN]
 signature_files:
   - System_Info.txt
   - Victim_Info.txt
+antisignature_files:
+  - pc_info.json
+  - log_info.json
+  - UserInformation.txt
+  - information.txt
+confidence_floor: 0.45
 loaders:
   - GuLoader
   - fake-installer campaigns

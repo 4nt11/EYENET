@@ -7,6 +7,22 @@ first_seen_year: 2022
 aliases: [Meta, MetaStealer]
 signature_files:
   - UserInformation.txt
+signature_rule_ids:
+  - processes_plain_exe
+  - software_installed_list
+  - passwords_block_title
+antisignature_files:
+  - pc_info.json
+  - log_info.json
+  - information.txt
+antisignature_rule_ids:
+  - stealer_info_yaml
+  - environment_windows
+# Meta forked from RedLine; the file layouts overlap enough that without
+# the stealer_info_yaml / environment_windows anti-signals they tie.
+# Floor is a notch higher so a weak match defers to no-verdict instead
+# of an uncertain Meta or RedLine pick.
+confidence_floor: 0.45
 loaders:
   - SmokeLoader
   - PrivateLoader

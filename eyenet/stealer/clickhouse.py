@@ -949,6 +949,30 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
 )
 
 
+# v1.3.8 per-victim stealer-family verdict. One row per (archive_sha256,
+# victim_folder). Written by the pipeline + the stealer-reclassify CLI.
+# The drawer's detail endpoint reads from this with FINAL so stale
+# re-runs collapse; a victim with no verdict row reads as "no verdict
+# yet" on the FE. Not an SQL MV because the scorer is Python-side
+# (regex + weighted sum + catalog-in-memory); see
+# development/STEALER_FAMILY_CLASSIFIER_DESIGN.md.
+_VERDICT_CREATE = """
+CREATE TABLE IF NOT EXISTS {db}.victim_family_verdict
+(
+    archive_sha256 FixedString(64),
+    victim_folder  String,
+    slug           LowCardinality(String),
+    confidence     Float32,
+    evidence       Array(String),
+    runners_up     Array(Tuple(String, Float32)),
+    computed_at    DateTime DEFAULT now()
+)
+ENGINE = ReplacingMergeTree(computed_at)
+ORDER BY (archive_sha256, victim_folder)
+{storage_policy_clause}
+"""
+
+
 class FileAuditSink:
     """CH sink for the file_audit observability table. Mirrors
     ``ClickHouseCredsSink`` shape so the pipeline can init + call insert_rows
@@ -979,6 +1003,12 @@ class FileAuditSink:
         )
         for stmt in _FILE_AUDIT_V127:
             client.command(stmt.format(db=self._db))
+        client.command(
+            _VERDICT_CREATE.format(
+                db=self._db,
+                storage_policy_clause=_storage_policy_clause(),
+            )
+        )
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)

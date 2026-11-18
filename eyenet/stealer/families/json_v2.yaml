@@ -10,9 +10,20 @@ signature_files:
   - log_info.json
   - passwords.tsv
   - screen.jpg
+signature_paths:
   - Autofill/
   - Cookies/
   - Software/
+signature_rule_ids:
+  - cookies_netscape_tsv
+antisignature_files:
+  - information.txt
+  - Information.txt
+  - UserInformation.txt
+antisignature_rule_ids:
+  - stealer_info_yaml
+  - environment_windows
+confidence_floor: 0.4
 loaders:
   - SmokeLoader
   - Amadey

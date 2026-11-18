@@ -13,6 +13,21 @@ signature_files:
   - BrowserSummary.txt
   - GoogleTokens.txt
   - All Passwords.txt
+signature_paths:
+  - Browsers/
+  - Wallets/
+  - Extensions/
+signature_rule_ids:
+  - environment_windows
+  - processes_dash_pid
+  - google_restore_tokens
+  - passwords_block_upper
+antisignature_files:
+  - information.txt   # Vidar's canonical info file
+  - UserInformation.txt
+antisignature_rule_ids:
+  - stealer_info_yaml  # Vidar/Khazan YAML-shaped Information.txt
+confidence_floor: 0.35
 loaders:
   - SmokeLoader
   - Amadey

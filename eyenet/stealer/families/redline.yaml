@@ -13,6 +13,18 @@ signature_files:
   - InstalledSoftware.txt
   - ProcessList.txt
   - Screenshot.jpg
+signature_rule_ids:
+  - processes_plain_exe
+  - software_installed_list
+  - passwords_block_title
+antisignature_files:
+  - pc_info.json
+  - log_info.json
+  - information.txt    # Vidar / mystic canonical info file
+antisignature_rule_ids:
+  - stealer_info_yaml
+  - environment_windows
+confidence_floor: 0.4
 loaders:
   - SmokeLoader
   - PrivateLoader
