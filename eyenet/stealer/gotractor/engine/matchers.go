@@ -687,20 +687,42 @@ func asInt(v any) (int, bool) {
 
 // asIntKeyMap turns a {"0": "host", "1": "user"} or {0: "host", 1: "user"}
 // shape into a map[int]string so the delimiter matcher can key by
-// column index.
+// column index. yaml.v3 parses `0: name` with an integer key and the
+// result lands as map[any]any, not map[string]any, so we handle both
+// shapes, otherwise the columns map silently empties and the rule
+// emits records with fields={}.
 func asIntKeyMap(v any) map[int]string {
 	out := map[int]string{}
-	asMap, ok := v.(map[string]any)
-	if !ok {
-		return out
-	}
-	for k, val := range asMap {
-		idx, err := strconv.Atoi(k)
-		if err != nil {
-			continue
+	switch m := v.(type) {
+	case map[string]any:
+		for k, val := range m {
+			idx, err := strconv.Atoi(k)
+			if err != nil {
+				continue
+			}
+			s, _ := val.(string)
+			out[idx] = s
 		}
-		s, _ := val.(string)
-		out[idx] = s
+	case map[any]any:
+		for k, val := range m {
+			var idx int
+			switch kk := k.(type) {
+			case int:
+				idx = kk
+			case int64:
+				idx = int(kk)
+			case string:
+				n, err := strconv.Atoi(kk)
+				if err != nil {
+					continue
+				}
+				idx = n
+			default:
+				continue
+			}
+			s, _ := val.(string)
+			out[idx] = s
+		}
 	}
 	return out
 }

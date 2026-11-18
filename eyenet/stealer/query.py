@@ -846,6 +846,12 @@ class StealerArtifactsReader:
             "passwords_block_upper",
             "credentials_windows",
             "firefox_logins_json",
+        ],
+        # Brute-force wordlist candidates (one field: candidate). Not
+        # credentials in the usual (host, user, password) sense; belongs
+        # to its own tab/view so the Credentials tab does not get
+        # 1000+ junk rows that render as blanks.
+        "wordlist": [
             "brute_wordlist",
         ],
         "cookies": [
