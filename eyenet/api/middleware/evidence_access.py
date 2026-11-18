@@ -48,6 +48,11 @@ _EVIDENCE_FAMILIES: dict[str, str] = {
     "linkages": "linkage",
     "graph": "graph",
     "audit": "audit",
+    # Stealer corpus is operator-grade evidence (full credential content,
+    # cookie bodies, machine fingerprints). Every GET /v1/stealer/* read
+    # that comes back 2xx emits one eyenet.audit.evidence_access row so
+    # access is non-repudiable against the per-session clearance grant.
+    "stealer": "stealer",
 }
 
 

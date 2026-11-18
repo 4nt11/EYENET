@@ -18,7 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from eyenet.api.deps import CurrentUser, RequireScope
+from eyenet.api.deps import CurrentUser, RequireScope, get_audit
 from eyenet.api.v1.schemas.stealer import (
     StealerClassifierCountDelta,
     StealerClassifierDryRunRequest,
@@ -28,6 +28,7 @@ from eyenet.api.v1.schemas.stealer import (
 from eyenet.stealer.classifier_dryrun import dry_run
 from eyenet.stealer.families.rw import _validate_family_shape
 from eyenet.stealer.query import StealerCorpusUninitializedError
+from eyenet.telemetry.audit import AuditEmitter
 
 router = APIRouter(tags=["stealer"])
 
@@ -40,7 +41,8 @@ router = APIRouter(tags=["stealer"])
 )
 async def stealer_classifier_dryrun(
     body: StealerClassifierDryRunRequest,
-    _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
+    current_user: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
+    audit: Annotated[AuditEmitter, Depends(get_audit)],
 ) -> StealerClassifierDryRunResponse:
     # Validate every proposed family through the same loader rules used
     # for a real catalog write. A bad signal payload here would not be
@@ -56,6 +58,23 @@ async def stealer_classifier_dryrun(
         result = await dry_run(body.families, limit=body.limit)
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
+    # The dry-run reads evidence out of the ClickHouse corpus (file_audit
+    # + extracted_records) across up to _DRYRUN_HARD_CAP victims, which
+    # is a non-trivial corpus read even though no persisted verdicts
+    # change. Emit an explicit audit event so the access + the proposed
+    # family shape are non-repudiable under the write:stealer-adjacent
+    # tuning workflow.
+    await audit.emit(
+        event="eyenet.audit.stealer_classifier.dryrun",
+        subject_kind="stealer_classifier",
+        system_user_id=current_user.user_id,
+        payload={
+            "limit": body.limit,
+            "sampled": result.sampled,
+            "proposed_slugs": [str(f.get("slug", "")) for f in body.families if f.get("slug")],
+            "moves": len(result.shifts),
+        },
+    )
     return StealerClassifierDryRunResponse(
         sampled=result.sampled,
         counts=[
