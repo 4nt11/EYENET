@@ -1,0 +1,45 @@
+id: hardware_bracket_colon
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 75
+path_glob: "**/*.txt"
+description: >
+  Hardware section inside a UserInformation-style file with INI-shaped
+  bracket headers and colon-space key/value bodies. Observed on Khazan
+  Cloud @CloudHesoyam drops and sibling v2.9 information shapes: the
+  file carries a top-level K:V identity block (matched by
+  information_v29_shape), then one or more bracket sections like:
+
+    [Hardware]
+    Processor: Intel(R) Core(TM) i5-8265U CPU @ 1.60GHz
+    Cores: 8
+    Threads: 8
+    RAM: 7998 MB
+    VideoCard: Intel(R) UHD Graphics 620
+
+  Standard INI uses '=' as separator; this family uses ': '. The
+  keyvalue_ini matcher takes an optional `separator` kwarg (added
+  alongside this rule) to handle both shapes with one matcher. The
+  `requires_sections: [Hardware]` gate stops this rule firing on
+  plain-K:V files that happen to also carry a "Processor" key at the
+  top level.
+
+  Separate from information_v29_shape because that rule is top-level
+  K:V only (keyvalue, not keyvalue_ini). Pairs with
+  processes_bracketed_pid to cover the sibling [Processes] section on
+  the same file.
+match:
+  type: keyvalue_ini
+  separator: ": "
+  requires_sections:
+    - Hardware
+extract:
+  keys:
+    Hardware.Processor: hw_cpu_product
+    Hardware.Cores: hw_cpu_count
+    Hardware.Threads: hw_cpu_threads
+    Hardware.RAM: hw_ram_size
+    Hardware.VideoCard: hw_gpu
+ttps:
+  - T1082

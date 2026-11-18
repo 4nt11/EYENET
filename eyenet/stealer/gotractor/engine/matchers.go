@@ -604,6 +604,13 @@ func MatchKeyvalue(m map[string]any, ex map[string]any, inp ContentInput) map[st
 // section, matching Python / JS semantics. Extract uses dotted
 // `Section.Key` lookup.
 func MatchKeyvalueIni(m map[string]any, ex map[string]any, inp ContentInput) map[string]any {
+	// Separator defaults to '=' (classic INI). Stealer logs frequently use
+	// ': ' colon-space (e.g. Khazan Cloud UserInformation with [Hardware]
+	// K:V bodies), so the rule can override: separator: ": ".
+	sep, _ := m["separator"].(string)
+	if sep == "" {
+		sep = "="
+	}
 	sections := map[string]map[string]string{}
 	cur := ""
 	for _, raw := range splitLines(inp.Text) {
@@ -618,12 +625,12 @@ func MatchKeyvalueIni(m map[string]any, ex map[string]any, inp ContentInput) map
 			}
 			continue
 		}
-		i := strings.Index(line, "=")
+		i := strings.Index(line, sep)
 		if i <= 0 {
 			continue
 		}
 		k := strings.TrimSpace(line[:i])
-		v := strings.TrimSpace(line[i+1:])
+		v := strings.TrimSpace(line[i+len(sep):])
 		if _, ok := sections[cur]; !ok {
 			sections[cur] = map[string]string{}
 		}

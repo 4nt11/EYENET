@@ -72,6 +72,8 @@ extract:
     Computer Name: ui_computer
     User Name: ui_user_name
     Display Resolution: ui_screen
+    Local Time: ui_local_time
+    Antivirus: ui_av_name
 ttps:
   - T1082
   - T1518
