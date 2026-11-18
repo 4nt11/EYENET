@@ -279,6 +279,7 @@ from eyenet.api.v1.stealer.api_audit_coverage import router as stealer_audit_cov
 from eyenet.api.v1.stealer.api_audit_samples import router as stealer_audit_samples_router
 from eyenet.api.v1.stealer.api_audit_search import router as stealer_audit_search_router
 from eyenet.api.v1.stealer.api_audit_unknown import router as stealer_audit_unknown_router
+from eyenet.api.v1.stealer.api_classifier_dryrun import router as stealer_classifier_dryrun_router
 from eyenet.api.v1.stealer.api_create_stealer_family import router as stealer_families_create_router
 from eyenet.api.v1.stealer.api_create_stealer_rule import router as stealer_rules_create_router
 from eyenet.api.v1.stealer.api_delete_stealer_family import router as stealer_families_delete_router
@@ -550,6 +551,7 @@ v1_router.include_router(stealer_audit_search_router)  # GET /stealer/audit/sear
 v1_router.include_router(stealer_failures_stats_router)  # GET /stealer/failures/stats
 v1_router.include_router(stealer_family_counts_router)  # GET /stealer/families/counts
 v1_router.include_router(stealer_family_metrics_router)  # GET /stealer/families/metrics
+v1_router.include_router(stealer_classifier_dryrun_router)  # POST classify-dryrun
 v1_router.include_router(stealer_failure_samples_router)  # GET /stealer/failures/{sig}/samples
 v1_router.include_router(stealer_list_failures_router)  # GET /stealer/failures
 v1_router.include_router(stealer_rules_list_router)  # GET /stealer/rules (read:stealer)

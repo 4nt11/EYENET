@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pydantic import Field
+
 from ._base import ApiSchema
 
 
@@ -204,6 +206,41 @@ class StealerFamilyCount(ApiSchema):
 class StealerFamilyCountsResponse(ApiSchema):
     initialized: bool = True
     items: list[StealerFamilyCount]
+
+
+class StealerClassifierCountDelta(ApiSchema):
+    slug: str
+    before: int
+    after: int
+
+
+class StealerClassifierVictimShift(ApiSchema):
+    archive_sha256: str
+    victim_folder: str
+    before_slug: str
+    before_confidence: float
+    after_slug: str
+    after_confidence: float
+
+
+class StealerClassifierDryRunRequest(ApiSchema):
+    """Operator-proposed signal edits for one or more families.
+
+    Each entry is a complete family document (slug, kind, signal_*,
+    floor, weights, ...); any family whose slug matches an on-disk
+    entry shadows the on-disk one for the dry run only. New slugs
+    (not in the on-disk catalog) are appended for the dry run.
+    Nothing is persisted.
+    """
+
+    families: list[dict[str, object]] = Field(default_factory=list)
+    limit: int = 200
+
+
+class StealerClassifierDryRunResponse(ApiSchema):
+    sampled: int
+    counts: list[StealerClassifierCountDelta]
+    shifts: list[StealerClassifierVictimShift]
 
 
 class StealerFamilyMetric(ApiSchema):
@@ -446,6 +483,10 @@ __all__ = [
     "StealerAuditUnknownResponse",
     "StealerAuditUnknownRow",
     "StealerBucket",
+    "StealerClassifierCountDelta",
+    "StealerClassifierDryRunRequest",
+    "StealerClassifierDryRunResponse",
+    "StealerClassifierVictimShift",
     "StealerCred",
     "StealerFailureSampleRow",
     "StealerFailureSamplesResponse",
