@@ -3,18 +3,21 @@ version: 1
 layer: content
 family: combolist
 priority: 25
-path_glob: "**/*.txt"
+path_glob: '**/*.txt'
 requires_container_family: combolist
-description: >
-  Email-anchored combos with no URL: user@domain:password. Priority 25
-  (above the ULP probes at 10-20) so a line that parses as email-only
-  isn't misclassified as a ULP with a weird host. Mirrors the
-  leadingEmail path in ulpextract.parseLine.
+description: 'Email-anchored combos with no URL: user@domain:password. Priority 25
+  (above the ULP probes at 10-20) so a line that parses as email-only isn''t misclassified
+  as a ULP with a weird host. Mirrors the leadingEmail path in ulpextract.parseLine.
+
+  '
 match:
   type: regex
-  pattern: '^(?P<user>[^@\s:;|,]+@[^@\s:;|,]+\.[a-z]{2,}):(?P<password>\S+)$'
+  pattern: ^(?P<user>[^@\s:;|,]+@[^@\s:;|,]+\.[a-z]{2,}):(?P<password>\S+)$
   multiline: true
+  pre_contains: '@'
 extract:
-  fields: [user, password]
+  fields:
+  - user
+  - password
 ttps:
-  - T1555.003
+- T1555.003

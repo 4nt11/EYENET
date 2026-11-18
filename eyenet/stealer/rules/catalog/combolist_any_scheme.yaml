@@ -3,25 +3,29 @@ version: 1
 layer: content
 family: combolist
 priority: 15
-path_glob: "**/*.txt"
+path_glob: '**/*.txt'
 requires_container_family: combolist
-description: >
-  Catches any-scheme ULPs beyond http(s): ftp://, smb://, chrome-extension://,
-  app://, and the long tail of proprietary schemes stealer logs include.
-  Mirrors ulpextract.leadingSchm (`[a-z][a-z0-9+-]*://`). Pipe is the
-  cleanest field separator for this shape (ssh paths and chrome-extension
-  IDs frequently contain colons).
+description: 'Catches any-scheme ULPs beyond http(s): ftp://, smb://, chrome-extension://,
+  app://, and the long tail of proprietary schemes stealer logs include. Mirrors ulpextract.leadingSchm
+  (`[a-z][a-z0-9+-]*://`). Pipe is the cleanest field separator for this shape (ssh
+  paths and chrome-extension IDs frequently contain colons).
+
+  '
 match:
   type: regex
-  pattern: '^(?P<url>[a-z][a-z0-9+-]*://[^\s|]+)\|(?P<user>[^|\s]+)\|(?P<password>\S+)$'
+  pattern: ^(?P<url>[a-z][a-z0-9+-]*://[^\s|]+)\|(?P<user>[^|\s]+)\|(?P<password>\S+)$
   multiline: true
+  pre_contains: '|'
 extract:
-  fields: [url, user, password]
+  fields:
+  - url
+  - user
+  - password
 normalize:
-  - verb: derive_url_parts
-    field: url
-    host_to: host
-    scheme_to: scheme
-    tld_to: tld
+- verb: derive_url_parts
+  field: url
+  host_to: host
+  scheme_to: scheme
+  tld_to: tld
 ttps:
-  - T1555.003
+- T1555.003

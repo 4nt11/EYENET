@@ -6,9 +6,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+// Hot path: bulk ingestion calls MatchRegex per-line, so recompiling the
+// pattern on every call turned up as 7% CPU in the PoC profile. Patterns
+// are drawn from the fixed catalog (bounded cardinality), so an unbounded
+// sync.Map is safe and amortises to one compile per unique pattern.
+var reCache sync.Map // map[string]*regexp.Regexp
 
 // MatchFolder evaluates either a predicate tree (new v2 form) or a flat
 // requires/forbids/optional/min_score shape (v1 sugar, lowered to a
@@ -219,6 +226,20 @@ func MatchRegex(m map[string]any, ex map[string]any, inp ContentInput) map[strin
 	if err != nil {
 		return nil
 	}
+	// Hot-path prefilter: regex rules with loose globs (**/*.txt) run
+	// against giant cookies files that will never match them. The full
+	// RE2 pass over 500k-byte text is wasted. Two layers:
+	//   1. Rule-declared `pre_contains` (operator hint). Catches combolist
+	//      rules whose pattern has no literal prefix but requires `|` or `://`.
+	//   2. Go `LiteralPrefix` fallback (auto; catches passwords_block_title).
+	if pre, ok := m["pre_contains"].(string); ok && pre != "" {
+		if !strings.Contains(inp.Text, pre) {
+			return nil
+		}
+	}
+	if prefix, _ := re.LiteralPrefix(); prefix != "" && !strings.Contains(inp.Text, prefix) {
+		return nil
+	}
 	hit := re.FindStringSubmatch(inp.Text)
 	if hit == nil {
 		return nil
@@ -315,7 +336,7 @@ func IterDelimiter(m map[string]any, ex map[string]any, text string) <-chan map[
 		minCols, _ := asInt(m["min_columns"])
 		cols := asIntKeyMap(ex["columns"])
 
-		for _, line := range splitLines(text) {
+		for line := range rangeLines(text) {
 			if skipBlank && strings.TrimSpace(line) == "" {
 				continue
 			}
@@ -568,7 +589,7 @@ func MatchKeyvalue(m map[string]any, ex map[string]any, inp ContentInput) map[st
 		strip = v
 	}
 	kv := map[string]string{}
-	for _, line := range splitLines(inp.Text) {
+	for line := range rangeLines(inp.Text) {
 		i := strings.Index(line, sep)
 		if i <= 0 {
 			continue
@@ -613,7 +634,7 @@ func MatchKeyvalueIni(m map[string]any, ex map[string]any, inp ContentInput) map
 	}
 	sections := map[string]map[string]string{}
 	cur := ""
-	for _, raw := range splitLines(inp.Text) {
+	for raw := range rangeLines(inp.Text) {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
 			continue
@@ -747,14 +768,26 @@ func stringsToAny(xs []string) []any {
 	return out
 }
 
-func splitLines(s string) []string {
-	// Mirror JS text.split(/\r?\n/) and Python text.splitlines() by
-	// stripping any trailing \r on each \n-split line.
-	parts := strings.Split(s, "\n")
-	for i, p := range parts {
-		parts[i] = strings.TrimSuffix(p, "\r")
+// rangeLines yields each \n-split line of s with any trailing \r stripped,
+// zero allocation (slices into s directly). Behaviour matches the previous
+// splitLines helper (which built a full []string): trailing "\n" yields a
+// final empty string, empty input yields one empty string, byte-parity with
+// JS text.split(/\r?\n/) and Python text.splitlines() when callers skip
+// blanks.
+func rangeLines(s string) func(yield func(string) bool) {
+	return func(yield func(string) bool) {
+		for {
+			i := strings.IndexByte(s, '\n')
+			if i < 0 {
+				yield(strings.TrimSuffix(s, "\r"))
+				return
+			}
+			if !yield(strings.TrimSuffix(s[:i], "\r")) {
+				return
+			}
+			s = s[i+1:]
+		}
 	}
-	return parts
 }
 
 func compileRE(pattern string, multiline, dotall bool) (*regexp.Regexp, error) {
@@ -768,6 +801,14 @@ func compileRE(pattern string, multiline, dotall bool) (*regexp.Regexp, error) {
 	if flags != "" {
 		pattern = "(?" + flags + ")" + pattern
 	}
-	return regexp.Compile(pattern)
+	if v, ok := reCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := reCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
 }
 

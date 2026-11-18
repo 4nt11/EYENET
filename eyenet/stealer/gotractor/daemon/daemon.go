@@ -48,6 +48,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -199,6 +201,20 @@ func (d *Daemon) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	// emit messages; we lock across each message so lines never
 	// interleave.
 	writer := &lockedWriter{w: w}
+	// Run-command concurrency: the catalog is an atomic pointer,
+	// metrics are prom counters (goroutine-safe), writer is locked.
+	// Everything else cmdRun touches is request-local, so N runs can
+	// execute in parallel. Bound at NumCPU; override with
+	// EYENET_GOTRACTOR_WORKERS. reload/stats/shutdown stay serial and
+	// drain in-flight runs first so shutdown_ack is truly the last line.
+	workers := runtime.NumCPU()
+	if v := os.Getenv("EYENET_GOTRACTOR_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			workers = n
+		}
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scan.Scan() {
@@ -206,6 +222,25 @@ func (d *Daemon) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 		if line == "" {
 			continue
 		}
+		var peek commandEnv
+		if json.Unmarshal([]byte(line), &peek) == nil && peek.Cmd == "run" {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(ln string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if cmd, err := d.dispatch(ctx, ln, writer); err != nil {
+					writer.emit(map[string]any{
+						"kind": "error", "req_id": cmd.ReqID, "error": err.Error(),
+					})
+				}
+			}(line)
+			continue
+		}
+		// Serial path: reload / stats / shutdown. Drain in-flight runs
+		// before touching these so stats and shutdown_ack reflect the
+		// final state.
+		wg.Wait()
 		if cmd, err := d.dispatch(ctx, line, writer); err != nil {
 			writer.emit(map[string]any{
 				"kind": "error", "req_id": cmd.ReqID, "error": err.Error(),
@@ -214,6 +249,7 @@ func (d *Daemon) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 			return nil
 		}
 	}
+	wg.Wait()
 	return scan.Err()
 }
 

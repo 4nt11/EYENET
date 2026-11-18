@@ -3,28 +3,33 @@ version: 1
 layer: content
 family: combolist
 priority: 20
-path_glob: "**/*.txt"
+path_glob: '**/*.txt'
 requires_container_family: combolist
-description: >
-  Probe for the "URL;user;pass" ULP shape. Semicolon is the clean
-  separator because URLs do not contain it. One sample row enough to
-  confirm shape; ulpextract remains the per-row credential ingester.
+description: 'Probe for the "URL;user;pass" ULP shape. Semicolon is the clean separator
+  because URLs do not contain it. One sample row enough to confirm shape; ulpextract
+  remains the per-row credential ingester.
+
+  '
 match:
   type: regex
-  pattern: '^(?P<url>https?://[^\s;]+);(?P<user>[^;\s]+);(?P<password>\S+)$'
+  pattern: ^(?P<url>https?://[^\s;]+);(?P<user>[^;\s]+);(?P<password>\S+)$
   multiline: true
+  pre_contains: ;
 extract:
-  fields: [url, user, password]
+  fields:
+  - url
+  - user
+  - password
 reject_patterns:
-  - '(?i)^(tg|telegram|channel|our\s+channel|cloud\s+channel|subscribe|join)\b'
-  - '(?i)\bt\.me/'
-  - '(?i)^(null|none|empty|-+|null\s*password)$'
-  - '(?i)ht[0-9]ps://'
+- (?i)^(tg|telegram|channel|our\s+channel|cloud\s+channel|subscribe|join)\b
+- (?i)\bt\.me/
+- (?i)^(null|none|empty|-+|null\s*password)$
+- (?i)ht[0-9]ps://
 normalize:
-  - verb: derive_url_parts
-    field: url
-    host_to: host
-    scheme_to: scheme
-    tld_to: tld
+- verb: derive_url_parts
+  field: url
+  host_to: host
+  scheme_to: scheme
+  tld_to: tld
 ttps:
-  - T1555.003
+- T1555.003
