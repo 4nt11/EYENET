@@ -1,18 +1,15 @@
 <script>
   import { onMount } from 'svelte';
+  import { listRules } from '$lib/stealerRulesApi.svelte.js';
 
   let rules = $state([]);
   let loading = $state(true);
   let error = $state(null);
   let query = $state('');
 
-  const RULES_URL = '/stealer-rules.json';
-
   onMount(async () => {
     try {
-      const r = await fetch(RULES_URL);
-      if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
-      rules = await r.json();
+      rules = await listRules();
     } catch (e) {
       error = String(e?.message ?? e);
     } finally {

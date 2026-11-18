@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import { listFamilies } from '$lib/stealerFamiliesApi.svelte.js';
+  import { listRules } from '$lib/stealerRulesApi.svelte.js';
 
   let families = $state([]);
   let rules = $state([]);
@@ -10,14 +12,10 @@
 
   onMount(async () => {
     try {
-      const [fr, rr] = await Promise.all([
-        fetch('/stealer-families.json'),
-        fetch('/stealer-rules.json')
-      ]);
-      if (!fr.ok) throw new Error(`families fetch failed: ${fr.status}`);
-      if (!rr.ok) throw new Error(`rules fetch failed: ${rr.status}`);
-      families = await fr.json();
-      rules = await rr.json();
+      // Hit the live API via the thin clients; each falls back to the
+      // static /stealer-{families,rules}.json export when the API is
+      // unreachable, so dev-without-API still renders something.
+      [families, rules] = await Promise.all([listFamilies(), listRules()]);
     } catch (e) {
       error = String(e?.message ?? e);
     } finally {

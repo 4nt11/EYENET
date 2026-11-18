@@ -3,7 +3,12 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Dropdown from '$lib/components/Dropdown.svelte';
+  import PredicateNode from '$lib/components/PredicateNode.svelte';
+  import QuickPicker from '$lib/components/QuickPicker.svelte';
+  import CodeBlock from '$lib/components/CodeBlock.svelte';
   import { getRule, createRule, updateRule, deleteRule } from '$lib/stealerRulesApi.svelte.js';
+  import { listFamilies } from '$lib/stealerFamiliesApi.svelte.js';
+  import * as yaml from 'js-yaml';
 
   // Dropdown.svelte expects {v, l} option shape.
   const MATCH_TYPE_OPTS = ['folder', 'regex', 'delimiter', 'template', 'json', 'yaml', 'keyvalue', 'keyvalue_ini'].map((v) => ({ v, l: v }));
@@ -11,8 +16,59 @@
   const NORMALIZE_VERB_OPTS = ['strip_whitespace', 'lowercase', 'uppercase', 'truncate', 'int_from_string', 'replace_re2', 'date_parse'].map((v) => ({ v, l: v }));
   const DATE_FORMAT_OPTS = ['iso8601', 'rfc2822', 'epoch_seconds'].map((v) => ({ v, l: v }));
 
-  const familyOpts = $derived(families.map((f) => ({ v: f.slug, l: f.slug })));
+  const familyOpts = $derived(families.map((f) => ({ v: f.slug, l: f.name || f.slug })));
   const requiresContainerFamilyOpts = $derived([{ v: '', l: '(any)' }, ...familyOpts]);
+
+  // QuickPicker: stolen from the graph quickAdd pattern. Supports keyboard
+  // search (arrow keys, Enter, Escape), outside-click-to-close, and a
+  // "+ Create family" action when the user types a brand-new slug. `field`
+  // disambiguates which slot ('family' or 'requires') the pick lands in.
+  let familyPicker = $state({ open: false, field: null, anchor: null });
+  function familyLabel(slug) {
+    if (!slug) return '';
+    return families.find((f) => f.slug === slug)?.name || slug;
+  }
+  function openFamilyPickerAt(e, field) {
+    familyPicker = { open: true, field, anchor: e.currentTarget };
+  }
+  // Synthetic sentinel for "no requirement". Shown only on the requires-
+  // container-family picker so an operator can clear a prior selection.
+  const ANY_SENTINEL = { slug: '', name: '(Any family)', _sentinel: true };
+  function familySearch(q) {
+    const s = (q ?? '').trim().toLowerCase();
+    const base = s
+      ? families.filter((f) => {
+          if (f.slug.toLowerCase().includes(s)) return true;
+          if ((f.name ?? '').toLowerCase().includes(s)) return true;
+          return (f.aliases ?? []).some((a) => a.toLowerCase().includes(s));
+        })
+      : families;
+    // Only the requires-container-family slot can be set to (any). The
+    // family field itself is required.
+    if (familyPicker.field === 'requires') {
+      const matchesAny = !s || 'any'.includes(s);
+      if (matchesAny) return [ANY_SENTINEL, ...base];
+    }
+    return base;
+  }
+  function pickFamily(f) {
+    if (familyPicker.field === 'family') rule.family = f.slug;
+    else if (familyPicker.field === 'requires') rule.requires_container_family = f.slug;
+    familyPicker = { open: false, field: null, anchor: null };
+  }
+  async function createFamilyFromPicker(name) {
+    const slug = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    if (!slug) return;
+    // Optimistic: drop a placeholder row into the local list so the
+    // picker's follow-up pick lands immediately. The operator can edit
+    // the full record at /tuning/stealer/families/<slug> afterwards.
+    families = [...families, { slug, name: name.trim(), status: 'draft' }];
+    pickFamily({ slug });
+  }
 
 
   const slug = $derived($page.params.id);
@@ -45,14 +101,19 @@
 
   onMount(async () => {
     try {
-      const fr = await fetch('/stealer-families.json');
-      if (fr.ok) families = await fr.json();
+      families = await listFamilies();
       if (!isNew) {
         rule = { ...blank(), ...(await getRule(slug)) };
         rule.reject_patterns ??= [];
         rule.normalize ??= [];
         rule.match ??= { type: 'keyvalue' };
         rule.extract ??= {};
+        ensureFolderPredicate(rule.match);
+        // Suppress the match-type watcher's reseed on this API-driven
+        // transition. Without this, the effect observes a type change
+        // (blank's 'keyvalue' -> loaded 'folder') and clobbers the
+        // predicate the API just handed us.
+        lastType = rule.match?.type ?? null;
       }
     } catch (e) {
       error = String(e?.message ?? e);
@@ -63,18 +124,55 @@
 
   // When match.type changes, reset the type-specific body shape AND the
   // extract shape (each match type drives a different extract vocab).
-  let lastType = $state('keyvalue');
+  //
+  // `lastType = null` initially so the FIRST observation of rule.match.type
+  // just records it instead of firing a reseed. Without this guard the
+  // effect fires on load (lastType='keyvalue' -> rule.match.type='folder')
+  // and clobbers whatever predicate / extract the API returned.
+  let lastType = $state(null);
   $effect(() => {
     const t = rule.match?.type;
-    if (!t || t === lastType) return;
+    if (!t) return;
+    if (lastType === null) { lastType = t; return; }
+    if (t === lastType) return;
     rule.match = seedMatchFor(t);
     rule.extract = seedExtractFor(t);
     lastType = t;
   });
 
+  // Upgrade a legacy folder match in-place. matchers.py still lowers
+  // {requires, forbids, optional, min_score} to the predicate shape at
+  // run time, but the builder exposes only the predicate tree. For a
+  // legacy rule loaded from disk, seed an empty predicate and drop the
+  // dead legacy keys from the in-memory model; operator rebuilds the
+  // tree (the original YAML stays around via the JSON preview if they
+  // want to port it by hand).
+  // Grow the description textarea to fit its content. Reset to 0 first so
+  // shrinking works when the operator deletes content. Called from the
+  // textarea's oninput + focus handlers, plus an $effect that fires after
+  // rule.description is populated from the API load.
+  function autoGrow(ev) {
+    const el = ev?.currentTarget ?? ev;
+    if (!el || typeof el.scrollHeight !== 'number') return;
+    el.style.height = '0px';
+    el.style.height = el.scrollHeight + 'px';
+  }
+  $effect(() => {
+    // depend on description to re-run after API hydration
+    const _ = rule?.description;
+    const ta = document.querySelector('textarea.desc-ta');
+    if (ta) autoGrow(ta);
+  });
+
+  function ensureFolderPredicate(m) {
+    if (!m || m.type !== 'folder') return;
+    if (!m.predicate) m.predicate = { or: [{ glob: '' }] };
+    for (const k of ['requires', 'forbids', 'optional', 'min_score']) delete m[k];
+  }
+
   function seedMatchFor(t) {
     switch (t) {
-      case 'folder':       return { type: t, requires: [], forbids: [], optional: [], min_score: 0 };
+      case 'folder':       return { type: t, predicate: { or: [{ glob: '' }] } };
       case 'regex':        return { type: t, pattern: '', multiline: false, dotall: false };
       case 'delimiter':    return { type: t, separator: '\t', min_columns: 0, skip_blank: true, skip_comment_prefix: '' };
       case 'template':     return { type: t, template: '', multiline: false };
@@ -98,7 +196,45 @@
 
   // ------- payload cleanup for save + side-panel preview -------
   const cleanRule = $derived.by(() => cleanPayload(rule));
-  const jsonPreview = $derived(JSON.stringify(cleanRule, null, 2));
+  // YAML preview. Rules live on disk as YAML; render the preview in the
+  // same shape so what the operator sees here is what gets written. Use
+  // block style (no flow/inline brackets), sort nothing (preserve the
+  // envelope order from the cleanRule), and dump long strings as-is
+  // rather than folding on spaces (lineWidth: -1).
+  const yamlPreview = $derived(
+    yaml.dump(cleanRule, { indent: 2, lineWidth: -1, noRefs: true, quotingType: '"' })
+  );
+  // Editable copy lives separately so operator edits don't fight the
+  // $derived re-render whenever the form changes. We sync in both
+  // directions: form -> buffer when the form changes AND the buffer
+  // matches the last-known-dumped value (no unsaved buffer edits);
+  // buffer -> form when the operator edits and the YAML parses clean.
+  let yamlBuffer = $state('');
+  let yamlParseErr = $state(null);
+  let lastDumped = '';
+  $effect(() => {
+    if (yamlPreview !== lastDumped) {
+      if (yamlBuffer === lastDumped || yamlBuffer === '') {
+        yamlBuffer = yamlPreview;
+      }
+      lastDumped = yamlPreview;
+    }
+  });
+  $effect(() => {
+    if (!yamlBuffer || yamlBuffer === lastDumped) return;
+    try {
+      const parsed = yaml.load(yamlBuffer);
+      if (parsed && typeof parsed === 'object' && parsed.id) {
+        // Spread into rule so Svelte 5 reactivity picks up every field.
+        // Preserve `rule`'s existing shape for keys the parse omits.
+        rule = { ...rule, ...parsed };
+        yamlParseErr = null;
+        lastDumped = yamlBuffer;
+      }
+    } catch (e) {
+      yamlParseErr = e?.reason || e?.message || String(e);
+    }
+  });
 
   function cleanPayload(r) {
     const out = { ...r };
@@ -125,6 +261,13 @@
       if (m.skip_comment_prefix === '') delete m.skip_comment_prefix;
       if (m.min_columns === 0) delete m.min_columns;
       if (m.min_score === 0) delete m.min_score;
+      // Folder-match authoring styles are mutually exclusive on-disk. If a
+      // predicate tree is present, drop the legacy keys that the toggle
+      // keeps hydrated in memory (so flipping back doesn't lose user input)
+      // but shouldn't ship to the API.
+      if (m.type === 'folder' && m.predicate) {
+        for (const k of ['requires', 'forbids', 'optional', 'min_score']) delete m[k];
+      }
       out.match = m;
     }
     // Strip empty extract containers.
@@ -189,14 +332,33 @@
   // ------- kv-map helpers (columns/paths/keys/rename) -------
   // Edits are tracked as an ordered array of {k, v} pairs so key edits don't
   // re-order / collide; serialised back to an object at read time.
+  //
+  // Svelte 5 forbids mutating $state from inside a template expression (the
+  // {#each} that reads these rows). Pre-populate from rule.match/extract in
+  // an $effect that fires after the rule hydrates; the template read is
+  // then a pure lookup.
   let mapRows = $state({}); // match/extract container key -> rows[]
+  const MAP_SLOTS = [
+    ['match', 'rename'],
+    ['extract', 'columns'],
+    ['extract', 'paths'],
+    ['extract', 'keys'],
+  ];
+  $effect(() => {
+    // Depend on rule.match/extract so a new rule load repopulates.
+    const _m = rule?.match;
+    const _e = rule?.extract;
+    for (const [container, mapKey] of MAP_SLOTS) {
+      const id = container + ':' + mapKey;
+      if (mapRows[id]) continue;
+      const src = (container === 'match' ? _m : _e)?.[mapKey] ?? {};
+      mapRows[id] = Object.entries(src).map(([k, v]) => ({ k, v }));
+    }
+  });
   function ensureRows(container, mapKey) {
-    const id = container + ':' + mapKey;
-    if (mapRows[id]) return mapRows[id];
-    const src = (container === 'match' ? rule.match : rule.extract)?.[mapKey] ?? {};
-    const rows = Object.entries(src).map(([k, v]) => ({ k, v }));
-    mapRows[id] = rows;
-    return rows;
+    // Pure template-safe read. Falls back to an empty array if the effect
+    // above hasn't fired yet (which Svelte will re-run post-render).
+    return mapRows[container + ':' + mapKey] ?? [];
   }
   function syncMap(container, mapKey) {
     const id = container + ':' + mapKey;
@@ -258,7 +420,16 @@
             </label>
             <label>
               <span>Family</span>
-              <Dropdown options={familyOpts} bind:value={rule.family} minWidth="100%" />
+              <button
+                type="button"
+                class="qp-trigger mono"
+                onclick={(e) => openFamilyPickerAt(e, 'family')}
+                aria-haspopup="listbox"
+                aria-expanded={familyPicker.open && familyPicker.field === 'family'}
+              >
+                <span class="qp-tval">{familyLabel(rule.family) || '-- pick family --'}</span>
+                <span class="qp-tcaret">▾</span>
+              </button>
             </label>
             <label>
               <span>Priority</span>
@@ -266,18 +437,36 @@
             </label>
             <label class="wide">
               <span>Description</span>
-              <input type="text" bind:value={rule.description} placeholder="one-sentence intent" />
+              <textarea
+                class="desc-ta"
+                rows="2"
+                bind:value={rule.description}
+                placeholder="one-sentence intent (or more; grows with content)"
+                oninput={autoGrow}
+                onfocus={autoGrow}
+              ></textarea>
             </label>
             <label>
               <span>Path glob</span>
               <input class="mono" type="text" bind:value={rule.path_glob} placeholder="**/*" disabled={rule.layer === 'container'} />
             </label>
-            <label>
+            <label class="wide-rcf">
               <span>Requires container family</span>
               {#if rule.layer === 'container'}
                 <div class="dd-disabled mono">(any)</div>
               {:else}
-                <Dropdown options={requiresContainerFamilyOpts} bind:value={rule.requires_container_family} minWidth="100%" />
+                <button
+                  type="button"
+                  class="qp-trigger mono"
+                  onclick={(e) => openFamilyPickerAt(e, 'requires')}
+                  aria-haspopup="listbox"
+                  aria-expanded={familyPicker.open && familyPicker.field === 'requires'}
+                >
+                  <span class="qp-tval">
+                    {familyLabel(rule.requires_container_family) || '(any)'}
+                  </span>
+                  <span class="qp-tcaret">▾</span>
+                </button>
               {/if}
             </label>
           </div>
@@ -303,22 +492,17 @@
             </label>
 
             {#if rule.match.type === 'folder'}
-              {#each ['requires', 'forbids', 'optional'] as key}
-                <div class="field">
-                  <div class="field-label">{key}</div>
-                  {#each listGet(rule.match, key) as item, i}
-                    <div class="row">
-                      <input class="mono flex" type="text" value={item} oninput={(e) => listSet(rule.match, key, i, e.currentTarget.value)} placeholder={key === 'optional' ? 'file or dir/ pattern' : 'required path'} />
-                      <button class="btn-ghost sm" onclick={() => listRemove(rule.match, key, i)}>x</button>
-                    </div>
-                  {/each}
-                  <button class="btn-ghost sm" onclick={() => listAdd(rule.match, key)}>+ Add {key}</button>
-                </div>
-              {/each}
-              <label>
-                <span>Min score (requires + optional hits)</span>
-                <input class="mono" type="number" bind:value={rule.match.min_score} />
-              </label>
+              <!-- Predicate tree is the one true authoring form.
+                   matchers.py still lowers the legacy flat shape at run
+                   time for the handful of container rules on disk that
+                   predate the predicate DSL, but the builder won't hand-
+                   craft new ones in that style. If a loaded rule shipped
+                   as legacy, _ensureFolderPredicate() seeds an empty
+                   tree and drops the dead keys. -->
+              <div class="field">
+                <div class="field-label">Predicate tree</div>
+                <PredicateNode bind:node={rule.match.predicate} depth={0} />
+              </div>
 
             {:else if rule.match.type === 'regex'}
               <label>
@@ -531,14 +715,30 @@
       <aside class="jsonpanel">
         <header>
           <span class="n">.</span>
-          <span class="label">Rule JSON</span>
+          <span class="label">Rule YAML</span>
           <span class="hint">live, write to disk on save</span>
         </header>
-        <pre class="json mono">{jsonPreview}</pre>
+        <CodeBlock bind:code={yamlBuffer} lang="yaml" editable wrap showLineNumbers maxHeight="70vh" />
+        {#if yamlParseErr}
+          <div class="yaml-err">YAML parse error: {yamlParseErr}</div>
+        {/if}
       </aside>
     </div>
   {/if}
 </div>
+
+<QuickPicker
+  bind:open={familyPicker.open}
+  anchor={familyPicker.anchor}
+  search={familySearch}
+  resultKey={(f) => f._sentinel ? '__any__' : f.slug}
+  resultLabel={(f) => f.name || f.slug}
+  resultDot={(f) => (f._sentinel ? 'var(--text-faint)' : 'var(--accent-text)')}
+  placeholder="Search family by name, slug, or alias..."
+  onPick={pickFamily}
+  onCreate={createFamilyFromPicker}
+  createLabel={(q) => (q ? `+ Create family "${q}"` : '+ Create family')}
+/>
 
 <style>
   .page { display: flex; flex-direction: column; gap: 16px; }
@@ -600,7 +800,12 @@
   .empty.err { color: var(--red-text); border-color: var(--red-fill-strong); }
   .empty code { color: var(--text); background: var(--surface); padding: 1px 6px; border-radius: var(--radius-sm); }
 
-  .layer { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+  /* overflow: visible so Dropdown menus (abs-positioned below the trigger)
+     aren't clipped by the section's rounded container. Rounded-corner
+     background clipping on this panel is handled by the border-radius +
+     background alone; no inner element is close enough to the edge to
+     need overflow: hidden. */
+  .layer { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); overflow: visible; }
   .layer > header {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 14px;
@@ -611,6 +816,10 @@
   .layer > header .hint { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--text-muted); flex: 1; }
 
   .meta .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 14px; }
+  /* REQUIRES CONTAINER FAMILY label wraps on narrow columns and the
+     picker trigger holds long family names; span two columns to give it
+     room without cramping path_glob. */
+  .meta .grid > label.wide-rcf { grid-column: span 2; }
   .meta label.wide { grid-column: span 4; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -637,6 +846,43 @@
   input:disabled, select:disabled { opacity: .5; cursor: not-allowed; }
 
   textarea { resize: vertical; min-height: 80px; }
+  /* Auto-growing description box: no manual resize handle, smaller floor,
+     wraps naturally so long single-sentence descriptions stay visible. */
+  textarea.desc-ta { resize: none; min-height: 36px; overflow: hidden; line-height: 1.5; }
+  /* Trigger button for the QuickPicker: matches Dropdown.svelte's .ddbtn
+     so the two controls live side-by-side without a visual seam. */
+  .qp-trigger {
+    width: 100%;
+    height: 28px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text-body);
+    font-family: var(--font-sans);
+    font-size: var(--fs-12);
+    padding: 0 8px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .qp-trigger:hover,
+  .qp-trigger[aria-expanded="true"] { border-color: var(--accent); }
+  .qp-tval { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qp-tcaret { color: var(--accent-text); font-size: 10px; flex: 0 0 auto; }
+  .yaml-err {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border: 1px solid rgba(194, 69, 63, 0.4);
+    border-radius: var(--radius);
+    background: var(--red-fill);
+    color: var(--red-text);
+    font-family: var(--font-mono);
+    font-size: var(--fs-11);
+  }
 
   .pad { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 
