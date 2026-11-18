@@ -41,7 +41,39 @@ _SCHEMA_VERSION = 2
 
 
 def families_dir() -> Path:
-    return Path(os.environ.get("EYENET_STEALER_FAMILIES_DIR") or _VENDORED)
+    """Return the active families directory (env-overridable).
+
+    When the env var points at a directory distinct from the vendored
+    one, lazily seed it from the vendored defaults so a shared volume
+    boots with the live catalog. Idempotent + never overwrites; see
+    _ensure_seeded. The rules-side rw mirrors this logic."""
+    env = os.environ.get("EYENET_STEALER_FAMILIES_DIR")
+    if env:
+        target = Path(env)
+        if target.resolve() != _VENDORED.resolve():
+            _ensure_seeded(target)
+        return target
+    return _VENDORED
+
+
+_seeded_targets: set[str] = set()
+
+
+def _ensure_seeded(target: Path) -> None:
+    key = str(target.resolve())
+    if key in _seeded_targets:
+        return
+    _seeded_targets.add(key)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        existing = {p.name for p in target.glob("*.yaml")}
+        for src in _VENDORED.glob("*.yaml"):
+            if src.name in existing:
+                continue
+            body = src.read_text(encoding="utf-8")
+            _atomic_write(target / src.name, body)
+    except OSError as exc:
+        _log.warning("stealer.families.seed_failed target=%s error=%s", target, exc)
 
 
 def list_family_slugs() -> list[str]:

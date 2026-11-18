@@ -163,6 +163,13 @@ services:
       # CORS is env-gated (never config.toml). Set to your FE origin(s).
       EYENET_API_CORS_ORIGINS: ${EYENET_CORS_ORIGINS:-}
       EYENET_API_METRICS_ENABLED: ${EYENET_METRICS_ENABLED:-1}
+      # Stealer rule + family catalog: shared with the stealer-processor
+      # over eyenet-data. API writes land here; gotractor's fsnotify
+      # picks them up without an image rebuild. Seeded from the vendored
+      # defaults on first boot (idempotent, never overwrites operator
+      # edits). See eyenet/stealer/rules/catalog/rw.py _ensure_seeded.
+      EYENET_STEALER_RULES_DIR: /var/lib/eyenet/stealer-catalog/rules
+      EYENET_STEALER_FAMILIES_DIR: /var/lib/eyenet/stealer-catalog/families
       # read:stealer corpus queries (stats/search) hit ClickHouse. Harmless when the
       # stealer profile is down — those endpoints just return 503.
       EYENET_CLICKHOUSE_HOST: clickhouse
@@ -355,6 +362,11 @@ services:
       EYENET_CLICKHOUSE_USER: eyenet
       EYENET_CLICKHOUSE_PASSWORD: ${EYENET_CLICKHOUSE_PASSWORD:?set EYENET_CLICKHOUSE_PASSWORD in deploy/docker/.env}
       EYENET_STEALER_WORK_DIR: /var/lib/eyenet/stealer-work
+      # Match the API-side mount so gotractor reads the SAME catalog the
+      # API writes to. API seeds this on first boot; stealer-processor's
+      # gotractor fsnotify-watches it for live reload.
+      EYENET_STEALER_RULES_DIR: /var/lib/eyenet/stealer-catalog/rules
+      EYENET_STEALER_FAMILIES_DIR: /var/lib/eyenet/stealer-catalog/families
     volumes:
       - eyenet-data:/var/lib/eyenet  # read captured blobs + scratch extraction space
     depends_on:

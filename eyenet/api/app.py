@@ -27,10 +27,10 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from eyenet.api.auth import AuthCache, load_mfa_key, load_pat_pepper, load_verifying_keys
 from eyenet.api.auth._qr_login import QrLoginRegistry
@@ -91,6 +91,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Run the QR-login reaper for the app's lifetime; disconnect all live
     Telethon clients on shutdown (the registry holds outbound connections that
     passive eviction can't close)."""
+    # Eagerly seed the stealer rules + families catalog directories from the
+    # vendored defaults. Lazy seeding would only fire on first handler
+    # access, which skips the auth-gated catalog endpoints entirely; a
+    # gotractor daemon on a fresh volume would read an empty dir and start
+    # with no rules at all. Idempotent + never overwrites operator edits.
+    from eyenet.stealer.families.rw import families_dir  # noqa: PLC0415
+    from eyenet.stealer.rules.catalog.rw import rules_dir  # noqa: PLC0415
+
+    rules_dir()
+    families_dir()
     registry: QrLoginRegistry = app.state.qr_logins
     reaper = asyncio.create_task(registry.reap_loop())
     try:
@@ -187,7 +197,9 @@ def create_app(  # noqa: PLR0915 - boot wiring plus every §7 exception handler 
             instance=request.url.path,
             request_id=_request_id(request),
         )
-        return _problem_response(problem, exc.status_code, headers=exc.headers)
+        return _problem_response(
+            problem, exc.status_code, headers=dict(exc.headers) if exc.headers else None
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

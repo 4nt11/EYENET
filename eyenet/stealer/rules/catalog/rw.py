@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from eyenet.stealer.families import valid_slugs as _family_slugs
 
@@ -27,15 +27,62 @@ _log = logging.getLogger(__name__)
 _VENDORED = Path(__file__).resolve().parent
 _SLUG_RX = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _VALID_LAYERS = frozenset({"container", "content"})
-_VALID_MATCH_TYPES = frozenset({
-    "folder", "regex", "delimiter", "template",
-    "json", "yaml", "keyvalue", "keyvalue_ini",
-})
+_VALID_MATCH_TYPES = frozenset(
+    {
+        "folder",
+        "regex",
+        "delimiter",
+        "template",
+        "json",
+        "yaml",
+        "keyvalue",
+        "keyvalue_ini",
+    }
+)
 
 
 def rules_dir() -> Path:
-    """Return the active catalog directory (env-overridable)."""
-    return Path(os.environ.get("EYENET_STEALER_RULES_DIR") or _VENDORED)
+    """Return the active catalog directory (env-overridable).
+
+    When the env var points at a directory distinct from the vendored
+    one (prod uses a shared /var/lib/eyenet/stealer-catalog/rules volume
+    so API writes flow to the gotractor daemon via fsnotify), lazily
+    seed it from the vendored defaults on first call per process. See
+    _ensure_seeded; dev + tests on the default path are untouched."""
+    env = os.environ.get("EYENET_STEALER_RULES_DIR")
+    if env:
+        target = Path(env)
+        if target.resolve() != _VENDORED.resolve():
+            _ensure_seeded(target)
+        return target
+    return _VENDORED
+
+
+_seeded_targets: set[str] = set()
+
+
+def _ensure_seeded(target: Path) -> None:
+    """Seed ``target`` from the vendored catalog if it lacks any of the
+    vendored files. Idempotent across process + concurrent-safe: a race
+    between two callers can only re-copy the same files, never corrupt
+    a partial write (atomic rename). Never overwrites: an operator edit
+    in the shared volume wins over a fresher vendored copy, so a
+    package upgrade does not stomp on live tunings. The matching CLI
+    (future) handles explicit vendored-resync when operators want it."""
+    key = str(target.resolve())
+    if key in _seeded_targets:
+        return
+    _seeded_targets.add(key)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        existing = {p.name for p in target.glob("*.yaml")}
+        for src in _VENDORED.glob("*.yaml"):
+            if src.name in existing:
+                continue
+            body = src.read_text(encoding="utf-8")
+            _atomic_write(target / src.name, body)
+    except OSError as exc:
+        _log.warning("stealer.rules.seed_failed target=%s error=%s", target, exc)
 
 
 def list_rule_slugs() -> list[str]:
@@ -108,7 +155,8 @@ def _validate_rule_shape(rule: dict[str, Any]) -> None:
     if fam not in _family_slugs():
         _log.warning(
             "rule %r references unknown family %r (editor should surface this)",
-            rule["id"], fam,
+            rule["id"],
+            fam,
         )
 
 
@@ -116,12 +164,15 @@ def _atomic_write(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # NamedTemporaryFile on the same filesystem so os.replace is atomic.
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8",
-        dir=str(path.parent), prefix=f".{path.stem}.", suffix=".tmp",
+        mode="w",
+        encoding="utf-8",
+        dir=str(path.parent),
+        prefix=f".{path.stem}.",
+        suffix=".tmp",
         delete=False,
     ) as tmp:
         tmp.write(body)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp_name = tmp.name
-    os.replace(tmp_name, path)
+    Path(tmp_name).replace(path)
