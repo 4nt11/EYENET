@@ -319,14 +319,23 @@ services:
     profiles: ["stealer"]
     image: clickhouse/clickhouse-server:24.8
     restart: unless-stopped
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
     environment:
       CLICKHOUSE_DB: stealer
       CLICKHOUSE_USER: eyenet
       CLICKHOUSE_PASSWORD: ${EYENET_CLICKHOUSE_PASSWORD:?set EYENET_CLICKHOUSE_PASSWORD in deploy/docker/.env}
-    ulimits:
-      nofile: { soft: 262144, hard: 262144 }
+      EYENET_WASABI_ENDPOINT: "${EYENET_WASABI_ENDPOINT:-}"
+      EYENET_WASABI_ACCESS_KEY_ID: "${EYENET_WASABI_ACCESS_KEY_ID:-}"
+      EYENET_WASABI_SECRET_ACCESS_KEY: "${EYENET_WASABI_SECRET_ACCESS_KEY:-}"
+      EYENET_WASABI_REGION: "${EYENET_WASABI_REGION:-}"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      # config.d auto-loads every *.xml on boot. Includes the wasabi_primary
+      # storage policy that stealer tables opt into. Without this mount a
+      # table created with the policy fails to load (UNKNOWN_POLICY 478) and
+      # takes the whole CH process down. Match the prod.lite stack.
+      - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
     # No published ports: reachable only in-network by the processor (service name).
 
   stealer-processor:
