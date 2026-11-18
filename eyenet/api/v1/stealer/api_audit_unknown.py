@@ -8,7 +8,6 @@ occurrence count desc, so the most common unparsed filenames surface first.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -42,9 +41,7 @@ async def stealer_audit_unknown(
     limit: LimitParam = 25,
 ) -> StealerAuditUnknownResponse:
     try:
-        rows, total, page_count = await asyncio.to_thread(
-            lambda: reader.unknown(page=page, limit=limit)
-        )
+        rows, total, page_count = await reader.unknown(page=page, limit=limit)
     except StealerCorpusUninitializedError:
         return StealerAuditUnknownResponse(
             initialized=False, items=[], page_meta=empty_meta(page, limit)

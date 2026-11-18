@@ -8,7 +8,6 @@ column.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -42,9 +41,7 @@ async def stealer_audit_coverage(
     limit: LimitParam = 25,
 ) -> StealerAuditCoverageResponse:
     try:
-        rows, total, page_count = await asyncio.to_thread(
-            lambda: reader.coverage(page=page, limit=limit)
-        )
+        rows, total, page_count = await reader.coverage(page=page, limit=limit)
     except StealerCorpusUninitializedError:
         return StealerAuditCoverageResponse(
             initialized=False, items=[], page_meta=empty_meta(page, limit)

@@ -29,9 +29,7 @@ LimitParam = Annotated[
 
 def empty_meta(page: int, limit: int) -> StealerAuditPageMeta:
     """Zeroed meta for the uninitialized-corpus response path."""
-    return StealerAuditPageMeta(
-        page=page, limit=limit, total=0, page_count=0, has_more=False
-    )
+    return StealerAuditPageMeta(page=page, limit=limit, total=0, page_count=0, has_more=False)
 
 
 def built_meta(page: int, limit: int, total: int, page_count: int) -> StealerAuditPageMeta:

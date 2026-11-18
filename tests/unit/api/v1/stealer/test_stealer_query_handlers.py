@@ -19,6 +19,20 @@ from eyenet.stealer.query import Bucket, CredRow, StealerStats
 pytestmark = pytest.mark.unit
 
 
+def _coro(value: object) -> object:
+    async def _inner(*_a: object, **_k: object) -> object:
+        return value
+
+    return _inner
+
+
+def _raises(exc: BaseException) -> object:
+    async def _inner(*_a: object, **_k: object) -> object:
+        raise exc
+
+    return _inner
+
+
 def _user() -> CurrentUser:
     return CurrentUser(
         user_id=uuid4(),
@@ -38,7 +52,7 @@ async def test_stats_maps_reader_output(monkeypatch: pytest.MonkeyPatch) -> None
         by_tld=[Bucket("com", 40000), Bucket("ru", 1200)],
         top_hosts=[Bucket("accounts.google.com", 2744)],
     )
-    monkeypatch.setattr(stats_mod._reader, "stats", lambda **_k: fake)
+    monkeypatch.setattr(stats_mod._reader, "stats", _coro(fake))
     resp = await stats_mod.stealer_stats(_user())
     assert resp.total_creds == 110001
     assert resp.unique_creds == 53341
@@ -47,10 +61,7 @@ async def test_stats_maps_reader_output(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 async def test_stats_503_when_corpus_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(**_k: object) -> StealerStats:
-        raise ConnectionError("clickhouse down")
-
-    monkeypatch.setattr(stats_mod._reader, "stats", _boom)
+    monkeypatch.setattr(stats_mod._reader, "stats", _raises(ConnectionError("clickhouse down")))
     with pytest.raises(HTTPException) as ei:
         await stats_mod.stealer_stats(_user())
     assert ei.value.status_code == 503
@@ -61,17 +72,14 @@ async def test_search_maps_rows(monkeypatch: pytest.MonkeyPatch) -> None:
         CredRow("accounts.google.com", "https://...", "u@x.com", "pw", "https", "com"),
         CredRow("m.facebook.com", "m.facebook.com/", "0171", "pw2", "https", "com"),
     ]
-    monkeypatch.setattr(search_mod._reader, "search", lambda **_k: rows)
+    monkeypatch.setattr(search_mod._reader, "search", _coro(rows))
     resp = await search_mod.stealer_search(_user(), host="google", limit=100, offset=0)
     assert [c.host for c in resp.items] == ["accounts.google.com", "m.facebook.com"]
-    assert resp.items[0].password == "pw"
+    assert resp.items[0].password == "pw"  # pragma: allowlist secret
 
 
 async def test_search_503_when_corpus_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(**_k: object) -> list[CredRow]:
-        raise ConnectionError("clickhouse down")
-
-    monkeypatch.setattr(search_mod._reader, "search", _boom)
+    monkeypatch.setattr(search_mod._reader, "search", _raises(ConnectionError("clickhouse down")))
     with pytest.raises(HTTPException) as ei:
         await search_mod.stealer_search(_user(), host=None, limit=100, offset=0)
     assert ei.value.status_code == 503

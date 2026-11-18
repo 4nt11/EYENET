@@ -8,7 +8,6 @@ that's down (stealer profile not up) is a 503, not a 500.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterable
 from typing import Annotated
 
@@ -36,15 +35,19 @@ async def stealer_stats(
     _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
 ) -> StealerStatsResponse:
     try:
-        s = await asyncio.to_thread(_reader.stats)
+        s = await _reader.stats()
     except StealerCorpusUninitializedError:
         # CH is up, the corpus just does not exist yet (no stealer channel ever
         # ingested). Return the zeroed response with initialized=False so the
         # dashboard can render an operator hint instead of a 503.
         return StealerStatsResponse(
             initialized=False,
-            total_creds=0, unique_creds=0, distinct_hosts=0,
-            by_scheme=[], by_tld=[], top_hosts=[],
+            total_creds=0,
+            unique_creds=0,
+            distinct_hosts=0,
+            by_scheme=[],
+            by_tld=[],
+            top_hosts=[],
         )
     except Exception as exc:  # CH unreachable / stealer profile down
         raise HTTPException(status_code=503, detail=f"stealer corpus unavailable: {exc}") from exc

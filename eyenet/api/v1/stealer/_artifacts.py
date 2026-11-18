@@ -30,9 +30,7 @@ def built_meta(page: int, limit: int, total: int, page_count: int) -> StealerAud
 
 
 def empty_meta(page: int, limit: int) -> StealerAuditPageMeta:
-    return StealerAuditPageMeta(
-        page=page, limit=limit, total=0, page_count=0, has_more=False
-    )
+    return StealerAuditPageMeta(page=page, limit=limit, total=0, page_count=0, has_more=False)
 
 
 __all__ = ["LimitParam", "PageParam", "built_meta", "empty_meta", "reader"]

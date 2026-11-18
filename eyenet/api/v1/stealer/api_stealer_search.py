@@ -8,7 +8,6 @@ is the gate. A corpus that's down is a 503.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,9 +35,7 @@ async def stealer_search(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> StealerSearchResponse:
     try:
-        rows = await asyncio.to_thread(
-            lambda: _reader.search(host=host, limit=limit, offset=offset)
-        )
+        rows = await _reader.search(host=host, limit=limit, offset=offset)
     except StealerCorpusUninitializedError:
         # Same semantics as the stats endpoint: CH is up, the table does not
         # exist yet. Empty page + initialized=False beats a 503.
@@ -48,8 +45,12 @@ async def stealer_search(
     return StealerSearchResponse(
         items=[
             StealerCred(
-                host=r.host, url=r.url, login=r.login,
-                password=r.password, scheme=r.scheme, tld=r.tld,
+                host=r.host,
+                url=r.url,
+                login=r.login,
+                password=r.password,
+                scheme=r.scheme,
+                tld=r.tld,
             )
             for r in rows
         ]

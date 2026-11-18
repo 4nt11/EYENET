@@ -9,17 +9,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from eyenet.stealer.clickhouse import (
     clickhouse_db,
     get_async_clickhouse_client,
-    get_clickhouse_client,
 )
-
-if TYPE_CHECKING:
-    from clickhouse_connect.driver.client import Client
-
 
 # ClickHouse's error code for "table does not exist". Used to distinguish
 # "corpus not initialized yet" (no stealer channels collected from, so
@@ -79,75 +74,84 @@ class CredRow:
 
 
 class StealerCredsReader:
-    """Aggregate + search queries over ``<db>.creds``. One client, reused."""
+    """Aggregate + search queries over ``<db>.creds``. Async: uses
+    clickhouse-connect's AsyncClient so parallel /v1/stealer requests do not
+    fight over a shared sync client the way the legacy readers did."""
 
     def __init__(self) -> None:
         self._db = clickhouse_db()
-        self._client: Client | None = None
+        self._client: Any | None = None
+        self._client_lock = asyncio.Lock()
 
-    def _c(self) -> Client:
+    async def _c(self) -> Any:
         if self._client is None:
-            self._client = get_clickhouse_client()
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = await get_async_clickhouse_client()
         return self._client
 
-    def _buckets(self, sql: str, params: dict[str, object]) -> list[Bucket]:
-        rows = self._c().query(sql, parameters=params).result_rows
-        return [Bucket(key=str(r[0]), count=int(r[1])) for r in rows]
+    async def _buckets(self, sql: str, params: dict[str, object]) -> list[Bucket]:
+        client = await self._c()
+        result = await client.query(sql, parameters=params)
+        return [Bucket(key=str(r[0]), count=int(r[1])) for r in result.result_rows]
 
-    def stats(self, *, top: int = 20) -> StealerStats:
+    async def stats(self, *, top: int = 20) -> StealerStats:
         # Fully parameterized: the db is a bound {Identifier}, the limit a bound UInt32,
         # no string interpolation, so no injection surface even on the (trusted) db name.
         db: dict[str, object] = {"db": self._db}
         db_top: dict[str, object] = {"db": self._db, "top": int(top)}
         try:
-            scalars = (
-                self._c()
-                .query(
-                    "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
-                    "FROM {db:Identifier}.creds",
-                    parameters=db,
-                )
-                .result_rows[0]
+            client = await self._c()
+            result = await client.query(
+                "SELECT count(), uniqExact((host,login,password)), uniqExact(host) "
+                "FROM {db:Identifier}.creds",
+                parameters=db,
             )
+            scalars = result.result_rows[0]
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
                     "stealer.creds table does not exist yet"
                 ) from exc
             raise
-        return StealerStats(
-            total_creds=int(scalars[0]),
-            unique_creds=int(scalars[1]),
-            distinct_hosts=int(scalars[2]),
-            by_scheme=self._buckets(
+        # Three distributions run in parallel: three CH queries, one event loop
+        # waiting on all three via gather.
+        by_scheme, by_tld, top_hosts = await asyncio.gather(
+            self._buckets(
                 "SELECT scheme, count() c FROM {db:Identifier}.creds "
                 "GROUP BY scheme ORDER BY c DESC",
                 db,
             ),
-            by_tld=self._buckets(
+            self._buckets(
                 "SELECT tld, count() c FROM {db:Identifier}.creds WHERE tld != '' "
                 "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}",
                 db_top,
             ),
-            top_hosts=self._buckets(
+            self._buckets(
                 "SELECT host, count() c FROM {db:Identifier}.creds WHERE host != '' "
                 "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}",
                 db_top,
             ),
         )
-
-    def count_host(self, host: str) -> int:
-        """Exact count of creds for one host (the enrichment degree)."""
-        return int(
-            self._c()
-            .query(
-                "SELECT count() FROM {db:Identifier}.creds WHERE host = {host:String}",
-                parameters={"db": self._db, "host": host},
-            )
-            .result_rows[0][0]
+        return StealerStats(
+            total_creds=int(scalars[0]),
+            unique_creds=int(scalars[1]),
+            distinct_hosts=int(scalars[2]),
+            by_scheme=by_scheme,
+            by_tld=by_tld,
+            top_hosts=top_hosts,
         )
 
-    def search(
+    async def count_host(self, host: str) -> int:
+        """Exact count of creds for one host (the enrichment degree)."""
+        client = await self._c()
+        result = await client.query(
+            "SELECT count() FROM {db:Identifier}.creds WHERE host = {host:String}",
+            parameters={"db": self._db, "host": host},
+        )
+        return int(result.result_rows[0][0])
+
+    async def search(
         self, *, host: str | None, limit: int, offset: int = 0, exact: bool = False
     ) -> list[CredRow]:
         where = ""
@@ -159,17 +163,15 @@ class StealerCredsReader:
             where = "WHERE host ILIKE {pat:String}"  # dashboard: substring
             params["pat"] = f"%{host}%"
         try:
-            rows = (
-                self._c()
-                .query(
-                    # `where` is a code constant (not user input); the search term + db + limits
-                    # are all bound params, so the f-string only splices our own literal.
-                    "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608  # nosec B608
-                    f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
-                    parameters=params,
-                )
-                .result_rows
+            client = await self._c()
+            result = await client.query(
+                # `where` is a code constant (not user input); the search term + db + limits
+                # are all bound params, so the f-string only splices our own literal.
+                "SELECT host,url,login,password,scheme,tld FROM {db:Identifier}.creds "  # noqa: S608  # nosec B608
+                f"{where} ORDER BY host LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
+                parameters=params,
             )
+            rows = result.result_rows
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -254,16 +256,21 @@ class FileAuditReader:
 
     def __init__(self) -> None:
         self._db = clickhouse_db()
-        self._client: Client | None = None
+        self._client: Any | None = None
+        self._client_lock = asyncio.Lock()
 
-    def _c(self) -> Client:
+    async def _c(self) -> Any:
         if self._client is None:
-            self._client = get_clickhouse_client()
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = await get_async_clickhouse_client()
         return self._client
 
-    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
+    async def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
         try:
-            return self._c().query(sql, parameters=params).result_rows  # type: ignore[return-value]
+            client = await self._c()
+            result = await client.query(sql, parameters=params)
+            return result.result_rows  # type: ignore[no-any-return]
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -271,8 +278,8 @@ class FileAuditReader:
                 ) from exc
             raise
 
-    def _scalar(self, sql: str, params: dict[str, object]) -> int:
-        rows = self._rows(sql, params)
+    async def _scalar(self, sql: str, params: dict[str, object]) -> int:
+        rows = await self._rows(sql, params)
         return int(rows[0][0]) if rows else 0
 
     @staticmethod
@@ -285,27 +292,29 @@ class FileAuditReader:
     def _window(page: int, limit: int) -> int:
         return max(0, (page - 1) * limit)
 
-    def coverage(self, *, page: int, limit: int) -> tuple[list[CoverageRow], int, int]:
+    async def coverage(self, *, page: int, limit: int) -> tuple[list[CoverageRow], int, int]:
         """Returns (rows, total, page_count). Reads the roll-up, not file_audit."""
         off = self._window(page, limit)
-        rows = self._rows(
-            "SELECT archive_sha256,"
-            "       sum(total_files)    AS total_files,"
-            "       sum(parsed_files)   AS parsed_files,"
-            "       sum(unknown_files)  AS unknown_files,"
-            "       round(if(sum(total_files)=0, 0.0,"
-            "               100.0 * sum(parsed_files) / sum(total_files)), 2) AS pct_parsed,"
-            "       min(first_seen_at)  AS first_seen"
-            "  FROM {db:Identifier}.file_audit_per_archive"
-            "  GROUP BY archive_sha256"
-            "  ORDER BY first_seen DESC"
-            "  LIMIT {lim:UInt32} OFFSET {off:UInt32}",
-            {"db": self._db, "lim": int(limit), "off": int(off)},
-        )
-        # uniqExact against the roll-up ORDER BY key = cheap read of a small table.
-        total = self._scalar(
-            "SELECT uniqExact(archive_sha256) FROM {db:Identifier}.file_audit_per_archive",
-            {"db": self._db},
+        rows, total = await asyncio.gather(
+            self._rows(
+                "SELECT archive_sha256,"
+                "       sum(total_files)    AS total_files,"
+                "       sum(parsed_files)   AS parsed_files,"
+                "       sum(unknown_files)  AS unknown_files,"
+                "       round(if(sum(total_files)=0, 0.0,"
+                "               100.0 * sum(parsed_files) / sum(total_files)), 2) AS pct_parsed,"
+                "       min(first_seen_at)  AS first_seen"
+                "  FROM {db:Identifier}.file_audit_per_archive"
+                "  GROUP BY archive_sha256"
+                "  ORDER BY first_seen DESC"
+                "  LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                {"db": self._db, "lim": int(limit), "off": int(off)},
+            ),
+            # uniqExact against the roll-up ORDER BY key: cheap read of a small table.
+            self._scalar(
+                "SELECT uniqExact(archive_sha256) FROM {db:Identifier}.file_audit_per_archive",
+                {"db": self._db},
+            ),
         )
         out = [
             CoverageRow(
@@ -320,25 +329,27 @@ class FileAuditReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def unknown(self, *, page: int, limit: int) -> tuple[list[UnknownRow], int, int]:
+    async def unknown(self, *, page: int, limit: int) -> tuple[list[UnknownRow], int, int]:
         """Returns (rows, total, page_count). Reads the per-unknown-file roll-up."""
         off = self._window(page, limit)
-        rows = self._rows(
-            "SELECT filename,"
-            "       heuristic_kind,"
-            "       sum(occurrences)                  AS occurrences,"
-            "       uniqExactMerge(archive_count_state) AS archive_count,"
-            "       anyMerge(sample_head_state)        AS sample_head"
-            "  FROM {db:Identifier}.file_audit_per_unknown_file"
-            "  GROUP BY filename, heuristic_kind"
-            "  ORDER BY occurrences DESC"
-            "  LIMIT {lim:UInt32} OFFSET {off:UInt32}",
-            {"db": self._db, "lim": int(limit), "off": int(off)},
-        )
-        total = self._scalar(
-            "SELECT uniqExact((filename, heuristic_kind))"
-            "  FROM {db:Identifier}.file_audit_per_unknown_file",
-            {"db": self._db},
+        rows, total = await asyncio.gather(
+            self._rows(
+                "SELECT filename,"
+                "       heuristic_kind,"
+                "       sum(occurrences)                  AS occurrences,"
+                "       uniqExactMerge(archive_count_state) AS archive_count,"
+                "       anyMerge(sample_head_state)        AS sample_head"
+                "  FROM {db:Identifier}.file_audit_per_unknown_file"
+                "  GROUP BY filename, heuristic_kind"
+                "  ORDER BY occurrences DESC"
+                "  LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                {"db": self._db, "lim": int(limit), "off": int(off)},
+            ),
+            self._scalar(
+                "SELECT uniqExact((filename, heuristic_kind))"
+                "  FROM {db:Identifier}.file_audit_per_unknown_file",
+                {"db": self._db},
+            ),
         )
         out = [
             UnknownRow(
@@ -352,22 +363,26 @@ class FileAuditReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def samples(self, *, filename: str, page: int, limit: int) -> tuple[list[SampleRow], int, int]:
+    async def samples(
+        self, *, filename: str, page: int, limit: int
+    ) -> tuple[list[SampleRow], int, int]:
         """Returns (rows, total, page_count). Filtered scan over file_audit;
         case-insensitive filename match + parsed_at DESC ordering."""
         off = self._window(page, limit)
-        rows = self._rows(
-            "SELECT archive_sha256, rel_path, size_bytes, sample_head"
-            "  FROM {db:Identifier}.file_audit"
-            "  WHERE lower(filename) = lower({fn:String})"
-            "  ORDER BY parsed_at DESC"
-            "  LIMIT {lim:UInt32} OFFSET {off:UInt32}",
-            {"db": self._db, "fn": filename, "lim": int(limit), "off": int(off)},
-        )
-        total = self._scalar(
-            "SELECT count() FROM {db:Identifier}.file_audit"
-            "  WHERE lower(filename) = lower({fn:String})",
-            {"db": self._db, "fn": filename},
+        rows, total = await asyncio.gather(
+            self._rows(
+                "SELECT archive_sha256, rel_path, size_bytes, sample_head"
+                "  FROM {db:Identifier}.file_audit"
+                "  WHERE lower(filename) = lower({fn:String})"
+                "  ORDER BY parsed_at DESC"
+                "  LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                {"db": self._db, "fn": filename, "lim": int(limit), "off": int(off)},
+            ),
+            self._scalar(
+                "SELECT count() FROM {db:Identifier}.file_audit"
+                "  WHERE lower(filename) = lower({fn:String})",
+                {"db": self._db, "fn": filename},
+            ),
         )
         out = [
             SampleRow(
@@ -380,7 +395,9 @@ class FileAuditReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def search(self, *, q: str, page: int, limit: int) -> tuple[list[AuditSearchRow], int, int]:
+    async def search(
+        self, *, q: str, page: int, limit: int
+    ) -> tuple[list[AuditSearchRow], int, int]:
         """Returns (rows, total, page_count). Case-insensitive substring across
         filename+rel_path+sample_head. The ngrambf_v1 index on sample_head
         prunes granules that cannot contain the query (case-folded match on
@@ -391,20 +408,23 @@ class FileAuditReader:
             " OR positionCaseInsensitive(rel_path, {q:String}) > 0"
             " OR positionCaseInsensitive(filename, {q:String}) > 0"
         )
-        rows = self._rows(
-            "SELECT archive_sha256, rel_path, filename, heuristic_kind, size_bytes,"  # nosec B608  # noqa: S608
-            "       substring(sample_head,"
-            "                 greatest(1, positionCaseInsensitive(sample_head, {q:String}) - 80),"
-            "                 200) AS match_context"
-            f"  FROM {{db:Identifier}}.file_audit"
-            f"  WHERE {where}"
-            "   ORDER BY parsed_at DESC"
-            "   LIMIT {lim:UInt32} OFFSET {off:UInt32}",
-            {"db": self._db, "q": q, "lim": int(limit), "off": int(off)},
-        )
-        total = self._scalar(
-            f"SELECT count() FROM {{db:Identifier}}.file_audit WHERE {where}",  # noqa: S608  # nosec B608
-            {"db": self._db, "q": q},
+        rows, total = await asyncio.gather(
+            self._rows(
+                "SELECT archive_sha256, rel_path, filename, heuristic_kind, size_bytes,"  # nosec B608  # noqa: S608
+                "       substring(sample_head,"
+                "                 greatest(1, positionCaseInsensitive("
+                "                                   sample_head, {q:String}) - 80),"
+                "                 200) AS match_context"
+                f"  FROM {{db:Identifier}}.file_audit"
+                f"  WHERE {where}"
+                "   ORDER BY parsed_at DESC"
+                "   LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                {"db": self._db, "q": q, "lim": int(limit), "off": int(off)},
+            ),
+            self._scalar(
+                f"SELECT count() FROM {{db:Identifier}}.file_audit WHERE {where}",  # noqa: S608  # nosec B608
+                {"db": self._db, "q": q},
+            ),
         )
         out = [
             AuditSearchRow(

@@ -8,7 +8,6 @@ archives so they can see the real shape of the file before writing a parser rule
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -47,9 +46,7 @@ async def stealer_audit_samples(
     limit: Annotated[int, Query(ge=1, le=25)] = 5,
 ) -> StealerAuditSamplesResponse:
     try:
-        rows, total, page_count = await asyncio.to_thread(
-            lambda: reader.samples(filename=filename, page=page, limit=limit)
-        )
+        rows, total, page_count = await reader.samples(filename=filename, page=page, limit=limit)
     except StealerCorpusUninitializedError:
         return StealerAuditSamplesResponse(
             initialized=False, items=[], page_meta=empty_meta(page, limit)

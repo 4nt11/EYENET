@@ -18,7 +18,6 @@ login, carrying the password/host in fields for the inspector. Gated by ``read:s
 
 from __future__ import annotations
 
-import asyncio
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -83,13 +82,12 @@ def _cred_node(c: CredRow) -> ExpandNode:
 async def _fetch_creds(
     src_id: UUID, host: str, *, limit: int, offset: int, want_total: bool
 ) -> ExpandResult:
-    # CH client is sync -> run off the event loop. Over-fetch by one for has_more.
-    rows = await asyncio.to_thread(
-        _reader.search, host=host, limit=limit + 1, offset=offset, exact=True
-    )
+    # Over-fetch by one for has_more. Reader is async (clickhouse-connect
+    # AsyncClient) so this stays on the event loop.
+    rows = await _reader.search(host=host, limit=limit + 1, offset=offset, exact=True)
     has_more = len(rows) > limit
     page = rows[:limit]
-    total = await asyncio.to_thread(_reader.count_host, host) if want_total else None
+    total = await _reader.count_host(host) if want_total else None
     nodes = [_cred_node(c) for c in page]
     edges: list[dict[str, Any]] = [
         {"src_id": src_id, "dst_id": n.entity_id, "kind": _EDGE} for n in nodes
@@ -127,7 +125,7 @@ class _InfostealerCreds(RemoteEnrichment):
         art = await _artifact(ctx, src_id)
         if art is None:
             return 0
-        return await asyncio.to_thread(_reader.count_host, art.value)
+        return await _reader.count_host(art.value)
 
     @abstractmethod
     async def applicable(self, ctx: ExpandContext, src_id: UUID) -> bool:

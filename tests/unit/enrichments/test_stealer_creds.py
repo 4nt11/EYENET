@@ -14,6 +14,13 @@ from eyenet.stealer.query import CredRow
 pytestmark = pytest.mark.unit
 
 
+def _coro(value: object) -> object:
+    async def _inner(*_a: object, **_k: object) -> object:
+        return value
+
+    return _inner
+
+
 def test_every_enrichment_carries_a_scope_matching_its_output() -> None:
     """Defense-in-depth: no enrichment surfaces an output type without the read scope
     for it (artifact/attachment/thread ride the read:search baseline + tier gate)."""
@@ -42,19 +49,34 @@ def test_has_subdomain_splits_domain_from_subdomain() -> None:
 
 def test_cred_node_shape() -> None:
     node = mod._cred_node(
-        CredRow(host="accounts.google.com", url="https://x", login="v@x.com",
-                password="hunter2", scheme="https", tld="com")
+        CredRow(
+            host="accounts.google.com",
+            url="https://x",
+            login="v@x.com",
+            password="hunter2",  # pragma: allowlist secret
+            scheme="https",
+            tld="com",
+        )
     )
     assert node.entity_type == "artifact"
     assert node.title == "v@x.com"  # login is the lead
     assert node.fields["kind"] == "credential"
-    assert node.fields["password"] == "hunter2"
+    assert node.fields["password"] == "hunter2"  # pragma: allowlist secret
     assert node.fields["ephemeral"] is True
     # Stable id across calls (same host|login|password).
-    assert node.entity_id == mod._cred_node(
-        CredRow(host="accounts.google.com", url="https://y", login="v@x.com",
-                password="hunter2", scheme="https", tld="com")
-    ).entity_id
+    assert (
+        node.entity_id
+        == mod._cred_node(
+            CredRow(
+                host="accounts.google.com",
+                url="https://y",
+                login="v@x.com",
+                password="hunter2",  # pragma: allowlist secret
+                scheme="https",
+                tld="com",
+            )
+        ).entity_id
+    )
 
 
 async def test_fetch_builds_nodes_and_edges(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,8 +84,8 @@ async def test_fetch_builds_nodes_and_edges(monkeypatch: pytest.MonkeyPatch) -> 
         CredRow("fiction.cl", "https://fiction.cl", "admin", "pw1", "https", "cl"),
         CredRow("fiction.cl", "https://fiction.cl", "user", "pw2", "https", "cl"),
     ]
-    monkeypatch.setattr(mod._reader, "search", lambda **_k: rows)
-    monkeypatch.setattr(mod._reader, "count_host", lambda _h: 2)
+    monkeypatch.setattr(mod._reader, "search", _coro(rows))
+    monkeypatch.setattr(mod._reader, "count_host", _coro(2))
     src = uuid4()
     res = await mod._fetch_creds(src, "fiction.cl", limit=10, offset=0, want_total=True)
     assert [n.title for n in res.nodes] == ["admin", "user"]
@@ -75,7 +97,7 @@ async def test_fetch_builds_nodes_and_edges(monkeypatch: pytest.MonkeyPatch) -> 
 async def test_fetch_has_more_on_overfetch(monkeypatch: pytest.MonkeyPatch) -> None:
     # Reader is asked for limit+1; 3 back for limit 2 => has_more, page trimmed to 2.
     rows = [CredRow(f"h{i}", "", f"u{i}", "p", "https", "") for i in range(3)]
-    monkeypatch.setattr(mod._reader, "search", lambda **_k: rows)
+    monkeypatch.setattr(mod._reader, "search", _coro(rows))
     res = await mod._fetch_creds(uuid4(), "h", limit=2, offset=0, want_total=False)
     assert len(res.nodes) == 2
     assert res.has_more is True

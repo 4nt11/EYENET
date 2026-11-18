@@ -13,7 +13,6 @@ lives in the audited file.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -59,9 +58,7 @@ async def stealer_audit_search(
     limit: LimitParam = 50,
 ) -> StealerAuditSearchResponse:
     try:
-        rows, total, page_count = await asyncio.to_thread(
-            lambda: reader.search(q=q, page=page, limit=limit)
-        )
+        rows, total, page_count = await reader.search(q=q, page=page, limit=limit)
     except StealerCorpusUninitializedError:
         return StealerAuditSearchResponse(
             initialized=False, items=[], page_meta=empty_meta(page, limit)
