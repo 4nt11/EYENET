@@ -606,7 +606,7 @@ class StealerArtifactsReader:
         params["offset"] = offset
 
         total_rows = await self._rows(
-            f"SELECT count() FROM {self._db}.victim_profiles WHERE {where_sql}",  # nosec B608  # noqa: S608
+            f"SELECT count() FROM {self._db}.victim_profiles FINAL WHERE {where_sql}",  # nosec B608  # noqa: S608
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
@@ -616,7 +616,7 @@ class StealerArtifactsReader:
             "  archive_sha256, victim_folder, country, traffic_affid, build_version, "
             "  creds_count, cookies_count, wallet_vaults_count, "
             "  has_corporate_marker, has_wallet, has_crypter_banner "
-            f"FROM {self._db}.victim_profiles "  # nosec B608
+            f"FROM {self._db}.victim_profiles FINAL "  # nosec B608
             f"WHERE {where_sql} "
             "ORDER BY (archive_sha256, victim_folder) "
             "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
@@ -651,7 +651,7 @@ class StealerArtifactsReader:
             "  localstorage_jwt_count, wallet_vaults_count, "
             "  has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner, "
             "  webmail_identity, first_corporate_marker, first_wallet_family "
-            f"FROM {self._db}.victim_profiles "  # nosec B608
+            f"FROM {self._db}.victim_profiles FINAL "  # nosec B608
             "WHERE archive_sha256 = {sha:FixedString(64)} "
             "  AND victim_folder = {vf:String} "
             "LIMIT 1",
