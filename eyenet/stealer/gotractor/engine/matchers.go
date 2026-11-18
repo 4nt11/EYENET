@@ -12,7 +12,7 @@ import (
 )
 
 // Hot path: bulk ingestion calls MatchRegex per-line, so recompiling the
-// pattern on every call turned up as 7% CPU in the PoC profile. Patterns
+// pattern on every call turned up as 7% CPU + a cliff of alloc. Patterns
 // are drawn from the fixed catalog (bounded cardinality), so an unbounded
 // sync.Map is safe and amortises to one compile per unique pattern.
 var reCache sync.Map // map[string]*regexp.Regexp
@@ -226,12 +226,13 @@ func MatchRegex(m map[string]any, ex map[string]any, inp ContentInput) map[strin
 	if err != nil {
 		return nil
 	}
-	// Hot-path prefilter: regex rules with loose globs (**/*.txt) run
+	// Hot-path prefilter: 12 regex rules carry **/*.txt globs and run
 	// against giant cookies files that will never match them. The full
 	// RE2 pass over 500k-byte text is wasted. Two layers:
-	//   1. Rule-declared `pre_contains` (operator hint). Catches combolist
-	//      rules whose pattern has no literal prefix but requires `|` or `://`.
-	//   2. Go `LiteralPrefix` fallback (auto; catches passwords_block_title).
+	//   1. Rule-declared `pre_contains` (operator hint, cheap substring
+	//      the pattern MUST contain). Catches combolist-family rules whose
+	//      pattern has no literal prefix but requires e.g. "://".
+	//   2. Go's LiteralPrefix (auto, catches passwords_block_title etc.)
 	if pre, ok := m["pre_contains"].(string); ok && pre != "" {
 		if !strings.Contains(inp.Text, pre) {
 			return nil
@@ -320,13 +321,15 @@ func MatchDelimiter(m map[string]any, ex map[string]any, inp ContentInput) map[s
 	return nil
 }
 
-// IterDelimiter yields every matching row as a map[string]any. Receiver
-// uses a channel so the engine shares the same code path as Python's
-// generator / JS's generator.
-func IterDelimiter(m map[string]any, ex map[string]any, text string) <-chan map[string]any {
-	ch := make(chan map[string]any)
-	go func() {
-		defer close(ch)
+// IterDelimiter yields every matching row as a map[string]any. Used to
+// spawn a goroutine + channel; MatchDelimiter reads one row and returns,
+// which left the sender blocked on `ch <- row` forever: a 7206-line
+// cookies file through MatchDelimiter leaked a goroutine per call, and
+// at full throughput on a corpus soak that compounded to ~150k live
+// goroutines + RSS spiralling past 20GB. Rewritten as iter.Seq: pure
+// synchronous callback, zero goroutines, safe early-exit.
+func IterDelimiter(m map[string]any, ex map[string]any, text string) func(yield func(map[string]any) bool) {
+	return func(yield func(map[string]any) bool) {
 		sep, _ := m["separator"].(string)
 		skipBlank := true
 		if v, ok := m["skip_blank"].(bool); ok {
@@ -353,10 +356,11 @@ func IterDelimiter(m map[string]any, ex map[string]any, text string) <-chan map[
 					row[field] = parts[idx]
 				}
 			}
-			ch <- row
+			if !yield(row) {
+				return
+			}
 		}
-	}()
-	return ch
+	}
 }
 
 // MatchJSON parses the input as JSON through the ordered decoder so
@@ -392,10 +396,10 @@ func MatchJSON(m map[string]any, ex map[string]any, inp ContentInput) map[string
 }
 
 // IterJSON walks every pivot entry as its own record.
-func IterJSON(m map[string]any, ex map[string]any, text string) <-chan map[string]any {
-	ch := make(chan map[string]any)
-	go func() {
-		defer close(ch)
+// IterJSON: iter.Seq for the same reason IterDelimiter is. Early exit
+// from MatchJSON would otherwise block the sender goroutine forever.
+func IterJSON(m map[string]any, ex map[string]any, text string) func(yield func(map[string]any) bool) {
+	return func(yield func(map[string]any) bool) {
 		doc, err := parseOrderedJSON([]byte(text))
 		if err != nil {
 			return
@@ -412,14 +416,15 @@ func IterJSON(m map[string]any, ex map[string]any, text string) <-chan map[strin
 		paths, _ := ex["paths"].(map[string]any)
 		pivot, _ := m["pivot"].(string)
 		if pivot == "" {
-			ch <- extractPaths(doc, paths)
+			yield(extractPaths(doc, paths))
 			return
 		}
 		for _, kv := range jsonPivotChildren(doc, pivot) {
-			ch <- jsonExtractRecord(kv.value, kv.key, paths)
+			if !yield(jsonExtractRecord(kv.value, kv.key, paths)) {
+				return
+			}
 		}
-	}()
-	return ch
+	}
 }
 
 type jsonKV struct {

@@ -294,10 +294,8 @@ func MatchXML(m map[string]any, ex map[string]any, inp ContentInput) map[string]
 	return xmlExtractRecord(root, root.Name, paths)
 }
 
-func IterXML(m map[string]any, ex map[string]any, text string) <-chan map[string]any {
-	ch := make(chan map[string]any)
-	go func() {
-		defer close(ch)
+func IterXML(m map[string]any, ex map[string]any, text string) func(yield func(map[string]any) bool) {
+	return func(yield func(map[string]any) bool) {
 		root, err := parseXML(text)
 		if err != nil {
 			return
@@ -308,14 +306,15 @@ func IterXML(m map[string]any, ex map[string]any, text string) <-chan map[string
 		paths, _ := ex["paths"].(map[string]any)
 		pivot, _ := m["pivot"].(string)
 		if pivot == "" {
-			ch <- xmlExtractRecord(root, root.Name, paths)
+			yield(xmlExtractRecord(root, root.Name, paths))
 			return
 		}
 		for _, kv := range xmlPivotChildren(root, pivot) {
-			ch <- xmlExtractRecord(kv.el, kv.key, paths)
+			if !yield(xmlExtractRecord(kv.el, kv.key, paths)) {
+				return
+			}
 		}
-	}()
-	return ch
+	}
 }
 
 func xmlCheckRequires(root *xmlElement, required []string) bool {

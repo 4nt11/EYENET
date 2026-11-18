@@ -34,10 +34,8 @@ func MatchVDF(m map[string]any, ex map[string]any, inp ContentInput) map[string]
 
 // IterVDF yields every pivot child as its own record. When pivot is
 // absent the single-doc extraction is yielded once.
-func IterVDF(m map[string]any, ex map[string]any, text string) <-chan map[string]any {
-	ch := make(chan map[string]any)
-	go func() {
-		defer close(ch)
+func IterVDF(m map[string]any, ex map[string]any, text string) func(yield func(map[string]any) bool) {
+	return func(yield func(map[string]any) bool) {
 		doc, err := parseVDF(text)
 		if err != nil {
 			return
@@ -50,14 +48,15 @@ func IterVDF(m map[string]any, ex map[string]any, text string) <-chan map[string
 		paths, _ := ex["paths"].(map[string]any)
 		pivot, _ := m["pivot"].(string)
 		if pivot == "" {
-			ch <- extractPathsVDF(doc, paths)
+			yield(extractPathsVDF(doc, paths))
 			return
 		}
 		for key, value := range pivotChildren(doc, pivot) {
-			ch <- extractVDFRecord(value, key, paths)
+			if !yield(extractVDFRecord(value, key, paths)) {
+				return
+			}
 		}
-	}()
-	return ch
+	}
 }
 
 var vdfPathToken = regexp.MustCompile(`\.([\w-]+)|\[(\d+)\]`)

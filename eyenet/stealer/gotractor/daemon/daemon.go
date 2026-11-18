@@ -38,6 +38,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	_ "net/http/pprof" // registers /debug/pprof/* on the default mux (same mux as /metrics)
 	"os"
 	"path/filepath"
 	"runtime"
@@ -195,12 +197,15 @@ func (d *Daemon) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	if err := watcher.Add(d.familiesDir); err != nil {
 		log.Printf("watch %s: %v", d.familiesDir, err)
 	}
-	go d.watchLoop(ctx, watcher, w)
-
-	// Writer serialization: both the run loop and the watch loop can
-	// emit messages; we lock across each message so lines never
-	// interleave.
-	writer := &lockedWriter{w: w}
+	// Stream + batch: workers do channel-send only (atomic, zero
+	// contention), one goroutine drains into a 64KB bufio to stdout.
+	// watchLoop shares this writer so the only process touching stdout
+	// is the drain goroutine; before this patch, watchLoop constructed
+	// its OWN lockedWriter around the same stdout, so two independent
+	// mutexes could interleave bytes on a hot reload. Fixed.
+	writer := newLockedWriter(w)
+	defer writer.close()
+	go d.watchLoop(ctx, watcher, writer)
 	// Run-command concurrency: the catalog is an atomic pointer,
 	// metrics are prom counters (goroutine-safe), writer is locked.
 	// Everything else cmdRun touches is request-local, so N runs can
@@ -445,10 +450,9 @@ func (d *Daemon) loadCatalog(trigger string) error {
 // single operator save ends in a single catalog reload. On reload the
 // daemon emits a reloaded message so the Python client can refresh any
 // caches it keeps.
-func (d *Daemon) watchLoop(ctx context.Context, w *fsnotify.Watcher, out io.Writer) {
+func (d *Daemon) watchLoop(ctx context.Context, w *fsnotify.Watcher, writer *lockedWriter) {
 	const debounce = 250 * time.Millisecond
 	var timer *time.Timer
-	writer := &lockedWriter{w: out}
 	for {
 		select {
 		case <-ctx.Done():
@@ -492,19 +496,97 @@ func (d *Daemon) watchLoop(ctx context.Context, w *fsnotify.Watcher, out io.Writ
 	}
 }
 
-// lockedWriter serialises JSON-per-line emits so the record loop and the
-// watcher never interleave a line.
+// lockedWriter streams JSON-per-line emits through a dedicated writer
+// goroutine so the N parallel run workers never contend on a mutex or
+// on the stdout syscall. Design:
+//
+//   1. Workers marshal to a pooled bytes.Buffer in parallel. All the
+//      reflection cost of encoding/json moves off the serial writer
+//      goroutine and onto the N parallel matchers (where it scales).
+//   2. The channel carries *bytes.Buffer, not `any`. No interface
+//      boxing per record (300k/s hot path).
+//   3. The writer goroutine owns stdout and a 64KB bufio.Writer. Its
+//      only work per record is `bw.Write(buf.Bytes())` + Put the buf
+//      back to the pool.
+//   4. Time-based flush every 10ms for latency; byte-triggered flush
+//      amortises syscalls.
 type lockedWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	ch   chan *bytes.Buffer
+	done chan struct{}
 }
 
+var bufPool = sync.Pool{New: func() any {
+	// Pre-size for the common record frame (~200-400 bytes). Records
+	// with fat fields maps will grow; sync.Pool caps the retained
+	// capacity after a few GCs, so a transient big record does not
+	// permanently bloat the pool.
+	b := new(bytes.Buffer)
+	b.Grow(512)
+	return b
+}}
+
+func getBuf() *bytes.Buffer {
+	b := bufPool.Get().(*bytes.Buffer)
+	b.Reset()
+	return b
+}
+
+func newLockedWriter(w io.Writer) *lockedWriter {
+	lw := &lockedWriter{
+		ch:   make(chan *bytes.Buffer, 4096),
+		done: make(chan struct{}),
+	}
+	go lw.run(w)
+	return lw
+}
+
+func (l *lockedWriter) run(w io.Writer) {
+	bw := bufio.NewWriterSize(w, 128*1024)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	dirty := false
+	for {
+		select {
+		case buf, ok := <-l.ch:
+			if !ok {
+				if dirty {
+					_ = bw.Flush()
+				}
+				close(l.done)
+				return
+			}
+			_, _ = bw.Write(buf.Bytes())
+			// Bound retained capacity. One huge record (fat delimiter
+			// row, 100KB+ fields map) must not permanently bloat a
+			// pool slot: sync.Pool keeps the whole backing array even
+			// after Reset. Drop oversize buffers; GC reclaims them.
+			if buf.Cap() <= 8192 {
+				bufPool.Put(buf)
+			}
+			dirty = true
+		case <-ticker.C:
+			if dirty {
+				_ = bw.Flush()
+				dirty = false
+			}
+		}
+	}
+}
+
+// emit marshals v on the CALLING goroutine (workers parallelise this
+// for free) and hands the serialised line to the writer goroutine.
+// Trailing newline comes from json.Encoder.Encode.
 func (l *lockedWriter) emit(v any) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	enc := json.NewEncoder(l.w)
+	buf := getBuf()
+	enc := json.NewEncoder(buf)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
+	l.ch <- buf
+}
+
+func (l *lockedWriter) close() {
+	close(l.ch)
+	<-l.done
 }
 
 // safeBulkParse wraps engine.BulkParse in a defer/recover so a single
