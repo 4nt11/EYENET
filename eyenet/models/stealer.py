@@ -31,9 +31,33 @@ class StealerProcessingTable(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
 
 
+class StealerFamilyOverrideTable(SQLModel, table=True):
+    """Operator verdict override for per-victim family classification.
+
+    An override is a human-sourced ground-truth label on one (archive,
+    victim) pair. Overrides are the labeled set that tunes the scorer's
+    weights (see development/STEALER_FAMILY_CLASSIFIER_DESIGN.md
+    Phase 7). The classifier-produced verdict stays in ClickHouse
+    (victim_family_verdict); overrides live here in Postgres because
+    they are operator actions tracked alongside other audit-relevant
+    writes (clearance, PAT mint/revoke, case ops).
+    """
+
+    __tablename__ = "stealer_family_override"
+
+    archive_sha256: str = Field(primary_key=True, max_length=64)
+    victim_folder: str = Field(primary_key=True, max_length=512)
+    slug: str = Field(index=True, max_length=64)
+    reason: str | None = Field(default=None, max_length=512)
+    author_user_id: UUID = Field(foreign_key="system_user.id", index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+
+
 __all__ = [
     "STEALER_DONE",
     "STEALER_FAILED",
     "STEALER_RUNNING",
+    "StealerFamilyOverrideTable",
     "StealerProcessingTable",
 ]

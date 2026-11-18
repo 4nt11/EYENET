@@ -6,7 +6,7 @@
 //   GET /v1/stealer/artifacts/{sha}/{folder}/domains→ EXTRACTED INDICATORS right panel
 // All read:stealer-gated; a 200 with initialized:false on /artifacts means the
 // corpus is wired but empty (same pattern as /stealer/stats).
-import { apiGet } from './api.js';
+import { apiGet, apiPut, apiDelete } from './api.js';
 
 export const listCtx = $state({
   items: [],
@@ -145,4 +145,30 @@ export async function loadRecords({ category, page = 1, ruleId, family } = {}) {
 
 export function pickFile(relPath) {
   drawerCtx.selectedFile = relPath;
+}
+
+// Family-verdict override. write:stealer gated server-side; the FE lets
+// the user try either way and surfaces 403/422 to the operator.
+export async function setFamilyOverride(sha, folder, { slug, reason } = {}) {
+  const encFolder = encodeURIComponent(folder);
+  const r = await apiPut(
+    `/v1/stealer/artifacts/${sha}/${encFolder}/family-override`,
+    { slug, reason: reason || null },
+    { auth: true },
+  );
+  // Drawer detail is stale; refetch so the SUSPECTED FAMILY tile reflects
+  // the override immediately.
+  const d = await apiGet(`/v1/stealer/artifacts/${sha}/${encFolder}`, { auth: true });
+  drawerCtx.detail = d;
+  return r;
+}
+
+export async function clearFamilyOverride(sha, folder) {
+  const encFolder = encodeURIComponent(folder);
+  await apiDelete(
+    `/v1/stealer/artifacts/${sha}/${encFolder}/family-override`,
+    { auth: true },
+  );
+  const d = await apiGet(`/v1/stealer/artifacts/${sha}/${encFolder}`, { auth: true });
+  drawerCtx.detail = d;
 }

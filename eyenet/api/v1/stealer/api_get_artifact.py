@@ -12,7 +12,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 
-from eyenet.api.deps import CurrentUser, RequireScope
+from eyenet.api.deps import CurrentUser, RequireScope, get_storage
 from eyenet.api.v1.schemas.stealer import (
     StealerArtifactDetail,
     StealerArtifactStatTiles,
@@ -23,6 +23,7 @@ from eyenet.api.v1.schemas.stealer import (
 from eyenet.api.v1.stealer._artifacts import reader
 from eyenet.stealer.query import StealerCorpusUninitializedError
 from eyenet.stealer.ttps import resolve_techniques
+from eyenet.storage.repository import BaseRepository
 
 router = APIRouter(tags=["stealer"])
 
@@ -37,6 +38,7 @@ async def stealer_get_artifact(
     _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
     archive_sha256: Annotated[str, Path(min_length=64, max_length=64)],
     victim_folder: Annotated[str, Path(min_length=1, max_length=512)],
+    storage: Annotated[BaseRepository, Depends(get_storage)],
 ) -> StealerArtifactDetail:
     try:
         row = await reader.detail(archive_sha256, victim_folder)
@@ -44,6 +46,13 @@ async def stealer_get_artifact(
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
     if row is None:
         raise HTTPException(404, "artifact not found")
+
+    # Operator override wins over the classifier verdict. On an override
+    # we present the operator's slug at confidence 1.0 with a single
+    # "override:<user>" evidence token; the classifier's own verdict
+    # drops to the runners-up head so the drawer still shows the
+    # scorer's state of mind.
+    override = await storage.get_stealer_family_override(archive_sha256, victim_folder)
 
     techs_raw = resolve_techniques(row.fired_rule_ids)
     techniques = [
@@ -106,12 +115,41 @@ async def stealer_get_artifact(
         first_corporate_marker=row.first_corporate_marker,
         first_wallet_family=row.first_wallet_family,
         techniques=techniques,
-        suspected_family=StealerFamilyVerdict(
-            slug=row.family_slug,
-            confidence=row.family_confidence,
-            evidence=row.family_evidence,
-            runners_up=[
-                StealerFamilyRunnerUp(slug=s, confidence=c) for s, c in row.family_runners_up
-            ],
-        ),
+        suspected_family=_merge_verdict(row, override),
+    )
+
+
+def _merge_verdict(row: object, override: object | None) -> StealerFamilyVerdict:
+    """Merge the classifier verdict (from CH) with the operator override
+    (from PG). Override wins at confidence 1.0; classifier's own winner
+    drops into the runners-up head so the drawer popover still shows the
+    scorer's state of mind."""
+    classifier_runners = [
+        StealerFamilyRunnerUp(slug=s, confidence=c)
+        for s, c in row.family_runners_up  # type: ignore[attr-defined]
+    ]
+    if override is None:
+        return StealerFamilyVerdict(
+            slug=row.family_slug,  # type: ignore[attr-defined]
+            confidence=row.family_confidence,  # type: ignore[attr-defined]
+            evidence=row.family_evidence,  # type: ignore[attr-defined]
+            runners_up=classifier_runners,
+        )
+    tail: list[StealerFamilyRunnerUp] = []
+    if row.family_slug:  # type: ignore[attr-defined]
+        tail.append(
+            StealerFamilyRunnerUp(
+                slug=row.family_slug,  # type: ignore[attr-defined]
+                confidence=row.family_confidence,  # type: ignore[attr-defined]
+            )
+        )
+    tail.extend(classifier_runners)
+    evidence = [f"override:{override.author_user_id}"]  # type: ignore[attr-defined]
+    if override.reason:  # type: ignore[attr-defined]
+        evidence.append(f"reason:{override.reason}")  # type: ignore[attr-defined]
+    return StealerFamilyVerdict(
+        slug=override.slug,  # type: ignore[attr-defined]
+        confidence=1.0,
+        evidence=evidence,
+        runners_up=tail[:3],
     )

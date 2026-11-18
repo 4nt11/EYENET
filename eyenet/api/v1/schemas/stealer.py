@@ -206,6 +206,21 @@ class StealerFamilyCountsResponse(ApiSchema):
     items: list[StealerFamilyCount]
 
 
+class StealerFamilyOverrideIn(ApiSchema):
+    slug: str
+    reason: str | None = None
+
+
+class StealerFamilyOverrideOut(ApiSchema):
+    archive_sha256: str
+    victim_folder: str
+    slug: str
+    reason: str | None = None
+    author_user_id: str
+    created_at: str
+    updated_at: str
+
+
 class StealerFamilyRunnerUp(ApiSchema):
     slug: str
     confidence: float
@@ -424,6 +439,8 @@ __all__ = [
     "StealerFailuresStats",
     "StealerFamilyCount",
     "StealerFamilyCountsResponse",
+    "StealerFamilyOverrideIn",
+    "StealerFamilyOverrideOut",
     "StealerFamilyRunnerUp",
     "StealerFamilyVerdict",
     "StealerSearchResponse",

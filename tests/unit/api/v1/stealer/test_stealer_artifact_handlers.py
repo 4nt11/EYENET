@@ -148,7 +148,7 @@ async def test_list_artifacts_uninitialized_returns_empty(
 
 async def test_detail_maps_tiles_and_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(detail_mod, "reader", _Fake(_detail(hits=5)))
-    resp = await detail_mod.stealer_get_artifact(_user(), _SHA, "v-01")
+    resp = await detail_mod.stealer_get_artifact(_user(), _SHA, "v-01", _NoOverrideStorage())  # type: ignore[arg-type]
     assert resp.stat_tiles.domain_hits == 5
     assert resp.stat_tiles.credentials == 17
     assert resp.stat_tiles.related == 0
@@ -158,14 +158,14 @@ async def test_detail_maps_tiles_and_hits(monkeypatch: pytest.MonkeyPatch) -> No
 async def test_detail_404_when_reader_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(detail_mod, "reader", _Fake(None))
     with pytest.raises(HTTPException) as ei:
-        await detail_mod.stealer_get_artifact(_user(), _SHA, "v-01")
+        await detail_mod.stealer_get_artifact(_user(), _SHA, "v-01", _NoOverrideStorage())  # type: ignore[arg-type]
     assert ei.value.status_code == 404
 
 
 async def test_detail_503_when_corpus_down(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(detail_mod, "reader", _Boom())
     with pytest.raises(HTTPException) as ei:
-        await detail_mod.stealer_get_artifact(_user(), _SHA, "v-01")
+        await detail_mod.stealer_get_artifact(_user(), _SHA, "v-01", _NoOverrideStorage())  # type: ignore[arg-type]
     assert ei.value.status_code == 503
 
 
@@ -258,3 +258,12 @@ class _Fake:
 class _Boom:
     async def detail(self, *_a: object) -> ArtifactDetailRow | None:
         raise StealerCorpusUninitializedError("no table")
+
+
+class _NoOverrideStorage:
+    """Fake BaseRepository for the stealer detail path: no override row
+    exists. The detail endpoint only calls get_stealer_family_override
+    on this path; every other storage method is unused."""
+
+    async def get_stealer_family_override(self, *_a: object) -> None:
+        return None

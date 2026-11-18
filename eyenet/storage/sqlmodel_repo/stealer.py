@@ -9,9 +9,13 @@ from uuid import UUID
 from sqlmodel import col, select
 
 from eyenet.contracts.message import AttachmentRow
-from eyenet.contracts.stealer import StealerProcessingRow
+from eyenet.contracts.stealer import StealerFamilyOverrideRow, StealerProcessingRow
 from eyenet.models.message import AttachmentTable
-from eyenet.models.stealer import STEALER_DONE, StealerProcessingTable
+from eyenet.models.stealer import (
+    STEALER_DONE,
+    StealerFamilyOverrideTable,
+    StealerProcessingTable,
+)
 
 from ._helpers import safe_session
 
@@ -93,6 +97,64 @@ class StealerMixin:
             stmt = stmt.order_by(col(AttachmentTable.id).desc()).limit(limit)
             result = await session.exec(stmt)
             return [AttachmentRow.model_validate(r.model_dump()) for r in list(result)]
+
+    async def get_stealer_family_override(
+        self, archive_sha256: str, victim_folder: str
+    ) -> StealerFamilyOverrideRow | None:
+        """Read one operator override by (archive, victim). Returns None
+        when no override exists; the drawer falls back to the classifier
+        verdict in that case."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(StealerFamilyOverrideTable, (archive_sha256, victim_folder))
+            if row is None:
+                return None
+            return StealerFamilyOverrideRow.model_validate(row.model_dump())
+
+    async def upsert_stealer_family_override(
+        self,
+        *,
+        archive_sha256: str,
+        victim_folder: str,
+        slug: str,
+        reason: str | None,
+        author_user_id: UUID,
+    ) -> StealerFamilyOverrideRow:
+        """Create or replace the override for (archive, victim). Generic
+        SELECT-then-add/update; dialect-neutral so a future MySQL backend
+        does not need its own path."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(StealerFamilyOverrideTable, (archive_sha256, victim_folder))
+            now = datetime.now(tz=UTC)
+            if row is None:
+                row = StealerFamilyOverrideTable(
+                    archive_sha256=archive_sha256,
+                    victim_folder=victim_folder,
+                    slug=slug,
+                    reason=reason,
+                    author_user_id=author_user_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            else:
+                row.slug = slug
+                row.reason = reason
+                row.author_user_id = author_user_id
+                row.updated_at = now
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return StealerFamilyOverrideRow.model_validate(row.model_dump())
+
+    async def delete_stealer_family_override(self, archive_sha256: str, victim_folder: str) -> bool:
+        """Remove the override. Returns True when a row was deleted,
+        False when there was nothing to delete."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            row = await session.get(StealerFamilyOverrideTable, (archive_sha256, victim_folder))
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
 
 
 __all__ = ["StealerMixin"]

@@ -17,6 +17,8 @@
     closeDrawer,
     loadRecords,
     pickFile,
+    setFamilyOverride,
+    clearFamilyOverride,
   } from '$lib/stealerArtifacts.svelte.js';
   import {
     canonicalize,
@@ -113,6 +115,61 @@
   });
   const familyVerdict = $derived(drawerCtx.detail?.suspected_family);
   const familyTopRunner = $derived(familyVerdict?.runners_up?.[0]);
+  const isOverride = $derived(
+    (familyVerdict?.evidence ?? []).some((e) => e.startsWith('override:')),
+  );
+
+  // Reclassify dialog state. Shown when the operator clicks "Reclassify"
+  // inside the verdict popover; the form upserts an override for this
+  // (sha, folder) pair via write:stealer.
+  let overrideOpen = $state(false);
+  let overrideSlug = $state('');
+  let overrideReason = $state('');
+  let overrideBusy = $state(false);
+  let overrideErr = $state(null);
+  $effect(() => {
+    drawerCtx.sha;
+    drawerCtx.folder;
+    overrideOpen = false;
+    overrideSlug = '';
+    overrideReason = '';
+    overrideErr = null;
+  });
+  async function onOverrideSubmit() {
+    if (!overrideSlug.trim()) return;
+    overrideBusy = true;
+    overrideErr = null;
+    try {
+      await setFamilyOverride(drawerCtx.sha, drawerCtx.folder, {
+        slug: overrideSlug.trim(),
+        reason: overrideReason.trim(),
+      });
+      overrideOpen = false;
+      familyPopoverOpen = false;
+    } catch (e) {
+      overrideErr = e.status === 403
+        ? 'needs write:stealer clearance'
+        : (e.message ?? String(e));
+    } finally {
+      overrideBusy = false;
+    }
+  }
+  async function onOverrideClear() {
+    if (!drawerCtx.sha || !drawerCtx.folder) return;
+    overrideBusy = true;
+    overrideErr = null;
+    try {
+      await clearFamilyOverride(drawerCtx.sha, drawerCtx.folder);
+      overrideOpen = false;
+      familyPopoverOpen = false;
+    } catch (e) {
+      overrideErr = e.status === 403
+        ? 'needs write:stealer clearance'
+        : (e.message ?? String(e));
+    } finally {
+      overrideBusy = false;
+    }
+  }
   // Dedupe files by filename until the pipeline stops writing the ephemeral
   // extraction root into rel_path (multiple reindex passes produce distinct
   // rel_paths for the same logical file, so FINAL on file_audit can't
@@ -399,6 +456,47 @@
                 {/each}
               </ul>
             {/if}
+            <div class="fp-actions">
+              {#if !overrideOpen}
+                <Button variant="ghost" size="sm" onclick={() => (overrideOpen = true)}>
+                  {isOverride ? 'Replace override' : 'Reclassify'}
+                </Button>
+                {#if isOverride}
+                  <Button variant="ghost" size="sm" onclick={onOverrideClear} disabled={overrideBusy}>
+                    Clear override
+                  </Button>
+                {/if}
+              {:else}
+                <form class="fp-form" onsubmit={(e) => { e.preventDefault(); onOverrideSubmit(); }}>
+                  <input
+                    type="text"
+                    placeholder="family slug (e.g. vidar)"
+                    bind:value={overrideSlug}
+                    required
+                    minlength="2"
+                    maxlength="64"
+                    pattern="[a-z][a-z0-9_]*"
+                  />
+                  <input
+                    type="text"
+                    placeholder="reason (optional)"
+                    bind:value={overrideReason}
+                    maxlength="512"
+                  />
+                  <div class="fp-form-actions">
+                    <Button variant="primary" size="sm" type="submit" disabled={overrideBusy || !overrideSlug.trim()}>
+                      {overrideBusy ? 'Saving…' : 'Save'}
+                    </Button>
+                    <Button variant="ghost" size="sm" onclick={() => (overrideOpen = false)} disabled={overrideBusy}>
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              {/if}
+              {#if overrideErr}
+                <div class="fp-err">{overrideErr}</div>
+              {/if}
+            </div>
           </div>
         {/if}
         <nav class="d-tabs">
@@ -867,6 +965,15 @@
   .fp-ru { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
   .fp-ru li { display: flex; justify-content: space-between; font-size: var(--fs-12); }
   .fp-empty { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); }
+  .fp-actions { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); margin-top: 4px; }
+  .fp-form { display: flex; flex-direction: column; gap: 6px; }
+  .fp-form input {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 4px 8px;
+    font-family: var(--font-mono); font-size: var(--fs-12);
+  }
+  .fp-form-actions { display: flex; gap: 6px; }
+  .fp-err { color: var(--red-text); font-size: var(--fs-11); font-family: var(--font-mono); }
 
   .d-tabs {
     display: flex;

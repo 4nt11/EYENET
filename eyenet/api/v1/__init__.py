@@ -284,6 +284,7 @@ from eyenet.api.v1.stealer.api_create_stealer_rule import router as stealer_rule
 from eyenet.api.v1.stealer.api_delete_stealer_family import router as stealer_families_delete_router
 from eyenet.api.v1.stealer.api_delete_stealer_rule import router as stealer_rules_delete_router
 from eyenet.api.v1.stealer.api_failures_stats import router as stealer_failures_stats_router
+from eyenet.api.v1.stealer.api_family_override import router as stealer_family_override_router
 from eyenet.api.v1.stealer.api_get_artifact import router as stealer_get_artifact_router
 from eyenet.api.v1.stealer.api_get_failure import router as stealer_failure_samples_router
 from eyenet.api.v1.stealer.api_get_stealer_family import router as stealer_families_get_router
@@ -533,6 +534,11 @@ v1_router.include_router(
 v1_router.include_router(
     stealer_artifact_domains_router
 )  # GET /stealer/artifacts/{sha}/{folder}/domains
+# The override endpoints live under the same /{sha}/{folder:path} prefix
+# as the detail GET, and since folder:path is greedy, the override routes
+# must register BEFORE the detail route so FastAPI prefers the more
+# specific match.
+v1_router.include_router(stealer_family_override_router)  # PUT/DEL family-override
 v1_router.include_router(stealer_get_artifact_router)  # GET /stealer/artifacts/{sha}/{folder}
 v1_router.include_router(stealer_audit_coverage_router)  # GET /stealer/audit/coverage
 v1_router.include_router(stealer_audit_unknown_router)  # GET /stealer/audit/unknown

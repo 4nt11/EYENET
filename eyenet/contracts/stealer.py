@@ -27,4 +27,20 @@ class StealerProcessingRow(DbRowBase):
     updated_at: datetime
 
 
-__all__ = ["StealerProcessingRow"]
+class StealerFamilyOverrideRow(DbRowBase):
+    """Operator verdict ground-truth for one (archive, victim) pair.
+
+    An override is a human attribution of a stealer family to a specific
+    victim. Overrides win over the classifier verdict at drawer read time
+    and feed the tuning P/R dashboard."""
+
+    archive_sha256: str
+    victim_folder: str
+    slug: str
+    reason: str | None = None
+    author_user_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+__all__ = ["StealerFamilyOverrideRow", "StealerProcessingRow"]
