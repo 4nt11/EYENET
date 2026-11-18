@@ -24,10 +24,10 @@ match:
 extract:
   columns:
     0: cookie_domain
-    1: include_subdomains
+    1: cookie_include_subdomains
     2: cookie_path
-    3: secure
-    4: expires_epoch
+    3: cookie_secure
+    4: cookie_expires_epoch
     5: cookie_name
     6: cookie_value
 ttps:

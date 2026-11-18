@@ -74,14 +74,18 @@ export const CANONICAL_FIELDS = {
     'cred.browser':  ['browser', 'soft', 'profile', 'software'],
   },
   // Cookie record shape (netscape_cookies / cookies_netscape_tsv).
+  // Both cookie rules (netscape_cookies, cookies_netscape_tsv) emit
+  // cookie_* on every column; standardised at the rule YAML level so
+  // raw-query reading tells you exactly what each field is at a glance.
   cookie: {
-    'cookie.host':    ['host', 'domain'],
-    'cookie.name':    ['name'],
-    'cookie.value':   ['value'],
-    'cookie.path':    ['path'],
-    'cookie.expires': ['expires', 'expiration'],
-    'cookie.secure':  ['secure', 'is_secure'],
-    'cookie.http_only': ['http_only', 'httponly'],
+    'cookie.host':    ['cookie_domain'],
+    'cookie.name':    ['cookie_name'],
+    'cookie.value':   ['cookie_value'],
+    'cookie.path':    ['cookie_path'],
+    'cookie.expires': ['cookie_expires_epoch'],
+    'cookie.secure':  ['cookie_secure'],
+    'cookie.http_only': ['cookie_http_only'],
+    'cookie.include_subdomains': ['cookie_include_subdomains'],
   },
   // Process list rows (processes_dash_pid, processes_plain_exe).
   proc: {

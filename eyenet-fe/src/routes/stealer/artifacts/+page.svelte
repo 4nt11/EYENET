@@ -93,12 +93,15 @@
   const credBrowser = (f) => firstField(f, ['browser', 'soft', 'profile']);
   // Cookie row shape: netscape_cookies emits host/name/value/expires/path,
   // cookies_netscape_tsv uses tab-split same columns.
-  const cookieHost = (f) => firstField(f, ['host', 'domain']);
-  const cookieName = (f) => firstField(f, ['name']);
-  const cookieValue = (f) => firstField(f, ['value']);
-  const cookiePath = (f) => firstField(f, ['path']);
-  const cookieExpires = (f) => firstField(f, ['expires', 'expiration']);
-  const cookieSecure = (f) => firstField(f, ['secure', 'is_secure']);
+  // Both netscape_cookies and cookies_netscape_tsv emit cookie_* on
+  // every column (standardised at the rule level; if you ever query by
+  // raw key, cookie_expires tells you exactly what it is at a glance).
+  const cookieHost = (f) => firstField(f, ['cookie_domain']);
+  const cookieName = (f) => firstField(f, ['cookie_name']);
+  const cookieValue = (f) => firstField(f, ['cookie_value']);
+  const cookiePath = (f) => firstField(f, ['cookie_path']);
+  const cookieExpires = (f) => firstField(f, ['cookie_expires_epoch']);
+  const cookieSecure = (f) => firstField(f, ['cookie_secure']);
 
   const creds = $derived(slotFor('credentials').items);
   const cookies = $derived(slotFor('cookies').items);
