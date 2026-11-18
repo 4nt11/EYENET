@@ -65,6 +65,9 @@ async def stealer_get_artifact(
         cookies=row.cookies_count,
         country=row.country,
         related=0,
+        coverage_pct=row.coverage_pct,
+        coverage_total=row.coverage_total_files,
+        coverage_parsed=row.coverage_parsed_files,
     )
 
     return StealerArtifactDetail(

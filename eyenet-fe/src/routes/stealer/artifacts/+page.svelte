@@ -243,6 +243,20 @@
           <StatTile label="Cookies" value={fmt(drawerCtx.detail?.stat_tiles?.cookies)} />
           <StatTile label="Country" value={drawerCtx.detail?.stat_tiles?.country || '--'} />
           <StatTile
+            label="Coverage"
+            value={drawerCtx.detail?.stat_tiles?.coverage_total
+              ? `${drawerCtx.detail.stat_tiles.coverage_pct}%`
+              : '--'}
+            sub={drawerCtx.detail?.stat_tiles?.coverage_total
+              ? `${fmt(drawerCtx.detail.stat_tiles.coverage_parsed)} / ${fmt(drawerCtx.detail.stat_tiles.coverage_total)} files`
+              : ''}
+            tone={drawerCtx.detail?.stat_tiles?.coverage_pct >= 80
+              ? 'default'
+              : drawerCtx.detail?.stat_tiles?.coverage_pct >= 50
+                ? 'accent'
+                : 'critical'}
+          />
+          <StatTile
             label="Related"
             value={fmt(drawerCtx.detail?.stat_tiles?.related)}
             tone="accent"

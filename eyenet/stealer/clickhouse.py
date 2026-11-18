@@ -884,6 +884,58 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
     # extracted_records via a JOIN in file_tree(), so this column is dead
     # weight. IF EXISTS keeps the ALTER idempotent for fresh installs.
     "ALTER TABLE {db}.file_audit DROP COLUMN IF EXISTS rows_emitted",
+    # v1.3.6 per-victim coverage roll-up. Same engine + aggregation shape as
+    # file_audit_per_archive but keyed (archive_sha256, victim_folder) so the
+    # drawer + parse-failures workbench can show "35 of 48 files parsed for
+    # victim AE[...]" without a hand-rolled GROUP BY against file_audit.
+    # Excludes files at the archive root (victim_folder = '') because those
+    # are channel wrappers (promo, cover, preview), not victim data.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.file_audit_per_victim
+    (
+        archive_sha256 FixedString(64),
+        victim_folder  String,
+        total_files    SimpleAggregateFunction(sum, UInt64),
+        parsed_files   SimpleAggregateFunction(sum, UInt64),
+        unknown_files  SimpleAggregateFunction(sum, UInt64),
+        first_seen_at  SimpleAggregateFunction(min, DateTime),
+        last_seen_at   SimpleAggregateFunction(max, DateTime)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY (archive_sha256, victim_folder)
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.file_audit_per_victim_mv
+    TO {db}.file_audit_per_victim AS
+    SELECT
+        archive_sha256,
+        victim_folder,
+        toUInt64(1) AS total_files,
+        toUInt64(extractor_touched) AS parsed_files,
+        toUInt64(extractor_touched = 0
+                 AND heuristic_kind NOT IN ('empty','binary')) AS unknown_files,
+        parsed_at AS first_seen_at,
+        parsed_at AS last_seen_at
+    FROM {db}.file_audit
+    WHERE victim_folder != ''
+    """,
+    # Idempotent backfill. Same NOT EXISTS gate as the per-archive roll-up.
+    # Runs AFTER the MV so historical rows land; new rows come through the MV.
+    """
+    INSERT INTO {db}.file_audit_per_victim
+    SELECT
+        archive_sha256,
+        victim_folder,
+        toUInt64(1) AS total_files,
+        toUInt64(extractor_touched) AS parsed_files,
+        toUInt64(extractor_touched = 0
+                 AND heuristic_kind NOT IN ('empty','binary')) AS unknown_files,
+        parsed_at AS first_seen_at,
+        parsed_at AS last_seen_at
+    FROM {db}.file_audit
+    WHERE victim_folder != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.file_audit_per_victim)
+    """,
 )
 
 

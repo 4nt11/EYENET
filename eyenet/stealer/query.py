@@ -513,6 +513,13 @@ class ArtifactDetailRow:
     # touched that match the operator's monitored_domains watchlist via
     # exact or suffix match. Drives the 'DOMAIN HITS' stat tile.
     monitored_domain_hits: int = 0
+    # v1.3.6 per-victim parse coverage. Read from file_audit_per_victim:
+    # total_files = how many files ride under this victim folder, parsed =
+    # how many at least one rule's path_glob touched, pct = ratio. Drives
+    # the "COVERAGE" stat tile on the drawer header.
+    coverage_total_files: int = 0
+    coverage_parsed_files: int = 0
+    coverage_pct: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -663,7 +670,7 @@ class StealerArtifactsReader:
         # Pull the distinct rule_ids fired for this victim + the monitored
         # domain hits in parallel; both are independent per-victim scans
         # over the same ClickHouse pool connection.
-        fired, hits = await asyncio.gather(
+        fired, hits, coverage = await asyncio.gather(
             self._rows(
                 "SELECT DISTINCT rule_id "  # noqa: S608
                 f"FROM {self._db}.extracted_records FINAL "  # nosec B608
@@ -672,6 +679,7 @@ class StealerArtifactsReader:
                 {"sha": archive_sha256, "vf": victim_folder},
             ),
             self._monitored_domain_hits(archive_sha256, victim_folder),
+            self._coverage(archive_sha256, victim_folder),
         )
         return ArtifactDetailRow(
             archive_sha256=archive_sha256,
@@ -707,7 +715,30 @@ class StealerArtifactsReader:
             first_wallet_family=r[28],
             fired_rule_ids=[row[0] for row in fired],
             monitored_domain_hits=hits,
+            coverage_total_files=coverage[0],
+            coverage_parsed_files=coverage[1],
+            coverage_pct=coverage[2],
         )
+
+    async def _coverage(self, archive_sha256: str, victim_folder: str) -> tuple[int, int, float]:
+        """Sum (total_files, parsed_files) from file_audit_per_victim and
+        derive pct_parsed at read time. Returns (0, 0, 0.0) when the victim
+        has no file_audit rows yet (indexed-but-empty state during the gap
+        between archive extraction and the per-victim MV catching up)."""
+        rows = await self._rows(
+            "SELECT sum(total_files) AS total, "  # noqa: S608
+            "       sum(parsed_files) AS parsed, "
+            "       round(if(sum(total_files) = 0, 0.0, "
+            "               100.0 * sum(parsed_files) / sum(total_files)), 1) AS pct "
+            f"FROM {self._db}.file_audit_per_victim "  # nosec B608
+            "WHERE archive_sha256 = {sha:FixedString(64)} "
+            "  AND victim_folder = {vf:String}",
+            {"sha": archive_sha256, "vf": victim_folder},
+        )
+        if not rows:
+            return (0, 0, 0.0)
+        r = rows[0]
+        return (int(r[0] or 0), int(r[1] or 0), float(r[2] or 0.0))
 
     async def _monitored_domain_hits(self, archive_sha256: str, victim_folder: str) -> int:
         """Count distinct monitored-watchlist domains this victim touched.
@@ -758,7 +789,7 @@ class StealerArtifactsReader:
             "       (coalesce(er.n, 0) > 0) OR fa.extractor_touched AS touched, "
             "       coalesce(er.n, 0)                               AS rows_emitted, "
             "       fa.sample_head, fa.file_sha256 "
-            f"FROM {self._db}.file_audit FINAL AS fa "  # nosec B608
+            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
             "LEFT JOIN ( "
             "  SELECT file_path, count() AS n "
             f"  FROM {self._db}.extracted_records FINAL "  # nosec B608

@@ -141,6 +141,7 @@ class StealerAuditSearchResponse(ApiSchema):
 # v1.3.3 per-victim artifact drawer surface.
 # One row per (archive_sha256, victim_folder) backs the card + drawer.
 
+
 class StealerArtifactCard(ApiSchema):
     """Compact card row for the left-panel artifact list."""
 
@@ -169,16 +170,22 @@ class StealerArtifactStatTiles(ApiSchema):
     """Stat tiles row at the top of the drawer header."""
 
     credentials: int
-    domain_hits: int   # monitored-domain match count; 0 until monitored_domains ships
+    domain_hits: int  # monitored-domain match count; 0 until monitored_domains ships
     cookies: int
     country: str
-    related: int       # other artifacts sharing a key join field; 0 until implemented
+    related: int  # other artifacts sharing a key join field; 0 until implemented
+    # v1.3.6 parse coverage. file_audit_per_victim.parsed_files / total_files
+    # expressed as a %; absolute counts help the operator judge sample size
+    # ("48% parsed" of 2 files is noisier than 48% of 200).
+    coverage_pct: float = 0.0
+    coverage_total: int = 0
+    coverage_parsed: int = 0
 
 
 class StealerTechnique(ApiSchema):
     """One MITRE ATT&CK technique badge for the Overview tab."""
 
-    technique_id: str   # e.g. 'T1555.003'
+    technique_id: str  # e.g. 'T1555.003'
     name: str
     tactic: str
     tactic_id: str
@@ -276,7 +283,9 @@ class StealerArtifactDomainRow(ApiSchema):
     """One domain-hit row for the drawer's EXTRACTED INDICATORS section."""
 
     domain: str
-    source_kind: str     # cookie | credential | history_visit | download | localstorage | email_webmail
+    source_kind: (
+        str  # cookie | credential | history_visit | download | localstorage | email_webmail
+    )
     count: int
 
 

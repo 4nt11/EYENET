@@ -132,6 +132,7 @@ async def test_detail_hydrates_full_row_with_ttps_and_hits() -> None:
             [detail_row],
             [("passwords_block_title",), ("cookies_netscape_tsv",)],
             [(7,)],  # monitored-domain hits
+            [(48, 23, 47.9)],  # coverage: total, parsed, pct
         ]
     )
     out = await r.detail(_SHA, "v-01")
@@ -140,6 +141,9 @@ async def test_detail_hydrates_full_row_with_ttps_and_hits() -> None:
     assert out.creds_count == 17
     assert out.fired_rule_ids == ["passwords_block_title", "cookies_netscape_tsv"]
     assert out.monitored_domain_hits == 7
+    assert out.coverage_total_files == 48
+    assert out.coverage_parsed_files == 23
+    assert out.coverage_pct == 47.9
 
 
 async def test_monitored_domain_hits_zero_when_watchlist_empty() -> None:
