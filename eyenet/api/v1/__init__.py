@@ -284,6 +284,7 @@ from eyenet.api.v1.stealer.api_create_stealer_rule import router as stealer_rule
 from eyenet.api.v1.stealer.api_delete_stealer_family import router as stealer_families_delete_router
 from eyenet.api.v1.stealer.api_delete_stealer_rule import router as stealer_rules_delete_router
 from eyenet.api.v1.stealer.api_failures_stats import router as stealer_failures_stats_router
+from eyenet.api.v1.stealer.api_family_metrics import router as stealer_family_metrics_router
 from eyenet.api.v1.stealer.api_family_override import router as stealer_family_override_router
 from eyenet.api.v1.stealer.api_get_artifact import router as stealer_get_artifact_router
 from eyenet.api.v1.stealer.api_get_failure import router as stealer_failure_samples_router
@@ -548,6 +549,7 @@ v1_router.include_router(stealer_audit_search_router)  # GET /stealer/audit/sear
 # first, same pattern as the artifact drawer routes.
 v1_router.include_router(stealer_failures_stats_router)  # GET /stealer/failures/stats
 v1_router.include_router(stealer_family_counts_router)  # GET /stealer/families/counts
+v1_router.include_router(stealer_family_metrics_router)  # GET /stealer/families/metrics
 v1_router.include_router(stealer_failure_samples_router)  # GET /stealer/failures/{sig}/samples
 v1_router.include_router(stealer_list_failures_router)  # GET /stealer/failures
 v1_router.include_router(stealer_rules_list_router)  # GET /stealer/rules (read:stealer)

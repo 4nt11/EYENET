@@ -1028,6 +1028,12 @@ class BaseRepository(ABC):
         """Create or replace the override row. Per-key (archive, victim)."""
 
     @abstractmethod
+    async def list_stealer_family_overrides(self) -> list[StealerFamilyOverrideRow]:
+        """Every override row. Drives the per-family P/R dashboard; the
+        override set is small (hundreds, not millions) so a full sweep
+        is cheap."""
+
+    @abstractmethod
     async def delete_stealer_family_override(self, archive_sha256: str, victim_folder: str) -> bool:
         """Remove the override. Returns True when a row was deleted."""
 

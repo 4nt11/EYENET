@@ -145,6 +145,15 @@ class StealerMixin:
             await session.refresh(row)
             return StealerFamilyOverrideRow.model_validate(row.model_dump())
 
+    async def list_stealer_family_overrides(self) -> list[StealerFamilyOverrideRow]:
+        """Every override row. Used to drive the per-family P/R
+        dashboard; the override set is intentionally small (hundreds,
+        not millions) so a full sweep is cheap."""
+        async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
+            stmt = select(StealerFamilyOverrideTable)
+            result = await session.exec(stmt)
+            return [StealerFamilyOverrideRow.model_validate(r.model_dump()) for r in list(result)]
+
     async def delete_stealer_family_override(self, archive_sha256: str, victim_folder: str) -> bool:
         """Remove the override. Returns True when a row was deleted,
         False when there was nothing to delete."""

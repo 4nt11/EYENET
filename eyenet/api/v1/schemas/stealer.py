@@ -206,6 +206,21 @@ class StealerFamilyCountsResponse(ApiSchema):
     items: list[StealerFamilyCount]
 
 
+class StealerFamilyMetric(ApiSchema):
+    slug: str
+    tp: int
+    fp: int
+    fn: int
+    precision: float
+    recall: float
+    override_count: int
+
+
+class StealerFamilyMetricsResponse(ApiSchema):
+    initialized: bool = True
+    items: list[StealerFamilyMetric]
+
+
 class StealerFamilyOverrideIn(ApiSchema):
     slug: str
     reason: str | None = None
@@ -439,6 +454,8 @@ __all__ = [
     "StealerFailuresStats",
     "StealerFamilyCount",
     "StealerFamilyCountsResponse",
+    "StealerFamilyMetric",
+    "StealerFamilyMetricsResponse",
     "StealerFamilyOverrideIn",
     "StealerFamilyOverrideOut",
     "StealerFamilyRunnerUp",
