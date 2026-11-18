@@ -520,6 +520,16 @@ class ArtifactDetailRow:
     coverage_total_files: int = 0
     coverage_parsed_files: int = 0
     coverage_pct: float = 0.0
+    # v1.3.8 stealer-family verdict. Written by the classifier
+    # (eyenet.stealer.classifier) at pipeline-end and/or by the
+    # stealer-reclassify CLI. All four fields are populated together:
+    # when no confident verdict exists, slug is empty and confidence
+    # is 0.0. runners_up is a list of (slug, confidence) pairs so the
+    # drawer evidence popover can show the scorer's state of mind.
+    family_slug: str = ""
+    family_confidence: float = 0.0
+    family_evidence: list[str] = field(default_factory=list)
+    family_runners_up: list[tuple[str, float]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -591,6 +601,7 @@ class StealerArtifactsReader:
         traffic_affid: str | None = None,
         has_wallet: bool | None = None,
         has_corporate: bool | None = None,
+        family: str | None = None,
     ) -> tuple[list[ArtifactCardRow], int, int]:
         where = ["1"]
         params: dict[str, object] = {}
@@ -606,8 +617,20 @@ class StealerArtifactsReader:
         if has_corporate is not None:
             where.append("has_corporate_marker = {hc:UInt8}")
             params["hc"] = 1 if has_corporate else 0
+        # family=<slug> joins against the verdict table. Hoisted outside
+        # the WHERE on victim_profiles because the verdict column is not
+        # part of that table; semi-join via IN keeps filtering sargable
+        # against the (sha, victim) PK.
+        family_join = ""
+        if family:
+            family_join = (
+                " AND (archive_sha256, victim_folder) IN ("  # noqa: S608  # nosec B608
+                f"SELECT archive_sha256, victim_folder FROM {self._db}.victim_family_verdict FINAL "
+                " WHERE slug = {family_slug:String})"
+            )
+            params["family_slug"] = family
 
-        where_sql = " AND ".join(where)
+        where_sql = " AND ".join(where) + family_join
         offset = (page - 1) * limit
         params["limit"] = limit
         params["offset"] = offset
@@ -670,7 +693,7 @@ class StealerArtifactsReader:
         # Pull the distinct rule_ids fired for this victim + the monitored
         # domain hits in parallel; both are independent per-victim scans
         # over the same ClickHouse pool connection.
-        fired, hits, coverage = await asyncio.gather(
+        fired, hits, coverage, verdict = await asyncio.gather(
             self._rows(
                 "SELECT DISTINCT rule_id "  # noqa: S608
                 f"FROM {self._db}.extracted_records FINAL "  # nosec B608
@@ -680,6 +703,7 @@ class StealerArtifactsReader:
             ),
             self._monitored_domain_hits(archive_sha256, victim_folder),
             self._coverage(archive_sha256, victim_folder),
+            self._family_verdict(archive_sha256, victim_folder),
         )
         return ArtifactDetailRow(
             archive_sha256=archive_sha256,
@@ -718,6 +742,10 @@ class StealerArtifactsReader:
             coverage_total_files=coverage[0],
             coverage_parsed_files=coverage[1],
             coverage_pct=coverage[2],
+            family_slug=verdict[0],
+            family_confidence=verdict[1],
+            family_evidence=verdict[2],
+            family_runners_up=verdict[3],
         )
 
     async def _coverage(self, archive_sha256: str, victim_folder: str) -> tuple[int, int, float]:
@@ -757,6 +785,32 @@ class StealerArtifactsReader:
             return (0, 0, 0.0)
         r = rows[0]
         return (int(r[0] or 0), int(r[1] or 0), float(r[2] or 0.0))
+
+    async def _family_verdict(
+        self, archive_sha256: str, victim_folder: str
+    ) -> tuple[str, float, list[str], list[tuple[str, float]]]:
+        """Read the per-victim stealer-family verdict. Returns
+        (slug, confidence, evidence, runners_up). Empty slug means no
+        verdict row yet (classifier has not run for this victim)."""
+        try:
+            rows = await self._rows(
+                "SELECT slug, confidence, evidence, runners_up "  # noqa: S608
+                f"FROM {self._db}.victim_family_verdict FINAL "  # nosec B608
+                "WHERE archive_sha256 = {sha:FixedString(64)} "
+                "  AND victim_folder = {vf:String} "
+                "LIMIT 1",
+                {"sha": archive_sha256, "vf": victim_folder},
+            )
+        except StealerCorpusUninitializedError:
+            # verdict table is lazy: a fresh host without a classify pass
+            # reads as "no verdict yet" instead of 503.
+            return ("", 0.0, [], [])
+        if not rows:
+            return ("", 0.0, [], [])
+        r = rows[0]
+        evidence = [str(x) for x in (r[2] or [])]
+        runners = [(str(s), float(c)) for s, c in (r[3] or [])]
+        return (str(r[0] or ""), float(r[1] or 0.0), evidence, runners)
 
     async def _monitored_domain_hits(self, archive_sha256: str, victim_folder: str) -> int:
         """Count distinct monitored-watchlist domains this victim touched.

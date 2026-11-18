@@ -43,6 +43,7 @@ async def stealer_list_artifacts(
     traffic_affid: Annotated[str | None, Query(max_length=64)] = None,
     has_wallet: Annotated[bool | None, Query()] = None,
     has_corporate: Annotated[bool | None, Query()] = None,
+    family: Annotated[str | None, Query(max_length=64)] = None,
 ) -> StealerArtifactsResponse:
     try:
         rows, total, page_count = await reader.list_cards(
@@ -52,6 +53,7 @@ async def stealer_list_artifacts(
             traffic_affid=traffic_affid,
             has_wallet=has_wallet,
             has_corporate=has_corporate,
+            family=family,
         )
     except StealerCorpusUninitializedError:
         return StealerArtifactsResponse(

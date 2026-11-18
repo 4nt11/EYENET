@@ -193,6 +193,28 @@ class StealerTechnique(ApiSchema):
     fired_from_rules: list[str]  # which rule_ids triggered this technique
 
 
+class StealerFamilyRunnerUp(ApiSchema):
+    slug: str
+    confidence: float
+
+
+class StealerFamilyVerdict(ApiSchema):
+    """Per-victim stealer-family verdict rendered in the drawer header.
+
+    ``slug`` is the empty string when no verdict row exists yet (classifier
+    has not run or the scorer did not clear any family's confidence
+    floor). ``runners_up`` is the next few ranked slugs regardless of
+    floor so the evidence popover shows the scorer's state of mind even
+    on a no-verdict. See
+    ``development/STEALER_FAMILY_CLASSIFIER_DESIGN.md``.
+    """
+
+    slug: str
+    confidence: float
+    evidence: list[str]
+    runners_up: list[StealerFamilyRunnerUp]
+
+
 class StealerArtifactDetail(ApiSchema):
     """Drawer detail: header + stat tiles + full profile fields.
 
@@ -240,6 +262,10 @@ class StealerArtifactDetail(ApiSchema):
     first_wallet_family: str
     # ATT&CK techniques derived from fired rules
     techniques: list[StealerTechnique]
+    # Per-victim stealer-family verdict. slug == "" means no confident
+    # verdict yet; runners_up is populated even on no-verdict so the
+    # evidence popover shows the scorer's ranking.
+    suspected_family: StealerFamilyVerdict
 
 
 class StealerArtifactFileRow(ApiSchema):
@@ -383,6 +409,8 @@ __all__ = [
     "StealerFailureShape",
     "StealerFailuresResponse",
     "StealerFailuresStats",
+    "StealerFamilyRunnerUp",
+    "StealerFamilyVerdict",
     "StealerSearchResponse",
     "StealerStatsResponse",
     "StealerTechnique",

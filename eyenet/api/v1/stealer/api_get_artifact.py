@@ -16,6 +16,8 @@ from eyenet.api.deps import CurrentUser, RequireScope
 from eyenet.api.v1.schemas.stealer import (
     StealerArtifactDetail,
     StealerArtifactStatTiles,
+    StealerFamilyRunnerUp,
+    StealerFamilyVerdict,
     StealerTechnique,
 )
 from eyenet.api.v1.stealer._artifacts import reader
@@ -104,4 +106,12 @@ async def stealer_get_artifact(
         first_corporate_marker=row.first_corporate_marker,
         first_wallet_family=row.first_wallet_family,
         techniques=techniques,
+        suspected_family=StealerFamilyVerdict(
+            slug=row.family_slug,
+            confidence=row.family_confidence,
+            evidence=row.family_evidence,
+            runners_up=[
+                StealerFamilyRunnerUp(slug=s, confidence=c) for s, c in row.family_runners_up
+            ],
+        ),
     )

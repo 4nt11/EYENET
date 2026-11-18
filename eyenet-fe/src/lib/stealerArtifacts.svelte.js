@@ -20,9 +20,17 @@ export const listCtx = $state({
   // doesn't lose the operator's scroll position.
   page: 1,
   q: '',
+  family: '',
 });
 
-export async function loadArtifacts({ page = 1, country, affid, hasWallet, hasCorporate } = {}) {
+export async function loadArtifacts({
+  page = 1,
+  country,
+  affid,
+  hasWallet,
+  hasCorporate,
+  family,
+} = {}) {
   listCtx.loading = true;
   listCtx.error = null;
   listCtx.denied = false;
@@ -32,11 +40,13 @@ export async function loadArtifacts({ page = 1, country, affid, hasWallet, hasCo
     if (affid) params.set('traffic_affid', affid);
     if (hasWallet !== undefined) params.set('has_wallet', String(hasWallet));
     if (hasCorporate !== undefined) params.set('has_corporate', String(hasCorporate));
+    if (family) params.set('family', family);
     const r = await apiGet(`/v1/stealer/artifacts?${params}`, { auth: true });
     listCtx.initialized = r.initialized !== false;
     listCtx.items = r.items ?? [];
     listCtx.pageMeta = r.page_meta ?? null;
     listCtx.page = page;
+    listCtx.family = family ?? '';
   } catch (e) {
     if (e.status === 403) listCtx.denied = true;
     else listCtx.error = e.message ?? String(e);

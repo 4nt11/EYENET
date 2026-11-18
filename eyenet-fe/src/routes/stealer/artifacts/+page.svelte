@@ -23,6 +23,7 @@
     CANONICAL_LABELS,
     PREFIX_LABELS,
   } from '$lib/stealerCanonicalFields.js';
+  import { apiGet } from '$lib/api.js';
 
   const shortSha = (s) => (s ? s.slice(0, 8) : '');
   const fmt = (n) => (n ?? 0).toLocaleString();
@@ -98,6 +99,19 @@
 
   const creds = $derived(slotFor('credentials').items);
   const cookies = $derived(slotFor('cookies').items);
+
+  // Family verdict popover state. Clicking the SUSPECTED FAMILY tile
+  // flips this; closes on close-button or re-click. Scoped per drawer
+  // open; reset when the drawer sha/folder changes.
+  let familyPopoverOpen = $state(false);
+  $effect(() => {
+    // Reset when drawer target changes
+    drawerCtx.sha;
+    drawerCtx.folder;
+    familyPopoverOpen = false;
+  });
+  const familyVerdict = $derived(drawerCtx.detail?.suspected_family);
+  const familyTopRunner = $derived(familyVerdict?.runners_up?.[0]);
   // Dedupe files by filename until the pipeline stops writing the ephemeral
   // extraction root into rel_path (multiple reindex passes produce distinct
   // rel_paths for the same logical file, so FINAL on file_audit can't
@@ -147,13 +161,32 @@
     dedupedFiles.find((f) => f.rel_path === drawerCtx.selectedFile) ?? dedupedFiles[0],
   );
 
-  const prevPage = () => loadArtifacts({ page: Math.max(1, listCtx.page - 1) });
+  const prevPage = () => loadArtifacts({ page: Math.max(1, listCtx.page - 1), family: listCtx.family });
   const nextPage = () => {
     const pc = listCtx.pageMeta?.page_count ?? 1;
-    loadArtifacts({ page: Math.min(pc, listCtx.page + 1) });
+    loadArtifacts({ page: Math.min(pc, listCtx.page + 1), family: listCtx.family });
   };
 
-  onMount(() => loadArtifacts({ page: 1 }));
+  // Load the catalog once to populate the SUSPECTED FAMILY filter
+  // dropdown. We filter to kind=stealer client-side; only those are
+  // classifier targets.
+  let familyOpts = $state([]);
+  async function loadFamilyOpts() {
+    try {
+      const r = await apiGet('/v1/stealer/families', { auth: true });
+      familyOpts = (r.families ?? []).filter((f) => f.kind === 'stealer');
+    } catch {
+      familyOpts = [];
+    }
+  }
+  function onFamilyPick(e) {
+    loadArtifacts({ page: 1, family: e.currentTarget.value || undefined });
+  }
+
+  onMount(() => {
+    loadArtifacts({ page: 1 });
+    loadFamilyOpts();
+  });
 </script>
 
 <main>
@@ -183,6 +216,15 @@
     <section class="list">
       <div class="meta">
         <span>{fmt(listCtx.pageMeta?.total ?? 0)} artifacts</span>
+        <label class="family-filter">
+          <span>Family</span>
+          <select onchange={onFamilyPick} value={listCtx.family ?? ''}>
+            <option value="">all</option>
+            {#each familyOpts as f}
+              <option value={f.slug}>{f.name || f.slug}</option>
+            {/each}
+          </select>
+        </label>
         <span class="range">
           {#if listCtx.pageMeta}
             Page {listCtx.pageMeta.page} of {listCtx.pageMeta.page_count || 1}
@@ -299,7 +341,56 @@
             value={fmt(drawerCtx.detail?.stat_tiles?.related)}
             tone="accent"
           />
+          <button
+            type="button"
+            class="tile-btn"
+            class:has-verdict={familyVerdict?.slug}
+            onclick={() => (familyPopoverOpen = !familyPopoverOpen)}
+            aria-expanded={familyPopoverOpen}
+            title={familyVerdict?.slug
+              ? `${familyVerdict.slug} @ ${(familyVerdict.confidence * 100).toFixed(0)}%`
+              : 'no confident verdict'}
+          >
+            <StatTile
+              label="Suspected family"
+              value={familyVerdict?.slug || '--'}
+              sub={familyVerdict?.slug
+                ? `${(familyVerdict.confidence * 100).toFixed(0)}% confidence`
+                : familyTopRunner
+                  ? `top: ${familyTopRunner.slug} ${(familyTopRunner.confidence * 100).toFixed(0)}%`
+                  : 'no verdict yet'}
+              tone={familyVerdict?.slug ? 'accent' : 'default'}
+            />
+          </button>
         </div>
+        {#if familyPopoverOpen && familyVerdict}
+          <div class="family-popover" role="dialog" aria-label="Family verdict evidence">
+            <div class="fp-head">
+              <span class="fp-label">Evidence</span>
+              <button class="fp-close" onclick={() => (familyPopoverOpen = false)} aria-label="Close">✕</button>
+            </div>
+            {#if familyVerdict.evidence?.length}
+              <ul class="fp-ev">
+                {#each familyVerdict.evidence as e}
+                  <li class="mono">{e}</li>
+                {/each}
+              </ul>
+            {:else}
+              <div class="fp-empty">No positive signals matched. Scorer ran empty.</div>
+            {/if}
+            {#if familyVerdict.runners_up?.length}
+              <div class="fp-label">Runners-up</div>
+              <ul class="fp-ru">
+                {#each familyVerdict.runners_up as ru}
+                  <li>
+                    <span class="mono">{ru.slug}</span>
+                    <span class="muted mono">{(ru.confidence * 100).toFixed(0)}%</span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        {/if}
         <nav class="d-tabs">
           {#each TABS as t}
             <button
@@ -732,12 +823,41 @@
     display: flex;
     gap: 6px;
   }
+  .family-filter { display: flex; align-items: center; gap: 6px; }
+  .family-filter > span { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .family-filter select {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 3px 8px;
+    font-family: var(--font-mono); font-size: var(--fs-12);
+  }
+
   .d-tiles {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 8px;
     margin: 12px 0;
   }
+  .tile-btn {
+    background: none; border: none; padding: 0; cursor: pointer;
+    display: block; text-align: left;
+  }
+  .tile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius); }
+  .family-popover {
+    margin: 0 0 12px 0; padding: 10px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel-2);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .fp-head { display: flex; align-items: center; justify-content: space-between; }
+  .fp-label { font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--text-faint); }
+  .fp-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: var(--fs-14); padding: 0 4px; }
+  .fp-close:hover { color: var(--text); }
+  .fp-ev { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+  .fp-ev li { padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); font-size: var(--fs-11); letter-spacing: var(--tracking-data); color: var(--accent-text); }
+  .fp-ru { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+  .fp-ru li { display: flex; justify-content: space-between; font-size: var(--fs-12); }
+  .fp-empty { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-data); }
+
   .d-tabs {
     display: flex;
     gap: 2px;
