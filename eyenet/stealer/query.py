@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from eyenet.stealer.clickhouse import (
     clickhouse_db,
@@ -721,18 +721,36 @@ class StealerArtifactsReader:
         )
 
     async def _coverage(self, archive_sha256: str, victim_folder: str) -> tuple[int, int, float]:
-        """Sum (total_files, parsed_files) from file_audit_per_victim and
-        derive pct_parsed at read time. Returns (0, 0, 0.0) when the victim
-        has no file_audit rows yet (indexed-but-empty state during the gap
-        between archive extraction and the per-victim MV catching up)."""
+        """Live per-victim coverage computed from file_audit JOIN
+        extracted_records. We deliberately bypass file_audit_per_victim:
+        its parsed_files column is set from file_audit.extractor_touched,
+        which only tracks ulpextract's pw_files set (Passwords.txt variants)
+        and does not see gotractor's emissions on InstalledSoftware.txt,
+        ProcessList.txt, cookies.txt, etc. The MV also summed raw row
+        counts, double-counting rel_path dupes from reindex passes.
+
+        Definition: total = uniqExact(filename) over non-empty / non-binary
+        file_audit rows in this (archive, victim). parsed = same uniqExact
+        but filtered to filenames whose rel_path appears at least once in
+        extracted_records for the same (archive, victim). Matches the
+        Files-tab dedup-by-filename view so the tile and the tree agree."""
         rows = await self._rows(
-            "SELECT sum(total_files) AS total, "  # noqa: S608
-            "       sum(parsed_files) AS parsed, "
-            "       round(if(sum(total_files) = 0, 0.0, "
-            "               100.0 * sum(parsed_files) / sum(total_files)), 1) AS pct "
-            f"FROM {self._db}.file_audit_per_victim "  # nosec B608
-            "WHERE archive_sha256 = {sha:FixedString(64)} "
-            "  AND victim_folder = {vf:String}",
+            "SELECT "  # noqa: S608
+            "  uniqExact(fa.filename) AS total, "
+            "  uniqExactIf(fa.filename, er.n > 0) AS parsed, "
+            "  round(if(uniqExact(fa.filename) = 0, 0.0, "
+            "    100.0 * uniqExactIf(fa.filename, er.n > 0) / uniqExact(fa.filename)), 1) AS pct "
+            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
+            "LEFT JOIN ("
+            "  SELECT file_path, count() AS n "
+            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  WHERE archive_sha256 = {sha:FixedString(64)} "
+            "    AND victim_folder = {vf:String} "
+            "  GROUP BY file_path"
+            ") AS er ON er.file_path = fa.rel_path "
+            "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
+            "  AND fa.victim_folder = {vf:String} "
+            "  AND fa.heuristic_kind NOT IN ('empty','binary')",
             {"sha": archive_sha256, "vf": victim_folder},
         )
         if not rows:
@@ -816,6 +834,44 @@ class StealerArtifactsReader:
             for r in rows
         ]
 
+    # Drawer tab -> set of rule_ids. Single source of truth so the FE
+    # does not need to know the rule-id catalog. "credentials" / "cookies"
+    # / "system" match the drawer tab ids; add new categories here as the
+    # rule library grows.
+    RECORD_CATEGORIES: ClassVar[dict[str, list[str]]] = {
+        "credentials": [
+            "passwords_block_title",
+            "passwords_block_divider",
+            "passwords_block_browser",
+            "passwords_block_upper",
+            "credentials_windows",
+            "firefox_logins_json",
+            "brute_wordlist",
+        ],
+        "cookies": [
+            "netscape_cookies",
+            "cookies_netscape_tsv",
+        ],
+        # System = canonical machine-profile records. The FE coalesces
+        # these into one host.* / av.* / build.* / net.* snapshot via
+        # stealerCanonicalFields.js; the Python side only picks the
+        # rule_ids that emit profile data (not software lists, not
+        # process lists, those live under their own categories).
+        "system": [
+            "environment_windows",
+            "stealer_info_yaml",
+            "information_v29_shape",
+            "software_corporate_marker",
+        ],
+        "software": [
+            "software_installed_list",
+        ],
+        "processes": [
+            "processes_dash_pid",
+            "processes_plain_exe",
+        ],
+    }
+
     async def records(
         self,
         archive_sha256: str,
@@ -825,6 +881,7 @@ class StealerArtifactsReader:
         limit: int,
         rule_id: str | None = None,
         family: str | None = None,
+        category: str | None = None,
     ) -> tuple[list[ArtifactRecordRow], int, int]:
         where = [
             "archive_sha256 = {sha:FixedString(64)}",
@@ -837,6 +894,12 @@ class StealerArtifactsReader:
         if family:
             where.append("family = {fam:String}")
             params["fam"] = family
+        if category:
+            ids = self.RECORD_CATEGORIES.get(category, [])
+            if not ids:
+                return ([], 0, 0)
+            where.append("rule_id IN {rids:Array(String)}")
+            params["rids"] = ids
         offset = (page - 1) * limit
         params["limit"] = limit
         params["offset"] = offset
@@ -881,6 +944,301 @@ class StealerArtifactsReader:
         return [ArtifactDomainRow(domain=r[0], source_kind=r[1], count=int(r[2])) for r in rows]
 
 
+@dataclass(frozen=True, slots=True)
+class ParseFailureStats:
+    """Corpus-wide tiles for the parse-failures workbench header.
+
+    total_files/parsed_files come from the per-victim roll-up MV so the
+    cost is O(victims), not O(files). fail_files + shape_buckets come
+    from the same LEFT JOIN the shape list uses, with no WHERE filters
+    beyond the parse-failure predicate itself.
+
+    "fail_files" here means "extractor touched the file and 0 records
+    came out", not distinct from gotractor crashing on the file. The
+    pipeline does not currently carry a hard-error flag; add a
+    file_audit.parse_error column when that distinction matters."""
+
+    total_files: int
+    parsed_files: int
+    coverage_pct: float
+    fail_files: int
+    shape_buckets: int
+    crash_files: int  # parse_error != '' in file_audit (gotractor panicked)
+
+
+@dataclass(frozen=True, slots=True)
+class ParseFailureShape:
+    """One shape bucket for the parse-failures workbench.
+
+    A shape bucket groups files whose sample_head collapses to the same
+    character-class fingerprint. count/victims/archives/files are
+    uniqExact over the file_audit rows that fell into this shape; sample
+    is one representative sample_head; filenames is the top-N filenames
+    seen under this shape so the operator can see "these are the
+    Passwords.txt-looking files we aren't parsing"."""
+
+    shape_sig: str
+    shape_preview: str
+    count: int
+    victims: int
+    archives: int
+    sample: str
+    sample_archive_sha256: str
+    sample_victim_folder: str
+    sample_file_path: str
+    heuristic_kind: str
+    filenames: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class ParseFailureSample:
+    """One raw sample row inside a shape bucket."""
+
+    archive_sha256: str
+    victim_folder: str
+    file_path: str
+    filename: str
+    size_bytes: int
+    sample_head: str
+    heuristic_kind: str
+
+
+class StealerFailuresReader:
+    """Read side of the parse-failures workbench (file-level).
+
+    A "parse failure" at the file granularity is a file that at least one
+    rule's path_glob touched (extractor_touched=1) but for which no
+    gotractor records were ever emitted. We detect those via a LEFT JOIN
+    against extracted_records keyed on file_path.
+
+    Shape fingerprint: compute from sample_head in SQL via a stacked
+    replaceRegexpAll (letters -> A, digits -> 9, whitespace -> _,
+    everything else literal), truncated to the first 200 chars so the
+    shape key stays stable under tail-noise drift. GROUP BY that sig
+    yields the bucketed workbench view."""
+
+    # Character-class signature expression. Applied to a truncated
+    # sample_head. Lowercase first so Soft vs soft collapse into the
+    # same shape.
+    _SIG_EXPR = (
+        "lower("
+        "replaceRegexpAll("
+        "replaceRegexpAll("
+        "replaceRegexpAll("
+        "substring(fa.sample_head, 1, 200), "
+        "'[A-Za-z]+', 'A'), "
+        "'[0-9]+', '9'), "
+        "'\\\\s+', '_'))"
+    )
+
+    def __init__(self) -> None:
+        self._db = clickhouse_db()
+        self._client: Any | None = None
+        self._client_lock = asyncio.Lock()
+
+    async def _c(self) -> Any:
+        if self._client is None:
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = await get_async_clickhouse_client()
+        return self._client
+
+    async def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
+        try:
+            client = await self._c()
+            result = await client.query(sql, parameters=params)
+            return result.result_rows  # type: ignore[no-any-return]
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError(
+                    "stealer.file_audit table does not exist yet"
+                ) from exc
+            raise
+
+    @staticmethod
+    def _page_count(total: int, limit: int) -> int:
+        return (total + limit - 1) // limit if total else 0
+
+    async def list_shapes(
+        self,
+        *,
+        page: int,
+        limit: int,
+        filename: str | None = None,
+        heuristic_kind: str | None = None,
+    ) -> tuple[list[ParseFailureShape], int, int]:
+        """Grouped by shape, ORDER BY count DESC. One row per distinct shape
+        fingerprint. Optional filters narrow the base failure set before
+        grouping (the operator can drill by filename substring or
+        heuristic_kind to focus on text files, config files, etc)."""
+        where = [
+            "fa.victim_folder != ''",
+            "fa.heuristic_kind NOT IN ('empty','binary')",
+            "er.n = 0",
+        ]
+        params: dict[str, object] = {}
+        if filename:
+            where.append("positionCaseInsensitive(fa.filename, {fn:String}) > 0")
+            params["fn"] = filename
+        if heuristic_kind:
+            where.append("fa.heuristic_kind = {hk:String}")
+            params["hk"] = heuristic_kind
+        where_sql = " AND ".join(where)
+        offset = (page - 1) * limit
+        params["limit"] = limit
+        params["offset"] = offset
+
+        base_from = (
+            f"FROM {self._db}.file_audit AS fa FINAL "  # noqa: S608  # nosec B608
+            "LEFT JOIN ("
+            "  SELECT file_path, count() AS n "
+            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  GROUP BY file_path "
+            ") AS er ON er.file_path = fa.rel_path "
+        )
+
+        total_rows = await self._rows(
+            f"SELECT uniqExact({self._SIG_EXPR}) {base_from} WHERE {where_sql}",
+            params,
+        )
+        total = int(total_rows[0][0]) if total_rows else 0
+
+        rows = await self._rows(
+            f"SELECT "
+            f"  {self._SIG_EXPR}                        AS sig, "
+            "  any(substring(fa.sample_head, 1, 200)) AS preview, "
+            "  count()                                AS n_files, "
+            "  uniqExact((fa.archive_sha256, fa.victim_folder)) AS n_victims, "
+            "  uniqExact(fa.archive_sha256)           AS n_archives, "
+            "  any(fa.sample_head)                    AS sample, "
+            "  any(fa.archive_sha256)                 AS sample_sha, "
+            "  any(fa.victim_folder)                  AS sample_vf, "
+            "  any(fa.rel_path)                       AS sample_path, "
+            "  any(fa.heuristic_kind)                 AS sample_hk, "
+            "  groupUniqArray(10)(fa.filename)        AS filenames "
+            f"{base_from} "
+            f"WHERE {where_sql} "
+            "GROUP BY sig "
+            "ORDER BY n_files DESC "
+            "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
+            params,
+        )
+        out = [
+            ParseFailureShape(
+                shape_sig=str(r[0]),
+                shape_preview=str(r[1] or ""),
+                count=int(r[2]),
+                victims=int(r[3]),
+                archives=int(r[4]),
+                sample=str(r[5] or ""),
+                sample_archive_sha256=str(r[6] or ""),
+                sample_victim_folder=str(r[7] or ""),
+                sample_file_path=str(r[8] or ""),
+                heuristic_kind=str(r[9] or ""),
+                filenames=list(r[10] or []),
+            )
+            for r in rows
+        ]
+        return out, total, self._page_count(total, limit)
+
+    async def global_stats(self) -> ParseFailureStats:
+        """Corpus-wide tiles. total/parsed are computed live against
+        file_audit JOIN extracted_records with dedup by (archive, victim,
+        filename), matching the per-victim drawer definition. We bypass
+        file_audit_per_victim on purpose: its parsed_files column is
+        set from extractor_touched (ulpextract only) and does not count
+        gotractor emissions, so the MV materially understates coverage.
+
+        fail_files + shape_buckets come from the same LEFT JOIN the shape
+        list uses. crash_files is a cheap count against file_audit where
+        parse_error is set."""
+        cov_rows = await self._rows(
+            "SELECT "  # noqa: S608
+            "  uniqExact((fa.archive_sha256, fa.victim_folder, fa.filename)) AS total, "
+            "  uniqExactIf((fa.archive_sha256, fa.victim_folder, fa.filename), er.n > 0) AS parsed "
+            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
+            "LEFT JOIN ("
+            "  SELECT archive_sha256, victim_folder, file_path, count() AS n "
+            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  GROUP BY archive_sha256, victim_folder, file_path"
+            ") AS er "
+            "  ON er.archive_sha256 = fa.archive_sha256 "
+            " AND er.victim_folder = fa.victim_folder "
+            " AND er.file_path = fa.rel_path "
+            "WHERE fa.victim_folder != '' "
+            "  AND fa.heuristic_kind NOT IN ('empty','binary')",
+            {},
+        )
+        total_files = int(cov_rows[0][0] or 0) if cov_rows else 0
+        parsed_files = int(cov_rows[0][1] or 0) if cov_rows else 0
+        coverage_pct = round(100.0 * parsed_files / total_files, 1) if total_files else 0.0
+
+        fail_rows = await self._rows(
+            f"SELECT count(), uniqExact({self._SIG_EXPR}) "  # noqa: S608
+            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
+            "LEFT JOIN ("
+            "  SELECT file_path, count() AS n "
+            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  GROUP BY file_path "
+            ") AS er ON er.file_path = fa.rel_path "
+            "WHERE fa.victim_folder != '' "
+            "  AND fa.heuristic_kind NOT IN ('empty','binary') "
+            "  AND er.n = 0",
+            {},
+        )
+        fail_files = int(fail_rows[0][0] or 0) if fail_rows else 0
+        shape_buckets = int(fail_rows[0][1] or 0) if fail_rows else 0
+
+        crash_rows = await self._rows(
+            f"SELECT count() FROM {self._db}.file_audit FINAL "  # noqa: S608  # nosec B608
+            "WHERE parse_error != ''",
+            {},
+        )
+        crash_files = int(crash_rows[0][0] or 0) if crash_rows else 0
+
+        return ParseFailureStats(
+            total_files=total_files,
+            parsed_files=parsed_files,
+            coverage_pct=coverage_pct,
+            fail_files=fail_files,
+            shape_buckets=shape_buckets,
+            crash_files=crash_files,
+        )
+
+    async def shape_samples(self, shape_sig: str, *, limit: int = 50) -> list[ParseFailureSample]:
+        """Raw sample rows for one shape bucket. Used by the workbench
+        detail panel + the 'Draft rule from file' pre-fill."""
+        rows = await self._rows(
+            "SELECT fa.archive_sha256, fa.victim_folder, fa.rel_path, "  # noqa: S608
+            "       fa.filename, fa.size_bytes, fa.sample_head, "
+            "       fa.heuristic_kind "
+            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
+            "LEFT JOIN ("
+            "  SELECT file_path, count() AS n "
+            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  GROUP BY file_path "
+            ") AS er ON er.file_path = fa.rel_path "
+            "WHERE fa.victim_folder != '' "
+            "  AND fa.heuristic_kind NOT IN ('empty','binary') "
+            "  AND er.n = 0 "
+            f"  AND {self._SIG_EXPR} = {{sig:String}} "
+            "LIMIT {limit:UInt32}",
+            {"sig": shape_sig, "limit": int(limit)},
+        )
+        return [
+            ParseFailureSample(
+                archive_sha256=str(r[0]),
+                victim_folder=str(r[1]),
+                file_path=str(r[2]),
+                filename=str(r[3]),
+                size_bytes=int(r[4]),
+                sample_head=str(r[5] or ""),
+                heuristic_kind=str(r[6] or ""),
+            )
+            for r in rows
+        ]
+
+
 __all__ = [
     "ArtifactCardRow",
     "ArtifactDetailRow",
@@ -892,9 +1250,13 @@ __all__ = [
     "CoverageRow",
     "CredRow",
     "FileAuditReader",
+    "ParseFailureSample",
+    "ParseFailureShape",
+    "ParseFailureStats",
     "SampleRow",
     "StealerArtifactsReader",
     "StealerCredsReader",
+    "StealerFailuresReader",
     "StealerStats",
     "UnknownRow",
 ]

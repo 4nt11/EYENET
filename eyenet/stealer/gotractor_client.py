@@ -20,14 +20,16 @@ import os
 import subprocess  # nosec B404
 import threading
 import uuid
-from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 from queue import Queue
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from eyenet.stealer.extractor import gotractor_path
 from eyenet.telemetry.logging import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 _log = get_logger()
 
@@ -85,9 +87,12 @@ class GotractorDaemon:
         cmd = [
             gotractor_path(),
             "--mode=daemon",
-            "--rules-dir", self._rules_dir,
-            "--families-dir", self._families_dir,
-            "--limit", str(self._bulk_limit),
+            "--rules-dir",
+            self._rules_dir,
+            "--families-dir",
+            self._families_dir,
+            "--limit",
+            str(self._bulk_limit),
         ]
         if self._metrics_port:
             cmd += ["--metrics-port", str(self._metrics_port)]
@@ -110,14 +115,16 @@ class GotractorDaemon:
         # Reader thread demultiplexes stdout by req_id into per-request queues.
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
-        _log.info("gotractor.daemon.started", rules_dir=self._rules_dir,
-                  metrics_port=self._metrics_port)
+        _log.info(
+            "gotractor.daemon.started", rules_dir=self._rules_dir, metrics_port=self._metrics_port
+        )
 
     def _reader_loop(self) -> None:
-        assert self._proc is not None and self._proc.stdout is not None  # noqa: S101
+        assert self._proc is not None  # noqa: S101
+        assert self._proc.stdout is not None  # noqa: S101
         try:
-            for line in self._proc.stdout:
-                line = line.strip()
+            for raw_line in self._proc.stdout:
+                line = raw_line.strip()
                 if not line:
                     continue
                 try:
@@ -130,22 +137,26 @@ class GotractorDaemon:
                     q = self._queues.get(rid) if rid else None
                 if q is not None:
                     q.put(msg)
-                else:
-                    # Unsolicited (fs-reload, plain error): log, do nothing.
-                    if msg.get("kind") == "reloaded":
-                        _log.info("gotractor.daemon.catalog_reloaded",
-                                  rules=msg.get("rules"), families=msg.get("families"),
-                                  trigger=msg.get("trigger"))
-                    elif msg.get("kind") == "error":
-                        _log.warning("gotractor.daemon.unsolicited_error",
-                                     error=msg.get("error"))
-        except Exception as exc:  # noqa: BLE001
+                # Unsolicited (fs-reload, plain error): log, do nothing.
+                elif msg.get("kind") == "reloaded":
+                    _log.info(
+                        "gotractor.daemon.catalog_reloaded",
+                        rules=msg.get("rules"),
+                        families=msg.get("families"),
+                        trigger=msg.get("trigger"),
+                    )
+                elif msg.get("kind") == "error":
+                    _log.warning("gotractor.daemon.unsolicited_error", error=msg.get("error"))
+        except Exception as exc:
             _log.warning("gotractor.daemon.reader_loop_crashed", error=str(exc))
 
     # ---- public ops ----
 
     def run(
-        self, input_path: Path | str, *, source_label: str = "",
+        self,
+        input_path: Path | str,
+        *,
+        source_label: str = "",
     ) -> tuple[Iterator[dict[str, Any]], Queue[RunDone]]:
         """Dispatch a 'run' command. Returns an iterator that yields each
         ``record`` line's ``fields`` dict as gotractor emits it, plus a
@@ -161,10 +172,17 @@ class GotractorDaemon:
         with self._mu:
             self._queues[rid] = q
             assert self._proc.stdin is not None  # noqa: S101
-            self._proc.stdin.write(json.dumps({
-                "cmd": "run", "req_id": rid,
-                "input": str(input_path), "source_label": source_label,
-            }) + "\n")
+            self._proc.stdin.write(
+                json.dumps(
+                    {
+                        "cmd": "run",
+                        "req_id": rid,
+                        "input": str(input_path),
+                        "source_label": source_label,
+                    }
+                )
+                + "\n"
+            )
             self._proc.stdin.flush()
 
         def _iter() -> Iterator[dict[str, Any]]:
@@ -177,8 +195,12 @@ class GotractorDaemon:
                         family = msg.get("family")
                         # Yield the verdict as a sentinel first-record so
                         # the pipeline can tag the whole batch.
-                        yield {"_kind": "verdict", "family": family,
-                               "root": msg.get("root"), "files": msg.get("files")}
+                        yield {
+                            "_kind": "verdict",
+                            "family": family,
+                            "root": msg.get("root"),
+                            "files": msg.get("files"),
+                        }
                     elif kind == "record":
                         yield {
                             "_kind": "record",
@@ -187,18 +209,37 @@ class GotractorDaemon:
                             "file_path": msg.get("file_path"),
                             "fields": msg.get("fields") or {},
                         }
+                    elif kind == "parse_error":
+                        # Per-file or archive-wide gotractor crash. The
+                        # daemon's recover() caught a panic in BulkParse
+                        # (file_path set) or RunRules (file_path="", one
+                        # marker per archive run). Downstream writes
+                        # parse_error cols onto the matching file_audit
+                        # rows so the operator can find the files that
+                        # make the extractor explode.
+                        yield {
+                            "_kind": "parse_error",
+                            "rule_id": msg.get("rule_id") or "",
+                            "file_path": msg.get("file_path") or "",
+                            "error": str(msg.get("error") or "")[:400],
+                            "kind_code": msg.get("kind_code") or "panic",
+                        }
                     elif kind == "truncated":
-                        _log.warning("gotractor.daemon.truncated",
-                                     rule_id=msg.get("rule_id"),
-                                     file_path=msg.get("file_path"),
-                                     emitted=msg.get("emitted"),
-                                     total_seen=msg.get("total_seen"))
+                        _log.warning(
+                            "gotractor.daemon.truncated",
+                            rule_id=msg.get("rule_id"),
+                            file_path=msg.get("file_path"),
+                            emitted=msg.get("emitted"),
+                            total_seen=msg.get("total_seen"),
+                        )
                     elif kind == "run_done":
-                        done_q.put(RunDone(
-                            records=msg.get("records", 0),
-                            wall_ms=msg.get("wall_ms", 0),
-                            rules_fired=msg.get("rules_fired") or {},
-                        ))
+                        done_q.put(
+                            RunDone(
+                                records=msg.get("records", 0),
+                                wall_ms=msg.get("wall_ms", 0),
+                                rules_fired=msg.get("rules_fired") or {},
+                            )
+                        )
                         return
                     elif kind == "error":
                         raise GotractorError(str(msg.get("error")))
@@ -220,8 +261,8 @@ class GotractorDaemon:
         self._closed = True
         try:
             self._request({"cmd": "shutdown"}, timeout_s=5.0)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:
+            _log.warning("gotractor.daemon.shutdown_failed", error=str(exc))
         try:
             self._proc.wait(timeout=5)
         except subprocess.TimeoutExpired:

@@ -54,10 +54,10 @@ export const drawerCtx = $state({
   folder: null,
   detail: null,
   files: [],
-  records: [],
-  recordsMeta: null,
+  // Per-category paged records: { credentials: {items, meta, page, loading}, ... }
+  recordsByCat: {},
   domains: [],
-  tab: 'overview', // overview | files | credentials | system | audit
+  tab: 'overview', // overview | files | credentials | cookies | system | audit
   loading: false,
   error: null,
   // right panel SELECTED state: which file row (by rel_path) is picked
@@ -70,7 +70,7 @@ export async function openDrawer(sha, folder) {
   drawerCtx.folder = folder;
   drawerCtx.detail = null;
   drawerCtx.files = [];
-  drawerCtx.records = [];
+  drawerCtx.recordsByCat = {};
   drawerCtx.domains = [];
   drawerCtx.selectedFile = null;
   drawerCtx.tab = 'overview';
@@ -99,21 +99,37 @@ export function closeDrawer() {
   drawerCtx.open = false;
 }
 
-export async function loadRecords({ page = 1, ruleId, family } = {}) {
-  if (!drawerCtx.sha || !drawerCtx.folder) return;
+// Per-category records cache. Each tab ('credentials' | 'cookies' |
+// 'system') maintains its own page + items + page_meta so switching tabs
+// does not refetch, and paging in one tab does not disturb another.
+function _ensureCat(cat) {
+  if (!drawerCtx.recordsByCat[cat]) {
+    drawerCtx.recordsByCat[cat] = { items: [], meta: null, page: 1, loading: false };
+  }
+  return drawerCtx.recordsByCat[cat];
+}
+
+export async function loadRecords({ category, page = 1, ruleId, family } = {}) {
+  if (!drawerCtx.sha || !drawerCtx.folder || !category) return;
   const encFolder = encodeURIComponent(drawerCtx.folder);
+  const slot = _ensureCat(category);
+  slot.loading = true;
   try {
     const params = new URLSearchParams({ page: String(page), limit: '50' });
+    params.set('category', category);
     if (ruleId) params.set('rule_id', ruleId);
     if (family) params.set('family', family);
     const r = await apiGet(
       `/v1/stealer/artifacts/${drawerCtx.sha}/${encFolder}/records?${params}`,
       { auth: true },
     );
-    drawerCtx.records = r.items ?? [];
-    drawerCtx.recordsMeta = r.page_meta ?? null;
+    slot.items = r.items ?? [];
+    slot.meta = r.page_meta ?? null;
+    slot.page = page;
   } catch (e) {
     drawerCtx.error = e.status === 503 ? 'Corpus offline.' : (e.message ?? String(e));
+  } finally {
+    slot.loading = false;
   }
 }
 

@@ -41,6 +41,7 @@ async def stealer_artifact_records(
     limit: LimitParam = 50,
     rule_id: Annotated[str | None, Query(max_length=128)] = None,
     family: Annotated[str | None, Query(max_length=64)] = None,
+    category: Annotated[str | None, Query(max_length=32)] = None,
 ) -> StealerArtifactRecordsResponse:
     try:
         rows, total, page_count = await reader.records(
@@ -50,6 +51,7 @@ async def stealer_artifact_records(
             limit=limit,
             rule_id=rule_id,
             family=family,
+            category=category,
         )
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc

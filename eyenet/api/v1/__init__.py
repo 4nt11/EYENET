@@ -283,10 +283,13 @@ from eyenet.api.v1.stealer.api_create_stealer_family import router as stealer_fa
 from eyenet.api.v1.stealer.api_create_stealer_rule import router as stealer_rules_create_router
 from eyenet.api.v1.stealer.api_delete_stealer_family import router as stealer_families_delete_router
 from eyenet.api.v1.stealer.api_delete_stealer_rule import router as stealer_rules_delete_router
+from eyenet.api.v1.stealer.api_failures_stats import router as stealer_failures_stats_router
 from eyenet.api.v1.stealer.api_get_artifact import router as stealer_get_artifact_router
+from eyenet.api.v1.stealer.api_get_failure import router as stealer_failure_samples_router
 from eyenet.api.v1.stealer.api_get_stealer_family import router as stealer_families_get_router
 from eyenet.api.v1.stealer.api_get_stealer_rule import router as stealer_rules_get_router
 from eyenet.api.v1.stealer.api_list_artifacts import router as stealer_list_artifacts_router
+from eyenet.api.v1.stealer.api_list_failures import router as stealer_list_failures_router
 from eyenet.api.v1.stealer.api_list_stealer_families import router as stealer_families_list_router
 from eyenet.api.v1.stealer.api_list_stealer_rules import router as stealer_rules_list_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
@@ -534,6 +537,11 @@ v1_router.include_router(stealer_audit_coverage_router)  # GET /stealer/audit/co
 v1_router.include_router(stealer_audit_unknown_router)  # GET /stealer/audit/unknown
 v1_router.include_router(stealer_audit_samples_router)  # GET /stealer/audit/samples
 v1_router.include_router(stealer_audit_search_router)  # GET /stealer/audit/search
+# Child route (/samples) before the greedy parent so FastAPI tries it
+# first, same pattern as the artifact drawer routes.
+v1_router.include_router(stealer_failures_stats_router)  # GET /stealer/failures/stats
+v1_router.include_router(stealer_failure_samples_router)  # GET /stealer/failures/{sig}/samples
+v1_router.include_router(stealer_list_failures_router)  # GET /stealer/failures
 v1_router.include_router(stealer_rules_list_router)  # GET /stealer/rules (read:stealer)
 v1_router.include_router(stealer_rules_get_router)  # GET /stealer/rules/{id} (read:stealer)
 v1_router.include_router(stealer_rules_create_router)  # POST /stealer/rules (write:stealer)

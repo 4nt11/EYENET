@@ -14,6 +14,7 @@
 //   {"kind":"verdict","req_id":"...","family":"...","root":"...","files":N}
 //   {"kind":"record","req_id":"...","rule_id":"...","family":"...","file_path":"...","fields":{...}}
 //   {"kind":"truncated","req_id":"...","rule_id":"...","file_path":"...","emitted":N,"total_seen":N}
+//   {"kind":"parse_error","req_id":"...","rule_id":"...","file_path":"...","error":"...","kind_code":"panic|timeout|decode"}
 //   {"kind":"run_done","req_id":"...","records":N,"wall_ms":N,"rules_fired":{"<rule_id>":N}}
 //   {"kind":"reloaded","req_id":"...","rules":N,"families":N,"trigger":"cmd|fs"}
 //   {"kind":"stats","req_id":"...","uptime_ms":N,"archives":N,"records":N,"catalog":{"rules":N,"families":N,"loaded_at":"..."}}
@@ -278,7 +279,22 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 	for _, r := range rules {
 		ruleByID[r.ID] = r
 	}
-	result := engine.RunRules(rules, folder)
+	result, runPanic := safeRunRules(rules, folder)
+	if runPanic != "" {
+		// RunRules took down the whole folder evaluation. We cannot
+		// attribute this to a single file (RunRules does not stream),
+		// so emit one archive-wide parse_error row keyed on an empty
+		// file_path. The Python side writes this onto every file in
+		// the archive that had no better attribution.
+		w.emit(map[string]any{
+			"kind":      "parse_error",
+			"req_id":    cmd.ReqID,
+			"rule_id":   "",
+			"file_path": "",
+			"error":     runPanic,
+			"kind_code": "panic",
+		})
+	}
 
 	w.emit(map[string]any{
 		"kind":   "verdict",
@@ -311,7 +327,19 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 				break
 			}
 		}
-		bulk := engine.BulkParse(r, file, d.bulkLimit)
+		bulk, bulkPanic := safeBulkParse(r, file, d.bulkLimit)
+		if bulkPanic != "" {
+			w.emit(map[string]any{
+				"kind":      "parse_error",
+				"req_id":    cmd.ReqID,
+				"rule_id":   r.ID,
+				"file_path": ev.FilePath,
+				"error":     bulkPanic,
+				"kind_code": "panic",
+			})
+			d.metrics.recordsRejected.WithLabelValues(r.ID).Inc()
+			continue
+		}
 		for _, rec := range bulk.Records {
 			w.emit(map[string]any{
 				"kind":      "record",
@@ -441,6 +469,41 @@ func (l *lockedWriter) emit(v any) {
 	enc := json.NewEncoder(l.w)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(v)
+}
+
+// safeBulkParse wraps engine.BulkParse in a defer/recover so a single
+// bad file (parser panic on a malformed cookie JSON, OOB slice on a
+// surprise byte sequence) does not take the whole daemon down. On
+// recover the caller emits a parse_error msg attributed to the file,
+// then continues with the next (rule, file) pair.
+func safeBulkParse(r engine.Rule, file engine.ContentInput, limit int) (result engine.BulkResult, panicMsg string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panicMsg = truncErr(fmt.Sprint(rec))
+		}
+	}()
+	return engine.BulkParse(r, file, limit), ""
+}
+
+// safeRunRules wraps engine.RunRules. A panic here cannot be attributed
+// to a single file (RunRules folds the whole folder before returning),
+// so the caller emits one archive-wide parse_error marker and then
+// continues with an empty evaluation list.
+func safeRunRules(rules []engine.Rule, folder engine.VictimFolder) (result engine.RunResult, panicMsg string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panicMsg = truncErr(fmt.Sprint(rec))
+		}
+	}()
+	return engine.RunRules(rules, folder), ""
+}
+
+func truncErr(s string) string {
+	const max = 400
+	if len(s) > max {
+		return s[:max]
+	}
+	return s
 }
 
 // readFolder mirrors the main CLI helper but lives here to keep the

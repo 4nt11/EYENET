@@ -296,6 +296,66 @@ class StealerArtifactDomainsResponse(ApiSchema):
     items: list[StealerArtifactDomainRow]
 
 
+# v1.3.6 parse-failures workbench. Grouped by shape fingerprint computed
+# in SQL from file_audit.sample_head; a "shape" row is the aggregate card
+# that drives the workbench table, and samples are the raw file-level
+# rows behind it, surfaced on expand or on the "Draft rule from file"
+# action.
+class StealerFailureShape(ApiSchema):
+    shape_sig: str  # character-class signature key
+    shape_preview: str  # same signature, trimmed for UI header
+    count: int  # how many files fell into this shape bucket
+    victims: int  # distinct (archive_sha256, victim_folder) pairs
+    archives: int  # distinct archives
+    sample: str  # one representative sample_head from the bucket
+    sample_archive_sha256: str
+    sample_victim_folder: str
+    sample_file_path: str
+    heuristic_kind: str
+    filenames: list[str]  # top N distinct filenames seen in the bucket
+
+
+class StealerFailuresResponse(ApiSchema):
+    initialized: bool = True
+    items: list[StealerFailureShape]
+    page_meta: StealerAuditPageMeta
+
+
+class StealerFailureSampleRow(ApiSchema):
+    archive_sha256: str
+    victim_folder: str
+    file_path: str
+    filename: str
+    size_bytes: int
+    sample_head: str
+    heuristic_kind: str
+
+
+class StealerFailureSamplesResponse(ApiSchema):
+    shape_sig: str
+    items: list[StealerFailureSampleRow]
+
+
+class StealerFailuresStats(ApiSchema):
+    """Corpus-wide tiles for the parse-failures workbench header.
+
+    coverage_pct = parsed_files / total_files * 100 across the whole corpus
+    (not filtered by the row-level workbench filters). fail_files is the
+    total count of files behind the shape buckets ( extractor matched a
+    path_glob but 0 records came out). crash_files is the count of files
+    where gotractor itself panicked: a hard error distinct from the
+    softer "rule matched, 0 records" case.
+    """
+
+    initialized: bool = True
+    total_files: int = 0
+    parsed_files: int = 0
+    coverage_pct: float = 0.0
+    fail_files: int = 0
+    shape_buckets: int = 0
+    crash_files: int = 0
+
+
 __all__ = [
     "StealerArtifactCard",
     "StealerArtifactDetail",
@@ -318,6 +378,11 @@ __all__ = [
     "StealerAuditUnknownRow",
     "StealerBucket",
     "StealerCred",
+    "StealerFailureSampleRow",
+    "StealerFailureSamplesResponse",
+    "StealerFailureShape",
+    "StealerFailuresResponse",
+    "StealerFailuresStats",
     "StealerSearchResponse",
     "StealerStatsResponse",
     "StealerTechnique",

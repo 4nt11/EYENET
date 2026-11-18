@@ -219,9 +219,10 @@ def process_archive(
         # the records straight into ClickHouse.
         records = 0
         families: list[str] = []
+        parse_errors: dict[str, tuple[str, str]] = {}
         if records_sink is not None and gotractor is not None:
             try:
-                records, families = _gotractor_insert_daemon(
+                records, families, parse_errors = _gotractor_insert_daemon(
                     gotractor,
                     records_sink,
                     dest,
@@ -254,7 +255,7 @@ def process_archive(
                     "stealer.wallet_extract_failed", error=str(exc), error_type=type(exc).__name__
                 )
         if audit_sink is not None:
-            _write_file_audit(audit_sink, dest, blob_path, pw_files)
+            _write_file_audit(audit_sink, dest, blob_path, pw_files, parse_errors)
         if not pw_files and records == 0:
             return ProcessResult(
                 ok=True,
@@ -281,27 +282,46 @@ def _gotractor_insert_daemon(
     dest: Path,
     blob_path: Path,
     source_label: str,
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[str], dict[str, tuple[str, str]]]:
     """Dispatch a 'run' command to the resident gotractor daemon, stream
     the record lines into ``stealer.extracted_records``. Returns
-    ``(rows_inserted, family_tags)``.
+    ``(rows_inserted, family_tags, parse_errors)``.
 
     The Python process is the batcher; the Go daemon is the parser.
     Daemon mode: one resident subprocess for the service lifetime, no
     per-archive fork. Records stream through a thread-safe queue in
     GotractorDaemon.run().
+
+    parse_errors maps rel_path -> (kind_code, error_msg). file_path=""
+    is the archive-wide bucket (RunRules panic); _write_file_audit uses
+    that as a fallback for every row that has no per-file attribution.
     """
     sink.ensure_schema()
     archive_sha = blob_path.stem  # <sha256>.bin
     stream, done_q = daemon.run(dest, source_label=source_label)
     total = 0
     families: list[str] = []
+    parse_errors: dict[str, tuple[str, str]] = {}
     batch: list[list[object]] = []
     for msg in stream:
         if msg["_kind"] == "verdict":
             fam = msg.get("family")
             if fam:
                 families.append(fam)
+            continue
+        if msg["_kind"] == "parse_error":
+            parse_errors[msg.get("file_path", "")] = (
+                msg.get("kind_code", "panic"),
+                msg.get("error", ""),
+            )
+            _log.warning(
+                "stealer.gotractor_parse_error",
+                archive=archive_sha,
+                rule_id=msg.get("rule_id") or "",
+                file_path=msg.get("file_path") or "<archive-wide>",
+                kind_code=msg.get("kind_code") or "panic",
+                error=msg.get("error") or "",
+            )
             continue
         # Record branch: derive per-victim folder from file_path segment [1] (second
         # path segment under the archive root, matching the Khazan wrapper
@@ -338,7 +358,7 @@ def _gotractor_insert_daemon(
         )
     except Exception:
         _log.info("stealer.gotractor_run", archive=archive_sha, records=total, families=families)
-    return total, families
+    return total, families, parse_errors
 
 
 def _gotractor_extract_wallets(
@@ -412,23 +432,35 @@ def _gotractor_extract_wallets(
 
 
 def _write_file_audit(
-    audit_sink: FileAuditSink, dest: Path, blob_path: Path, pw_files: list[Path]
+    audit_sink: FileAuditSink,
+    dest: Path,
+    blob_path: Path,
+    pw_files: list[Path],
+    parse_errors: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Walk the decrypted work dir, scan every file, write rows to file_audit.
 
     Failures land as a WARN log, never raised: an audit-side DB hiccup must
     not propagate out to stealer_processor.done. ``archive_sha256`` is taken
     from the blob's filename (``<sha256>.bin``) so audit rows join back to the
-    attachment row in PG by sha."""
+    attachment row in PG by sha.
+
+    ``parse_errors`` is the per-file gotractor crash map from the daemon
+    stream: {rel_path: (kind_code, error_msg)}. The empty-string key is the
+    archive-wide fallback (RunRules panic) applied to every row with no
+    per-file attribution."""
     try:
         from eyenet.stealer.file_scan import walk_audit  # noqa: PLC0415
 
         audit_sink.ensure_schema()
         pw_rel = {str(p.relative_to(dest)) for p in pw_files}
         archive_sha = blob_path.stem  # <sha256>.bin -> <sha256>
+        errs = parse_errors or {}
+        archive_err = errs.get("", ("", ""))
         batch: list[list[object]] = []
         count = 0
         for a in walk_audit(dest):
+            err_code, err_detail = errs.get(a.rel_path, archive_err)
             batch.append(
                 [
                     archive_sha,
@@ -441,6 +473,8 @@ def _write_file_audit(
                     a.approx_banner_hits,
                     a.approx_null_pw_hits,
                     a.sample_head,
+                    err_code,
+                    err_detail,
                 ]
             )
             if len(batch) >= _INSERT_BATCH:

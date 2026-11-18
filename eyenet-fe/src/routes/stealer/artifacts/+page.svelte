@@ -17,6 +17,12 @@
     loadRecords,
     pickFile,
   } from '$lib/stealerArtifacts.svelte.js';
+  import {
+    canonicalize,
+    groupByPrefix,
+    CANONICAL_LABELS,
+    PREFIX_LABELS,
+  } from '$lib/stealerCanonicalFields.js';
 
   const shortSha = (s) => (s ? s.slice(0, 8) : '');
   const fmt = (n) => (n ?? 0).toLocaleString();
@@ -42,34 +48,56 @@
     { id: 'overview', label: 'Overview' },
     { id: 'files', label: 'Files' },
     { id: 'credentials', label: 'Credentials' },
+    { id: 'cookies', label: 'Cookies' },
     { id: 'system', label: 'System' },
     { id: 'audit', label: 'Audit' },
   ];
 
+  // Tabs backed by paged /records responses. Opening one of these lazy-
+  // loads page 1 for its category; the backend maps category -> rule_ids.
+  const RECORD_TABS = new Set(['credentials', 'cookies', 'system']);
+
   const pickTab = (id) => {
     drawerCtx.tab = id;
-    // Lazy-load records when Credentials or System tab opens.
-    if ((id === 'credentials' || id === 'system') && drawerCtx.records.length === 0) {
-      loadRecords({ page: 1 });
+    if (RECORD_TABS.has(id) && !drawerCtx.recordsByCat[id]) {
+      loadRecords({ category: id, page: 1 });
     }
   };
 
-  // Credentials tab: records filtered to credential-emitting rules. Different
-  // rules emit different field names (passwords_block_title: soft/host/login,
-  // passwords_block_divider: url/username, credentials_windows: target/user,
-  // etc), so the row renderer coalesces across the known key aliases.
-  const CRED_RULES = /^(passwords_|credentials_|firefox_logins)/;
+  const slotFor = (cat) => drawerCtx.recordsByCat[cat] ?? { items: [], meta: null, page: 1, loading: false };
+
+  const prevRecPage = (cat) => {
+    const s = slotFor(cat);
+    loadRecords({ category: cat, page: Math.max(1, (s.page ?? 1) - 1) });
+  };
+  const nextRecPage = (cat) => {
+    const s = slotFor(cat);
+    const pc = s.meta?.page_count ?? 1;
+    loadRecords({ category: cat, page: Math.min(pc, (s.page ?? 1) + 1) });
+  };
+
   const firstField = (fields, keys) => {
     for (const k of keys) if (fields?.[k]) return fields[k];
     return '';
   };
+  // Credentials row shape coalesces across the known rule schemas
+  // (passwords_block_title: soft/host/login, passwords_block_divider:
+  // url/username, credentials_windows: target/user, firefox_logins).
   const credUrl = (f) => firstField(f, ['url', 'host', 'target']);
   const credUser = (f) => firstField(f, ['login', 'username', 'user']);
   const credPw = (f) => firstField(f, ['password']);
   const credBrowser = (f) => firstField(f, ['browser', 'soft', 'profile']);
-  const creds = $derived(
-    drawerCtx.records.filter((r) => CRED_RULES.test(r.rule_id ?? '')),
-  );
+  // Cookie row shape: netscape_cookies emits host/name/value/expires/path,
+  // cookies_netscape_tsv uses tab-split same columns.
+  const cookieHost = (f) => firstField(f, ['host', 'domain']);
+  const cookieName = (f) => firstField(f, ['name']);
+  const cookieValue = (f) => firstField(f, ['value']);
+  const cookiePath = (f) => firstField(f, ['path']);
+  const cookieExpires = (f) => firstField(f, ['expires', 'expiration']);
+  const cookieSecure = (f) => firstField(f, ['secure', 'is_secure']);
+
+  const creds = $derived(slotFor('credentials').items);
+  const cookies = $derived(slotFor('cookies').items);
   // Dedupe files by filename until the pipeline stops writing the ephemeral
   // extraction root into rel_path (multiple reindex passes produce distinct
   // rel_paths for the same logical file, so FINAL on file_audit can't
@@ -96,14 +124,24 @@
     }
     return Array.from(byName.values());
   });
-  const systemRows = $derived(
-    drawerCtx.records.filter(
-      (r) =>
-        r.rule_id === 'software_corporate_marker' ||
-        r.rule_id === 'pc_info_block' ||
-        r.rule_id === 'ui_identity_block',
-    ),
+  const systemRows = $derived(slotFor('system').items);
+
+  // Canonical machine profile. Coalesce every system-category record
+  // (environment_windows, stealer_info_yaml, information_v29_shape)
+  // into one host.*/av.*/build.*/net.* snapshot. Order matters: the
+  // first non-empty alias wins per canonical key, and record order
+  // is the backend's (ORDER BY rule_id), so put the more complete
+  // profile rule later in CANONICAL_FIELDS if the order ever flips.
+  const systemCanonical = $derived.by(() => {
+    const groups = ['host', 'av', 'build', 'net'];
+    const merged = {};
+    for (const g of groups) Object.assign(merged, canonicalize(systemRows, g));
+    return groupByPrefix(merged);
+  });
+  const systemHasAny = $derived(
+    Object.values(systemCanonical).some((rows) => rows.length > 0),
   );
+  const canonicalLabel = (k) => CANONICAL_LABELS[k] ?? k.split('.').slice(1).join('.');
 
   const selectedFileRow = $derived(
     dedupedFiles.find((f) => f.rel_path === drawerCtx.selectedFile) ?? dedupedFiles[0],
@@ -350,6 +388,7 @@
               <p class="note">No files indexed for this victim.</p>
             {/if}
           {:else if drawerCtx.tab === 'credentials'}
+            {@const s = slotFor('credentials')}
             <table class="t t-creds">
               <colgroup>
                 <col style="width:34%" />
@@ -373,24 +412,90 @@
                 {/each}
               </tbody>
             </table>
-            {#if creds.length === 0}
-              <p class="note">No credential rows loaded yet.</p>
+            {#if s.loading}
+              <p class="note">Loading credentials…</p>
+            {:else if creds.length === 0}
+              <p class="note">No credential rows for this victim.</p>
             {/if}
-          {:else if drawerCtx.tab === 'system'}
-            <table class="t">
+            {#if s.meta && s.meta.page_count > 1}
+              <div class="recpager">
+                <span class="muted mono">{fmt(s.meta.total)} rows · page {s.meta.page}/{s.meta.page_count}</span>
+                <Button variant="ghost" size="sm" disabled={s.page <= 1 || s.loading} onclick={() => prevRecPage('credentials')}>Prev</Button>
+                <Button variant="primary" size="sm" disabled={s.loading || !s.meta.has_more} onclick={() => nextRecPage('credentials')}>Next</Button>
+              </div>
+            {/if}
+          {:else if drawerCtx.tab === 'cookies'}
+            {@const s = slotFor('cookies')}
+            <table class="t t-cookies">
+              <colgroup>
+                <col style="width:26%" />
+                <col style="width:20%" />
+                <col style="width:34%" />
+                <col style="width:12%" />
+                <col style="width:8%" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>HOST</th><th>NAME</th><th>VALUE</th><th>EXPIRES</th><th>SECURE</th>
+                </tr>
+              </thead>
               <tbody>
-                {#each systemRows as r}
-                  {#each Object.entries(r.fields) as [k, v]}
-                    <tr>
-                      <td class="muted" style="width:140px">{k}</td>
-                      <td class="name">{v}</td>
-                    </tr>
-                  {/each}
+                {#each cookies as c}
+                  <tr>
+                    <td class="name wrap">{cookieHost(c.fields)}</td>
+                    <td class="wrap">{cookieName(c.fields)}</td>
+                    <td class="pw wrap mono-sm">{cookieValue(c.fields)}</td>
+                    <td class="muted">{cookieExpires(c.fields)}</td>
+                    <td class="muted">{cookieSecure(c.fields) === 'TRUE' || cookieSecure(c.fields) === 'true' ? 'yes' : ''}</td>
+                  </tr>
                 {/each}
               </tbody>
             </table>
-            {#if systemRows.length === 0}
-              <p class="note">No system fingerprint rows loaded.</p>
+            {#if s.loading}
+              <p class="note">Loading cookies…</p>
+            {:else if cookies.length === 0}
+              <p class="note">No cookies for this victim.</p>
+            {/if}
+            {#if s.meta && s.meta.page_count > 1}
+              <div class="recpager">
+                <span class="muted mono">{fmt(s.meta.total)} rows · page {s.meta.page}/{s.meta.page_count}</span>
+                <Button variant="ghost" size="sm" disabled={s.page <= 1 || s.loading} onclick={() => prevRecPage('cookies')}>Prev</Button>
+                <Button variant="primary" size="sm" disabled={s.loading || !s.meta.has_more} onclick={() => nextRecPage('cookies')}>Next</Button>
+              </div>
+            {/if}
+          {:else if drawerCtx.tab === 'system'}
+            {@const s = slotFor('system')}
+            {#if s.loading && !systemHasAny}
+              <p class="note">Loading machine profile…</p>
+            {:else if !systemHasAny}
+              <p class="note">No system fingerprint records for this victim.</p>
+            {:else}
+              <div class="syspanels">
+                {#each ['host', 'av', 'build', 'net'] as g}
+                  {#if (systemCanonical[g] ?? []).length > 0}
+                    <section class="syspanel">
+                      <div class="panel-label">{PREFIX_LABELS[g]}</div>
+                      <table class="t t-kv">
+                        <tbody>
+                          {#each systemCanonical[g] as [k, v]}
+                            <tr>
+                              <td class="muted" style="width:140px">{canonicalLabel(k)}</td>
+                              <td class="name wrap">{v}</td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </section>
+                  {/if}
+                {/each}
+              </div>
+              {#if s.meta && s.meta.page_count > 1}
+                <div class="recpager">
+                  <span class="muted mono">{fmt(s.meta.total)} source rows · page {s.meta.page}/{s.meta.page_count}</span>
+                  <Button variant="ghost" size="sm" disabled={s.page <= 1 || s.loading} onclick={() => prevRecPage('system')}>Prev</Button>
+                  <Button variant="primary" size="sm" disabled={s.loading || !s.meta.has_more} onclick={() => nextRecPage('system')}>Next</Button>
+                </div>
+              {/if}
             {/if}
           {:else if drawerCtx.tab === 'audit'}
             <p class="note">Audit stream is not wired yet (backend endpoint pending).</p>
@@ -795,13 +900,34 @@
      ("Microsoft Edge (Default)") push a layout:auto table way past the
      available width. Fix the layout so column widths are respected,
      then let cell content wrap on any boundary via overflow-wrap:anywhere. */
-  .t-creds {
+  .t-creds, .t-cookies {
     table-layout: fixed;
   }
-  .t-creds td.wrap {
+  .t-creds td.wrap, .t-cookies td.wrap {
     overflow-wrap: anywhere;
     word-break: break-word;
     line-height: 1.4;
+  }
+  .syspanels { display: flex; flex-direction: column; gap: 14px; }
+  .syspanel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+  .syspanel > .panel-label { padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+  .t-kv td { padding: 5px 12px; }
+  .mono-sm {
+    font-family: var(--font-mono);
+    font-size: var(--fs-11);
+    letter-spacing: var(--tracking-data);
+  }
+  .recpager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 2px 2px;
+  }
+  .recpager .muted {
+    margin-right: auto;
+    font-size: var(--fs-11);
+    letter-spacing: var(--tracking-data);
   }
   /* Signal column tones: skipped files are the most common state and should
      stay quiet; "empty" (inspected, nothing matched) gets a dim amber hint

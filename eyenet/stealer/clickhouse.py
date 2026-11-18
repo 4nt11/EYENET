@@ -729,6 +729,8 @@ _FILE_AUDIT_COLUMNS = [
     "approx_banner_hits",
     "approx_null_pw_hits",
     "sample_head",
+    "parse_error",
+    "parse_error_detail",
 ]
 
 # v1.2.7 schema evolution for file_audit: pre-aggregated roll-up tables + the
@@ -936,6 +938,14 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
     WHERE victim_folder != ''
       AND NOT EXISTS (SELECT 1 FROM {db}.file_audit_per_victim)
     """,
+    # v1.3.7 hard-crash tracking. parse_error = short code ('panic', 'timeout',
+    # 'decode', ''); parse_error_detail = truncated message. Set per-file by
+    # the gotractor daemon via a safeBulkParse recover() wrapper. Operator
+    # uses these to tell "gotractor died on this file" apart from the softer
+    # "rule matched, zero records emitted" case the workbench shape-groups.
+    "ALTER TABLE {db}.file_audit ADD COLUMN IF NOT EXISTS "
+    "parse_error LowCardinality(String) DEFAULT ''",
+    "ALTER TABLE {db}.file_audit ADD COLUMN IF NOT EXISTS parse_error_detail String DEFAULT ''",
 )
 
 
