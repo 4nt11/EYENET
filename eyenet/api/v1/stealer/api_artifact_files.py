@@ -7,7 +7,6 @@ directory. FE builds the tree client-side by splitting rel_path on '/'.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -35,9 +34,7 @@ async def stealer_artifact_files(
     victim_folder: Annotated[str, Path(min_length=1, max_length=512)],
 ) -> StealerArtifactFilesResponse:
     try:
-        rows = await asyncio.to_thread(
-            lambda: reader.file_tree(archive_sha256, victim_folder)
-        )
+        rows = await reader.file_tree(archive_sha256, victim_folder)
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
     return StealerArtifactFilesResponse(

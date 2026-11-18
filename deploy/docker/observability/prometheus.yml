@@ -35,3 +35,12 @@ scrape_configs:
   - job_name: eyenet-otel-collector
     static_configs:
       - targets: ["otel-collector:8889"]
+
+  # gotractor (the Go rule engine the stealer-processor hosts). Native Prometheus
+  # /metrics on :9091 (EYENET_GOTRACTOR_METRICS_PORT, 0 disables). Emits per-rule
+  # and per-family records_emitted/_rejected counters, archive_duration histogram,
+  # catalog rule/family gauges, and reload+error counters. No OTel yet. The target
+  # resolves via compose DNS when the observability + stealer profiles are both up.
+  - job_name: eyenet-gotractor
+    static_configs:
+      - targets: ["stealer-processor:9091"]

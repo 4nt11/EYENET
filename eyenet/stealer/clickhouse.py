@@ -101,11 +101,27 @@ def clickhouse_db() -> str:
 
 
 def get_clickhouse_client() -> Client:
-    """A clickhouse-connect client from EYENET_CLICKHOUSE_* env. Shared by the creds
-    sink (processor) and the read API (search/stats)."""
-    import clickhouse_connect  # noqa: PLC0415 — dep present in core + stealer images
+    """A clickhouse-connect sync client from EYENET_CLICKHOUSE_* env. Used by the
+    creds sink (processor is a pure sync pipeline) and the schema DDL path."""
+    import clickhouse_connect  # noqa: PLC0415 - dep present in core + stealer images
 
     return clickhouse_connect.get_client(
+        host=os.environ.get("EYENET_CLICKHOUSE_HOST", "clickhouse"),
+        port=int(os.environ.get("EYENET_CLICKHOUSE_PORT", "8123")),
+        username=os.environ.get("EYENET_CLICKHOUSE_USER", "default"),
+        password=os.environ.get("EYENET_CLICKHOUSE_PASSWORD", ""),
+    )
+
+
+async def get_async_clickhouse_client() -> Any:
+    """Async clickhouse-connect client for the API read path. Built-in connection
+    pool, every call is awaitable, event loop never blocks. Swap for the sync one
+    in any reader the API serves concurrently; keep the sync one for the
+    processor's single-threaded pipeline. Returns Any because clickhouse-connect
+    does not export a public AsyncClient type under a stable path yet."""
+    import clickhouse_connect  # noqa: PLC0415
+
+    return await clickhouse_connect.get_async_client(
         host=os.environ.get("EYENET_CLICKHOUSE_HOST", "clickhouse"),
         port=int(os.environ.get("EYENET_CLICKHOUSE_PORT", "8123")),
         username=os.environ.get("EYENET_CLICKHOUSE_USER", "default"),

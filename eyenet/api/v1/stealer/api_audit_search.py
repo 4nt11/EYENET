@@ -66,7 +66,7 @@ async def stealer_audit_search(
         return StealerAuditSearchResponse(
             initialized=False, items=[], page_meta=empty_meta(page, limit)
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=503, detail=f"stealer corpus unavailable: {exc}") from exc
     return StealerAuditSearchResponse(
         items=[

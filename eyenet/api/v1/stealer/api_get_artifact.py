@@ -8,7 +8,6 @@ fired rule_ids.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -38,7 +37,7 @@ async def stealer_get_artifact(
     victim_folder: Annotated[str, Path(min_length=1, max_length=512)],
 ) -> StealerArtifactDetail:
     try:
-        row = await asyncio.to_thread(lambda: reader.detail(archive_sha256, victim_folder))
+        row = await reader.detail(archive_sha256, victim_folder)
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
     if row is None:

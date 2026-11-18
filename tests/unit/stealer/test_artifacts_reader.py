@@ -31,12 +31,12 @@ class _Reader(StealerArtifactsReader):
     def set_responses(self, rows: Iterable[list[tuple[object, ...]]]) -> None:
         self._responses = list(rows)
 
-    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+    async def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
         self._calls.append((sql, params))
         return self._responses.pop(0) if self._responses else []
 
 
-def test_list_cards_filters_and_pagination() -> None:
+async def test_list_cards_filters_and_pagination() -> None:
     r = _Reader()
     card_row = (
         _SHA,
@@ -53,7 +53,7 @@ def test_list_cards_filters_and_pagination() -> None:
     )
     r.set_responses([[(2,)], [card_row, card_row]])
 
-    rows, total, pages = r.list_cards(
+    rows, total, pages = await r.list_cards(
         page=2,
         limit=25,
         country="US",
@@ -79,22 +79,22 @@ def test_list_cards_filters_and_pagination() -> None:
     assert list_params["offset"] == 25  # page 2, limit 25
 
 
-def test_list_cards_no_filters() -> None:
+async def test_list_cards_no_filters() -> None:
     r = _Reader()
     r.set_responses([[(0,)], []])
-    rows, total, pages = r.list_cards(page=1, limit=10)
+    rows, total, pages = await r.list_cards(page=1, limit=10)
     assert rows == []
     assert total == 0
     assert pages == 0
 
 
-def test_detail_returns_none_when_no_row() -> None:
+async def test_detail_returns_none_when_no_row() -> None:
     r = _Reader()
     r.set_responses([[]])
-    assert r.detail(_SHA, "v-01") is None
+    assert await r.detail(_SHA, "v-01") is None
 
 
-def test_detail_hydrates_full_row_with_ttps_and_hits() -> None:
+async def test_detail_hydrates_full_row_with_ttps_and_hits() -> None:
     r = _Reader()
     detail_row = (
         "khazan",
@@ -134,7 +134,7 @@ def test_detail_hydrates_full_row_with_ttps_and_hits() -> None:
             [(7,)],  # monitored-domain hits
         ]
     )
-    out = r.detail(_SHA, "v-01")
+    out = await r.detail(_SHA, "v-01")
     assert out is not None
     assert out.source == "khazan"
     assert out.creds_count == 17
@@ -142,17 +142,17 @@ def test_detail_hydrates_full_row_with_ttps_and_hits() -> None:
     assert out.monitored_domain_hits == 7
 
 
-def test_monitored_domain_hits_zero_when_watchlist_empty() -> None:
+async def test_monitored_domain_hits_zero_when_watchlist_empty() -> None:
     r = _Reader()
     r.set_responses([[(0,)]])
-    assert r._monitored_domain_hits(_SHA, "v-01") == 0
+    assert await r._monitored_domain_hits(_SHA, "v-01") == 0
     sql, _params = r._calls[0]
     assert "monitored_domains" in sql
     assert "match_type = 'exact'" in sql
     assert "match_type = 'suffix'" in sql
 
 
-def test_file_tree_maps_rows() -> None:
+async def test_file_tree_maps_rows() -> None:
     r = _Reader()
     r.set_responses(
         [
@@ -161,17 +161,17 @@ def test_file_tree_maps_rows() -> None:
             ]
         ]
     )
-    rows = r.file_tree(_SHA, "v-01")
+    rows = await r.file_tree(_SHA, "v-01")
     assert rows[0].filename == "P.txt"
     assert rows[0].size_bytes == 2048
     assert rows[0].extractor_touched is True
 
 
-def test_records_filters_by_rule_and_family() -> None:
+async def test_records_filters_by_rule_and_family() -> None:
     r = _Reader()
     rec_row = ("passwords_block_title", "khazan", "arch/v-01/P.txt", {"u": "a"})
     r.set_responses([[(1,)], [rec_row]])
-    rows, total, pages = r.records(
+    rows, total, pages = await r.records(
         _SHA, "v-01", page=1, limit=50, rule_id="passwords_block_title", family="khazan"
     )
     assert total == 1
@@ -182,14 +182,14 @@ def test_records_filters_by_rule_and_family() -> None:
     assert count_params["fam"] == "khazan"
 
 
-def test_records_tolerates_null_fields_dict() -> None:
+async def test_records_tolerates_null_fields_dict() -> None:
     r = _Reader()
     r.set_responses([[(1,)], [("r", "f", "p", None)]])
-    rows, _total, _pages = r.records(_SHA, "v-01", page=1, limit=50)
+    rows, _total, _pages = await r.records(_SHA, "v-01", page=1, limit=50)
     assert rows[0].fields == {}
 
 
-def test_domains_maps_rows() -> None:
+async def test_domains_maps_rows() -> None:
     r = _Reader()
     r.set_responses(
         [
@@ -199,7 +199,7 @@ def test_domains_maps_rows() -> None:
             ]
         ]
     )
-    rows = r.domains(_SHA, "v-01")
+    rows = await r.domains(_SHA, "v-01")
     assert [d.domain for d in rows] == ["accounts.google.com", "facebook.com"]
     assert rows[1].count == 12
 

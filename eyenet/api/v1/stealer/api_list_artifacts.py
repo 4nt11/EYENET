@@ -8,7 +8,6 @@ has_wallet, has_corporate.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -46,15 +45,13 @@ async def stealer_list_artifacts(
     has_corporate: Annotated[bool | None, Query()] = None,
 ) -> StealerArtifactsResponse:
     try:
-        rows, total, page_count = await asyncio.to_thread(
-            lambda: reader.list_cards(
-                page=page,
-                limit=limit,
-                country=country,
-                traffic_affid=traffic_affid,
-                has_wallet=has_wallet,
-                has_corporate=has_corporate,
-            )
+        rows, total, page_count = await reader.list_cards(
+            page=page,
+            limit=limit,
+            country=country,
+            traffic_affid=traffic_affid,
+            has_wallet=has_wallet,
+            has_corporate=has_corporate,
         )
     except StealerCorpusUninitializedError:
         return StealerArtifactsResponse(

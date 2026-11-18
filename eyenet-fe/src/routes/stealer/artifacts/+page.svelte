@@ -364,10 +364,31 @@
 </main>
 
 <style>
+  /* Match the layout convention from /stealer and the other primary surfaces:
+     main is a flex column that fills the content area; children carry their own
+     horizontal padding (:16px 20px:) so lists, tables, and the empty-state card
+     all align flush with the SectionHeader above. */
   main {
-    padding: 16px;
-    display: grid;
-    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    background: var(--black);
+    padding-bottom: 24px;
+  }
+  .head {
+    padding-right: 20px;
+  }
+  .list,
+  .empty {
+    padding: 0 20px;
+  }
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 10px;
   }
   .note {
     color: var(--text-muted);
@@ -378,20 +399,18 @@
     color: var(--red-text);
   }
   .empty {
-    display: grid;
-    place-items: center;
-    padding: 64px 0;
+    display: flex;
+    justify-content: center;
+    padding-top: 64px;
   }
   .empty-card {
+    width: 100%;
     max-width: 520px;
     padding: 24px;
     border: 1px solid var(--border);
     background: var(--panel);
     border-radius: var(--radius);
-  }
-  .list {
-    display: grid;
-    gap: 10px;
+    text-align: center;
   }
   .meta {
     display: flex;

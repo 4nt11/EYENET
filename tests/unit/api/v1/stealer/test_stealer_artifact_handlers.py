@@ -37,6 +37,24 @@ pytestmark = pytest.mark.unit
 _SHA = "a" * 64
 
 
+def _coro(value: object) -> object:
+    """Wrap a value so the stubbed reader method returns an awaitable."""
+
+    async def _inner(*_a: object, **_k: object) -> object:
+        return value
+
+    return _inner
+
+
+def _raises(exc: BaseException) -> object:
+    """Async stub that raises the given exception when awaited."""
+
+    async def _inner(*_a: object, **_k: object) -> object:
+        raise exc
+
+    return _inner
+
+
 def _user() -> CurrentUser:
     return CurrentUser(
         user_id=uuid4(),
@@ -105,7 +123,7 @@ def _detail(hits: int = 3) -> ArtifactDetailRow:
 
 
 async def test_list_artifacts_maps_cards(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shared_reader, "list_cards", lambda **_k: ([_card("a"), _card("b")], 2, 1))
+    monkeypatch.setattr(shared_reader, "list_cards", _coro(([_card("a"), _card("b")], 2, 1)))
     resp = await list_mod.stealer_list_artifacts(_user())
     assert resp.initialized is True
     assert [c.victim_folder for c in resp.items] == ["a", "b"]
@@ -116,10 +134,9 @@ async def test_list_artifacts_maps_cards(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_list_artifacts_uninitialized_returns_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _boom(**_k: object) -> object:
-        raise StealerCorpusUninitializedError("no table")
-
-    monkeypatch.setattr(shared_reader, "list_cards", _boom)
+    monkeypatch.setattr(
+        shared_reader, "list_cards", _raises(StealerCorpusUninitializedError("no table"))
+    )
     resp = await list_mod.stealer_list_artifacts(_user())
     assert resp.initialized is False
     assert resp.items == []
@@ -161,17 +178,16 @@ async def test_files_maps_rows(monkeypatch: pytest.MonkeyPatch) -> None:
             "v-01/Passwords.txt", "Passwords.txt", 2048, "passwords", True, 17, "URL: ...", "f" * 64
         ),
     ]
-    monkeypatch.setattr(shared_reader, "file_tree", lambda *_a: rows)
+    monkeypatch.setattr(shared_reader, "file_tree", _coro(rows))
     resp = await files_mod.stealer_artifact_files(_user(), _SHA, "v-01")
     assert resp.items[0].filename == "Passwords.txt"
     assert resp.items[0].rows_emitted == 17
 
 
 async def test_files_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object) -> object:
-        raise StealerCorpusUninitializedError("no table")
-
-    monkeypatch.setattr(shared_reader, "file_tree", _boom)
+    monkeypatch.setattr(
+        shared_reader, "file_tree", _raises(StealerCorpusUninitializedError("no table"))
+    )
     with pytest.raises(HTTPException) as ei:
         await files_mod.stealer_artifact_files(_user(), _SHA, "v-01")
     assert ei.value.status_code == 503
@@ -189,7 +205,7 @@ async def test_records_maps_rows(monkeypatch: pytest.MonkeyPatch) -> None:
             fields={"url": "https://x", "username": "u", "password": "p"},
         )
     ]
-    monkeypatch.setattr(shared_reader, "records", lambda *_a, **_k: (rows, 1, 1))
+    monkeypatch.setattr(shared_reader, "records", _coro((rows, 1, 1)))
     resp = await records_mod.stealer_artifact_records(_user(), _SHA, "v-01")
     assert resp.items[0].rule_id == "passwords_block_title"
     assert resp.items[0].fields["password"] == "p"
@@ -197,10 +213,9 @@ async def test_records_maps_rows(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_records_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object, **_k: object) -> object:
-        raise StealerCorpusUninitializedError("no table")
-
-    monkeypatch.setattr(shared_reader, "records", _boom)
+    monkeypatch.setattr(
+        shared_reader, "records", _raises(StealerCorpusUninitializedError("no table"))
+    )
     with pytest.raises(HTTPException) as ei:
         await records_mod.stealer_artifact_records(_user(), _SHA, "v-01")
     assert ei.value.status_code == 503
@@ -214,17 +229,16 @@ async def test_domains_maps_rows(monkeypatch: pytest.MonkeyPatch) -> None:
         ArtifactDomainRow(domain="accounts.google.com", source_kind="credential", count=4),
         ArtifactDomainRow(domain="facebook.com", source_kind="cookie", count=12),
     ]
-    monkeypatch.setattr(shared_reader, "domains", lambda *_a: rows)
+    monkeypatch.setattr(shared_reader, "domains", _coro(rows))
     resp = await domains_mod.stealer_artifact_domains(_user(), _SHA, "v-01")
     assert [d.domain for d in resp.items] == ["accounts.google.com", "facebook.com"]
     assert resp.items[1].count == 12
 
 
 async def test_domains_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object) -> object:
-        raise StealerCorpusUninitializedError("no table")
-
-    monkeypatch.setattr(shared_reader, "domains", _boom)
+    monkeypatch.setattr(
+        shared_reader, "domains", _raises(StealerCorpusUninitializedError("no table"))
+    )
     with pytest.raises(HTTPException) as ei:
         await domains_mod.stealer_artifact_domains(_user(), _SHA, "v-01")
     assert ei.value.status_code == 503
@@ -237,10 +251,10 @@ class _Fake:
     def __init__(self, row: ArtifactDetailRow | None) -> None:
         self._row = row
 
-    def detail(self, *_a: object) -> ArtifactDetailRow | None:
+    async def detail(self, *_a: object) -> ArtifactDetailRow | None:
         return self._row
 
 
 class _Boom:
-    def detail(self, *_a: object) -> ArtifactDetailRow | None:
+    async def detail(self, *_a: object) -> ArtifactDetailRow | None:
         raise StealerCorpusUninitializedError("no table")

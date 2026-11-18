@@ -11,10 +11,19 @@
 #   RAR5-encrypted-data variant 7z cannot, and (unlike unrar) isn't rar-only + is in main.
 # - clickhouse-connect: the creds sink (optional dep, stealer profile only).
 
-FROM golang:1.22-bookworm AS gobuild
-WORKDIR /src
+FROM golang:1.26-bookworm AS gobuild
+WORKDIR /src/ulp
 COPY eyenet/stealer/ulpextract/ ./
 RUN CGO_ENABLED=0 go build -o /ulpextract ./ulpextract.go
+
+# gotractor: the v1.3.1 rule-driven DSL extractor (records table) + the v1.3.2
+# wallet-vault LevelDB pass. The stealer processor's daemon mode calls this
+# binary one-shot per archive via GotractorDaemon; without it the processor
+# crashes on `on_subscribe` with FileNotFoundError on the gotractor binary.
+# go.mod requires 1.26 (added via syndtr/goleveldb idb_cmp1 comparer work).
+WORKDIR /src/gotractor
+COPY eyenet/stealer/gotractor/ ./
+RUN CGO_ENABLED=0 go build -o /gotractor .
 
 FROM eyenet:base
 
@@ -24,7 +33,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 RUN /opt/venv/bin/pip install --no-cache-dir 'clickhouse-connect>=0.8'
 COPY --from=gobuild /ulpextract /usr/local/bin/ulpextract
+COPY --from=gobuild /gotractor /usr/local/bin/gotractor
 ENV EYENET_ULPEXTRACT_BIN=/usr/local/bin/ulpextract
+ENV EYENET_GOTRACTOR_BIN=/usr/local/bin/gotractor
 # Re-stamp the version label: FROM eyenet:base carries base's value, baked at base-build
 # time; re-declaring here stamps the stealer image with THIS deploy's version.
 ARG EYENET_VERSION=dev

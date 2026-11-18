@@ -9,7 +9,6 @@ the full corpus size.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -37,18 +36,14 @@ async def stealer_artifact_domains(
     victim_folder: Annotated[str, Path(min_length=1, max_length=512)],
 ) -> StealerArtifactDomainsResponse:
     try:
-        rows = await asyncio.to_thread(
-            lambda: reader.domains(archive_sha256, victim_folder)
-        )
+        rows = await reader.domains(archive_sha256, victim_folder)
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
     return StealerArtifactDomainsResponse(
         archive_sha256=archive_sha256,
         victim_folder=victim_folder,
         items=[
-            StealerArtifactDomainRow(
-                domain=r.domain, source_kind=r.source_kind, count=r.count
-            )
+            StealerArtifactDomainRow(domain=r.domain, source_kind=r.source_kind, count=r.count)
             for r in rows
         ],
     )

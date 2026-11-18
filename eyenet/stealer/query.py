@@ -7,10 +7,15 @@ Backs the read:stealer API (overview charts + host search). Queries are paramete
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from eyenet.stealer.clickhouse import clickhouse_db, get_clickhouse_client
+from eyenet.stealer.clickhouse import (
+    clickhouse_db,
+    get_async_clickhouse_client,
+    get_clickhouse_client,
+)
 
 if TYPE_CHECKING:
     from clickhouse_connect.driver.client import Client
@@ -518,20 +523,27 @@ class ArtifactDomainRow:
 
 
 class StealerArtifactsReader:
-    """Read side of the per-victim artifact drawer."""
+    """Read side of the per-victim artifact drawer. Async: wraps clickhouse-connect's
+    AsyncClient so three parallel API calls (detail + files + domains) don't fight
+    over a shared sync client the way the legacy readers did."""
 
     def __init__(self) -> None:
         self._db = clickhouse_db()
-        self._client: Client | None = None
+        self._client: Any | None = None
+        self._client_lock = asyncio.Lock()
 
-    def _c(self) -> Client:
+    async def _c(self) -> Any:
         if self._client is None:
-            self._client = get_clickhouse_client()
+            async with self._client_lock:
+                if self._client is None:
+                    self._client = await get_async_clickhouse_client()
         return self._client
 
-    def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
+    async def _rows(self, sql: str, params: dict[str, object]) -> list[tuple[Any, ...]]:
         try:
-            return self._c().query(sql, parameters=params).result_rows  # type: ignore[return-value]
+            client = await self._c()
+            result = await client.query(sql, parameters=params)
+            return result.result_rows  # type: ignore[no-any-return]
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -543,7 +555,7 @@ class StealerArtifactsReader:
     def _page_count(total: int, limit: int) -> int:
         return (total + limit - 1) // limit if total else 0
 
-    def list_cards(
+    async def list_cards(
         self,
         *,
         page: int,
@@ -573,13 +585,13 @@ class StealerArtifactsReader:
         params["limit"] = limit
         params["offset"] = offset
 
-        total_rows = self._rows(
+        total_rows = await self._rows(
             f"SELECT count() FROM {self._db}.victim_profiles WHERE {where_sql}",  # nosec B608  # noqa: S608
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
 
-        rows = self._rows(
+        rows = await self._rows(
             "SELECT "  # noqa: S608
             "  archive_sha256, victim_folder, country, traffic_affid, build_version, "
             "  creds_count, cookies_count, wallet_vaults_count, "
@@ -608,8 +620,8 @@ class StealerArtifactsReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def detail(self, archive_sha256: str, victim_folder: str) -> ArtifactDetailRow | None:
-        rows = self._rows(
+    async def detail(self, archive_sha256: str, victim_folder: str) -> ArtifactDetailRow | None:
+        rows = await self._rows(
             "SELECT "  # noqa: S608
             "  source, country, egress_ip, user_name, computer_name, os_version, "
             "  traffic_affid, build_version, payload_md5, work_dir, "
@@ -628,14 +640,18 @@ class StealerArtifactsReader:
         if not rows:
             return None
         r = rows[0]
-        # Pull the distinct rule_ids fired for this victim; drives the
-        # MITRE technique derivation at the API-route layer.
-        fired = self._rows(
-            "SELECT DISTINCT rule_id "  # noqa: S608
-            f"FROM {self._db}.extracted_records "  # nosec B608
-            "WHERE archive_sha256 = {sha:FixedString(64)} "
-            "  AND splitByChar('/', file_path)[2] = {vf:String}",
-            {"sha": archive_sha256, "vf": victim_folder},
+        # Pull the distinct rule_ids fired for this victim + the monitored
+        # domain hits in parallel; both are independent per-victim scans
+        # over the same ClickHouse pool connection.
+        fired, hits = await asyncio.gather(
+            self._rows(
+                "SELECT DISTINCT rule_id "  # noqa: S608
+                f"FROM {self._db}.extracted_records "  # nosec B608
+                "WHERE archive_sha256 = {sha:FixedString(64)} "
+                "  AND splitByChar('/', file_path)[2] = {vf:String}",
+                {"sha": archive_sha256, "vf": victim_folder},
+            ),
+            self._monitored_domain_hits(archive_sha256, victim_folder),
         )
         return ArtifactDetailRow(
             archive_sha256=archive_sha256,
@@ -670,10 +686,10 @@ class StealerArtifactsReader:
             first_corporate_marker=r[27],
             first_wallet_family=r[28],
             fired_rule_ids=[row[0] for row in fired],
-            monitored_domain_hits=self._monitored_domain_hits(archive_sha256, victim_folder),
+            monitored_domain_hits=hits,
         )
 
-    def _monitored_domain_hits(self, archive_sha256: str, victim_folder: str) -> int:
+    async def _monitored_domain_hits(self, archive_sha256: str, victim_folder: str) -> int:
         """Count distinct monitored-watchlist domains this victim touched.
 
         Joins ``victim_domains`` against ``monitored_domains`` by exact or
@@ -681,7 +697,7 @@ class StealerArtifactsReader:
         the monitored_domains table has no rows (watchlist not seeded yet),
         which is the common early-stage state.
         """
-        rows = self._rows(
+        rows = await self._rows(
             "SELECT uniqExact(vd.domain) AS n "  # noqa: S608
             f"FROM {self._db}.victim_domains AS vd "  # nosec B608
             f"INNER JOIN {self._db}.monitored_domains AS md "
@@ -693,8 +709,8 @@ class StealerArtifactsReader:
         )
         return int(rows[0][0]) if rows else 0
 
-    def file_tree(self, archive_sha256: str, victim_folder: str) -> list[ArtifactFileRow]:
-        rows = self._rows(
+    async def file_tree(self, archive_sha256: str, victim_folder: str) -> list[ArtifactFileRow]:
+        rows = await self._rows(
             "SELECT rel_path, filename, size_bytes, heuristic_kind, "  # noqa: S608
             "       extractor_touched, rows_emitted, sample_head, file_sha256 "
             f"FROM {self._db}.file_audit "  # nosec B608
@@ -717,7 +733,7 @@ class StealerArtifactsReader:
             for r in rows
         ]
 
-    def records(
+    async def records(
         self,
         archive_sha256: str,
         victim_folder: str,
@@ -743,20 +759,21 @@ class StealerArtifactsReader:
         params["offset"] = offset
         where_sql = " AND ".join(where)
 
-        total_rows = self._rows(
-            f"SELECT count() FROM {self._db}.extracted_records WHERE {where_sql}",  # nosec B608  # noqa: S608
-            params,
+        total_rows, rows = await asyncio.gather(
+            self._rows(
+                f"SELECT count() FROM {self._db}.extracted_records WHERE {where_sql}",  # nosec B608  # noqa: S608
+                params,
+            ),
+            self._rows(
+                "SELECT rule_id, family, file_path, fields "  # noqa: S608
+                f"FROM {self._db}.extracted_records "  # nosec B608
+                f"WHERE {where_sql} "
+                "ORDER BY rule_id, file_path "
+                "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
+                params,
+            ),
         )
         total = int(total_rows[0][0]) if total_rows else 0
-
-        rows = self._rows(
-            "SELECT rule_id, family, file_path, fields "  # noqa: S608
-            f"FROM {self._db}.extracted_records "  # nosec B608
-            f"WHERE {where_sql} "
-            "ORDER BY rule_id, file_path "
-            "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
-            params,
-        )
         out = [
             ArtifactRecordRow(
                 rule_id=r[0],
@@ -768,8 +785,8 @@ class StealerArtifactsReader:
         ]
         return out, total, self._page_count(total, limit)
 
-    def domains(self, archive_sha256: str, victim_folder: str) -> list[ArtifactDomainRow]:
-        rows = self._rows(
+    async def domains(self, archive_sha256: str, victim_folder: str) -> list[ArtifactDomainRow]:
+        rows = await self._rows(
             "SELECT domain, source_kind, sum(count) AS total_count "  # noqa: S608
             f"FROM {self._db}.victim_domains "  # nosec B608
             "WHERE archive_sha256 = {sha:FixedString(64)} "

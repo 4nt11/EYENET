@@ -7,7 +7,6 @@ lists. Supports filter by rule_id or family.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -44,15 +43,13 @@ async def stealer_artifact_records(
     family: Annotated[str | None, Query(max_length=64)] = None,
 ) -> StealerArtifactRecordsResponse:
     try:
-        rows, total, page_count = await asyncio.to_thread(
-            lambda: reader.records(
-                archive_sha256,
-                victim_folder,
-                page=page,
-                limit=limit,
-                rule_id=rule_id,
-                family=family,
-            )
+        rows, total, page_count = await reader.records(
+            archive_sha256,
+            victim_folder,
+            page=page,
+            limit=limit,
+            rule_id=rule_id,
+            family=family,
         )
     except StealerCorpusUninitializedError as exc:
         raise HTTPException(503, "stealer corpus not initialized yet") from exc
