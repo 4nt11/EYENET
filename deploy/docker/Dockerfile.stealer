@@ -19,7 +19,21 @@ FROM golang:1.26-bookworm AS gobuild
 # comparer work).
 WORKDIR /src/gotractor
 COPY eyenet/stealer/gotractor/ ./
-RUN CGO_ENABLED=0 go build -o /gotractor .
+
+# Build identity: embed version + git SHA + build time via -ldflags so
+# the running binary is traceable (`gotractor --version`, logged on
+# daemon boot, returned in the stats command). EYENET_VERSION comes
+# from the compose build arg; EYENET_GIT_SHA is injected the same way,
+# falling back to 'unknown' for a vanilla `docker build`. BUILD_TIME
+# is stamped at image build.
+ARG EYENET_VERSION=dev
+ARG EYENET_GIT_SHA=unknown
+RUN CGO_ENABLED=0 go build \
+    -ldflags "-s -w \
+      -X main.buildVersion=${EYENET_VERSION} \
+      -X main.buildCommit=${EYENET_GIT_SHA} \
+      -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /gotractor .
 
 FROM eyenet:base
 

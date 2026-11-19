@@ -70,6 +70,13 @@ type Daemon struct {
 	familiesDir string
 	bulkLimit   int
 
+	// Build identity, populated by main via SetBuildInfo. Surfaced in
+	// the stats command + logged on Serve() so the exact binary behind
+	// a prod log line is traceable without guessing which image shipped.
+	buildVersion string
+	buildCommit  string
+	buildTime    string
+
 	// Atomic pointer to the current catalog so reads from the run loop
 	// never block a hot-reload and vice versa.
 	catalog atomic.Pointer[catalogSnapshot]
@@ -80,6 +87,14 @@ type Daemon struct {
 	records   atomic.Uint64
 
 	metrics *metrics
+}
+
+// SetBuildInfo records the binary's identity on the daemon. Called once
+// from main after daemon.New, before Serve.
+func (d *Daemon) SetBuildInfo(version, commit, built string) {
+	d.buildVersion = version
+	d.buildCommit = commit
+	d.buildTime = built
 }
 
 type catalogSnapshot struct {
@@ -183,6 +198,9 @@ func (d *Daemon) ServeMetrics(port int) {
 func (d *Daemon) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	log.Printf("gotractor: daemon serve starting version=%s commit=%s built=%s",
+		d.buildVersion, d.buildCommit, d.buildTime)
 
 	// fsnotify watcher. Catalog reloads are debounced so a wave of
 	// editor saves ends in one reload.
@@ -291,6 +309,11 @@ func (d *Daemon) dispatch(ctx context.Context, line string, w *lockedWriter) (co
 			"uptime_ms": time.Since(d.startedAt).Milliseconds(),
 			"archives":  d.archives.Load(),
 			"records":   d.records.Load(),
+			"build": map[string]any{
+				"version": d.buildVersion,
+				"commit":  d.buildCommit,
+				"built":   d.buildTime,
+			},
 			"catalog": map[string]any{
 				"rules":     len(snap.Rules),
 				"families":  len(snap.Families),

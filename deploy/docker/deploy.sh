@@ -273,7 +273,12 @@ deploy() {
 
 	version="$stamp-$tag$dirty"
 	export EYENET_VERSION="$version" # consumed as a build arg -> the OCI label
-	log "building $version"
+	# Full git SHA baked into the gotractor binary via -ldflags so
+	# `gotractor --version` in prod reports the exact commit, and the
+	# daemon's stats command returns it over the wire. Dirty worktree
+	# prints the commit anyway; the OCI version carries the +dirty tag.
+	export EYENET_GIT_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+	log "building $version (git $EYENET_GIT_SHA)"
 	componer build
 	preflight || exit 1
 	componer up -d

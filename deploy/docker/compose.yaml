@@ -352,6 +352,7 @@ services:
       dockerfile: deploy/docker/Dockerfile.stealer
       args:
         EYENET_VERSION: "${EYENET_VERSION:-dev}"
+        EYENET_GIT_SHA: "${EYENET_GIT_SHA:-unknown}"
     image: eyenet:stealer
     restart: unless-stopped
     command: ["stealer-processor"]

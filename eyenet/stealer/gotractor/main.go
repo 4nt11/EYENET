@@ -40,6 +40,19 @@ import (
 	"eyenet.io/stealer/gotractor/wallets"
 )
 
+// Build identity. Populated by the Dockerfile via -ldflags at build
+// time ("-X main.buildVersion=... -X main.buildCommit=... -X
+// main.buildTime=..."). Defaults to "unknown" for a local
+// `go build .` so the binary still runs. Surfaced through the
+// --version flag, logged on daemon boot, and returned in the stats
+// command so "which gotractor is running" is answerable from logs,
+// pprof, or a stats ping without guessing.
+var (
+	buildVersion = "unknown"
+	buildCommit  = "unknown"
+	buildTime    = "unknown"
+)
+
 func main() {
 	rulesDir := flag.String("rules-dir", envOr("EYENET_STEALER_RULES_DIR", ""), "catalog YAML directory")
 	familiesDir := flag.String("families-dir", envOr("EYENET_STEALER_FAMILIES_DIR", ""), "family catalog directory")
@@ -47,7 +60,13 @@ func main() {
 	mode := flag.String("mode", "records", "records | summary | daemon | selftest | extract-wallets")
 	limit := flag.Int("limit", 100000, "bulkParse record cap per file per rule")
 	metricsPort := flag.Int("metrics-port", 0, "daemon: bind Prometheus /metrics on this port (0 disables)")
+	showVersion := flag.Bool("version", false, "print build identity (version, commit, build time) and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("gotractor version=%s commit=%s built=%s\n", buildVersion, buildCommit, buildTime)
+		return
+	}
 
 	// extract-wallets bypasses rule catalog - it is a binary pre-extractor
 	// that feeds synthetic vault JSON files into the DSL pipeline downstream.
@@ -70,6 +89,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("daemon boot: %v", err)
 		}
+		d.SetBuildInfo(buildVersion, buildCommit, buildTime)
 		if *metricsPort > 0 {
 			d.ServeMetrics(*metricsPort)
 		}
