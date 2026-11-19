@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess  # nosec B404: fixed tools (7zz/unrar/unar), list argv, never a shell
 import tempfile
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,10 @@ _log = get_logger()
 
 # Rows per ClickHouse INSERT. Bounds memory + keeps ReplacingMergeTree merges sane.
 _INSERT_BATCH = 50_000
+# v1.3.3: max pending batches in the ThreadPoolExecutor's queue. See
+# _gotractor_insert_daemon for the backpressure reasoning. 16 batches *
+# 50k rows * ~200 bytes each = ~160 MB in-flight ceiling.
+_PENDING_BATCH_CAP = 16
 # Three-tier dispatch: RAR goes to unrar (RAR5-native, ~25x faster than unar on
 # prod-sized 2GB dumps: measured 10.8s vs 272s), non-RAR to 7zz (multithreaded
 # AES + SIMD CRC for 7z/zip/tar/gz/xz), unar is the last-resort fallback for
@@ -290,10 +295,28 @@ def _gotractor_insert_daemon(
     # and run_done never arrived. Observed on prod: gotractor_archives_total
     # stayed at 0 despite 2.7M cookie records flowing - high-priority rules
     # (passwords_block_title at prio 80) came after the deadlock point and
-    # never ran their BulkParse. Single worker keeps CH-side ordering sane;
-    # the Queue is the backpressure (unbounded, we drain it at EOF).
+    # never ran their BulkParse.
+    #
+    # v1.3.3: bounded semaphore keeps the pending queue capped. Without it
+    # a slow CH (uniqExact backfills ongoing, part merges running) lets
+    # Python's future queue grow unbounded while the daemon emits at full
+    # rate, eating 2-4 GB of pending-batch RAM and OOMing the service on a
+    # tight-memory box. The 16-slot cap means at most 16 * 50k rows * ~200
+    # bytes each = ~160 MB in-flight. When full, pool.submit's wrapper
+    # blocks on sem.acquire; the stream iteration pauses; the gotractor
+    # daemon backpressures through its 4096-slot channel (room to spare);
+    # CH catches up; semaphore releases; iteration resumes. No deadlock
+    # (iteration always resumes once CH flushes a batch), no OOM.
     insert_futures: list[Future[int]] = []
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ch-insert")
+    pending_sem = threading.BoundedSemaphore(value=_PENDING_BATCH_CAP)
+
+    def _submit(batch_to_insert: list[list[object]]) -> Future[int]:
+        pending_sem.acquire()
+        fut = pool.submit(sink.insert_rows, batch_to_insert)
+        fut.add_done_callback(lambda _f: pending_sem.release())
+        return fut
+
     try:
         for msg in stream:
             if msg["_kind"] == "verdict":
@@ -335,10 +358,10 @@ def _gotractor_insert_daemon(
                 ]
             )
             if len(batch) >= _INSERT_BATCH:
-                insert_futures.append(pool.submit(sink.insert_rows, batch))
+                insert_futures.append(_submit(batch))
                 batch = []
         if batch:
-            insert_futures.append(pool.submit(sink.insert_rows, batch))
+            insert_futures.append(_submit(batch))
         # Drain: every submitted insert must finish before we report a total.
         # A failed INSERT raises here and bubbles up as the archive's error.
         for fut in insert_futures:
