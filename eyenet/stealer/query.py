@@ -1018,9 +1018,13 @@ class StealerArtifactsReader:
         family: str | None = None,
         category: str | None = None,
     ) -> tuple[list[ArtifactRecordRow], int, int]:
+        # v1.3.1: read from extracted_records_by_victim, sorted on
+        # (archive, victim_folder, rule_id, file_path). Before: filter via
+        # splitByChar scanned the archive's whole slice; ~1s per query,
+        # 2s total under parallel count+page fan-out. After: index seek.
         where = [
             "archive_sha256 = {sha:FixedString(64)}",
-            "splitByChar('/', file_path)[2] = {vf:String}",
+            "victim_folder = {vf:String}",
         ]
         params: dict[str, object] = {"sha": archive_sha256, "vf": victim_folder}
         if rule_id:
@@ -1042,12 +1046,12 @@ class StealerArtifactsReader:
 
         total_rows, rows = await asyncio.gather(
             self._rows(
-                f"SELECT count() FROM {self._db}.extracted_records FINAL WHERE {where_sql}",  # nosec B608  # noqa: S608
+                f"SELECT count() FROM {self._db}.extracted_records_by_victim WHERE {where_sql}",  # nosec B608  # noqa: S608
                 params,
             ),
             self._rows(
                 "SELECT rule_id, family, file_path, fields "  # noqa: S608
-                f"FROM {self._db}.extracted_records FINAL "  # nosec B608
+                f"FROM {self._db}.extracted_records_by_victim "  # nosec B608
                 f"WHERE {where_sql} "
                 "ORDER BY rule_id, file_path "
                 "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",

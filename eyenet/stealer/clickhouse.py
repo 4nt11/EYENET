@@ -588,6 +588,57 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
       AND NOT EXISTS (SELECT 1 FROM {db}.extracted_rules_per_victim)
     GROUP BY archive_sha256, victim_folder, rule_id
     """,
+    # v1.3.1 per-victim records index. Backs the artifact drawer's
+    # Credentials / Cookies / System tabs via StealerCredsReader.records().
+    # Before: WHERE archive=X AND splitByChar('/', file_path)[2]=Y scanned
+    # the archive's entire extracted_records slice because splitByChar is
+    # not indexable, 1s per query x 2 queries (count + page) in parallel
+    # = 2s observed. After: ORDER BY (archive, victim_folder, rule_id,
+    # file_path) makes the common filter a direct index seek. Full row
+    # payload duplicated so the drawer's rule_id / family / file_path /
+    # fields read is self-contained.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.extracted_records_by_victim
+    (
+        archive_sha256 FixedString(64),
+        victim_folder  String,
+        rule_id        LowCardinality(String),
+        family         LowCardinality(String),
+        file_path      String,
+        fields         Map(String, String),
+        ingested_at    DateTime DEFAULT now()
+    )
+    ENGINE = ReplacingMergeTree(ingested_at)
+    ORDER BY (archive_sha256, victim_folder, rule_id, file_path, cityHash64(toString(fields)))
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_records_by_victim_mv
+    TO {db}.extracted_records_by_victim AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        rule_id,
+        family,
+        file_path,
+        fields
+    FROM {db}.extracted_records
+    WHERE splitByChar('/', file_path)[2] != ''
+    """,
+    """
+    INSERT INTO {db}.extracted_records_by_victim
+        (archive_sha256, victim_folder, rule_id, family, file_path, fields)
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        rule_id,
+        family,
+        file_path,
+        fields
+    FROM {db}.extracted_records
+    WHERE splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.extracted_records_by_victim)
+    """,
 )
 
 
