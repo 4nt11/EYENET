@@ -304,6 +304,184 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 _VICTIM_PROFILES_STALE_SENTINEL = "rule_id LIKE 'passwords_"
 
 
+# v1.3.1 /stats pre-aggregation. Before: GET /v1/stealer/stats ran 4 FULL
+# scans of extracted_records with FINAL, uniqExact over 3.6M rows per
+# call. The dashboard polls it and prod CPU paid for it each time. After:
+# four AggregatingMergeTree rollups fired on every INSERT into
+# extracted_records. Reader queries sum() + uniqMerge() on tiny rollup
+# tables; response is O(1)-ish regardless of corpus size.
+#
+# The four rollups mirror the shape of the /stats response:
+#   - stats_rollup_totals: single row ('all') holding sum(total_creds) +
+#     uniq HLL sketches for unique_creds + distinct_hosts.
+#   - stats_rollup_scheme:  per-scheme sum. Tiny cardinality (http/https
+#     +/android).
+#   - stats_rollup_tld:     per-tld sum. Hundreds of keys.
+#   - stats_rollup_host:    per-host sum. Tens of thousands at prod scale.
+#
+# The HOST/SCHEME/TLD expressions must stay in lock-step with the Python
+# reader (eyenet/stealer/query.py StealerCredsReader._{HOST,SCHEME,TLD}_EXPR)
+# so pre-rollup and post-rollup buckets agree. If you change one, change
+# the other AND bump _STATS_ROLLUP_STALE_SENTINEL to force rebuild.
+_CRED_FAMS_LITERAL = "('browser_passwords', 'windows_credentials', 'firefox_logins', 'combolist')"
+_HOST_EXPR_DDL = (
+    "lower(coalesce("
+    "nullIf(domain(fields['url']), ''), "
+    "nullIf(domain(fields['host']), ''), "
+    "nullIf(fields['host'], ''), ''))"
+)
+_SCHEME_EXPR_DDL = (
+    "lower(coalesce(nullIf(fields['scheme'], ''), nullIf(protocol(fields['url']), ''), ''))"
+)
+_TLD_EXPR_DDL = (
+    "coalesce("
+    "nullIf(fields['tld'], ''), "
+    "nullIf(topLevelDomain(fields['url']), ''), "
+    "nullIf(topLevelDomain(fields['host']), ''), '')"
+)
+_STATS_WHERE = (
+    f"family IN {_CRED_FAMS_LITERAL} AND (notEmpty(fields['url']) OR notEmpty(fields['host']))"
+)
+
+# Each DDL below is a static template; _CRED_FAMS_LITERAL / _HOST_EXPR_DDL etc.
+# are MODULE constants (no external input) and _STATS_WHERE is composed from
+# them. ruff S608 flags f-strings that interpolate into SQL; the "variables"
+# here are compile-time literals the module owns, so per-f-string noqa.
+_STATS_ROLLUP_TOTALS_MV = f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_totals_mv
+    TO {{db}}.stats_rollup_totals AS
+    SELECT
+        'all' AS bucket,
+        toUInt64(count()) AS total_creds,
+        uniqState(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
+        uniqState({_HOST_EXPR_DDL}) AS distinct_hosts
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE}
+    GROUP BY bucket
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_SCHEME_MV = f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_scheme_mv
+    TO {{db}}.stats_rollup_scheme AS
+    SELECT
+        {_SCHEME_EXPR_DDL} AS scheme,
+        toUInt64(count()) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
+    GROUP BY scheme
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_TLD_MV = f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_tld_mv
+    TO {{db}}.stats_rollup_tld AS
+    SELECT
+        {_TLD_EXPR_DDL} AS tld,
+        toUInt64(count()) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
+    GROUP BY tld
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_HOST_MV = f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_host_mv
+    TO {{db}}.stats_rollup_host AS
+    SELECT
+        {_HOST_EXPR_DDL} AS host,
+        toUInt64(count()) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
+    GROUP BY host
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_TOTALS_BACKFILL = f"""
+    INSERT INTO {{db}}.stats_rollup_totals
+    SELECT
+        'all' AS bucket,
+        toUInt64(count()) AS total_creds,
+        uniqState(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
+        uniqState({_HOST_EXPR_DDL}) AS distinct_hosts
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE}
+      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_totals)
+    GROUP BY bucket
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_SCHEME_BACKFILL = f"""
+    INSERT INTO {{db}}.stats_rollup_scheme
+    SELECT {_SCHEME_EXPR_DDL} AS scheme, toUInt64(count()) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
+      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_scheme)
+    GROUP BY scheme
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_TLD_BACKFILL = f"""
+    INSERT INTO {{db}}.stats_rollup_tld
+    SELECT {_TLD_EXPR_DDL} AS tld, toUInt64(count()) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
+      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_tld)
+    GROUP BY tld
+    """  # noqa: S608  # nosec B608
+_STATS_ROLLUP_HOST_BACKFILL = f"""
+    INSERT INTO {{db}}.stats_rollup_host
+    SELECT {_HOST_EXPR_DDL} AS host, toUInt64(count()) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
+      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_host)
+    GROUP BY host
+    """  # noqa: S608  # nosec B608
+
+_STATS_ROLLUP: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_totals
+    (
+        bucket         LowCardinality(String),
+        total_creds    SimpleAggregateFunction(sum, UInt64),
+        unique_creds   AggregateFunction(uniq, Tuple(String, String, String)),
+        distinct_hosts AggregateFunction(uniq, String)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY bucket
+    {storage_policy_clause}
+    """,
+    _STATS_ROLLUP_TOTALS_MV,
+    """
+    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_scheme
+    (
+        scheme LowCardinality(String),
+        cnt    SimpleAggregateFunction(sum, UInt64)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY scheme
+    {storage_policy_clause}
+    """,
+    _STATS_ROLLUP_SCHEME_MV,
+    """
+    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_tld
+    (
+        tld LowCardinality(String),
+        cnt SimpleAggregateFunction(sum, UInt64)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY tld
+    {storage_policy_clause}
+    """,
+    _STATS_ROLLUP_TLD_MV,
+    """
+    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_host
+    (
+        host String,
+        cnt  SimpleAggregateFunction(sum, UInt64)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY host
+    {storage_policy_clause}
+    """,
+    _STATS_ROLLUP_HOST_MV,
+    # One-shot backfill: NOT EXISTS gate so each only fires on the first
+    # ensure_schema() call against an existing corpus.
+    _STATS_ROLLUP_TOTALS_BACKFILL,
+    _STATS_ROLLUP_SCHEME_BACKFILL,
+    _STATS_ROLLUP_TLD_BACKFILL,
+    _STATS_ROLLUP_HOST_BACKFILL,
+)
+
+
 # v1.3.3 per-victim DOMAIN index. One row per (archive_sha256, victim_folder,
 # domain, source_kind) with a running count. The whole point of this table
 # is detection economics: a future monitored-domain watchlist joins against
@@ -605,6 +783,9 @@ class ClickHouseRecordsSink:
         # v1.3.4 monitored-domain watchlist (detection-engine input table).
         for stmt in _MONITORED_DOMAINS:
             client.command(stmt.format(db=self._db))
+        # v1.3.1 /stats pre-aggregation rollups (4 MVs + one-shot backfill).
+        for stmt in _STATS_ROLLUP:
+            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
 
     def _repair_victim_profiles_if_stale(self, client: Any) -> None:
         """Drop the pre-1.3.1 victim_profiles table + MV iff the MV body

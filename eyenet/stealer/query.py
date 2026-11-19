@@ -148,25 +148,24 @@ class StealerCredsReader:
         return [Bucket(key=str(r[0]), count=int(r[1])) for r in result.result_rows]
 
     async def stats(self, *, top: int = 20) -> StealerStats:
-        """Overview stats computed over extracted_records credential
-        families. Uses CH's URL functions as a fallback so pre-
-        derive_url_parts rows still contribute to host/scheme/tld
-        buckets even without a reindex."""
-        fams: dict[str, object] = {"fams": self._CRED_FAMILIES}
-        fams_top: dict[str, object] = {**fams, "top": int(top)}
-        where = self._WHERE_ANY_URL
-        host_expr = self._HOST_EXPR
-        scheme_expr = self._SCHEME_EXPR
-        tld_expr = self._TLD_EXPR
+        """Overview stats for the /v1/stealer/stats endpoint.
+
+        v1.3.1: reads from the stats_rollup_* AggregatingMergeTree tables
+        populated on every extracted_records INSERT. Before: 4 FULL scans
+        of extracted_records with FINAL + uniqExact (O(N)). After: one
+        single-row read + three small GROUP BY/ORDER BY/LIMIT scans over
+        pre-aggregated rollup tables (O(1)-ish regardless of corpus size).
+        unique_creds + distinct_hosts are HLL approximations (~1% error).
+        """
+        top_param: dict[str, object] = {"top": int(top)}
         try:
             client = await self._c()
-            result = await client.query(
-                f"SELECT count(), uniqExact(({host_expr}, fields['login'], fields['password'])), "  # noqa: S608  # nosec B608
-                f"       uniqExact({host_expr}) "
-                f"FROM {self._db}.extracted_records FINAL "
-                f"WHERE {where}",
-                parameters=fams,
+            # self._db is operator config, not user input; no injection risk.
+            sql_totals = (
+                "SELECT ifNull(sum(total_creds), 0), uniqMerge(unique_creds),"  # noqa: S608
+                f" uniqMerge(distinct_hosts) FROM {self._db}.stats_rollup_totals"  # nosec B608
             )
+            result = await client.query(sql_totals)
             scalars = result.result_rows[0]
         except Exception as exc:
             if _is_unknown_table(exc):
@@ -176,25 +175,22 @@ class StealerCredsReader:
             raise
         by_scheme, by_tld, top_hosts = await asyncio.gather(
             self._buckets(
-                f"SELECT {scheme_expr} s, count() c "  # noqa: S608  # nosec B608
-                f"FROM {self._db}.extracted_records FINAL "
-                f"WHERE {where} AND notEmpty({scheme_expr}) "
-                "GROUP BY s ORDER BY c DESC",
-                fams,
+                f"SELECT scheme, sum(cnt) c "  # noqa: S608  # nosec B608
+                f"FROM {self._db}.stats_rollup_scheme "
+                "GROUP BY scheme ORDER BY c DESC",
+                {},
             ),
             self._buckets(
-                f"SELECT {tld_expr} t, count() c "  # noqa: S608  # nosec B608
-                f"FROM {self._db}.extracted_records FINAL "
-                f"WHERE {where} AND notEmpty({tld_expr}) "
-                "GROUP BY t ORDER BY c DESC LIMIT {top:UInt32}",
-                fams_top,
+                f"SELECT tld, sum(cnt) c "  # noqa: S608  # nosec B608
+                f"FROM {self._db}.stats_rollup_tld "
+                "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}",
+                top_param,
             ),
             self._buckets(
-                f"SELECT {host_expr} h, count() c "  # noqa: S608  # nosec B608
-                f"FROM {self._db}.extracted_records FINAL "
-                f"WHERE {where} AND notEmpty({host_expr}) "
-                "GROUP BY h ORDER BY c DESC LIMIT {top:UInt32}",
-                fams_top,
+                f"SELECT host, sum(cnt) c "  # noqa: S608  # nosec B608
+                f"FROM {self._db}.stats_rollup_host "
+                "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}",
+                top_param,
             ),
         )
         return StealerStats(
