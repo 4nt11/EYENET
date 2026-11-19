@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess  # nosec B404: fixed tools (7zz/unrar/unar), list argv, never a shell
 import tempfile
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -282,49 +283,68 @@ def _gotractor_insert_daemon(
     families: list[str] = []
     parse_errors: dict[str, tuple[str, str]] = {}
     batch: list[list[object]] = []
-    for msg in stream:
-        if msg["_kind"] == "verdict":
-            fam = msg.get("family")
-            if fam:
-                families.append(fam)
-            continue
-        if msg["_kind"] == "parse_error":
-            parse_errors[msg.get("file_path", "")] = (
-                msg.get("kind_code", "panic"),
-                msg.get("error", ""),
+    # v1.3.2: CH inserts run on a background thread so the stream iteration
+    # never blocks the gotractor daemon's writer. Before: inline insert_rows()
+    # held the stream thread while CH ran a sync HTTP INSERT. The daemon's
+    # 4096-slot emit channel then filled, cmdRun blocked on its own emit,
+    # and run_done never arrived. Observed on prod: gotractor_archives_total
+    # stayed at 0 despite 2.7M cookie records flowing - high-priority rules
+    # (passwords_block_title at prio 80) came after the deadlock point and
+    # never ran their BulkParse. Single worker keeps CH-side ordering sane;
+    # the Queue is the backpressure (unbounded, we drain it at EOF).
+    insert_futures: list[Future[int]] = []
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ch-insert")
+    try:
+        for msg in stream:
+            if msg["_kind"] == "verdict":
+                fam = msg.get("family")
+                if fam:
+                    families.append(fam)
+                continue
+            if msg["_kind"] == "parse_error":
+                parse_errors[msg.get("file_path", "")] = (
+                    msg.get("kind_code", "panic"),
+                    msg.get("error", ""),
+                )
+                _log.warning(
+                    "stealer.gotractor_parse_error",
+                    archive=archive_sha,
+                    rule_id=msg.get("rule_id") or "",
+                    file_path=msg.get("file_path") or "<archive-wide>",
+                    kind_code=msg.get("kind_code") or "panic",
+                    error=msg.get("error") or "",
+                )
+                continue
+            # Record branch: derive per-victim folder from file_path segment [1]
+            # (second path segment under the archive root, matching the Khazan
+            # wrapper structure <channel_wrapper>/<victim>/<content>). Empty
+            # string if the file is at the archive root; victim_profiles MV
+            # filters those out. See eyenet/stealer/clickhouse.py
+            # _VICTIM_PROFILES for the matching derivation at the MV level.
+            file_path = msg.get("file_path", "")
+            victim_folder = _victim_folder_from_path(file_path)
+            batch.append(
+                [
+                    archive_sha,
+                    source_label,
+                    victim_folder,
+                    file_path,
+                    msg.get("rule_id", ""),
+                    msg.get("family", ""),
+                    {k: str(v) for k, v in (msg.get("fields") or {}).items()},
+                ]
             )
-            _log.warning(
-                "stealer.gotractor_parse_error",
-                archive=archive_sha,
-                rule_id=msg.get("rule_id") or "",
-                file_path=msg.get("file_path") or "<archive-wide>",
-                kind_code=msg.get("kind_code") or "panic",
-                error=msg.get("error") or "",
-            )
-            continue
-        # Record branch: derive per-victim folder from file_path segment [1] (second
-        # path segment under the archive root, matching the Khazan wrapper
-        # structure <channel_wrapper>/<victim>/<content>). Empty string if
-        # the file is at the archive root; victim_profiles MV filters those
-        # out. See eyenet/stealer/clickhouse.py _VICTIM_PROFILES for the
-        # matching derivation at the MV level.
-        file_path = msg.get("file_path", "")
-        victim_folder = _victim_folder_from_path(file_path)
-        batch.append(
-            [
-                archive_sha,
-                source_label,
-                victim_folder,
-                file_path,
-                msg.get("rule_id", ""),
-                msg.get("family", ""),
-                {k: str(v) for k, v in (msg.get("fields") or {}).items()},
-            ]
-        )
-        if len(batch) >= _INSERT_BATCH:
-            total += sink.insert_rows(batch)
-            batch = []
-    total += sink.insert_rows(batch)
+            if len(batch) >= _INSERT_BATCH:
+                insert_futures.append(pool.submit(sink.insert_rows, batch))
+                batch = []
+        if batch:
+            insert_futures.append(pool.submit(sink.insert_rows, batch))
+        # Drain: every submitted insert must finish before we report a total.
+        # A failed INSERT raises here and bubbles up as the archive's error.
+        for fut in insert_futures:
+            total += fut.result()
+    finally:
+        pool.shutdown(wait=True)
     try:
         done = done_q.get(timeout=5.0)
         _log.info(
