@@ -7,10 +7,15 @@
 # - gotractor: the rule-driven DSL extractor (records table) + the wallet-
 #   vault LevelDB pass. The stealer processor's daemon mode calls this
 #   binary one-shot per archive via GotractorDaemon.
-# - unar (The Unarchiver, Debian main): ONE extractor for every container a
-#   dump ships in: rar/rar5, 7z, zip, tar, tar.gz/.xz, gz, with password
-#   support. Opens the RAR5-encrypted-data variant 7z cannot, and (unlike
-#   unrar) isn't rar-only + is in main.
+# Archive extractors, three-tier dispatch (see eyenet/stealer/pipeline.py):
+# - unrar (Debian non-free): RAR5-native decoder. Measured 25x faster than
+#   unar on the Khazan 2GB prod corpus (10.8s vs 272s).
+# - 7zip (Debian main, provides /usr/bin/7zz): multithreaded AES + SIMD CRC
+#   for 7z/zip/tar/gz/xz. Does NOT ship a RAR codec in the Debian build,
+#   so RAR archives route to unrar.
+# - unar (Debian main): LAST-RESORT fallback for the handful of archives
+#   neither tool opens. Opt-out via EYENET_STEALER_EXTRACT_FALLBACK=disable;
+#   see development/UNAR_MIGRATION_SCOPE.md.
 # - clickhouse-connect: the records sink (optional dep, stealer profile only).
 
 FROM golang:1.26-bookworm AS gobuild
@@ -38,8 +43,12 @@ RUN CGO_ENABLED=0 go build \
 FROM eyenet:base
 
 USER root
-RUN apt-get update \
- && apt-get install -y --no-install-recommends unar \
+# unrar is in non-free; enable it just for this install, then restore the
+# default sources.list so later apt-get calls stay in main.
+RUN echo 'deb http://deb.debian.org/debian bookworm main non-free non-free-firmware' > /etc/apt/sources.list.d/non-free.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends 7zip unrar unar \
+ && rm -f /etc/apt/sources.list.d/non-free.list \
  && rm -rf /var/lib/apt/lists/*
 RUN /opt/venv/bin/pip install --no-cache-dir 'clickhouse-connect>=0.8'
 COPY --from=gobuild /gotractor /usr/local/bin/gotractor

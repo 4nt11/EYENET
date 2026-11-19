@@ -13,8 +13,9 @@ address space.
 from __future__ import annotations
 
 import json
+import os
 import shutil
-import subprocess  # nosec B404: fixed tool (unar), list argv, never a shell
+import subprocess  # nosec B404: fixed tools (7zz/unrar/unar), list argv, never a shell
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,11 +35,15 @@ _log = get_logger()
 
 # Rows per ClickHouse INSERT. Bounds memory + keeps ReplacingMergeTree merges sane.
 _INSERT_BATCH = 50_000
-# ONE extractor for every container format a dump ships in — rar/rar5, 7z, zip, tar,
-# tar.gz/.xz, gz. unar (The Unarchiver, Debian main) auto-detects the format and takes a
-# password; unlike unrar it's not rar-only, and unlike 7z it opens the RAR5-encrypted-data
-# variant these channels use. -q quiet, -f overwrite, -D no enclosing dir, -o dest.
-_UNAR = "unar"
+# Three-tier dispatch: RAR goes to unrar (RAR5-native, ~25x faster than unar on
+# prod-sized 2GB dumps: measured 10.8s vs 272s), non-RAR to 7zz (multithreaded
+# AES + SIMD CRC for 7z/zip/tar/gz/xz), unar is the last-resort fallback for
+# the archives that both tools choke on. unar is single-threaded XADMaster;
+# keeping it on the cold path. EYENET_STEALER_EXTRACT_TOOL=unar|7zz|unrar
+# forces one tool (operator kill switch); =auto is the default dispatch.
+_RAR_MAGIC = b"Rar!\x1a\x07"  # covers RAR4 (\x00 trailer) and RAR5 (\x01 trailer)
+_TOOL_OVERRIDE = os.environ.get("EYENET_STEALER_EXTRACT_TOOL", "auto")
+_FALLBACK_DISABLED = os.environ.get("EYENET_STEALER_EXTRACT_FALLBACK", "") == "disable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,29 +80,93 @@ def _any_nonempty_file(root: Path) -> bool:
     return any(f.is_file() and f.stat().st_size > 0 for f in root.rglob("*"))
 
 
-def _extract(blob_path: Path, candidates: list[str], dest: Path) -> str | None:
-    """Try each password candidate (then no-password) until the archive extracts with
-    real content. Returns the working password ("" = none), or None if nothing opened it.
-    Candidates are ordered best-first, so the usual case extracts exactly once."""
-    attempts = [*candidates, ""]  # "" => no -p (unencrypted / watermark-only)
+def _pick_tool(blob_path: Path) -> str:
+    """Pick extractor from the override env var, or the first 8 magic bytes:
+    RAR to unrar, everything else to 7zz. Override forces one tool."""
+    if _TOOL_OVERRIDE in {"unar", "7zz", "unrar"}:
+        return _TOOL_OVERRIDE
+    try:
+        with blob_path.open("rb") as f:
+            head = f.read(8)
+    except OSError:
+        return "7zz"
+    if head.startswith(_RAR_MAGIC):
+        return "unrar"
+    return "7zz"
+
+
+def _extract_cmd(tool: str, blob: Path, dest: Path, pw: str) -> list[str]:
+    """Build the argv for one tool invocation. Password goes inline (never as
+    stdin) so a wrong-password archive fails fast instead of hanging on a
+    prompt."""
+    if tool == "7zz":
+        # -bso0/-bse0 silence stdout+stderr, -p<pw> inline (empty = no password),
+        # -y assume yes, -mmt=on multithreaded. 7zz treats an empty -p as "no
+        # password" and does not prompt.
+        return [
+            "7zz",
+            "x",
+            "-y",
+            "-bso0",
+            "-bse0",
+            f"-o{dest}",
+            f"-p{pw}",
+            "-mmt=on",
+            str(blob),
+        ]
+    if tool == "unrar":
+        # -inul suppresses all messages, -o+ overwrite without prompting,
+        # -p<pw> inline (-p- = no password, suppress prompt). Trailing slash
+        # on dest tells unrar it's a directory.
+        pw_arg = f"-p{pw}" if pw else "-p-"
+        return ["unrar", "x", "-o+", "-inul", pw_arg, str(blob), f"{dest}/"]
+    # unar fallback: -q quiet, -f overwrite, -D no enclosing dir, -o dest.
+    cmd = ["unar", "-q", "-f", "-D", "-o", str(dest)]
+    if pw:
+        cmd += ["-p", pw]
+    cmd.append(str(blob))
+    return cmd
+
+
+def _try_tool(tool: str, blob_path: Path, dest: Path, pw: str) -> bool:
+    """Run one tool with one password candidate. Returns True iff real decrypted
+    content landed on disk (not just 0-byte stubs from a wrong password)."""
+    dest.mkdir(parents=True, exist_ok=True)
+    subprocess.run(  # noqa: S603  # nosec B603 - fixed tool, list argv, no shell
+        _extract_cmd(tool, blob_path, dest, pw),
+        capture_output=True,
+        check=False,
+        timeout=3600,
+        stdin=subprocess.DEVNULL,
+    )
+    if _any_nonempty_file(dest):
+        return True
+    shutil.rmtree(dest, ignore_errors=True)
+    return False
+
+
+def _extract(blob_path: Path, candidates: list[str], dest: Path) -> tuple[str, str] | None:
+    """Try each password candidate (then no-password) until the archive extracts
+    with real content. Returns (password, tool) on success, or None if nothing
+    opened it. Candidates are ordered best-first, so the usual case extracts
+    exactly once."""
+    primary = _pick_tool(blob_path)
+    attempts = [*candidates, ""]  # "" => no password (unencrypted / watermark-only)
     for pw in attempts:
-        dest.mkdir(parents=True, exist_ok=True)
-        cmd = [_UNAR, "-q", "-f", "-D", "-o", str(dest)]
-        if pw:
-            cmd += ["-p", pw]
-        cmd.append(str(blob_path))
-        subprocess.run(  # noqa: S603  # nosec B603 — fixed tool, list argv, no shell
-            cmd,
-            capture_output=True,
-            check=False,
-            timeout=3600,
-            stdin=subprocess.DEVNULL,  # never block on a password prompt
-        )
-        # unar returns 0 even when every file "Failed! (wrong password)", so the real
-        # signal is decrypted content on disk, not the exit code.
-        if _any_nonempty_file(dest):
-            return pw
-        shutil.rmtree(dest, ignore_errors=True)  # wrong password — clear stubs, try next
+        if _try_tool(primary, blob_path, dest, pw):
+            return pw, primary
+    # Fallback: 7zz/unrar failed on every password but the archive may be a
+    # RAR5-encrypted-data variant only XADMaster handles. unar takes one shot
+    # with the best candidate before we declare failure.
+    if primary != "unar" and not _FALLBACK_DISABLED:
+        for pw in attempts:
+            if _try_tool("unar", blob_path, dest, pw):
+                _log.info(
+                    "stealer.extract_fallback_unar",
+                    blob=blob_path.name,
+                    primary=primary,
+                )
+                return pw, "unar"
     return None
 
 
@@ -122,13 +191,15 @@ def process_archive(
     work_root.mkdir(parents=True, exist_ok=True)
     dest = Path(tempfile.mkdtemp(dir=work_root, prefix="ulp-"))
     try:
-        pw = _extract(blob_path, password_candidates, dest)
-        if pw is None:
+        extracted = _extract(blob_path, password_candidates, dest)
+        if extracted is None:
             return ProcessResult(
                 ok=False,
                 password_used=None,
                 error="no password opened the archive",
             )
+        pw, tool = extracted
+        _log.debug("stealer.extract_ok", blob=blob_path.name, tool=tool)
         records = 0
         families: list[str] = []
         parse_errors: dict[str, tuple[str, str]] = {}

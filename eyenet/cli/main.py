@@ -919,162 +919,93 @@ def stealer_reprocess_local(  # pragma: no cover
     )
 
 
-async def _reindex_one(  # pragma: no cover
-    att: Any,
-    *,
-    storage: Any,
-    audit_sink: Any,
-    records_sink: Any,
-    gotractor: Any,
-    work_root: Path,
-) -> tuple[bool, str]:
-    """Reindex one attachment. Returns (ok, status_line) for the caller to print."""
-    from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED  # noqa: PLC0415
-    from eyenet.stealer.password import (  # noqa: PLC0415
-        parse_password,
-        password_candidates,
-    )
-    from eyenet.stealer.pipeline import process_archive  # noqa: PLC0415
-
-    msg = await storage.get_message(att.message_id)
-    body = getattr(msg, "body", "") or ""
-    candidates = password_candidates(parse_password(body))
-    try:
-        result = process_archive(
-            blob_path=Path(att.storage_uri) if att.storage_uri else Path(),
-            password_candidates=candidates,
-            work_root=work_root,
-            source_label=f"reindex:{att.id}",
-            audit_sink=audit_sink,
-            records_sink=records_sink,
-            gotractor=gotractor,
-        )
-    except OSError as exc:
-        await storage.set_stealer_processing(
-            att.id, state=STEALER_FAILED, error=f"reindex crash: {exc}"
-        )
-        return False, f"CRASH: {exc}"
-    if result.ok:
-        await storage.set_stealer_processing(
-            att.id, state=STEALER_DONE, creds_extracted=result.records_inserted
-        )
-        return True, (
-            f"ok records={result.records_inserted} families={','.join(result.gotractor_families)}"
-        )
-    await storage.set_stealer_processing(att.id, state=STEALER_FAILED, error=result.error)
-    return False, f"FAIL: {result.error}"
-
-
 @app.command("stealer-reindex")
-def stealer_reindex(  # noqa: PLR0915  # pragma: no cover
+def stealer_reindex(  # pragma: no cover
     data_dir: Path | None = typer.Option(None, "--data-dir"),
-    limit: int = typer.Option(
-        50,
-        "--limit",
-        help="Max archives to process this run. Paginates in pages of 50 when --all is passed.",
+    attachment: UUID | None = typer.Option(
+        None,
+        "--attachment",
+        help="Reindex ONE attachment by id. Required with --urgent.",
     ),
-    all_: bool = typer.Option(
-        False, "--all", help="Sweep the whole corpus, keyset-paged, up to --limit rows."
+    urgent: bool = typer.Option(
+        False,
+        "--urgent",
+        help="Publish per-attachment to the urgent subject so the processor runs"
+        " it ahead of any queued corpus sweep. Requires --attachment.",
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="List the attachments that WOULD be reindexed and exit."
+        False,
+        "--dry-run",
+        help="List the attachments that WOULD be reindexed and exit without publishing.",
     ),
-    skip_done: bool = typer.Option(
-        False, "--skip-done", help="Skip attachments already marked DONE."
-    ),
-    work_root: Path = typer.Option(
-        Path("/var/lib/eyenet/stealer-work"),
-        "--work-root",
-        help="Scratch root for archive extraction.",
+    limit: int = typer.Option(
+        0, "--limit", help="Cap on the corpus-reindex envelope (0 = sweep everything)."
     ),
 ) -> None:
-    """Walk every stored stealer archive and re-run the extraction pipeline against it.
+    """Request a stealer reindex via the bus and exit.
 
-    Rule-catalog bumps, new wallet families, the v1.3.3 victim_profiles MV and the v1.3.4
-    monitored_domains watchlist surface against the EXISTING corpus only if the extractor
-    is re-run or the materialized views get a chance to backfill. The MVs backfill
-    idempotently on API boot via ensure_schema(); this CLI closes the other half of the
-    loop by re-running gotractor over on-disk archives. Serial on purpose: multi-GB
-    extractions dominate the box, parallel shreds disk + CPU.
+    v1.3.1: no longer spawns its own GotractorDaemon or ClickHouse sinks.
+    The resident stealer-processor service owns the gotractor subprocess
+    and the sinks; this CLI only enqueues work for it. Running this CLI
+    twice is harmless (idempotent), and prod is no longer at risk of
+    two gotractor daemons racing on the same blobs.
+
+    Three modes:
+      - no flags: publish a corpus-reindex envelope (processor walks
+        every stored attachment).
+      - --attachment ID: publish a per-attachment reindex envelope.
+      - --attachment ID --urgent: as above, but on the urgent subject
+        (processor jumps the line).
+      - --dry-run: list attachments the processor would cover and exit.
     """
+    from eyenet.bus.publisher import BusEnvelopePublisher  # noqa: PLC0415
     from eyenet.contracts.group import STEALER_LOG_CATEGORY  # noqa: PLC0415
-    from eyenet.models.stealer import STEALER_DONE  # noqa: PLC0415
-    from eyenet.stealer.clickhouse import (  # noqa: PLC0415
-        ClickHouseRecordsSink,
-        FileAuditSink,
+    from eyenet.contracts.stealer_events import (  # noqa: PLC0415
+        SUBJECT_STEALER_ATTACHMENT_REINDEX,
+        SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT,
+        SUBJECT_STEALER_CORPUS_REINDEX,
+        StealerAttachmentReindexEnvelope,
+        StealerCorpusReindexEnvelope,
     )
-    from eyenet.stealer.gotractor_client import GotractorDaemon  # noqa: PLC0415
+    from eyenet.telemetry.propagation import ZERO_TRACEPARENT  # noqa: PLC0415
 
-    # Synchronous setup OUTSIDE the event loop: one-shot Path resolution + sink
-    # + daemon construction. Keeps _main() free of async-unsafe FS calls.
-    vendored = Path(__file__).resolve().parents[1] / "stealer"
-    rules_dir = Path(
-        os.environ.get("EYENET_STEALER_RULES_DIR", str(vendored / "rules" / "catalog"))
-    )
-    families_dir = Path(os.environ.get("EYENET_STEALER_FAMILIES_DIR", str(vendored / "families")))
-    audit_sink = None if dry_run else FileAuditSink()
-    records_sink = None if dry_run else ClickHouseRecordsSink()
-    gotractor: GotractorDaemon | None = None
-    if not dry_run:
-        gotractor = GotractorDaemon(
-            rules_dir=rules_dir, families_dir=families_dir, metrics_port=None
-        )
-        gotractor.start()
-        work_root.mkdir(parents=True, exist_ok=True)
+    tc = TraceContext(traceparent=ZERO_TRACEPARENT)
 
-    async def _main() -> tuple[int, int, int]:
+    if urgent and attachment is None:
+        typer.echo("error: --urgent requires --attachment", err=True)
+        raise typer.Exit(code=2)
+
+    async def _main() -> int:
         cfg = RuntimeConfig.from_env(data_dir=data_dir)
         storage = get_repository(data_dir=cfg.data_dir)
-        processed = succeeded = skipped = 0
-        after_id: UUID | None = None
         try:
-            while processed < limit:
-                page_size = min(50, limit - processed)
+            if dry_run:
                 page = await storage.list_stealer_attachments_for_reindex(
-                    STEALER_LOG_CATEGORY, limit=page_size, after_id=after_id
+                    STEALER_LOG_CATEGORY, limit=limit or 1000, after_id=None
                 )
-                if not page:
-                    break
                 for att in page:
-                    after_id = att.id
-                    if skip_done:
-                        existing = await storage.get_stealer_processing(att.id)
-                        if existing is not None and existing.state == STEALER_DONE:
-                            skipped += 1
-                            continue
-                    processed += 1
-                    if dry_run:
-                        typer.echo(f"  would reindex attachment={att.id} blob={att.storage_uri}")
-                        continue
-                    typer.echo(f"[{processed}] attachment={att.id} blob={att.storage_uri}")
-                    ok, line = await _reindex_one(
-                        att,
-                        storage=storage,
-                        audit_sink=audit_sink,
-                        records_sink=records_sink,
-                        gotractor=gotractor,
-                        work_root=work_root,
-                    )
-                    if ok:
-                        succeeded += 1
-                    typer.echo(f"  {line}")
-                if not all_ or processed >= limit:
-                    break
+                    typer.echo(f"  would reindex attachment={att.id} blob={att.storage_uri}")
+                return len(page)
+            bus = await _connect_bus(cfg)
+            publisher = BusEnvelopePublisher(bus)
+            if attachment is not None:
+                subject = (
+                    SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT
+                    if urgent
+                    else SUBJECT_STEALER_ATTACHMENT_REINDEX
+                )
+                env = StealerAttachmentReindexEnvelope(attachment_id=attachment, trace_context=tc)
+                await publisher.publish(subject, env)
+                typer.echo(f"published {subject} attachment={attachment}")
+                return 1
+            env2 = StealerCorpusReindexEnvelope(limit=limit, trace_context=tc)
+            await publisher.publish(SUBJECT_STEALER_CORPUS_REINDEX, env2)
+            typer.echo(f"published {SUBJECT_STEALER_CORPUS_REINDEX} limit={limit or 'unbounded'}")
+            return 1
         finally:
             await storage.close()
-        return processed, succeeded, skipped
 
-    try:
-        processed, succeeded, skipped = asyncio.run(_main())
-    finally:
-        for closer in (audit_sink, records_sink, gotractor):
-            if closer is not None:
-                closer.close()
-    verb = "would reindex" if dry_run else "reindexed"
-    typer.echo(
-        f"done: {verb} {processed} attachments"
-        f" ({succeeded} ok, {processed - succeeded} failed), skipped {skipped}"
-    )
+    asyncio.run(_main())
 
 
 @app.command("engine")
@@ -1401,7 +1332,6 @@ def api_run(  # pragma: no cover
     )
 
     async def _main() -> None:
-        import os  # noqa: PLC0415
         import socket  # noqa: PLC0415
 
         from eyenet.telemetry import init_telemetry  # noqa: PLC0415

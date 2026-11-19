@@ -368,6 +368,10 @@ services:
       # gotractor fsnotify-watches it for live reload.
       EYENET_STEALER_RULES_DIR: /var/lib/eyenet/stealer-catalog/rules
       EYENET_STEALER_FAMILIES_DIR: /var/lib/eyenet/stealer-catalog/families
+      # Half the host cores for gotractor (worker pool + GOMAXPROCS). Leaves
+      # headroom for unar/7zz + the Python service itself on small prod boxes.
+      # Override in .env for larger hosts: EYENET_THREADS=all or an integer.
+      EYENET_THREADS: ${EYENET_THREADS:-half}
     volumes:
       - eyenet-data:/var/lib/eyenet  # read captured blobs + scratch extraction space
     depends_on:

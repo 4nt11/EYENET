@@ -21,6 +21,7 @@ from eyenet.contracts.group import STEALER_LOG_CATEGORY
 from eyenet.contracts.stealer_events import (
     SUBJECT_STEALER_ATTACHMENT_CAPTURED,
     SUBJECT_STEALER_ATTACHMENT_REINDEX,
+    SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT,
     SUBJECT_STEALER_CORPUS_RECLASSIFY,
     SUBJECT_STEALER_CORPUS_REINDEX,
     StealerAttachmentCapturedEnvelope,
@@ -126,6 +127,13 @@ class StealerProcessorService(ServiceBase):
         # processes each event once; the processor's own subscription group.
         await self._bus.subscribe(
             SUBJECT_STEALER_ATTACHMENT_REINDEX, _on_reindex_one, queue_group="stealer"
+        )
+        # Urgent per-attachment reindex. Separate queue_group so the fast path
+        # never queues behind a corpus sweep; same handler, same envelope.
+        await self._bus.subscribe(
+            SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT,
+            _on_reindex_one,
+            queue_group="stealer_urgent",
         )
         await self._bus.subscribe(
             SUBJECT_STEALER_CORPUS_REINDEX, _on_corpus_reindex, queue_group="stealer"

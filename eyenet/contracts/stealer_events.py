@@ -27,6 +27,11 @@ SUBJECT_STEALER_ATTACHMENT_REINDEX: str = "stealer.attachment.reindex"
 # through the pipeline. Scope is admin:stealer at the API layer; the
 # bus event itself carries no filter so an eavesdrop cannot narrow it.
 SUBJECT_STEALER_CORPUS_REINDEX: str = "stealer.corpus.reindex"
+# Jump-the-line per-attachment reindex. Same envelope as
+# SUBJECT_STEALER_ATTACHMENT_REINDEX; the processor serves it off a
+# dedicated subscription (queue_group="stealer_urgent") so it never
+# queues behind an in-flight corpus sweep. Use for "this one blob, now."
+SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT: str = "stealer.attachment.reindex.urgent"
 # Operator-driven full corpus reclassify: processor skips extract and
 # just re-scores every (archive, victim) pair under the current family
 # catalog. Cheap compared to reindex (CH-only).
@@ -69,10 +74,11 @@ class StealerCorpusReclassifyEnvelope(BusEnvelope):
 __all__ = [
     "SUBJECT_STEALER_ATTACHMENT_CAPTURED",
     "SUBJECT_STEALER_ATTACHMENT_REINDEX",
+    "SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT",
     "SUBJECT_STEALER_CORPUS_RECLASSIFY",
     "SUBJECT_STEALER_CORPUS_REINDEX",
     "StealerAttachmentCapturedEnvelope",
     "StealerAttachmentReindexEnvelope",
     "StealerCorpusReclassifyEnvelope",
     "StealerCorpusReindexEnvelope",
-]
+]  # grouped by subject constants then envelopes

@@ -101,6 +101,20 @@ class GotractorDaemon:
             "EYENET_STEALER_RULES_DIR": self._rules_dir,
             "EYENET_STEALER_FAMILIES_DIR": self._families_dir,
         }
+        # CPU cap. EYENET_THREADS sets both the daemon's parallel-run worker pool
+        # (EYENET_GOTRACTOR_WORKERS, see daemon.go) AND Go's OS-thread cap
+        # (GOMAXPROCS). Accepts an integer, or "half"/"all" so the compose file
+        # ships one value across hosts of different core counts. Default unset =
+        # NumCPU (free run).
+        threads = os.environ.get("EYENET_THREADS", "").strip().lower()
+        if threads:
+            if threads in {"half", "all"}:
+                cpu = os.cpu_count() or 1
+                resolved = str(max(1, cpu // 2) if threads == "half" else cpu)
+            else:
+                resolved = threads  # daemon re-parses and rejects garbage
+            env["EYENET_GOTRACTOR_WORKERS"] = resolved
+            env["GOMAXPROCS"] = resolved
         self._proc = subprocess.Popen(  # noqa: S603  # nosec B603
             cmd,
             stdin=subprocess.PIPE,

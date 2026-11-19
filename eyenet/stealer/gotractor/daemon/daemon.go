@@ -230,10 +230,24 @@ func (d *Daemon) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 	// execute in parallel. Bound at NumCPU; override with
 	// EYENET_GOTRACTOR_WORKERS. reload/stats/shutdown stay serial and
 	// drain in-flight runs first so shutdown_ack is truly the last line.
+	// EYENET_GOTRACTOR_WORKERS: integer, or the special values "half"
+	// (NumCPU/2, min 1) and "all" (NumCPU). Lets the compose file ship
+	// EYENET_GOTRACTOR_WORKERS=half once and get sensible behavior
+	// across hosts of different core counts.
 	workers := runtime.NumCPU()
-	if v := os.Getenv("EYENET_GOTRACTOR_WORKERS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			workers = n
+	if v := strings.ToLower(os.Getenv("EYENET_GOTRACTOR_WORKERS")); v != "" {
+		switch v {
+		case "half":
+			workers = workers / 2
+			if workers < 1 {
+				workers = 1
+			}
+		case "all":
+			// default
+		default:
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				workers = n
+			}
 		}
 	}
 	sem := make(chan struct{}, workers)
