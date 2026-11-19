@@ -131,6 +131,94 @@ _RECORDS_COLUMNS = [
 ]
 
 
+# v1.3.1 reindex-idempotent counter semantics. The ClickHouse MV contract is
+# "forward the INSERT block, not the post-merge state of the source", so a
+# plain count() in an MV over extracted_records (ReplacingMergeTree) double-
+# counts when the same row is re-inserted via a reindex. The ReplacingMergeTree
+# dedups on its ORDER BY key; if our rollup counter is uniqExact over the
+# SAME tuple, it dedups the same way. Correctness becomes a schema property
+# instead of a maintenance procedure the operator has to remember.
+#
+# Identity tuple matches extracted_records' ORDER BY -- archive_sha256,
+# rule_id, file_path, cityHash64(toString(fields)).
+_IDENTITY_TUPLE_DDL = "(archive_sha256, rule_id, file_path, cityHash64(toString(fields)))"
+_IDENTITY_TUPLE_TYPE = "Tuple(FixedString(64), LowCardinality(String), String, UInt64)"
+
+# f-strings are pre-built as module constants so ruff S608 noqa sits on one
+# line each; the "variable" they interpolate is a module constant above.
+_EXTRACTED_ROWS_PER_FILE_MV = f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.extracted_rows_per_file_mv
+    TO {{db}}.extracted_rows_per_file AS
+    SELECT
+        archive_sha256,
+        file_path,
+        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+    FROM {{db}}.extracted_records
+    GROUP BY archive_sha256, file_path
+    """  # noqa: S608  # nosec B608
+_EXTRACTED_ROWS_PER_FILE_BACKFILL = f"""
+    INSERT INTO {{db}}.extracted_rows_per_file
+    SELECT archive_sha256, file_path, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+    FROM {{db}}.extracted_records
+    WHERE NOT EXISTS (SELECT 1 FROM {{db}}.extracted_rows_per_file)
+    GROUP BY archive_sha256, file_path
+    """  # noqa: S608  # nosec B608
+
+# victim_profiles MV body + backfill. Shared across both: the SELECT core
+# is identical; only the wrapping (INSERT ... vs CREATE MATERIALIZED VIEW)
+# differs. Keep them literally separate to match the original structure.
+_VICTIM_PROFILES_SELECT_CORE = f"""
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        max(source) AS source,
+        max(fields['ui_country']) AS country,
+        max(if(fields['ui_egress_ip'] != '', fields['ui_egress_ip'], fields['build_egress_ip'])) AS egress_ip,
+        max(coalesce(nullIf(fields['ui_user_name'], ''), nullIf(fields['os_user_name'], ''), nullIf(fields['env_user_name'], ''), '')) AS user_name,
+        max(coalesce(nullIf(fields['ui_computer'], ''), nullIf(fields['os_computer_name'], ''), nullIf(fields['env_computer_name'], ''), '')) AS computer_name,
+        max(coalesce(nullIf(fields['ui_os'], ''), nullIf(fields['os_version'], ''), '')) AS os_version,
+        max(fields['ui_traffic_affid']) AS traffic_affid,
+        max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
+        max(fields['ui_payload_md5']) AS payload_md5,
+        max(fields['ui_work_dir']) AS work_dir,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family IN ('browser_passwords','combolist','windows_credentials','json_v2')) AS creds_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family IN ('cookies','victim_cookies')) AS cookies_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_autofills') AS autofills_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_history') AS history_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_downloads') AS downloads_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_processes') AS processes_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_software') AS software_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'discord_tokens') AS discord_tokens_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'steam_accounts') AS steam_tokens_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'google_oauth_tokens') AS google_refresh_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
+        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, rule_id LIKE 'wallet_vault_leveldb:%') AS wallet_vaults_count,
+        maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
+        maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
+        maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
+        maxIf(toUInt8(1), family = 'aware_crypter') AS has_crypter_banner,
+        maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
+        maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
+        maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
+    FROM {{db}}.extracted_records
+"""  # noqa: S608  # nosec B608
+
+_VICTIM_PROFILES_MV = f"""
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.victim_profiles_mv
+    TO {{db}}.victim_profiles AS
+    {_VICTIM_PROFILES_SELECT_CORE}
+    WHERE splitByChar('/', file_path)[2] != ''
+    GROUP BY archive_sha256, victim_folder
+    """
+_VICTIM_PROFILES_BACKFILL = f"""
+    INSERT INTO {{db}}.victim_profiles
+    {_VICTIM_PROFILES_SELECT_CORE}
+    WHERE splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {{db}}.victim_profiles)
+    GROUP BY archive_sha256, victim_folder
+    """  # noqa: S608  # nosec B608
+
+
 # v1.3.3 per-victim profile roll-up. ONE row per (archive_sha256, victim_folder)
 # that the FE lists + filters + opens in a detail drawer. Cheap enough to
 # query without FINAL because archive_sha256 is the sort-key prefix.
@@ -159,8 +247,8 @@ _RECORDS_COLUMNS = [
 # random temp extraction dir name by the pipeline, which does not
 # distinguish victims. Fix is pending; MV bypasses by deriving directly.
 _VICTIM_PROFILES: tuple[str, ...] = (
-    """
-    CREATE TABLE IF NOT EXISTS {db}.victim_profiles
+    f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.victim_profiles
     (
         archive_sha256         FixedString(64),
         victim_folder          String,
@@ -174,18 +262,18 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         build_version          SimpleAggregateFunction(max, LowCardinality(String)),
         payload_md5            SimpleAggregateFunction(max, String),
         work_dir               SimpleAggregateFunction(max, String),
-        creds_count            SimpleAggregateFunction(sum, UInt64),
-        cookies_count          SimpleAggregateFunction(sum, UInt64),
-        autofills_count        SimpleAggregateFunction(sum, UInt64),
-        history_count          SimpleAggregateFunction(sum, UInt64),
-        downloads_count        SimpleAggregateFunction(sum, UInt64),
-        processes_count        SimpleAggregateFunction(sum, UInt64),
-        software_count         SimpleAggregateFunction(sum, UInt64),
-        discord_tokens_count   SimpleAggregateFunction(sum, UInt64),
-        steam_tokens_count     SimpleAggregateFunction(sum, UInt64),
-        google_refresh_count   SimpleAggregateFunction(sum, UInt64),
-        localstorage_jwt_count SimpleAggregateFunction(sum, UInt64),
-        wallet_vaults_count    SimpleAggregateFunction(sum, UInt64),
+        creds_count            AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        cookies_count          AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        autofills_count        AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        history_count          AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        downloads_count        AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        processes_count        AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        software_count         AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        discord_tokens_count   AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        steam_tokens_count     AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        google_refresh_count   AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        localstorage_jwt_count AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        wallet_vaults_count    AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
         has_corporate_marker   SimpleAggregateFunction(max, UInt8),
         has_webmail_leak       SimpleAggregateFunction(max, UInt8),
         has_wallet             SimpleAggregateFunction(max, UInt8),
@@ -200,96 +288,21 @@ _VICTIM_PROFILES: tuple[str, ...] = (
     )
     ENGINE = AggregatingMergeTree
     ORDER BY (archive_sha256, victim_folder)
-    {storage_policy_clause}
+    {{storage_policy_clause}}
     """,
-    # MV reads only the batch being inserted. Fields the batch does not
-    # contribute leave empty strings / zeros which SAF's lexicographic max
-    # discards in favour of non-empty values from other batches.
-    # victim_folder='' rows (files at the archive root with no victim
-    # subdirectory) are filtered out so the UI never shows a phantom "empty
-    # victim" row.
-    """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_profiles_mv
-    TO {db}.victim_profiles AS
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2] AS victim_folder,
-        max(source) AS source,
-        max(fields['ui_country']) AS country,
-        max(if(fields['ui_egress_ip'] != '', fields['ui_egress_ip'], fields['build_egress_ip'])) AS egress_ip,
-        max(coalesce(nullIf(fields['ui_user_name'], ''), nullIf(fields['os_user_name'], ''), nullIf(fields['env_user_name'], ''), '')) AS user_name,
-        max(coalesce(nullIf(fields['ui_computer'], ''), nullIf(fields['os_computer_name'], ''), nullIf(fields['env_computer_name'], ''), '')) AS computer_name,
-        max(coalesce(nullIf(fields['ui_os'], ''), nullIf(fields['os_version'], ''), '')) AS os_version,
-        max(fields['ui_traffic_affid']) AS traffic_affid,
-        max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
-        max(fields['ui_payload_md5']) AS payload_md5,
-        max(fields['ui_work_dir']) AS work_dir,
-        toUInt64(countIf(family IN ('browser_passwords','combolist','windows_credentials','json_v2'))) AS creds_count,
-        toUInt64(countIf(family IN ('cookies','victim_cookies'))) AS cookies_count,
-        toUInt64(countIf(family = 'victim_autofills')) AS autofills_count,
-        toUInt64(countIf(family = 'victim_history')) AS history_count,
-        toUInt64(countIf(family = 'victim_downloads')) AS downloads_count,
-        toUInt64(countIf(family = 'victim_processes')) AS processes_count,
-        toUInt64(countIf(family = 'victim_software')) AS software_count,
-        toUInt64(countIf(family = 'discord_tokens')) AS discord_tokens_count,
-        toUInt64(countIf(family = 'steam_accounts')) AS steam_tokens_count,
-        toUInt64(countIf(family = 'google_oauth_tokens')) AS google_refresh_count,
-        toUInt64(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
-        toUInt64(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
-        maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
-        maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
-        maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
-        maxIf(toUInt8(1), family = 'aware_crypter') AS has_crypter_banner,
-        maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
-        maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
-        maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
-    FROM {db}.extracted_records
-    WHERE splitByChar('/', file_path)[2] != ''
-    GROUP BY archive_sha256, victim_folder
-    """,
+    # v1.3.1: switched the *_count columns from SAF(sum, UInt64) +
+    # countIf(...) in the MV body to AggregateFunction(uniqExact, identity_tuple)
+    # + uniqExactStateIf(identity_tuple, predicate). The identity tuple
+    # matches extracted_records' ReplacingMergeTree ORDER BY so a reindex
+    # re-inserting the same row contributes the same tuple, and the counter
+    # dedups. Correctness is a schema property, not an operator procedure.
+    # The "max" fields stay SAF(max) since the gotcha is specific to count.
+    _VICTIM_PROFILES_MV,
     # Idempotent backfill with NOT EXISTS gate. First-run on an existing
     # extracted_records populates all historical rows; subsequent calls on
     # each pipeline run are no-ops. v1.3.1: also fires after the one-shot
     # repair (see _repair_victim_profiles_if_stale) rebuilds the table.
-    """
-    INSERT INTO {db}.victim_profiles
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2] AS victim_folder,
-        max(source) AS source,
-        max(fields['ui_country']) AS country,
-        max(if(fields['ui_egress_ip'] != '', fields['ui_egress_ip'], fields['build_egress_ip'])) AS egress_ip,
-        max(coalesce(nullIf(fields['ui_user_name'], ''), nullIf(fields['os_user_name'], ''), nullIf(fields['env_user_name'], ''), '')) AS user_name,
-        max(coalesce(nullIf(fields['ui_computer'], ''), nullIf(fields['os_computer_name'], ''), nullIf(fields['env_computer_name'], ''), '')) AS computer_name,
-        max(coalesce(nullIf(fields['ui_os'], ''), nullIf(fields['os_version'], ''), '')) AS os_version,
-        max(fields['ui_traffic_affid']) AS traffic_affid,
-        max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
-        max(fields['ui_payload_md5']) AS payload_md5,
-        max(fields['ui_work_dir']) AS work_dir,
-        toUInt64(countIf(family IN ('browser_passwords','combolist','windows_credentials','json_v2'))) AS creds_count,
-        toUInt64(countIf(family IN ('cookies','victim_cookies'))) AS cookies_count,
-        toUInt64(countIf(family = 'victim_autofills')) AS autofills_count,
-        toUInt64(countIf(family = 'victim_history')) AS history_count,
-        toUInt64(countIf(family = 'victim_downloads')) AS downloads_count,
-        toUInt64(countIf(family = 'victim_processes')) AS processes_count,
-        toUInt64(countIf(family = 'victim_software')) AS software_count,
-        toUInt64(countIf(family = 'discord_tokens')) AS discord_tokens_count,
-        toUInt64(countIf(family = 'steam_accounts')) AS steam_tokens_count,
-        toUInt64(countIf(family = 'google_oauth_tokens')) AS google_refresh_count,
-        toUInt64(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
-        toUInt64(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
-        maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
-        maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
-        maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
-        maxIf(toUInt8(1), family = 'aware_crypter') AS has_crypter_banner,
-        maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
-        maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
-        maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
-    FROM {db}.extracted_records
-    WHERE splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_profiles)
-    GROUP BY archive_sha256, victim_folder
-    """,
+    _VICTIM_PROFILES_BACKFILL,
 )
 
 
@@ -301,7 +314,19 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 # 3.6M-row extracted_records. The new MV keys off `family` (stable,
 # catalog-defined). This string is the sentinel we grep in
 # system.tables.create_table_query to decide whether to force-rebuild.
-_VICTIM_PROFILES_STALE_SENTINEL = "rule_id LIKE 'passwords_"
+#
+# v1.3.1 bump: the earlier body had been fixed to key off `family` (1.3.0
+# post-ship patch), so the old sentinel no longer matches on upgraded
+# clusters. The 1.3.1 switchover is from countIf(family IN ...) to
+# uniqExactStateIf(identity_tuple, family IN ...); the sentinel now
+# catches the countIf shape.
+_VICTIM_PROFILES_STALE_SENTINEL = "countIf(family IN"
+
+# v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
+# bodies used `toUInt64(count()) AS <col>`; the new body uses
+# `uniqExactState(_IDENTITY_TUPLE_DDL)`. The sentinel catches the old shape.
+_STATS_ROLLUP_STALE_SENTINEL = "toUInt64(count())"
+_EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "toUInt64(count())"
 
 
 # v1.3.1 /stats pre-aggregation. Before: GET /v1/stealer/stats ran 4 FULL
@@ -352,7 +377,7 @@ _STATS_ROLLUP_TOTALS_MV = f"""
     TO {{db}}.stats_rollup_totals AS
     SELECT
         'all' AS bucket,
-        toUInt64(count()) AS total_creds,
+        uniqExactState({_IDENTITY_TUPLE_DDL}) AS total_creds,
         uniqState(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
         uniqState({_HOST_EXPR_DDL}) AS distinct_hosts
     FROM {{db}}.extracted_records
@@ -364,7 +389,7 @@ _STATS_ROLLUP_SCHEME_MV = f"""
     TO {{db}}.stats_rollup_scheme AS
     SELECT
         {_SCHEME_EXPR_DDL} AS scheme,
-        toUInt64(count()) AS cnt
+        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
     GROUP BY scheme
@@ -374,7 +399,7 @@ _STATS_ROLLUP_TLD_MV = f"""
     TO {{db}}.stats_rollup_tld AS
     SELECT
         {_TLD_EXPR_DDL} AS tld,
-        toUInt64(count()) AS cnt
+        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
     GROUP BY tld
@@ -384,7 +409,7 @@ _STATS_ROLLUP_HOST_MV = f"""
     TO {{db}}.stats_rollup_host AS
     SELECT
         {_HOST_EXPR_DDL} AS host,
-        toUInt64(count()) AS cnt
+        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
     GROUP BY host
@@ -393,7 +418,7 @@ _STATS_ROLLUP_TOTALS_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_totals
     SELECT
         'all' AS bucket,
-        toUInt64(count()) AS total_creds,
+        uniqExactState({_IDENTITY_TUPLE_DDL}) AS total_creds,
         uniqState(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
         uniqState({_HOST_EXPR_DDL}) AS distinct_hosts
     FROM {{db}}.extracted_records
@@ -403,7 +428,7 @@ _STATS_ROLLUP_TOTALS_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_SCHEME_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_scheme
-    SELECT {_SCHEME_EXPR_DDL} AS scheme, toUInt64(count()) AS cnt
+    SELECT {_SCHEME_EXPR_DDL} AS scheme, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_scheme)
@@ -411,7 +436,7 @@ _STATS_ROLLUP_SCHEME_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_TLD_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_tld
-    SELECT {_TLD_EXPR_DDL} AS tld, toUInt64(count()) AS cnt
+    SELECT {_TLD_EXPR_DDL} AS tld, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_tld)
@@ -419,7 +444,7 @@ _STATS_ROLLUP_TLD_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_HOST_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_host
-    SELECT {_HOST_EXPR_DDL} AS host, toUInt64(count()) AS cnt
+    SELECT {_HOST_EXPR_DDL} AS host, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_host)
@@ -427,50 +452,50 @@ _STATS_ROLLUP_HOST_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 
 _STATS_ROLLUP: tuple[str, ...] = (
-    """
-    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_totals
+    f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_totals
     (
         bucket         LowCardinality(String),
-        total_creds    SimpleAggregateFunction(sum, UInt64),
+        total_creds    AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
         unique_creds   AggregateFunction(uniq, Tuple(String, String, String)),
         distinct_hosts AggregateFunction(uniq, String)
     )
     ENGINE = AggregatingMergeTree
     ORDER BY bucket
-    {storage_policy_clause}
+    {{storage_policy_clause}}
     """,
     _STATS_ROLLUP_TOTALS_MV,
-    """
-    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_scheme
+    f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_scheme
     (
         scheme LowCardinality(String),
-        cnt    SimpleAggregateFunction(sum, UInt64)
+        cnt    AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY scheme
-    {storage_policy_clause}
+    {{storage_policy_clause}}
     """,
     _STATS_ROLLUP_SCHEME_MV,
-    """
-    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_tld
+    f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_tld
     (
         tld LowCardinality(String),
-        cnt SimpleAggregateFunction(sum, UInt64)
+        cnt AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY tld
-    {storage_policy_clause}
+    {{storage_policy_clause}}
     """,
     _STATS_ROLLUP_TLD_MV,
-    """
-    CREATE TABLE IF NOT EXISTS {db}.stats_rollup_host
+    f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_host
     (
         host String,
-        cnt  SimpleAggregateFunction(sum, UInt64)
+        cnt  AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY host
-    {storage_policy_clause}
+    {{storage_policy_clause}}
     """,
     _STATS_ROLLUP_HOST_MV,
     # One-shot backfill: NOT EXISTS gate so each only fires on the first
@@ -522,34 +547,19 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
     # the sort key is not (archive, file_path). After: a tiny
     # AggregatingMergeTree keyed on exactly that tuple, so a per-archive
     # lookup is a direct index seek.
-    """
-    CREATE TABLE IF NOT EXISTS {db}.extracted_rows_per_file
+    f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.extracted_rows_per_file
     (
         archive_sha256 FixedString(64),
         file_path      String,
-        cnt            SimpleAggregateFunction(sum, UInt64)
+        cnt            AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY (archive_sha256, file_path)
-    {storage_policy_clause}
+    {{storage_policy_clause}}
     """,
-    """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_rows_per_file_mv
-    TO {db}.extracted_rows_per_file AS
-    SELECT
-        archive_sha256,
-        file_path,
-        toUInt64(count()) AS cnt
-    FROM {db}.extracted_records
-    GROUP BY archive_sha256, file_path
-    """,
-    """
-    INSERT INTO {db}.extracted_rows_per_file
-    SELECT archive_sha256, file_path, toUInt64(count()) AS cnt
-    FROM {db}.extracted_records
-    WHERE NOT EXISTS (SELECT 1 FROM {db}.extracted_rows_per_file)
-    GROUP BY archive_sha256, file_path
-    """,
+    _EXTRACTED_ROWS_PER_FILE_MV,
+    _EXTRACTED_ROWS_PER_FILE_BACKFILL,
     # v1.3.1 per-victim rule-id set. Backs the artifact drawer's
     # fired_rule_ids resolution (which feeds the MITRE ATT&CK technique
     # list). Before: SELECT DISTINCT rule_id FROM extracted_records FINAL
@@ -943,6 +953,24 @@ class ClickHouseRecordsSink:
         # v1.3.4 monitored-domain watchlist (detection-engine input table).
         for stmt in _MONITORED_DOMAINS:
             client.command(stmt.format(db=self._db))
+        # v1.3.1 one-shot repair for the rollups whose counter type changed
+        # from SAF(sum, UInt64) to AggregateFunction(uniqExact, identity_tuple).
+        # The sentinel is the pre-1.3.1 MV body's `toUInt64(count())`; if present
+        # the MV + target are dropped and the CREATE IF NOT EXISTS below
+        # rebuilds them with the new body, then the NOT EXISTS backfill fires.
+        for mv in (
+            "stats_rollup_totals_mv",
+            "stats_rollup_scheme_mv",
+            "stats_rollup_tld_mv",
+            "stats_rollup_host_mv",
+            "extracted_rows_per_file_mv",
+        ):
+            self._repair_mv_if_stale(
+                client,
+                mv_name=mv,
+                target_name=mv.removesuffix("_mv"),
+                sentinel=_STATS_ROLLUP_STALE_SENTINEL,
+            )
         # v1.3.1 /stats pre-aggregation rollups (4 MVs + one-shot backfill).
         for stmt in _STATS_ROLLUP:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
@@ -952,22 +980,43 @@ class ClickHouseRecordsSink:
 
     def _repair_victim_profiles_if_stale(self, client: Any) -> None:
         """Drop the pre-1.3.1 victim_profiles table + MV iff the MV body
-        still contains the stale rule_id-based count expressions. The
-        follow-on CREATE IF NOT EXISTS then rebuilds with the family-based
-        body, and the NOT EXISTS backfill repopulates from
+        still contains the stale countIf expressions. Idempotent."""
+        self._repair_mv_if_stale(
+            client,
+            mv_name="victim_profiles_mv",
+            target_name="victim_profiles",
+            sentinel=_VICTIM_PROFILES_STALE_SENTINEL,
+        )
+
+    def _repair_mv_if_stale(
+        self,
+        client: Any,
+        *,
+        mv_name: str,
+        target_name: str,
+        sentinel: str,
+    ) -> None:
+        """Drop {mv_name} + {target_name} iff the stored MV body contains
+        {sentinel}. The follow-on CREATE IF NOT EXISTS then rebuilds both
+        with the new body and the NOT EXISTS backfill repopulates from
         extracted_records. Idempotent: once rebuilt, the sentinel no
-        longer matches, so later ensure_schema() calls are no-ops."""
+        longer matches, so later ensure_schema() calls are no-ops.
+
+        Safe for the stealer rollups because their data is pure
+        derivation of extracted_records; the authoritative rows stay
+        untouched.
+        """
         # self._db is operator-set config, not user input; no injection risk.
         query = (
             "SELECT create_table_query FROM system.tables "  # noqa: S608  # nosec B608
-            f"WHERE database = '{self._db}' AND name = 'victim_profiles_mv'"
+            f"WHERE database = '{self._db}' AND name = '{mv_name}'"
         )
         rows = client.query(query).result_rows
-        if not rows or _VICTIM_PROFILES_STALE_SENTINEL not in (rows[0][0] or ""):
+        if not rows or sentinel not in (rows[0][0] or ""):
             return
-        client.command(f"DROP VIEW IF EXISTS {self._db}.victim_profiles_mv")
-        client.command(f"TRUNCATE TABLE IF EXISTS {self._db}.victim_profiles")
-        client.command(f"DROP TABLE IF EXISTS {self._db}.victim_profiles")
+        client.command(f"DROP VIEW IF EXISTS {self._db}.{mv_name}")
+        client.command(f"TRUNCATE TABLE IF EXISTS {self._db}.{target_name}")
+        client.command(f"DROP TABLE IF EXISTS {self._db}.{target_name}")
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)

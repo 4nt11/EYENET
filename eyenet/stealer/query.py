@@ -161,8 +161,10 @@ class StealerCredsReader:
         try:
             client = await self._c()
             # self._db is operator config, not user input; no injection risk.
+            # v1.3.1: total_creds is now AggregateFunction(uniqExact, identity),
+            # so uniqExactMerge instead of sum. Reindex-safe by construction.
             sql_totals = (
-                "SELECT ifNull(sum(total_creds), 0), uniqMerge(unique_creds),"  # noqa: S608
+                "SELECT uniqExactMerge(total_creds), uniqMerge(unique_creds),"  # noqa: S608
                 f" uniqMerge(distinct_hosts) FROM {self._db}.stats_rollup_totals"  # nosec B608
             )
             result = await client.query(sql_totals)
@@ -175,19 +177,19 @@ class StealerCredsReader:
             raise
         by_scheme, by_tld, top_hosts = await asyncio.gather(
             self._buckets(
-                f"SELECT scheme, sum(cnt) c "  # noqa: S608  # nosec B608
+                f"SELECT scheme, uniqExactMerge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_scheme "
                 "GROUP BY scheme ORDER BY c DESC",
                 {},
             ),
             self._buckets(
-                f"SELECT tld, sum(cnt) c "  # noqa: S608  # nosec B608
+                f"SELECT tld, uniqExactMerge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_tld "
                 "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}",
                 top_param,
             ),
             self._buckets(
-                f"SELECT host, sum(cnt) c "  # noqa: S608  # nosec B608
+                f"SELECT host, uniqExactMerge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_host "
                 "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}",
                 top_param,
@@ -711,10 +713,15 @@ class StealerArtifactsReader:
         )
         total = int(total_rows[0][0]) if total_rows else 0
 
+        # v1.3.1: *_count columns are AggregateFunction(uniqExact, ...) so
+        # finalizeAggregation under FINAL extracts the scalar. SAF(max)
+        # columns (country, traffic_affid, ...) FINAL-merge automatically.
         rows = await self._rows(
             "SELECT "  # noqa: S608
             "  archive_sha256, victim_folder, country, traffic_affid, build_version, "
-            "  creds_count, cookies_count, wallet_vaults_count, "
+            "  finalizeAggregation(creds_count),"
+            "  finalizeAggregation(cookies_count),"
+            "  finalizeAggregation(wallet_vaults_count), "
             "  has_corporate_marker, has_wallet, has_crypter_banner "
             f"FROM {self._db}.victim_profiles FINAL "  # nosec B608
             f"WHERE {where_sql} "
@@ -741,14 +748,25 @@ class StealerArtifactsReader:
         return out, total, self._page_count(total, limit)
 
     async def detail(self, archive_sha256: str, victim_folder: str) -> ArtifactDetailRow | None:
+        # v1.3.1: *_count columns are AggregateFunction(uniqExact, identity).
+        # finalizeAggregation extracts the scalar under FINAL (which merges
+        # states across parts).
         rows = await self._rows(
             "SELECT "  # noqa: S608
             "  source, country, egress_ip, user_name, computer_name, os_version, "
             "  traffic_affid, build_version, payload_md5, work_dir, "
-            "  creds_count, cookies_count, autofills_count, history_count, "
-            "  downloads_count, processes_count, software_count, "
-            "  discord_tokens_count, steam_tokens_count, google_refresh_count, "
-            "  localstorage_jwt_count, wallet_vaults_count, "
+            "  finalizeAggregation(creds_count),"
+            "  finalizeAggregation(cookies_count),"
+            "  finalizeAggregation(autofills_count),"
+            "  finalizeAggregation(history_count), "
+            "  finalizeAggregation(downloads_count),"
+            "  finalizeAggregation(processes_count),"
+            "  finalizeAggregation(software_count), "
+            "  finalizeAggregation(discord_tokens_count),"
+            "  finalizeAggregation(steam_tokens_count),"
+            "  finalizeAggregation(google_refresh_count), "
+            "  finalizeAggregation(localstorage_jwt_count),"
+            "  finalizeAggregation(wallet_vaults_count), "
             "  has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner, "
             "  webmail_identity, first_corporate_marker, first_wallet_family "
             f"FROM {self._db}.victim_profiles FINAL "  # nosec B608
@@ -848,7 +866,7 @@ class StealerArtifactsReader:
             "    / uniqExact(fa.filename)), 1) AS pct "
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
-            "  SELECT file_path, sum(cnt) AS n "
+            "  SELECT file_path, uniqExactMerge(cnt) AS n "
             f"  FROM {self._db}.extracted_rows_per_file "  # nosec B608
             "  WHERE archive_sha256 = {sha:FixedString(64)} "
             "  GROUP BY file_path"
@@ -939,7 +957,7 @@ class StealerArtifactsReader:
             "       fa.sample_head, fa.file_sha256 "
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
-            "  SELECT file_path, sum(cnt) AS n "
+            "  SELECT file_path, uniqExactMerge(cnt) AS n "
             f"  FROM {self._db}.extracted_rows_per_file "  # nosec B608
             "  WHERE archive_sha256 = {sha:FixedString(64)} "
             "  GROUP BY file_path"
