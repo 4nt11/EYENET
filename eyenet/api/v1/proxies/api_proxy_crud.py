@@ -87,7 +87,9 @@ async def proxy_get(
     current_user: Annotated[CurrentUser, Depends(RequireScope("proxy:read"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
     session_key: Annotated[object, Depends(get_session_key)],
-    reveal: Annotated[bool, Query(description="Include decrypted secret. Requires proxy:admin.")] = False,
+    reveal: Annotated[
+        bool, Query(description="Include decrypted secret. Requires proxy:admin.")
+    ] = False,
 ) -> ProxyAdminResponse | ProxyResponse:
     row = await storage.get_proxy(proxy_id)
     if row is None:

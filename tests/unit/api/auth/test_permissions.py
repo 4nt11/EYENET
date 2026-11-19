@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -27,7 +27,7 @@ def _user(role: SystemUserRole) -> SystemUserRow:
     )
 
 
-def _grant(scope: ClearanceScope, user_id) -> SystemUserClearanceGrantRow:
+def _grant(scope: ClearanceScope, user_id: UUID) -> SystemUserClearanceGrantRow:
     return SystemUserClearanceGrantRow(
         id=uuid4(),
         user_id=user_id,
@@ -39,7 +39,7 @@ def _grant(scope: ClearanceScope, user_id) -> SystemUserClearanceGrantRow:
     )
 
 
-def _explicit(scope: str, user_id) -> SystemUserScopeRow:
+def _explicit(scope: str, user_id: UUID) -> SystemUserScopeRow:
     return SystemUserScopeRow(
         user_id=user_id,
         scope=scope,
@@ -72,7 +72,16 @@ def test_write_documents_in_admin_and_analyst_not_viewer() -> None:
 
 @pytest.mark.parametrize(
     "scope",
-    ["read:restricted", "read:classified", "admin:reclassify", "admin:case", "admin:clearance", "read:stealer", "write:stealer", "admin:stealer"],
+    [
+        "read:restricted",
+        "read:classified",
+        "admin:reclassify",
+        "admin:case",
+        "admin:clearance",
+        "read:stealer",
+        "write:stealer",
+        "admin:stealer",
+    ],
 )
 @pytest.mark.unit
 def test_grant_only_scopes_never_in_any_baseline(scope: str) -> None:

@@ -7,6 +7,7 @@ the rw module directly to keep the suite independent of the API deps.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ def tmp_rules_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _rule(slug: str = "test_rule", *, family: str = "lumma") -> dict:
+def _rule(slug: str = "test_rule", *, family: str = "lumma") -> dict[str, Any]:
     return {
         "id": slug,
         "version": 1,
@@ -65,20 +66,20 @@ def test_delete_removes_file(tmp_rules_dir: Path) -> None:
 @pytest.mark.parametrize(
     "bad_slug",
     [
-        "../escape",         # path traversal
-        "/absolute",         # rooted
-        "has spaces",        # whitespace
-        "UPPER",             # uppercase
-        "bad.dot",           # dot in slug
-        "1_starts_with_num", # leading digit
-        "x",                 # too short
-        "a" * 65,            # too long
+        "../escape",  # path traversal
+        "/absolute",  # rooted
+        "has spaces",  # whitespace
+        "UPPER",  # uppercase
+        "bad.dot",  # dot in slug
+        "1_starts_with_num",  # leading digit
+        "x",  # too short
+        "a" * 65,  # too long
     ],
 )
 def test_slug_rejects_unsafe_input(tmp_rules_dir: Path, bad_slug: str) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="slug"):
         rw._enforce_slug(bad_slug)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="slug"):
         rw.read_rule(bad_slug)
 
 
@@ -99,7 +100,7 @@ def test_shape_validation_requires_core_fields(tmp_rules_dir: Path) -> None:
 def test_shape_validation_rejects_unknown_match_type(tmp_rules_dir: Path) -> None:
     bad = _rule("bad_type")
     bad["match"] = {"type": "not_a_real_matcher"}
-    with pytest.raises(ValueError, match="match.type"):
+    with pytest.raises(ValueError, match=r"match\.type"):
         rw.write_rule(bad, allow_overwrite=False)
 
 
@@ -108,6 +109,7 @@ def test_unknown_family_warns_but_does_not_block(
 ) -> None:
     rule = _rule("exp_family", family="brand_new_family_not_in_catalog")
     import logging
+
     with caplog.at_level(logging.WARNING, logger="eyenet.stealer.rules.catalog.rw"):
         rw.write_rule(rule, allow_overwrite=False)
     assert any("unknown family" in r.message for r in caplog.records)

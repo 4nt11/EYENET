@@ -481,6 +481,15 @@ ignore_missing_imports = true
 module = ["tests.unit.api.test_group_i_middleware"]
 disable_error_code = ["arg-type"]
 
+# Optional ML runtime deps: torch + transformers are declared as runtime
+# requirements (see dependencies above) but are intentionally NOT
+# installed in the API / dev venv (the incident-classifier worker ships
+# with its own image). mypy can't find the stubs; silence the import
+# noise for just those modules.
+[[tool.mypy.overrides]]
+module = ["torch", "transformers", "transformers.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
@@ -513,3 +522,9 @@ ignore = ["DEP002"]
 [tool.deptry.package_module_name_map]
 PySocks = "socks"
 google-re2 = "re2"
+
+[dependency-groups]
+dev = [
+    "types-pysocks>=1.7.1.20261115",
+    "types-pyyaml>=6.0.12.20261113",
+]

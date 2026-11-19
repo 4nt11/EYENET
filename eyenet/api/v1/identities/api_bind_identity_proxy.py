@@ -12,7 +12,8 @@ held, so the proxies rejoin the lease pool automatically.
 
 from __future__ import annotations
 
-from typing import Annotated
+import logging
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +26,8 @@ from eyenet.contracts.identity import IdentityRow
 from eyenet.contracts.proxy import IdentityProxyBindRequest
 from eyenet.contracts.supervisor import RebindProxyCommand, command_subject_for
 from eyenet.storage.repository import BaseRepository
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["identities"])
 
@@ -73,6 +76,6 @@ async def identity_bind_proxy(
                 cmd.model_dump_json().encode("utf-8"),
                 headers={"command-kind": cmd.kind},
             )
-        except Exception:  # noqa: BLE001 - bus is best-effort for the signal
-            pass
-    return row
+        except Exception:  # best-effort signal: bus hiccup must not fail the write
+            _log.warning("rebind-proxy signal failed for identity %s", identity_id, exc_info=True)
+    return cast("IdentityRow", row)

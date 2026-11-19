@@ -1,38 +1,56 @@
+# ruff: noqa: PLR2004, S101
 """Smoke parity with the JS _selftest.js. Run from repo root:
 
     python -m eyenet.stealer.rules._selftest
 
 Mirrors every assertion in ``eyenet-fe/src/lib/stealer-engine/_selftest.js``
 so a divergence between the engines shows up as the same assertion failing
-on exactly one side.
+on exactly one side. Dev tool, not part of prod import path: assertions
+and verbatim JS-port lines are intentional.
 """
 
 from __future__ import annotations
 
 import json
 import time
+from typing import cast
 
 from eyenet.stealer.rules.engine import match_glob, run_rules
 from eyenet.stealer.rules.matchers import match_json, match_keyvalue_ini, match_regex, match_yaml
 from eyenet.stealer.rules.normalize import apply_normalize
-from eyenet.stealer.rules.types import ContentInput, VictimFolder
+from eyenet.stealer.rules.types import ContentInput, RuleSpec, VictimFolder
 
 
-def _eq(label: str, got, want) -> None:
+def _eq(label: str, got: object, want: object) -> None:
     if json.dumps(got, sort_keys=True) != json.dumps(want, sort_keys=True):
         raise AssertionError(f"[{label}] got {got!r} want {want!r}")
 
 
 def self_test() -> str:
     # 1. normalize verbs
-    _eq("strip", apply_normalize({"a": "  x  "}, [{"verb": "strip_whitespace", "field": "a"}]), {"a": "x"})
+    _eq(
+        "strip",
+        apply_normalize({"a": "  x  "}, [{"verb": "strip_whitespace", "field": "a"}]),
+        {"a": "x"},
+    )
     _eq("lower", apply_normalize({"a": "AB"}, [{"verb": "lowercase", "field": "a"}]), {"a": "ab"})
     _eq("upper", apply_normalize({"a": "ab"}, [{"verb": "uppercase", "field": "a"}]), {"a": "AB"})
-    _eq("trunc", apply_normalize({"a": "abcdef"}, [{"verb": "truncate", "field": "a", "max_len": 3}]), {"a": "abc"})
-    _eq("int", apply_normalize({"a": "count: 42"}, [{"verb": "int_from_string", "field": "a"}]), {"a": 42})
+    _eq(
+        "trunc",
+        apply_normalize({"a": "abcdef"}, [{"verb": "truncate", "field": "a", "max_len": 3}]),
+        {"a": "abc"},
+    )
+    _eq(
+        "int",
+        apply_normalize({"a": "count: 42"}, [{"verb": "int_from_string", "field": "a"}]),
+        {"a": 42},
+    )
     _eq(
         "replace",
-        apply_normalize({"a": "a  b   c"}, [{"verb": "replace_re2", "field": "a", "pattern": r"\s+", "replacement": " "}]),
+        apply_normalize(
+            {"a": "a  b   c"},
+            [{"verb": "replace_re2", "field": "a", "pattern": r"\s+", "replacement": " "}],
+        ),
         {"a": "a b c"},
     )
 
@@ -40,7 +58,9 @@ def self_test() -> str:
     ini_hit = match_keyvalue_ini(
         {"type": "keyvalue_ini", "requires_sections": ["Hardware"]},
         {"keys": {"Hardware.HWID": "hwid", "Software.OS": "os"}},
-        ContentInput(path="information.txt", text="[Hardware]\nHWID=ABC-123\n\n[Software]\nOS=Win10\n"),
+        ContentInput(
+            path="information.txt", text="[Hardware]\nHWID=ABC-123\n\n[Software]\nOS=Win10\n"
+        ),
     )
     _eq("ini", ini_hit, {"hwid": "ABC-123", "os": "Win10"})
 
@@ -87,22 +107,42 @@ def self_test() -> str:
     # 5. end-to-end
     rules = [
         {
-            "id": "lumma_folder", "version": 1, "layer": "container", "family": "lumma", "priority": 100,
+            "id": "lumma_folder",
+            "version": 1,
+            "layer": "container",
+            "family": "lumma",
+            "priority": 100,
             "match": {"type": "folder", "requires": ["System.txt"]},
         },
         {
-            "id": "lumma_system_txt", "version": 1, "layer": "content", "family": "lumma", "priority": 100,
+            "id": "lumma_system_txt",
+            "version": 1,
+            "layer": "content",
+            "family": "lumma",
+            "priority": 100,
             "path_glob": "System.txt",
-            "match": {"type": "keyvalue", "separator": ":", "strip_whitespace": True, "requires_keys": ["HWID"]},
+            "match": {
+                "type": "keyvalue",
+                "separator": ":",
+                "strip_whitespace": True,
+                "requires_keys": ["HWID"],
+            },
             "extract": {"keys": {"HWID": "hwid", "IP": "ip", "Country": "country"}},
-            "normalize": [{"verb": "uppercase", "field": "hwid"}, {"verb": "lowercase", "field": "country"}],
+            "normalize": [
+                {"verb": "uppercase", "field": "hwid"},
+                {"verb": "lowercase", "field": "country"},
+            ],
         },
     ]
     folder = VictimFolder(
         root_name="victim-001",
-        files=(ContentInput(path="System.txt", text="HWID: abc-123\nIP: 1.2.3.4\nCountry: US\n"),),
+        files=(
+            ContentInput(
+                path="System.txt", text="HWID: abc-123\nIP: 1.2.3.4\nCountry: US\n"
+            ),  # pragma: allowlist secret
+        ),
     )
-    r = run_rules(rules, folder)
+    r = run_rules(cast("list[RuleSpec]", rules), folder)
     _eq("family", r.family, "lumma")
     _eq("merged", r.fields, {"hwid": "ABC-123", "ip": "1.2.3.4", "country": "us"})
 

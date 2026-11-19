@@ -13,6 +13,8 @@ cleartext. QUIC (h3) is TLS-only, so it requires an in-process cert.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from hypercorn.config import Config
 
 # Hosts where a cleartext bind is acceptable because nothing but this box (or an
@@ -60,16 +62,22 @@ def build_config(
 
 
 if __name__ == "__main__":
-    # ponytail: self-check for the security guard — the one branch that, if
-    # wrong, leaks plaintext on a public interface.
-    assert build_config("127.0.0.1", 8000).alpn_protocols == ["h2"]
-    assert build_config(
-        "0.0.0.0", 443, enable_h3=True, certfile="c.pem", keyfile="k.pem"
+    # ponytail: self-check for the security guard, the one branch that, if
+    # wrong, leaks plaintext on a public interface. Dev-tool only (asserts
+    # and bind-all strings here are inside __main__, not prod).
+    assert build_config("127.0.0.1", 8000).alpn_protocols == ["h2"]  # noqa: S101
+    assert build_config(  # noqa: S101
+        "0.0.0.0",  # noqa: S104  # nosec B104  # dev-tool self-check, not prod  # pragma: allowlist secret
+        443,
+        enable_h3=True,
+        certfile="c.pem",
+        keyfile="k.pem",
     ).alpn_protocols == ["h2", "h3"]
-    for bad in (
-        lambda: build_config("0.0.0.0", 8000),  # public + no TLS
+    bads: tuple[Callable[[], Config], ...] = (
+        lambda: build_config("0.0.0.0", 8000),  # noqa: S104  # nosec B104  # public + no TLS
         lambda: build_config("127.0.0.1", 8000, enable_h3=True),  # h3 + no TLS
-    ):
+    )
+    for bad in bads:
         try:
             bad()
         except RuntimeError:
@@ -77,5 +85,5 @@ if __name__ == "__main__":
         else:
             raise AssertionError("expected RuntimeError on insecure config")
     # Upstream-TLS proxy escape hatch is honored.
-    assert build_config("0.0.0.0", 8000, allow_insecure_bind=True).bind == ["0.0.0.0:8000"]
+    assert build_config("0.0.0.0", 8000, allow_insecure_bind=True).bind == ["0.0.0.0:8000"]  # noqa: S101,S104  # nosec B104  # pragma: allowlist secret
     print("ok")

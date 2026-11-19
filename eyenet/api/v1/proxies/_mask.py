@@ -49,7 +49,7 @@ def to_proxy_admin_response(row: ProxyRow, key: Fernet) -> ProxyAdminResponse:
     if row.secret_encrypted is not None:
         try:
             secret = key.decrypt(row.secret_encrypted).decode("utf-8")
-        except Exception:  # noqa: BLE001 - audit this in the handler, not here
+        except Exception:
             secret = None
     base = to_proxy_response(row)
     return ProxyAdminResponse(**base.model_dump(), secret=secret)

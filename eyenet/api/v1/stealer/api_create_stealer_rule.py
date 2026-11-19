@@ -44,7 +44,7 @@ async def stealer_rules_create(
     await audit.emit(
         event="eyenet.audit.stealer_rule.created",
         subject_kind="stealer_rule",
-        subject_id=body.id,
+        evidence_ref=body.id,
         system_user_id=current_user.user_id,
         payload={"family": body.family, "layer": body.layer, "priority": body.priority},
     )

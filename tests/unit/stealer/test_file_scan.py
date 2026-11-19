@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from eyenet.stealer.file_scan import FileAudit, scan_file, walk_audit
+from eyenet.stealer.file_scan import scan_file, walk_audit
 
 pytestmark = pytest.mark.unit
 
@@ -40,11 +40,7 @@ def test_known_metadata_filename_wins_even_with_banner(tmp_path: Path) -> None:
     # The banner lines also tick approx_banner_hits so the operator sees
     # "this file is meta AND it carries banner noise" at a glance.
     content = (
-        "TG t.me/+SomeInvite\n"
-        "TELEGRAM - t.me/+other\n"
-        "\n"
-        "Windows: Windows 10\n"
-        "User Name: alice\n"
+        "TG t.me/+SomeInvite\nTELEGRAM - t.me/+other\n\nWindows: Windows 10\nUser Name: alice\n"
     )
     p = _write(tmp_path, "information.txt", content)
     a = scan_file(p, "information.txt")
@@ -79,21 +75,14 @@ def test_rar_archive_magic_bytes(tmp_path: Path) -> None:
 
 def test_credential_shape_text(tmp_path: Path) -> None:
     # URL:USER:PASS layout should land as likely_creds for unknown filenames.
-    content = (
-        "https://example.com:alice:hunter2\n"
-        "https://another.com:bob:p455\n"
-    )
+    content = "https://example.com:alice:hunter2\nhttps://another.com:bob:p455\n"
     p = _write(tmp_path, "mystery_dump.txt", content)
     a = scan_file(p, "mystery_dump.txt")
     assert a.heuristic_kind == "likely_creds"
 
 
 def test_banner_hits_counted(tmp_path: Path) -> None:
-    content = (
-        "TG t.me/+abc\n"
-        "TELEGRAM - t.me/+def\n"
-        "https://real.com:user:realpass\n"
-    )
+    content = "TG t.me/+abc\nTELEGRAM - t.me/+def\nhttps://real.com:user:realpass\n"
     p = _write(tmp_path, "banner_salad.txt", content)
     a = scan_file(p, "banner_salad.txt")
     # Three hits, not two: "TG " + "TELEGRAM " are two anchored-start matches;
@@ -103,11 +92,7 @@ def test_banner_hits_counted(tmp_path: Path) -> None:
 
 
 def test_null_pw_hits_counted(tmp_path: Path) -> None:
-    content = (
-        "host1.com:alice:Null\n"
-        "host2.com:bob:none\n"
-        "host3.com:charlie:realpass\n"
-    )
+    content = "host1.com:alice:Null\nhost2.com:bob:none\nhost3.com:charlie:realpass\n"
     p = _write(tmp_path, "mixed.txt", content)
     a = scan_file(p, "mixed.txt")
     assert a.approx_null_pw_hits == 2
@@ -133,4 +118,6 @@ def test_file_sha256_stable(tmp_path: Path) -> None:
     # Known input -> known sha. Dedup in ReplacingMergeTree relies on this.
     p = _write(tmp_path, "x.txt", b"hello")
     a = scan_file(p, "x.txt")
-    assert a.file_sha256 == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    assert (
+        a.file_sha256 == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    )  # pragma: allowlist secret

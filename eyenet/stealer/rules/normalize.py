@@ -9,12 +9,13 @@ RE2-wasm engine on the browser side.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import re2
 
-from eyenet.stealer.rules.types import NormalizeStep
+if TYPE_CHECKING:
+    from eyenet.stealer.rules.types import NormalizeStep
 
 _RE2_MAX_MEM = 8 * 1024 * 1024
 
@@ -37,7 +38,7 @@ def apply_normalize(
     return out
 
 
-def _run_verb(step: NormalizeStep, raw: str) -> str | int | None:
+def _run_verb(step: NormalizeStep, raw: str) -> str | int | None:  # noqa: PLR0911  # one return per verb
     verb = step["verb"]
     if verb == "strip_whitespace":
         return raw.strip()
@@ -67,12 +68,12 @@ def _run_verb(step: NormalizeStep, raw: str) -> str | int | None:
             opts = re2.Options()
             opts.max_mem = _RE2_MAX_MEM
             re_compiled = re2.compile(pattern, options=opts)
-            return re_compiled.sub(step.get("replacement", ""), raw)
+            return str(re_compiled.sub(step.get("replacement", ""), raw))
         except Exception:
             return None
     if verb == "date_parse":
         return _parse_date(raw, step.get("format", "iso8601"))
-    return None
+    return None  # type: ignore[unreachable]  # yaml-loaded verb strings may fall through all cases
 
 
 def _parse_date(raw: str, fmt: str) -> str | None:
@@ -81,10 +82,12 @@ def _parse_date(raw: str, fmt: str) -> str | None:
             n = int(raw)
         except ValueError:
             return None
-        dt = datetime.fromtimestamp(n, tz=timezone.utc)
+        dt = datetime.fromtimestamp(n, tz=UTC)
     else:
         # iso8601 / rfc2822: try both; emit canonical ISO back.
+        # ruff: noqa: PLC0415  # lazy import, only rfc2822 path needs it
         from email.utils import parsedate_to_datetime
+
         try:
             dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         except ValueError:
@@ -93,7 +96,7 @@ def _parse_date(raw: str, fmt: str) -> str | None:
             except (TypeError, ValueError):
                 return None
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
     # Both engines drop fractional seconds before the trailing Z for parity.
-    dt = dt.astimezone(timezone.utc).replace(microsecond=0)
+    dt = dt.astimezone(UTC).replace(microsecond=0)
     return dt.isoformat().replace("+00:00", "Z")

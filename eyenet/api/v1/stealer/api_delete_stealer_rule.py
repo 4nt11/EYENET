@@ -49,7 +49,7 @@ async def stealer_rules_delete(
     await audit.emit(
         event="eyenet.audit.stealer_rule.deleted",
         subject_kind="stealer_rule",
-        subject_id=rule_id,
+        evidence_ref=rule_id,
         system_user_id=current_user.user_id,
         payload={"family": rule.get("family"), "layer": rule.get("layer")},
     )

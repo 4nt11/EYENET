@@ -558,7 +558,7 @@ class MessagesMixin:
 
     async def messages_for_discovery_backfill(
         self, *, limit: int, after_id: UUID | None = None
-    ) -> list[DiscoveryBackfillMessage]:
+    ) -> list[object]:
         """Page the whole corpus (keyset by id ASC) — the one-shot discovery
         backfill primitive.
 

@@ -22,7 +22,7 @@ follow-up when we first ship an MTProto entry to prod.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eyenet.contracts.enums import ProxyKind, SourceKind
@@ -45,7 +45,7 @@ def _decrypt_user_pass(blob: bytes | None, fernet: Fernet) -> tuple[str | None, 
         return (None, None)
     try:
         raw = fernet.decrypt(blob).decode("utf-8")
-    except Exception:  # noqa: BLE001 - caller logs; a bad credential should not crash start
+    except Exception:
         return (None, None)
     if ":" in raw:
         user, pw = raw.split(":", 1)
@@ -59,7 +59,7 @@ async def lease_telethon_proxy(
     *,
     source_kind: SourceKind,
     fernet: Fernet,
-) -> tuple | None:
+) -> tuple[Any, ...] | None:
     """Lease a proxy and shape it for :class:`telethon.TelegramClient`.
 
     Returns ``None`` when the identity is not pool-attached or the pool has

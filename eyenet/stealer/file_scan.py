@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 HeuristicKind = Literal[
     "empty",
@@ -95,7 +97,12 @@ class FileAudit:
     approx_null_pw_hits: int
 
 
-def _classify(head: bytes, filename: str) -> HeuristicKind:
+_ASCII_PRINTABLE_MIN = 32  # ' '
+_ASCII_PRINTABLE_MAX = 127  # DEL excluded
+_PRINTABLE_TEXT_RATIO = 0.70  # anything below -> "binary"
+
+
+def _classify(head: bytes, filename: str) -> HeuristicKind:  # noqa: PLR0911  # one return per file-kind
     if not head:
         return "empty"
     # Magic-byte checks first (cheapest).
@@ -104,8 +111,10 @@ def _classify(head: bytes, filename: str) -> HeuristicKind:
     if head.startswith((b"PK\x03\x04", b"Rar!", b"7z\xbc\xaf", b"\x1f\x8b")):
         return "likely_archive"
     # Printable-byte ratio (quick binary sniff).
-    printable = sum(1 for c in head if 32 <= c < 127 or c in (9, 10, 13))
-    if printable / len(head) < 0.70:
+    printable = sum(
+        1 for c in head if _ASCII_PRINTABLE_MIN <= c < _ASCII_PRINTABLE_MAX or c in (9, 10, 13)
+    )
+    if printable / len(head) < _PRINTABLE_TEXT_RATIO:
         return "binary"
     # Known filename overrides pattern match (cheaper + more specific).
     fn_lower = filename.lower()

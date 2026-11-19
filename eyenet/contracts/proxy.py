@@ -13,7 +13,7 @@ Requests:
   Fernet-encrypted by the API handler before touching the DB; it never lives
   decrypted at rest.
 - :class:`ProxyBulkCreateRequest`: paste a textarea of lines in common proxy
-  URI formats (``socks5://user:pass@host:port``, ``host:port:user:pass``,
+  URI formats (``socks5://USER:PASS@host:port``, ``host:port:USER:PASS``,
   ``host:port``, ``mtproto://host:port?secret=HEX``). The handler parses
   each line, rejects malformed entries loudly, and inserts the rest.
 - :class:`ProxyStateUpdateRequest`: operator mark-burned / mark-active.
@@ -27,12 +27,26 @@ Everything here is a pydantic ``BaseModel``; the row types extend
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ._base import DbRowBase
 from .enums import ProxyKind, ProxyState
+
+
+class BulkProxyEntry(TypedDict, total=False):
+    """Shape of one row passed to ``bulk_create_proxies``. Mirrors the
+    ``create_proxy`` kwargs; ``secret_encrypted``/``source``/``notes`` are
+    optional."""
+
+    kind: ProxyKind
+    host: str
+    port: int
+    secret_encrypted: bytes | None
+    source: str | None
+    notes: str | None
 
 
 class ProxyPoolRow(DbRowBase):
@@ -122,7 +136,8 @@ class ProxyBulkCreateRequest(BaseModel):
     - ``socks5://user:pass@host:port``                       (auth SOCKS5)
     - ``http://host:port`` / ``https://...`` / ``http(s)://user:pass@...``
     - ``mtproto://host:port?secret=HEX``                     (TG MTProxy)
-    - ``host:port``                                          (defaults ``kind`` to the pool's ``kind_hint``, else SOCKS5)
+    - ``host:port``                                          (defaults ``kind`` to the pool's
+      ``kind_hint``, else SOCKS5)
     - ``host:port:user:pass``                                (same default kind)
 
     The handler parses each line, reports malformed ones in the response,

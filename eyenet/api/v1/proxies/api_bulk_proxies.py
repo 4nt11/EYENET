@@ -14,13 +14,17 @@ scope that granted the pool itself.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from eyenet.api.deps import CurrentUser, RequireScope, get_session_key, get_storage
-from eyenet.contracts.proxy import ProxyBulkCreateRequest, ProxyBulkCreateResult
+from eyenet.contracts.proxy import (
+    BulkProxyEntry,
+    ProxyBulkCreateRequest,
+    ProxyBulkCreateResult,
+)
 from eyenet.storage.repository import BaseRepository
 
 from ._parse_bulk import parse_bulk_lines
@@ -46,36 +50,39 @@ async def proxy_bulk_create(
         raise HTTPException(status_code=404, detail="proxy_pool not found")
 
     parsed = parse_bulk_lines(body.lines, default_kind=body.default_kind)
-    entries: list[dict[str, object]] = []
+    entries: list[BulkProxyEntry] = []
     for entry in parsed.entries:
         ciphertext: bytes | None = None
         if entry.secret:
             ciphertext = session_key.encrypt(entry.secret.encode("utf-8"))  # type: ignore[attr-defined]
         entries.append(
-            {
-                "kind": entry.kind,
-                "host": entry.host,
-                "port": entry.port,
-                "secret_encrypted": ciphertext,
-                "source": body.source,
-                "notes": None,
-            }
+            BulkProxyEntry(
+                kind=entry.kind,
+                host=entry.host,
+                port=entry.port,
+                secret_encrypted=ciphertext,
+                source=body.source,
+                notes=None,
+            )
         )
 
     rejected = list(parsed.rejected)
-    result = {"inserted": 0, "skipped_duplicate": 0, "skipped_keys": []}
+    inserted = 0
+    skipped_duplicate = 0
     if entries:
         result = await storage.bulk_create_proxies(
             pool_id=pool_id,
             entries=entries,
             created_at=datetime.now(tz=UTC),
         )
+        inserted = int(cast("int", result.get("inserted", 0)))
+        skipped_duplicate = int(cast("int", result.get("skipped_duplicate", 0)))
         # Surface duplicates to the operator in the rejection stream too so
         # the UI can render one unified list.
-        for key in result.get("skipped_keys", []):  # type: ignore[union-attr]
+        for key in cast("list[str]", result.get("skipped_keys", [])):
             rejected.append(f"duplicate (host:port:kind): {key}")
     return ProxyBulkCreateResult(
-        inserted=int(result.get("inserted", 0)),
-        skipped_duplicate=int(result.get("skipped_duplicate", 0)),
+        inserted=inserted,
+        skipped_duplicate=skipped_duplicate,
         rejected=rejected,
     )

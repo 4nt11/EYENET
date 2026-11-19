@@ -19,13 +19,17 @@ helper seeds the user THEN explicitly grants it via ``storage.grant_scope``.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
 from eyenet.contracts.enums import SourceKind, SystemUserRole
 from eyenet.storage.repository import BaseRepository
+
+SeedUserFn = Callable[..., Awaitable[UUID]]
 
 pytestmark = pytest.mark.integration
 
@@ -40,7 +44,7 @@ def _login(client: TestClient, username: str, password: str) -> str:
 
 
 async def _seed_admin_with_proxy_admin(
-    storage: BaseRepository, seed_user, now: datetime, *, username: str = "op"
+    storage: BaseRepository, seed_user: SeedUserFn, now: datetime, *, username: str = "op"
 ) -> str:
     """Seed an ADMIN user and bolt ``proxy:admin`` on top via grant_scope.
 
@@ -75,11 +79,15 @@ async def _seed_source_and_identity(
 
 
 async def test_pool_create_requires_proxy_admin(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     """Analyst has proxy:read + proxy:write via baseline but NOT proxy:admin.
     Pool creation is a reshape of operator infra, so the stricter scope gates it."""
-    await seed_user(username="an", password="pw", role=SystemUserRole.ANALYST)
+    await seed_user(
+        username="an",
+        password="pw",
+        role=SystemUserRole.ANALYST,  # pragma: allowlist secret
+    )  # pragma: allowlist secret
     headers = {"Authorization": f"Bearer {_login(client, 'an', 'pw')}"}
 
     resp = client.post(
@@ -91,7 +99,7 @@ async def test_pool_create_requires_proxy_admin(
 
 
 async def test_pool_full_crud(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
@@ -140,7 +148,7 @@ async def test_pool_full_crud(
 
 
 async def test_pool_delete_refuses_non_empty(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
@@ -152,7 +160,7 @@ async def test_pool_delete_refuses_non_empty(
     ).json()["id"]
     client.post(
         f"/v1/proxy-pools/{pool_id}/proxies",
-        json={"kind": "socks5", "host": "1.2.3.4", "port": 1080},
+        json={"kind": "socks5", "host": "1.2.3.4", "port": 1080},  # pragma: allowlist secret
         headers=headers,
     )
 
@@ -164,7 +172,7 @@ async def test_pool_delete_refuses_non_empty(
 
 
 async def test_proxy_crud_secret_masked_on_list(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
@@ -180,9 +188,9 @@ async def test_proxy_crud_secret_masked_on_list(
         f"/v1/proxy-pools/{pool_id}/proxies",
         json={
             "kind": "socks5",
-            "host": "1.2.3.4",
+            "host": "1.2.3.4",  # pragma: allowlist secret
             "port": 1080,
-            "secret": "user:pw",
+            "secret": "user:pw",  # pragma: allowlist secret
             "source": "manual",
         },
         headers=headers,
@@ -202,19 +210,22 @@ async def test_proxy_crud_secret_masked_on_list(
 
 
 async def test_proxy_reveal_requires_proxy_admin(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     admin_headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
     await seed_user(username="an", password="pw", role=SystemUserRole.ANALYST)
     an_headers = {"Authorization": f"Bearer {_login(client, 'an', 'pw')}"}
 
-    pool_id = client.post(
-        "/v1/proxy-pools", json={"name": "p"}, headers=admin_headers
-    ).json()["id"]
+    pool_id = client.post("/v1/proxy-pools", json={"name": "p"}, headers=admin_headers).json()["id"]
     proxy_id = client.post(
         f"/v1/proxy-pools/{pool_id}/proxies",
-        json={"kind": "http", "host": "9.8.7.6", "port": 8080, "secret": "u:p"},
+        json={
+            "kind": "http",
+            "host": "9.8.7.6",  # pragma: allowlist secret
+            "port": 8080,
+            "secret": "u:p",
+        },  # pragma: allowlist secret
         headers=admin_headers,
     ).json()["id"]
 
@@ -235,7 +246,7 @@ async def test_proxy_reveal_requires_proxy_admin(
 
 
 async def test_proxy_state_flip_releases_sticky_binding(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     """Marking a proxy BURNED or DISABLED must clear its sticky
     ``bound_identity_id`` so the pool can lease a fresh proxy next claim.
@@ -244,9 +255,7 @@ async def test_proxy_state_flip_releases_sticky_binding(
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
     _src, identity_id = await _seed_source_and_identity(storage)
 
-    pool_id = client.post(
-        "/v1/proxy-pools", json={"name": "p"}, headers=headers
-    ).json()["id"]
+    pool_id = client.post("/v1/proxy-pools", json={"name": "p"}, headers=headers).json()["id"]
     proxy_id = client.post(
         f"/v1/proxy-pools/{pool_id}/proxies",
         json={"kind": "socks5", "host": "1.1.1.1", "port": 1080},
@@ -282,14 +291,12 @@ async def test_proxy_state_flip_releases_sticky_binding(
 
 
 async def test_bulk_import_parses_all_shapes(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
 
-    pool_id = client.post(
-        "/v1/proxy-pools", json={"name": "bulk"}, headers=headers
-    ).json()["id"]
+    pool_id = client.post("/v1/proxy-pools", json={"name": "bulk"}, headers=headers).json()["id"]
 
     body = {
         "lines": [
@@ -299,17 +306,15 @@ async def test_bulk_import_parses_all_shapes(
             "mtproto://13.14.15.16:443?secret=DEADBEEFCAFE",
             "17.18.19.20:1080",
             "21.22.23.24:1080:user:pass",
-            "",            # blank -> ignored
+            "",  # blank -> ignored
             "# comment",  # comment -> ignored
-            "nonsense",   # rejected
+            "nonsense",  # rejected
             "socks5://1.2.3.4:1080",  # dup against first row
         ],
         "default_kind": "socks5",
         "source": "bulk-test",
     }
-    resp = client.post(
-        f"/v1/proxy-pools/{pool_id}/proxies/bulk", json=body, headers=headers
-    )
+    resp = client.post(f"/v1/proxy-pools/{pool_id}/proxies/bulk", json=body, headers=headers)
     assert resp.status_code == 201, resp.text
     result = resp.json()
     # 6 distinct shapes land; 1 is dup-against-batch; 1 is nonsense
@@ -322,7 +327,7 @@ async def test_bulk_import_parses_all_shapes(
 
 
 async def test_bulk_import_requires_proxy_admin(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     """Analyst has proxy:write (can add single proxies) but NOT proxy:admin
     (needed for bulk, which is the paste-raw-credentials surface)."""
@@ -331,9 +336,7 @@ async def test_bulk_import_requires_proxy_admin(
     await seed_user(username="an", password="pw", role=SystemUserRole.ANALYST)
     an_headers = {"Authorization": f"Bearer {_login(client, 'an', 'pw')}"}
 
-    pool_id = client.post(
-        "/v1/proxy-pools", json={"name": "p"}, headers=admin_headers
-    ).json()["id"]
+    pool_id = client.post("/v1/proxy-pools", json={"name": "p"}, headers=admin_headers).json()["id"]
     resp = client.post(
         f"/v1/proxy-pools/{pool_id}/proxies/bulk",
         json={"lines": ["1.2.3.4:1080"], "default_kind": "socks5"},
@@ -346,15 +349,13 @@ async def test_bulk_import_requires_proxy_admin(
 
 
 async def test_identity_bind_roundtrip_and_orphan_sticky_cleared(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
     _src, identity_id = await _seed_source_and_identity(storage)
 
-    pool_id = client.post(
-        "/v1/proxy-pools", json={"name": "p"}, headers=headers
-    ).json()["id"]
+    pool_id = client.post("/v1/proxy-pools", json={"name": "p"}, headers=headers).json()["id"]
 
     # Attach pool + sticky=yes
     attach = client.patch(
@@ -381,7 +382,7 @@ async def test_identity_bind_roundtrip_and_orphan_sticky_cleared(
 
 
 async def test_identity_bind_requires_write_identity_too(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     """proxy:write on the pool side is not enough on its own to modify an
     identity row; write:identity is the second gate. Admin + analyst baselines
@@ -407,7 +408,7 @@ async def test_identity_bind_requires_write_identity_too(
 
 
 async def test_identity_bind_404_on_missing_pool(
-    client: TestClient, storage: BaseRepository, seed_user, now: datetime
+    client: TestClient, storage: BaseRepository, seed_user: SeedUserFn, now: datetime
 ) -> None:
     await _seed_admin_with_proxy_admin(storage, seed_user, now)
     headers = {"Authorization": f"Bearer {_login(client, 'op', 'pw')}"}
@@ -429,4 +430,5 @@ async def test_all_proxy_endpoints_require_auth(client: TestClient) -> None:
     assert client.get("/v1/proxy-pools").status_code == 401
     assert client.post("/v1/proxy-pools", json={"name": "x"}).status_code == 401
     assert client.get(f"/v1/proxy-pools/{uuid.uuid4()}/proxies").status_code == 401
-    assert client.post(f"/v1/proxies/{uuid.uuid4()}/state", json={"state": "burned"}).status_code == 401
+    resp = client.post(f"/v1/proxies/{uuid.uuid4()}/state", json={"state": "burned"})
+    assert resp.status_code == 401

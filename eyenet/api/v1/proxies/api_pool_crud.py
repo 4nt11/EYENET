@@ -11,7 +11,7 @@ Duplicate names surface as 409 via the app's :class:`IntegrityError` handler.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,13 +38,14 @@ async def proxy_pool_create(
     current_user: Annotated[CurrentUser, Depends(RequireScope("proxy:admin"))],
     storage: Annotated[BaseRepository, Depends(get_storage)],
 ) -> ProxyPoolRow:
-    return await storage.create_proxy_pool(
+    row = await storage.create_proxy_pool(
         name=body.name,
         kind_hint=body.kind_hint,
         description=body.description,
         created_at=datetime.now(tz=UTC),
         created_by_user_id=current_user.user_id,
     )
+    return cast("ProxyPoolRow", row)
 
 
 @router.get(
@@ -72,7 +73,7 @@ async def proxy_pool_get(
     row = await storage.get_proxy_pool(pool_id)
     if row is None:
         raise HTTPException(status_code=404, detail="proxy_pool not found")
-    return row
+    return cast("ProxyPoolRow", row)
 
 
 @router.patch(
@@ -94,7 +95,7 @@ async def proxy_pool_update(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="proxy_pool not found")
-    return row
+    return cast("ProxyPoolRow", row)
 
 
 @router.delete(

@@ -45,7 +45,7 @@ def test_mime_to_kind(mime: str, kind: AttachmentKind) -> None:
 
 
 @pytest.mark.parametrize(
-    "size_bytes,expected",
+    ("size_bytes", "expected"),
     [
         (None, _ATT_FETCH_TIMEOUT_FLOOR_S),  # unknown falls back to floor
         (0, _ATT_FETCH_TIMEOUT_FLOOR_S),  # zero falls back to floor

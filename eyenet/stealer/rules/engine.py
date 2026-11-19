@@ -7,29 +7,27 @@ No I/O. No logging. Pure functions. Thread-safe.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import re2
 
-from eyenet.stealer.rules.matchers import _re2_compile  # noqa: F401 - shared RE2 config
 from eyenet.stealer.rules.matchers import (
+    _re2_compile,
     match_delimiter,
     match_folder,
     match_json,
-    iter_json,
-    iter_vdf,
-    iter_xml,
     match_keyvalue,
     match_keyvalue_ini,
-    match_vdf,
-    match_xml,
     match_regex,
     match_template,
+    match_vdf,
+    match_xml,
     match_yaml,
 )
 from eyenet.stealer.rules.normalize import apply_normalize
 from eyenet.stealer.rules.types import (
     ContainerInput,
+    ContentInput,
     EvalResult,
     RuleSpec,
     VictimFolder,
@@ -86,13 +84,13 @@ def run_rules(rules: list[RuleSpec], folder: VictimFolder) -> RunResult:
 
 def _eval_container(r: RuleSpec, inp: ContainerInput) -> EvalResult:
     base = _base_eval(r)
-    m = r.get("match", {})
+    m: dict[str, Any] = r.get("match", {})  # type: ignore[assignment]
     if m.get("type") != "folder":
         return EvalResult(**base, matched=False, reason="container rule requires folder match")
     fields = match_folder(m, inp)  # type: ignore[arg-type]
     if fields is None:
         return EvalResult(**base, matched=False, reason="no match")
-    mapped = _apply_map(fields, r.get("map"))
+    mapped = _apply_map(fields, cast("dict[str, Any] | None", r.get("map")))
     rej = _rule_rejects(r, mapped)
     if rej is not None:
         return EvalResult(**base, matched=False, reason=f"reject: {rej}")
@@ -100,9 +98,9 @@ def _eval_container(r: RuleSpec, inp: ContainerInput) -> EvalResult:
     return EvalResult(**base, matched=True, fields=_escape_nulls(normed))
 
 
-def _eval_content(r: RuleSpec, file) -> EvalResult:
+def _eval_content(r: RuleSpec, file: ContentInput) -> EvalResult:  # noqa: PLR0912  # one branch per matcher type
     base = _base_eval(r)
-    m = r.get("match", {})
+    m: dict[str, Any] = r.get("match", {})  # type: ignore[assignment]
     kind = m.get("type")
     ex = r.get("extract")
     if kind == "regex":
@@ -116,21 +114,23 @@ def _eval_content(r: RuleSpec, file) -> EvalResult:
     elif kind == "yaml":
         fields = match_yaml(m, ex, file)  # type: ignore[arg-type]
     elif kind == "vdf":
-        fields = match_vdf(m, ex, file)  # type: ignore[arg-type]
+        fields = match_vdf(m, ex, file)
     elif kind == "xml":
-        fields = match_xml(m, ex, file)  # type: ignore[arg-type]
+        fields = match_xml(m, ex, file)
     elif kind == "keyvalue":
         fields = match_keyvalue(m, ex, file)  # type: ignore[arg-type]
     elif kind == "keyvalue_ini":
         fields = match_keyvalue_ini(m, ex, file)  # type: ignore[arg-type]
     elif kind == "folder":
-        return EvalResult(**base, matched=False, reason="folder match only valid in container layer")
+        return EvalResult(
+            **base, matched=False, reason="folder match only valid in container layer"
+        )
     else:
         return EvalResult(**base, matched=False, reason=f"unknown match type: {kind}")
 
     if fields is None:
         return EvalResult(**base, matched=False, reason="no match")
-    mapped = _apply_map(fields, r.get("map"))
+    mapped = _apply_map(fields, cast("dict[str, Any] | None", r.get("map")))
     rej = _rule_rejects(r, mapped)
     if rej is not None:
         return EvalResult(**base, matched=False, reason=f"reject: {rej}")
@@ -159,7 +159,7 @@ def _rule_rejects(r: RuleSpec, fields: dict[str, Any]) -> str | None:
             try:
                 if re_c.search(s):
                     return raw
-            except Exception:
+            except Exception:  # noqa: S112  # nosec B112  # by-design: bad user pattern -> skip, don't reject
                 continue
     return None
 
@@ -188,7 +188,7 @@ def _base_eval(r: RuleSpec) -> dict[str, Any]:
     }
 
 
-def _apply_map(fields: dict[str, Any], m) -> dict[str, Any]:
+def _apply_map(fields: dict[str, Any], m: dict[str, Any] | None) -> dict[str, Any]:
     if not m:
         return fields
     out: dict[str, Any] = {}

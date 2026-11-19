@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 _log = logging.getLogger(__name__)
 _VENDORED = Path(__file__).resolve().parent

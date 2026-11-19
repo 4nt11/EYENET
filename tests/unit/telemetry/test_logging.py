@@ -18,7 +18,7 @@ def _provider() -> None:
     otel_trace.set_tracer_provider(TracerProvider())
 
 
-def _render_event(event: dict[str, object]) -> str | dict[str, object]:
+def _render_event(event: dict[str, object]) -> str:
     """Walk the configured structlog processors up to the stdlib bridge, then
     render as JSON.
 
@@ -38,7 +38,7 @@ def _render_event(event: dict[str, object]) -> str | dict[str, object]:
             break  # the stdlib bridge; hand-off to the application formatter
         out = proc(logger, "info", out)
     rendered = structlog.processors.JSONRenderer()(logger, "info", out)  # type: ignore[arg-type]
-    return rendered  # type: ignore[no-any-return]
+    return rendered if isinstance(rendered, str) else rendered.decode("utf-8")
 
 
 @pytest.mark.unit

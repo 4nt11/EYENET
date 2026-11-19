@@ -24,7 +24,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import structlog
@@ -140,6 +140,8 @@ def _att_fetch_timeout_for(size_bytes: int | None) -> float:
         return _ATT_FETCH_TIMEOUT_FLOOR_S
     budget = size_bytes / _ATT_FETCH_MIN_RATE_BYTES_PER_S
     return max(_ATT_FETCH_TIMEOUT_FLOOR_S, min(budget, _ATT_FETCH_TIMEOUT_CEILING_S))
+
+
 _tracer = trace.get_tracer("eyenet.collector.telegram")
 
 # max subscriptions returned in health()
@@ -262,14 +264,20 @@ class TelegramCollector(CollectorSkeleton):
             )
 
         # Prefer a pool-leased proxy; fall back to the legacy proxy_uri when
-        # no pool is attached. ``None`` means "direct connection".
+        # no pool is attached. ``None`` means "direct connection". Pool
+        # leasing needs a session key to decrypt secrets; without one we
+        # skip straight to the legacy fallback.
         from eyenet.collectors._proxy import lease_telethon_proxy  # noqa: PLC0415
 
-        proxy = await lease_telethon_proxy(
-            self._storage,
-            identity_row.id,
-            source_kind=SourceKind.TELEGRAM,
-            fernet=self._session_key,
+        proxy = (
+            await lease_telethon_proxy(
+                self._storage,
+                identity_row.id,
+                source_kind=SourceKind.TELEGRAM,
+                fernet=self._session_key,
+            )
+            if self._session_key is not None
+            else None
         )
         if proxy is None:
             proxy = _parse_proxy(entry.proxy_uri)
@@ -512,7 +520,7 @@ class TelegramCollector(CollectorSkeleton):
                 "(account is not a member and the id has no public username)"
             ) from None
 
-    async def _handle_join(self, cmd: JoinGroupCommand) -> None:
+    async def _handle_join(self, cmd: JoinGroupCommand) -> None:  # noqa: PLR0912  # one branch per join outcome
         """Execute a supervisor-dispatched join (E5/E5.5, §4.12.4).
 
         Live telethon path (coverage-omitted, §3.4); the DB/transition logic
@@ -1404,9 +1412,7 @@ class TelegramCollector(CollectorSkeleton):
                     ),
                 )
 
-    async def _download_media_to_store(
-        self, msg: TLMessage
-    ) -> tuple[str, str, int] | None:
+    async def _download_media_to_store(self, msg: TLMessage) -> tuple[str, str, int] | None:
         """Stream a message's media to disk and store it content-addressed.
 
         Downloads to a temp file on the blob store's filesystem (NOT a RAM `bytes`
@@ -1842,7 +1848,7 @@ def _parse_proxy(proxy_uri: str | None) -> tuple[int, str | None, int] | None:
     try:
         from urllib.parse import urlparse  # noqa: PLC0415  — lazy: only when proxy_uri set
 
-        import socks  # type: ignore[import-untyped]  # noqa: PLC0415  — lazy PySocks load
+        import socks  # noqa: PLC0415  # lazy PySocks load
 
         p = urlparse(proxy_uri)
         scheme_map = {"socks5": socks.SOCKS5, "socks4": socks.SOCKS4, "http": socks.HTTP}

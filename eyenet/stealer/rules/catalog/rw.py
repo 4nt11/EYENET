@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from eyenet.stealer.families import valid_slugs as _family_slugs
 

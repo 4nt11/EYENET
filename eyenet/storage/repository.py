@@ -92,6 +92,7 @@ if TYPE_CHECKING:
     from eyenet.contracts.membership import CollectorGroupMembershipRow, MessageObservationRow
     from eyenet.contracts.message import AttachmentRow
     from eyenet.contracts.mfa import MfaChallengeRow
+    from eyenet.contracts.proxy import BulkProxyEntry
     from eyenet.contracts.source import SourceBridgeSummary, SourceRow
     from eyenet.contracts.source_domain import SourceDomainRow
     from eyenet.contracts.stealer import StealerFamilyOverrideRow, StealerProcessingRow
@@ -3942,7 +3943,7 @@ class BaseRepository(ABC):
         self,
         *,
         pool_id: UUID,
-        entries: list[dict[str, object]],
+        entries: list[BulkProxyEntry],
         created_at: datetime,
     ) -> dict[str, object]:
         """Insert many proxies. Entries that collide on (host, port, kind) are

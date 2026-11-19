@@ -12,11 +12,14 @@ across the catalog; the loader asserts that at import time.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import yaml
 
 from eyenet.stealer.families import valid_slugs, validate_rule_family
-from eyenet.stealer.rules.types import RuleSpec
+
+if TYPE_CHECKING:
+    from eyenet.stealer.rules.types import RuleSpec
 
 _CATALOG_DIR = Path(__file__).resolve().parent
 
@@ -42,5 +45,5 @@ def load_catalog() -> list[RuleSpec]:
         fam = rule.get("family")
         if fam:
             validate_rule_family(rid, fam, slugs=known_families)
-        rules.append(rule)
+        rules.append(cast("RuleSpec", rule))
     return rules

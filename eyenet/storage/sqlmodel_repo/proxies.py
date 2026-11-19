@@ -17,7 +17,7 @@ from sqlmodel import col, select
 
 from eyenet.contracts.enums import ProxyKind, ProxyState, SourceKind
 from eyenet.contracts.identity import IdentityRow
-from eyenet.contracts.proxy import ProxyPoolRow, ProxyRow
+from eyenet.contracts.proxy import BulkProxyEntry, ProxyPoolRow, ProxyRow
 from eyenet.models.identity import IdentityTable
 from eyenet.models.proxy import ProxyPoolTable, ProxyTable
 
@@ -53,9 +53,9 @@ def _identity_row(t: IdentityTable) -> IdentityRow:
 # Convenience: which SourceKind defaults to sticky when identity.proxy_sticky is NULL.
 _STICKY_BY_SOURCE_KIND: dict[SourceKind, bool] = {
     SourceKind.TELEGRAM: True,  # auth_key + IP consistency; must not rotate
-    SourceKind.MATRIX: True,     # session + device fingerprint
-    SourceKind.FORUM: False,     # per-request rotation is fine
-    SourceKind.DISCORD: True,    # tokens are IP-bound
+    SourceKind.MATRIX: True,  # session + device fingerprint
+    SourceKind.FORUM: False,  # per-request rotation is fine
+    SourceKind.DISCORD: True,  # tokens are IP-bound
     SourceKind.OPERATOR: False,  # not a wire source
 }
 
@@ -101,9 +101,7 @@ class ProxiesMixin:
 
     async def list_proxy_pools(self) -> list[ProxyPoolRow]:
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            result = await session.exec(
-                select(ProxyPoolTable).order_by(col(ProxyPoolTable.name))
-            )
+            result = await session.exec(select(ProxyPoolTable).order_by(col(ProxyPoolTable.name)))
             return [_pool_row(r) for r in result.all()]
 
     async def update_proxy_pool(
@@ -240,7 +238,7 @@ class ProxiesMixin:
         self,
         *,
         pool_id: UUID,
-        entries: list[dict[str, object]],
+        entries: list[BulkProxyEntry],
         created_at: datetime,
     ) -> dict[str, object]:
         """Insert many proxies in one session. Returns counts + skipped reasons.
@@ -302,7 +300,9 @@ class ProxiesMixin:
         identity is released so the proxies go back to the lease pool.
         """
         async with safe_session(self._session_factory) as session:  # type: ignore[attr-defined]
-            result = await session.exec(select(IdentityTable).where(IdentityTable.id == identity_id))
+            result = await session.exec(
+                select(IdentityTable).where(IdentityTable.id == identity_id)
+            )
             row = result.first()
             if row is None:
                 return None
@@ -375,11 +375,13 @@ class ProxiesMixin:
                     return _proxy_row(existing)
                 # Lease a fresh one and bind.
                 fresh = await session.exec(
-                    select(ProxyTable).where(
+                    select(ProxyTable)
+                    .where(
                         ProxyTable.pool_id == identity.proxy_pool_id,
                         ProxyTable.state == ProxyState.ACTIVE,
                         col(ProxyTable.bound_identity_id).is_(None),
-                    ).order_by(col(ProxyTable.last_used_at).asc().nulls_first())
+                    )
+                    .order_by(col(ProxyTable.last_used_at).asc().nulls_first())
                 )
                 row = fresh.first()
                 if row is None:
@@ -393,10 +395,12 @@ class ProxiesMixin:
 
             # Non-sticky: LRU over ACTIVE proxies, no binding.
             lru = await session.exec(
-                select(ProxyTable).where(
+                select(ProxyTable)
+                .where(
                     ProxyTable.pool_id == identity.proxy_pool_id,
                     ProxyTable.state == ProxyState.ACTIVE,
-                ).order_by(col(ProxyTable.last_used_at).asc().nulls_first())
+                )
+                .order_by(col(ProxyTable.last_used_at).asc().nulls_first())
             )
             row = lru.first()
             if row is None:

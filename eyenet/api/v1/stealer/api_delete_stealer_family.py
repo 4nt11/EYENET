@@ -47,7 +47,7 @@ async def stealer_families_delete(
     if referencing:
         raise ConflictError(
             f"family {slug!r} still referenced by {len(referencing)} rule(s): "
-            f"{', '.join(referencing[:5])}{'...' if len(referencing) > 5 else ''}"
+            f"{', '.join(referencing[:5])}{'...' if len(referencing) > 5 else ''}"  # noqa: PLR2004
         )
     try:
         delete_family(slug)
@@ -56,7 +56,7 @@ async def stealer_families_delete(
     await audit.emit(
         event="eyenet.audit.stealer_family.deleted",
         subject_kind="stealer_family",
-        subject_id=slug,
+        evidence_ref=slug,
         system_user_id=current_user.user_id,
         payload={"name": fam.get("name"), "status": fam.get("status")},
     )

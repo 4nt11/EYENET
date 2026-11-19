@@ -1,3 +1,11 @@
+# Parser dispatch module. The matcher-type switches have inherent breadth
+# and count, by design (one branch per DSL matcher; adding a matcher is
+# one new branch). Lazy stdlib imports (vdf, xml, csv) stay inside their
+# matcher function to keep import-time flat for callers that only touch
+# one shape. _BadPredicate is a module-private sentinel, not an Error
+# hierarchy. _YAML12SafeLoader is a yaml.SafeLoader subclass (safe by
+# construction), not the full yaml.Loader.
+# ruff: noqa: N818, PLC0415, PLR0911, PLR0912, PLR0915, S506
 """Per-type matchers. Byte-parity with ``matchers.js``.
 
 Each matcher returns a fields dict on match or None on no-match. Container
@@ -10,25 +18,27 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import re2
 import yaml
 
-from eyenet.stealer.rules.types import (
-    ContainerInput,
-    ContentInput,
-    DelimiterMatch,
-    ExtractSpec,
-    FolderMatch,
-    JsonMatch,
-    KeyvalueIniMatch,
-    KeyvalueMatch,
-    RegexMatch,
-    TemplateMatch,
-    YamlMatch,
-)
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from eyenet.stealer.rules.types import (
+        ContainerInput,
+        ContentInput,
+        DelimiterMatch,
+        ExtractSpec,
+        FolderMatch,
+        JsonMatch,
+        KeyvalueIniMatch,
+        KeyvalueMatch,
+        RegexMatch,
+        TemplateMatch,
+        YamlMatch,
+    )
 
 _RE2_MAX_MEM = 8 * 1024 * 1024
 
@@ -54,7 +64,7 @@ _YAML12SafeLoader.add_implicit_resolver(
 )
 
 
-def _re2_compile(pattern: str, multiline: bool = False, dotall: bool = False):
+def _re2_compile(pattern: str, multiline: bool = False, dotall: bool = False) -> re2.Pattern:
     # Note: google-re2's Options.one_line / Options.dot_nl are not honored
     # by the Python binding in a way that affects ^/$/. matching. Embedded
     # flags (?m) and (?s) are RE2's documented path and work both here and
@@ -73,6 +83,7 @@ def _re2_compile(pattern: str, multiline: bool = False, dotall: bool = False):
 #  L1 container                                                          #
 # --------------------------------------------------------------------- #
 
+
 def match_folder(m: FolderMatch, inp: ContainerInput) -> dict[str, Any] | None:
     """Folder matcher.
 
@@ -86,12 +97,13 @@ def match_folder(m: FolderMatch, inp: ContainerInput) -> dict[str, Any] | None:
     paths_list = list(inp.paths)
     pred = m.get("predicate")
     if pred is None:
-        pred = _lower_legacy_folder(m)
+        pred = _lower_legacy_folder(cast("dict[str, Any]", m))
     try:
         if _eval_predicate(pred, paths, paths_list):
             return {}
     except _BadPredicate as exc:
         import logging
+
         logging.getLogger(__name__).warning("folder predicate rejected: %s", exc)
         return None
     return None
@@ -156,6 +168,7 @@ def _eval_predicate(node: Any, paths: set[str], paths_list: list[str]) -> bool:
         if not isinstance(body, str):
             raise _BadPredicate("'glob' expects a string")
         from eyenet.stealer.rules.engine import match_glob  # local import to break cycle
+
         return any(match_glob(body, p) for p in paths_list)
     raise _BadPredicate(f"unknown predicate operator: {op!r}")
 
@@ -176,12 +189,14 @@ def _lower_legacy_folder(m: dict[str, Any]) -> dict[str, Any]:
     for f in forbids:
         clauses.append({"not": {"path": f}})
     if min_score > 0 and (requires or optional):
-        clauses.append({
-            "at_least": {
-                "count": min_score,
-                "of": [{"path": p} for p in requires + optional],
+        clauses.append(
+            {
+                "at_least": {
+                    "count": min_score,
+                    "of": [{"path": p} for p in requires + optional],
+                }
             }
-        })
+        )
     if not clauses:
         return {"and": []}  # vacuously true
     return {"and": clauses}
@@ -191,8 +206,11 @@ def _lower_legacy_folder(m: dict[str, Any]) -> dict[str, Any]:
 #  L3 content                                                            #
 # --------------------------------------------------------------------- #
 
+
 def match_regex(
-    m: RegexMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: RegexMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     try:
         re_c = _re2_compile(m["pattern"], m.get("multiline", False), m.get("dotall", False))
@@ -212,7 +230,9 @@ def match_regex(
 
 
 def match_template(
-    m: TemplateMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: TemplateMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     holes: list[str] = []
     out: list[str] = []
@@ -233,14 +253,21 @@ def match_template(
             i = j
     pattern = "^" + "".join(out) + "$"
     return match_regex(
-        {"type": "regex", "pattern": pattern, "multiline": m.get("multiline", False), "dotall": True},
+        {
+            "type": "regex",
+            "pattern": pattern,
+            "multiline": m.get("multiline", False),
+            "dotall": True,
+        },
         ex or {"fields": holes},
         inp,
     )
 
 
 def match_delimiter(
-    m: DelimiterMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: DelimiterMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     cols = (ex or {}).get("columns") or {}
     first: dict[str, str] | None = None
@@ -265,7 +292,9 @@ def match_delimiter(
 
 
 def match_json(
-    m: JsonMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: JsonMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     """JSON matcher. requires_keys checks root. When ``pivot`` is set
     the pivot path must resolve to either a LIST (iterate each element
@@ -284,14 +313,16 @@ def match_json(
     pivot = m.get("pivot")
     paths = (ex or {}).get("paths") or {}
     if pivot:
-        for key, value in _json_pivot_children(doc, pivot):
+        for key, value in _json_pivot_children(doc, cast("str", pivot)):
             return _json_extract_record(value, key, paths)
         return None
     return _extract_paths(doc, paths)
 
 
 def iter_json(
-    m: dict[str, Any], ex: ExtractSpec | None, text: str,
+    m: dict[str, Any],
+    ex: ExtractSpec | None,
+    text: str,
 ) -> Iterator[dict[str, Any]]:
     """Walk every pivot entry as a record (used by bulk_parse)."""
     try:
@@ -312,7 +343,7 @@ def iter_json(
         yield _json_extract_record(value, key, paths)
 
 
-def _json_pivot_children(doc: Any, pivot_expr: str):
+def _json_pivot_children(doc: Any, pivot_expr: str) -> Iterator[tuple[str, Any]]:
     """Walk pivot_expr via JSONPath-lite and yield (key, value) pairs
     for each entry. When the pivot resolves to a list, keys are the
     stringified array indices; when it resolves to an object, keys are
@@ -353,6 +384,7 @@ def _json_extract_record(value: Any, key_name: str, paths: dict[str, str]) -> di
         if v is None:
             continue
         import math  # local to avoid a cycle at module import
+
         if isinstance(v, float) and not math.isfinite(v):
             continue
         if isinstance(v, float) and v.is_integer():
@@ -367,7 +399,9 @@ def _json_extract_record(value: Any, key_name: str, paths: dict[str, str]) -> di
 
 
 def match_vdf(
-    m: dict[str, Any], ex: ExtractSpec | None, inp: ContentInput,
+    m: dict[str, Any],
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     """Valve Data Format (Steam's .vdf). Parse the KeyValues tree, honour
     requires_keys on the top level, extract via the standard JSONPath-lite
@@ -379,8 +413,6 @@ def match_vdf(
     try:
         doc = _parse_vdf(inp.text)
     except _VDFParseError:
-        return None
-    if not isinstance(doc, dict):
         return None
     for k in m.get("requires_keys", []):
         if k not in doc:
@@ -397,14 +429,14 @@ def match_vdf(
 
 
 def iter_vdf(
-    m: dict[str, Any], ex: ExtractSpec | None, text: str,
+    m: dict[str, Any],
+    ex: ExtractSpec | None,
+    text: str,
 ) -> Iterator[dict[str, Any]]:
     """Walk every pivot child as a record. Used by engine.bulk_parse."""
     try:
         doc = _parse_vdf(text)
     except _VDFParseError:
-        return
-    if not isinstance(doc, dict):
         return
     for k in m.get("requires_keys", []):
         if k not in doc:
@@ -418,7 +450,7 @@ def iter_vdf(
         yield _extract_vdf_record(value, key, paths)
 
 
-def _pivot_children(doc: Any, pivot_expr: str):
+def _pivot_children(doc: Any, pivot_expr: str) -> Iterator[tuple[str, Any]]:
     """Walk pivot_expr via JSONPath-lite and yield (child_key, child_value)
     pairs for each entry in the resolved map. Non-map pivots and missing
     pivots yield nothing."""
@@ -450,9 +482,7 @@ def _extract_vdf_record(value: Any, key_name: str, paths: dict[str, str]) -> dic
         v = _eval_path(value, expr)
         if v is None:
             continue
-        if isinstance(v, str):
-            out[field] = v
-        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+        if isinstance(v, str) or (isinstance(v, (int, float)) and not isinstance(v, bool)):
             out[field] = v
         else:
             out[field] = json.dumps(v, separators=(",", ":"))
@@ -482,6 +512,7 @@ def extract_paths_vdf(doc: Any, paths: dict[str, str]) -> dict[str, Any]:
 # No arrays; dicts can have duplicate keys in the wild (last-wins when
 # we flatten into a Python dict; matches game behaviour).
 
+
 class _VDFParseError(ValueError):
     pass
 
@@ -492,7 +523,7 @@ def _parse_vdf(text: str) -> dict[str, Any]:
 
 
 class _VDFParser:
-    __slots__ = ("text", "i", "n")
+    __slots__ = ("i", "n", "text")
 
     def __init__(self, text: str) -> None:
         self.text = text
@@ -563,7 +594,7 @@ class _VDFParser:
                     continue
                 if ch == '"':
                     self.i += 1
-                    return "".join(buf) if buf else self.text[start:self.i - 1]
+                    return "".join(buf) if buf else self.text[start : self.i - 1]
                 buf.append(ch)
                 self.i += 1
             raise _VDFParseError("unterminated quoted string")
@@ -573,7 +604,7 @@ class _VDFParser:
             self.i += 1
         if self.i == start:
             raise _VDFParseError(f"expected string at offset {self.i}")
-        return self.text[start:self.i]
+        return self.text[start : self.i]
 
     def _skip(self) -> None:
         while self.i < self.n:
@@ -609,7 +640,7 @@ class _XMLParseError(ValueError):
 
 
 class _XMLElement:
-    __slots__ = ("name", "attrs", "children", "text")
+    __slots__ = ("attrs", "children", "name", "text")
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -627,7 +658,7 @@ def _parse_xml(text: str) -> _XMLElement:
 
 
 class _XMLParser:
-    __slots__ = ("t", "i", "n", "depth")
+    __slots__ = ("depth", "i", "n", "t")
 
     def __init__(self, text: str) -> None:
         self.t = text
@@ -716,7 +747,7 @@ class _XMLParser:
                 end = self.t.find("]]>", self.i + 9)
                 if end < 0:
                     raise _XMLParseError("unterminated CDATA")
-                buf.append(self.t[self.i + 9:end])
+                buf.append(self.t[self.i + 9 : end])
                 self.i = end + 3
                 continue
             if self.t.startswith("<?", self.i):
@@ -732,7 +763,7 @@ class _XMLParser:
             end = self.t.find("<", self.i)
             if end < 0:
                 raise _XMLParseError(f"unterminated element <{name}>")
-            buf.append(_xml_unescape(self.t[self.i:end]))
+            buf.append(_xml_unescape(self.t[self.i : end]))
             self.i = end
 
     def _read_name(self) -> str:
@@ -742,10 +773,10 @@ class _XMLParser:
         self.i += 1
         while self.i < self.n and (self.t[self.i].isalnum() or self.t[self.i] in "_-.:"):
             self.i += 1
-        return self.t[start:self.i]
+        return self.t[start : self.i]
 
     def _read_attr_value(self) -> str:
-        if self.i >= self.n or self.t[self.i] not in '"\'':
+        if self.i >= self.n or self.t[self.i] not in "\"'":
             raise _XMLParseError(f"attribute value must be quoted at {self.i}")
         q = self.t[self.i]
         self.i += 1
@@ -754,7 +785,7 @@ class _XMLParser:
             self.i += 1
         if self.i >= self.n:
             raise _XMLParseError("unterminated attribute value")
-        v = _xml_unescape(self.t[start:self.i])
+        v = _xml_unescape(self.t[start : self.i])
         self.i += 1
         return v
 
@@ -783,29 +814,31 @@ def _xml_unescape(s: str) -> str:
             out.append("&")
             i += 1
             continue
-        entity = s[i + 1:end]
+        entity = s[i + 1 : end]
         if entity in _XML_ENTITIES:
             out.append(_XML_ENTITIES[entity])
         elif entity.startswith("#x") or entity.startswith("#X"):
             try:
                 out.append(chr(int(entity[2:], 16)))
             except ValueError:
-                out.append(s[i:end + 1])
+                out.append(s[i : end + 1])
         elif entity.startswith("#"):
             try:
                 out.append(chr(int(entity[1:], 10)))
             except ValueError:
-                out.append(s[i:end + 1])
+                out.append(s[i : end + 1])
         else:
             # Unknown named entity (e.g. &xxe; from an attempted DTD
             # injection). Preserve literally; do NOT resolve.
-            out.append(s[i:end + 1])
+            out.append(s[i : end + 1])
         i = end + 1
     return "".join(out)
 
 
 def match_xml(
-    m: dict[str, Any], ex: ExtractSpec | None, inp: ContentInput,
+    m: dict[str, Any],
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     """XML matcher. requires_keys checks root + direct children.
     When pivot is set, bulk mode iterates the matching elements; this
@@ -838,7 +871,9 @@ def match_xml(
 
 
 def iter_xml(
-    m: dict[str, Any], ex: ExtractSpec | None, text: str,
+    m: dict[str, Any],
+    ex: ExtractSpec | None,
+    text: str,
 ) -> Iterator[dict[str, Any]]:
     """Walk every pivot child as a record (used by bulk_parse)."""
     try:
@@ -862,14 +897,14 @@ def iter_xml(
         yield _xml_extract_record(el, key, paths)
 
 
-def _xml_pivot_children(root: _XMLElement, pivot_expr: str):
+def _xml_pivot_children(root: _XMLElement, pivot_expr: str) -> Iterator[tuple[str, _XMLElement]]:
     """Walk the pivot path; the LAST segment names the element type to
     iterate. E.g. '$.FileZilla3.Servers.Server' navigates to the
     <Servers> element and yields each <Server> child in order.
     """
     if not pivot_expr.startswith("$"):
         return
-    steps = []
+    steps: list[str] = []
     for tok in _PATH_TOKEN.finditer(pivot_expr[1:]):
         key = tok.group(1)
         if key is None:
@@ -878,13 +913,14 @@ def _xml_pivot_children(root: _XMLElement, pivot_expr: str):
     if not steps:
         return
     # Top-level step may name the root OR a direct child; try both.
-    cur = root
+    cur: _XMLElement = root
     if steps[0] == root.name:
         steps = steps[1:]
     for step in steps[:-1]:
-        cur = next((c for c in cur.children if c.name == step), None)
-        if cur is None:
+        nxt = next((c for c in cur.children if c.name == step), None)
+        if nxt is None:
             return
+        cur = nxt
     target = steps[-1]
     for c in cur.children:
         if c.name == target:
@@ -929,7 +965,9 @@ def _xml_eval_path(el: _XMLElement, expr: str) -> str | None:
 
 
 def match_yaml(
-    m: YamlMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: YamlMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     text = inp.text
     # Optional banner strip: slice from first occurrence of literal marker.
@@ -937,14 +975,14 @@ def match_yaml(
     # the real YAML document.
     marker = m.get("strip_before")
     if marker:
-        idx = text.find(marker)
+        idx = text.find(cast("str", marker))
         if idx < 0:
             return None
         text = text[idx:]
     try:
         # YAML 1.2 Core schema (see _YAML12SafeLoader above): `yes`/`no`/`on`/`off`
         # stay as strings to match js-yaml and preserve forensic correctness.
-        doc = yaml.load(text, Loader=_YAML12SafeLoader)
+        doc = yaml.load(text, Loader=_YAML12SafeLoader)  # nosec B506  # _YAML12SafeLoader subclasses yaml.SafeLoader
     except yaml.YAMLError:
         return None
     if not isinstance(doc, dict):
@@ -956,7 +994,9 @@ def match_yaml(
 
 
 def match_keyvalue(
-    m: KeyvalueMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: KeyvalueMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     sep = m["separator"]
     strip = m.get("strip_whitespace", True)
@@ -977,14 +1017,16 @@ def match_keyvalue(
             return None
     out: dict[str, str] = {}
     for src, dst in ((ex or {}).get("keys") or {}).items():
-        v = kv.get(src.lower())
-        if v is not None:
-            out[dst] = v
+        got = kv.get(src.lower())
+        if got is not None:
+            out[dst] = got
     return out
 
 
 def match_keyvalue_ini(
-    m: KeyvalueIniMatch, ex: ExtractSpec | None, inp: ContentInput,
+    m: KeyvalueIniMatch,
+    ex: ExtractSpec | None,
+    inp: ContentInput,
 ) -> dict[str, Any] | None:
     sections: dict[str, dict[str, str]] = {}
     cur = ""
@@ -1012,9 +1054,9 @@ def match_keyvalue_ini(
             continue
         sec = dotted[:dot]
         key = dotted[dot + 1 :]
-        v = sections.get(sec, {}).get(key)
-        if v is not None:
-            out[dst] = v
+        got = sections.get(sec, {}).get(key)
+        if got is not None:
+            out[dst] = got
     return out
 
 

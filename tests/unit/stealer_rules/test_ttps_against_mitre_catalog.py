@@ -17,8 +17,9 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-_CATALOG_DIR = Path(__file__).resolve().parents[3] / "eyenet" / "stealer" / "rules" / "catalog"
-_MITRE_PATH = Path(__file__).resolve().parents[3] / "eyenet" / "stealer" / "ttps" / "mitre_catalog.yaml"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_CATALOG_DIR = _REPO_ROOT / "eyenet" / "stealer" / "rules" / "catalog"
+_MITRE_PATH = _REPO_ROOT / "eyenet" / "stealer" / "ttps" / "mitre_catalog.yaml"
 
 
 def test_every_rule_ttp_resolves_in_mitre_catalog() -> None:
@@ -34,8 +35,7 @@ def test_every_rule_ttp_resolves_in_mitre_catalog() -> None:
                 missing.setdefault(rule_path.name, []).append(t)
 
     assert missing == {}, (
-        "rules reference techniques not in eyenet/stealer/ttps/mitre_catalog.yaml: "
-        f"{missing}"
+        f"rules reference techniques not in eyenet/stealer/ttps/mitre_catalog.yaml: {missing}"
     )
 
 
@@ -49,6 +49,4 @@ def test_every_rule_has_ttps_field() -> None:
         rule = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
         if "ttps" not in rule:
             missing_field.append(rule_path.name)
-    assert missing_field == [], (
-        "rule YAMLs missing ttps field (even [] is fine): " f"{missing_field}"
-    )
+    assert missing_field == [], f"rule YAMLs missing ttps field (even [] is fine): {missing_field}"

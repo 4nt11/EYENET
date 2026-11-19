@@ -54,7 +54,7 @@ async def stealer_rules_update(
     await audit.emit(
         event="eyenet.audit.stealer_rule.updated",
         subject_kind="stealer_rule",
-        subject_id=rule_id,
+        evidence_ref=rule_id,
         system_user_id=current_user.user_id,
         payload={"family": body.family, "layer": body.layer, "priority": body.priority},
     )

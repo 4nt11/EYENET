@@ -352,7 +352,7 @@ class ForumCollector(CollectorSkeleton):
         self._last_discovery = 0.0
         self._last_monitored: frozenset[str] = frozenset()
 
-    async def on_subscribe(self) -> None:
+    async def on_subscribe(self) -> None:  # noqa: PLR0915  # long by design: on_subscribe is the one-shot wiring hook
         await super().on_subscribe()
         # `kill -USR1 <pid>` dumps every thread's Python stack to stderr (container
         # logs) — a live, zero-dependency probe for a wedged collector when the
@@ -450,14 +450,16 @@ class ForumCollector(CollectorSkeleton):
                     await self.syslog(
                         level=SystemLogLevel.NOTICE,
                         event="forum.proxy_rebound",
-                        message=f"{self._identity_name}: rebuilt http client against new pool binding",
+                        message=(
+                            f"{self._identity_name}: rebuilt http client against new pool binding"
+                        ),
                     )
                     # Close the old client in the background; a concurrent
                     # request on it would get a short exception at worst.
                     if old is not None and hasattr(old, "aclose"):
                         try:
                             await old.aclose()
-                        except Exception as exc:  # noqa: BLE001 - defensive, log-only
+                        except Exception as exc:
                             _log.warning("forum.old_client_close_failed", error=str(exc))
             except (RateLimited, OperationalError, httpx.HTTPError) as exc:
                 await self.syslog(
@@ -524,7 +526,7 @@ class ForumCollector(CollectorSkeleton):
 
         proxy: str | None = None
         identity_row = await self._storage.get_identity_by_name(entry.name)
-        if identity_row is not None:
+        if identity_row is not None and self._session_key is not None:
             proxy = await lease_httpx_proxy_url(
                 self._storage,
                 identity_row.id,
@@ -648,7 +650,7 @@ class ForumCollector(CollectorSkeleton):
         # ponytail: integer-seconds only (what real boards send); an HTTP-date
         # Retry-After falls back to the measured default — add dateparse if ever seen.
         base = float(ra) if ra.isdigit() else DEFAULT_RETRY_AFTER
-        pad = random.uniform(*RETRY_AFTER_PAD)  # noqa: S311 - jitter, not crypto
+        pad = random.uniform(*RETRY_AFTER_PAD)  # noqa: S311  # nosec B311  # jitter, not crypto
         self._cooldown_until = time.monotonic() + base + pad
         shape = "429" if is_429 else "200 'Slow down now' throttle"
         raise RateLimited(
@@ -669,7 +671,7 @@ class ForumCollector(CollectorSkeleton):
             raise RuntimeError("forum collector http client not initialized")
         self._guard_cooldown()
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
-        await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
+        await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311  # nosec B311  # jitter, not crypto
         resp = await self._request(self._client.get(url, headers=headers, **kw), url)
         self._last_request_at = time.monotonic()  # progress signal for the sweep watchdog
         self._note_rate_limit(resp)
@@ -683,7 +685,7 @@ class ForumCollector(CollectorSkeleton):
             raise RuntimeError("forum collector http client not initialized")
         self._guard_cooldown()
         headers = {**kw.pop("headers", {}), **self._nav_headers(referer)}
-        await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311 - jitter, not crypto
+        await asyncio.sleep(random.uniform(self._delay_min, self._delay_max))  # noqa: S311  # nosec B311  # jitter, not crypto
         resp = await self._request(self._client.post(url, headers=headers, **kw), url)
         self._last_request_at = time.monotonic()  # progress signal for the sweep watchdog
         self._note_rate_limit(resp)

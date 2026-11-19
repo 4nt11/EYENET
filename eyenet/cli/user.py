@@ -81,7 +81,9 @@ _SCOPES_CHANGED_SUBJECT: Final[str] = "eyenet.auth.scopes_changed"
 # permanent grant-only capability scopes (never in a baseline, but still granted
 # here, e.g. write:stealer). The grant-only CLEARANCE scopes are deliberately NOT
 # here — they flow through the time-bound clearance-grant path (bounded expiry + reason).
-_GRANTABLE: Final[frozenset[str]] = frozenset().union(*ROLE_BASELINE.values()) | GRANT_ONLY_CAPABILITIES
+_GRANTABLE: Final[frozenset[str]] = (
+    frozenset().union(*ROLE_BASELINE.values()) | GRANT_ONLY_CAPABILITIES
+)
 _CLEARANCE: Final[frozenset[str]] = frozenset(s.value for s in ClearanceScope)
 
 _EXIT_USAGE: Final[int] = 2

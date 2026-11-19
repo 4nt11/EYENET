@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict, cast
 
 import yaml
 
@@ -67,13 +67,11 @@ def load_families() -> list[Family]:
             if req not in fam:
                 raise ValueError(f"{p.name}: missing required field '{req}'")
         if fam["status"] not in _VALID_STATUSES:
-            raise ValueError(
-                f"{p.name}: status {fam['status']!r} not in {sorted(_VALID_STATUSES)}"
-            )
+            raise ValueError(f"{p.name}: status {fam['status']!r} not in {sorted(_VALID_STATUSES)}")
         if fam["slug"] in seen:
             raise ValueError(f"{p.name}: duplicate slug {fam['slug']!r}")
         seen.add(fam["slug"])
-        out.append(fam)
+        out.append(cast("Family", fam))
     return out
 
 
@@ -93,5 +91,6 @@ def validate_rule_family(rule_id: str, rule_family: str, slugs: set[str] | None 
     if rule_family not in known:
         _log.warning(
             "rule %r references unknown family %r (add it in eyenet/stealer/families/)",
-            rule_id, rule_family,
+            rule_id,
+            rule_family,
         )

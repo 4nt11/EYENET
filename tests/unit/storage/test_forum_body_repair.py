@@ -32,7 +32,12 @@ async def _forum_msg(storage: BaseRepository, *, mangled_body: str, body_html: s
         source_id=src, platform_groupid="c", kind=GroupKind.FORUM_CATEGORY, title="c", seen_at=_NOW
     )
     actor, _ = await storage.upsert_actor(
-        source_id=src, actor_key="a", platform_userid="1", handle="h", display_name="d", seen_at=_NOW
+        source_id=src,
+        actor_key="a",
+        platform_userid="1",
+        handle="h",
+        display_name="d",
+        seen_at=_NOW,
     )
     await storage.put_message(
         MessageTable(

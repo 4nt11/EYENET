@@ -21,7 +21,7 @@ from eyenet.contracts.enums import ProxyKind
 
 _SCHEME_TO_KIND: dict[str, ProxyKind] = {
     "socks5": ProxyKind.SOCKS5,
-    "socks5h": ProxyKind.SOCKS5,   # DNS-via-proxy variant; same wire kind.
+    "socks5h": ProxyKind.SOCKS5,  # DNS-via-proxy variant; same wire kind.
     "http": ProxyKind.HTTP,
     "https": ProxyKind.HTTPS,
     "mtproto": ProxyKind.MTPROXY,
@@ -77,9 +77,7 @@ def _parse_one(line: str, *, default_kind: ProxyKind | None) -> ParsedEntry:
         secret: str | None
         if kind == ProxyKind.MTPROXY:
             # mtproto://host:port?secret=HEX
-            qs = dict(
-                pair.split("=", 1) for pair in parsed.query.split("&") if "=" in pair
-            )
+            qs = dict(pair.split("=", 1) for pair in parsed.query.split("&") if "=" in pair)
             secret = qs.get("secret")
             if not secret:
                 raise ValueError("mtproto requires ?secret=HEX")
@@ -101,9 +99,11 @@ def _parse_one(line: str, *, default_kind: ProxyKind | None) -> ParsedEntry:
         port = int(parts[1])
     except ValueError as exc:
         raise ValueError(f"bad port {parts[1]!r}") from exc
-    if port < 1 or port > 65535:
+    max_port = 65535
+    if port < 1 or port > max_port:
         raise ValueError(f"port out of range: {port}")
-    secret = f"{parts[2]}:{parts[3]}" if len(parts) == 4 else None
+    host_port_user_pass = 4
+    secret = f"{parts[2]}:{parts[3]}" if len(parts) == host_port_user_pass else None
     kind = default_kind or ProxyKind.SOCKS5
     return ParsedEntry(kind=kind, host=host, port=port, secret=secret)
 
