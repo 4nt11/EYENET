@@ -224,22 +224,22 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
         max(fields['ui_payload_md5']) AS payload_md5,
         max(fields['ui_work_dir']) AS work_dir,
-        toUInt64(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
-        toUInt64(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
-        toUInt64(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
-        toUInt64(countIf(rule_id = 'history_url_title_block')) AS history_count,
-        toUInt64(countIf(rule_id = 'download_history_block')) AS downloads_count,
-        toUInt64(countIf(rule_id LIKE 'processes_%')) AS processes_count,
-        toUInt64(countIf(rule_id = 'software_installed_list')) AS software_count,
-        toUInt64(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
-        toUInt64(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
-        toUInt64(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
+        toUInt64(countIf(family IN ('browser_passwords','combolist','windows_credentials','json_v2'))) AS creds_count,
+        toUInt64(countIf(family IN ('cookies','victim_cookies'))) AS cookies_count,
+        toUInt64(countIf(family = 'victim_autofills')) AS autofills_count,
+        toUInt64(countIf(family = 'victim_history')) AS history_count,
+        toUInt64(countIf(family = 'victim_downloads')) AS downloads_count,
+        toUInt64(countIf(family = 'victim_processes')) AS processes_count,
+        toUInt64(countIf(family = 'victim_software')) AS software_count,
+        toUInt64(countIf(family = 'discord_tokens')) AS discord_tokens_count,
+        toUInt64(countIf(family = 'steam_accounts')) AS steam_tokens_count,
+        toUInt64(countIf(family = 'google_oauth_tokens')) AS google_refresh_count,
         toUInt64(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
         toUInt64(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
         maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
         maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
         maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
-        maxIf(toUInt8(1), rule_id = 'aware_crypter_banner') AS has_crypter_banner,
+        maxIf(toUInt8(1), family = 'aware_crypter') AS has_crypter_banner,
         maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
         maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
         maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
@@ -249,7 +249,8 @@ _VICTIM_PROFILES: tuple[str, ...] = (
     """,
     # Idempotent backfill with NOT EXISTS gate. First-run on an existing
     # extracted_records populates all historical rows; subsequent calls on
-    # each pipeline run are no-ops.
+    # each pipeline run are no-ops. v1.3.1: also fires after the one-shot
+    # repair (see _repair_victim_profiles_if_stale) rebuilds the table.
     """
     INSERT INTO {db}.victim_profiles
     SELECT
@@ -265,22 +266,22 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
         max(fields['ui_payload_md5']) AS payload_md5,
         max(fields['ui_work_dir']) AS work_dir,
-        toUInt64(countIf(rule_id LIKE 'passwords_%')) AS creds_count,
-        toUInt64(countIf(rule_id = 'cookies_netscape_tsv')) AS cookies_count,
-        toUInt64(countIf(rule_id IN ('autofills_form_value_block', 'autofills_space_delim'))) AS autofills_count,
-        toUInt64(countIf(rule_id = 'history_url_title_block')) AS history_count,
-        toUInt64(countIf(rule_id = 'download_history_block')) AS downloads_count,
-        toUInt64(countIf(rule_id LIKE 'processes_%')) AS processes_count,
-        toUInt64(countIf(rule_id = 'software_installed_list')) AS software_count,
-        toUInt64(countIf(rule_id = 'discord_tokens_plain')) AS discord_tokens_count,
-        toUInt64(countIf(rule_id = 'steam_jwt_tokens')) AS steam_tokens_count,
-        toUInt64(countIf(rule_id = 'google_restore_tokens')) AS google_refresh_count,
+        toUInt64(countIf(family IN ('browser_passwords','combolist','windows_credentials','json_v2'))) AS creds_count,
+        toUInt64(countIf(family IN ('cookies','victim_cookies'))) AS cookies_count,
+        toUInt64(countIf(family = 'victim_autofills')) AS autofills_count,
+        toUInt64(countIf(family = 'victim_history')) AS history_count,
+        toUInt64(countIf(family = 'victim_downloads')) AS downloads_count,
+        toUInt64(countIf(family = 'victim_processes')) AS processes_count,
+        toUInt64(countIf(family = 'victim_software')) AS software_count,
+        toUInt64(countIf(family = 'discord_tokens')) AS discord_tokens_count,
+        toUInt64(countIf(family = 'steam_accounts')) AS steam_tokens_count,
+        toUInt64(countIf(family = 'google_oauth_tokens')) AS google_refresh_count,
         toUInt64(countIf(rule_id = 'localstorage_jwt_candidates')) AS localstorage_jwt_count,
         toUInt64(countIf(rule_id LIKE 'wallet_vault_leveldb:%')) AS wallet_vaults_count,
         maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
         maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
         maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
-        maxIf(toUInt8(1), rule_id = 'aware_crypter_banner') AS has_crypter_banner,
+        maxIf(toUInt8(1), family = 'aware_crypter') AS has_crypter_banner,
         maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
         maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
         maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
@@ -290,6 +291,17 @@ _VICTIM_PROFILES: tuple[str, ...] = (
     GROUP BY archive_sha256, victim_folder
     """,
 )
+
+
+# v1.3.1 one-shot repair sentinel. The pre-1.3.1 MV body counted creds by
+# `rule_id LIKE 'passwords_%'` (never matches: real rule_ids are
+# passwords_block_title, combolist_*, credentials_windows, etc.) and
+# cookies by `rule_id = 'cookies_netscape_tsv'` (misses the bulk
+# netscape_cookies hits). Prod was showing 0 creds / 0 cookies on
+# 3.6M-row extracted_records. The new MV keys off `family` (stable,
+# catalog-defined). This string is the sentinel we grep in
+# system.tables.create_table_query to decide whether to force-rebuild.
+_VICTIM_PROFILES_STALE_SENTINEL = "rule_id LIKE 'passwords_"
 
 
 # v1.3.3 per-victim DOMAIN index. One row per (archive_sha256, victim_folder,
@@ -581,6 +593,10 @@ class ClickHouseRecordsSink:
             )
         )
         # v1.3.3 per-victim profile roll-up (table + MV + idempotent backfill).
+        # v1.3.1 one-shot repair: drop + rebuild if the old rule_id-based MV
+        # is detected, then let the CREATE IF NOT EXISTS below re-make it
+        # with the new family-based body, then the NOT EXISTS backfill fires.
+        self._repair_victim_profiles_if_stale(client)
         for stmt in _VICTIM_PROFILES:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
         # v1.3.3 per-victim domain index (detection engine primitive).
@@ -589,6 +605,25 @@ class ClickHouseRecordsSink:
         # v1.3.4 monitored-domain watchlist (detection-engine input table).
         for stmt in _MONITORED_DOMAINS:
             client.command(stmt.format(db=self._db))
+
+    def _repair_victim_profiles_if_stale(self, client: Any) -> None:
+        """Drop the pre-1.3.1 victim_profiles table + MV iff the MV body
+        still contains the stale rule_id-based count expressions. The
+        follow-on CREATE IF NOT EXISTS then rebuilds with the family-based
+        body, and the NOT EXISTS backfill repopulates from
+        extracted_records. Idempotent: once rebuilt, the sentinel no
+        longer matches, so later ensure_schema() calls are no-ops."""
+        # self._db is operator-set config, not user input; no injection risk.
+        query = (
+            "SELECT create_table_query FROM system.tables "  # noqa: S608  # nosec B608
+            f"WHERE database = '{self._db}' AND name = 'victim_profiles_mv'"
+        )
+        rows = client.query(query).result_rows
+        if not rows or _VICTIM_PROFILES_STALE_SENTINEL not in (rows[0][0] or ""):
+            return
+        client.command(f"DROP VIEW IF EXISTS {self._db}.victim_profiles_mv")
+        client.command(f"TRUNCATE TABLE IF EXISTS {self._db}.victim_profiles")
+        client.command(f"DROP TABLE IF EXISTS {self._db}.victim_profiles")
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)
