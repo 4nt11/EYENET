@@ -223,10 +223,10 @@ print('base OK')
 		log "preflight FAILED: eyenet:base is missing a runtime dependency. NOT deploying."
 		return 1
 	}
-	log "preflight: eyenet:stealer runtime deps (ulpextract, clickhouse-connect)"
+	log "preflight: eyenet:stealer runtime deps (gotractor, clickhouse-connect)"
 	docker run --rm --entrypoint sh eyenet:stealer -c \
-		'test -x /usr/local/bin/ulpextract && python -c "import clickhouse_connect"' || {
-		log "preflight FAILED: eyenet:stealer missing ulpextract / clickhouse-connect."
+		'test -x /usr/local/bin/gotractor && python -c "import clickhouse_connect"' || {
+		log "preflight FAILED: eyenet:stealer missing gotractor / clickhouse-connect."
 		return 1
 	}
 	log "preflight: eyenet:edge (built SPA + valid Caddyfile)"

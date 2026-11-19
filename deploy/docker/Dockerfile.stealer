@@ -43,12 +43,25 @@ RUN CGO_ENABLED=0 go build \
 FROM eyenet:base
 
 USER root
-# unrar is in non-free; enable it just for this install, then restore the
-# default sources.list so later apt-get calls stay in main.
-RUN echo 'deb http://deb.debian.org/debian bookworm main non-free non-free-firmware' > /etc/apt/sources.list.d/non-free.list \
+# unrar is in non-free; add its component to the existing debian.sources
+# (matches signed-by key of main), install, then revert. Keeps later
+# apt-get calls free of non-free noise. Fallback to editing sources.list
+# for images where debian.sources isn't present.
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's/^Components: main/Components: main non-free non-free-firmware/' \
+            /etc/apt/sources.list.d/debian.sources; \
+    else \
+        sed -i 's/ main$/ main non-free non-free-firmware/' /etc/apt/sources.list; \
+    fi \
  && apt-get update \
  && apt-get install -y --no-install-recommends 7zip unrar unar \
- && rm -f /etc/apt/sources.list.d/non-free.list \
+ && if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's/^Components: main non-free non-free-firmware/Components: main/' \
+            /etc/apt/sources.list.d/debian.sources; \
+    else \
+        sed -i 's/ main non-free non-free-firmware$/ main/' /etc/apt/sources.list; \
+    fi \
  && rm -rf /var/lib/apt/lists/*
 RUN /opt/venv/bin/pip install --no-cache-dir 'clickhouse-connect>=0.8'
 COPY --from=gobuild /gotractor /usr/local/bin/gotractor
