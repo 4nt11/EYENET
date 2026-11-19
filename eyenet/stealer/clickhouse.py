@@ -516,6 +516,78 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
     FROM {db}.extracted_records
     WHERE NOT EXISTS (SELECT 1 FROM {db}.extracted_file_paths)
     """,
+    # v1.3.1 per-archive per-file row counts. Backs file_tree() and the
+    # per-victim coverage computation. Before: both scanned extracted_records
+    # FINAL + GROUP BY file_path for ONE archive, which is still O(N) because
+    # the sort key is not (archive, file_path). After: a tiny
+    # AggregatingMergeTree keyed on exactly that tuple, so a per-archive
+    # lookup is a direct index seek.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.extracted_rows_per_file
+    (
+        archive_sha256 FixedString(64),
+        file_path      String,
+        cnt            SimpleAggregateFunction(sum, UInt64)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY (archive_sha256, file_path)
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_rows_per_file_mv
+    TO {db}.extracted_rows_per_file AS
+    SELECT
+        archive_sha256,
+        file_path,
+        toUInt64(count()) AS cnt
+    FROM {db}.extracted_records
+    GROUP BY archive_sha256, file_path
+    """,
+    """
+    INSERT INTO {db}.extracted_rows_per_file
+    SELECT archive_sha256, file_path, toUInt64(count()) AS cnt
+    FROM {db}.extracted_records
+    WHERE NOT EXISTS (SELECT 1 FROM {db}.extracted_rows_per_file)
+    GROUP BY archive_sha256, file_path
+    """,
+    # v1.3.1 per-victim rule-id set. Backs the artifact drawer's
+    # fired_rule_ids resolution (which feeds the MITRE ATT&CK technique
+    # list). Before: SELECT DISTINCT rule_id FROM extracted_records FINAL
+    # WHERE archive = X AND splitByChar('/', file_path)[2] = Y was a full
+    # scan because splitByChar is not indexable. After: ReplacingMergeTree
+    # keyed on (archive, victim_folder, rule_id); lookup is an index seek.
+    """
+    CREATE TABLE IF NOT EXISTS {db}.extracted_rules_per_victim
+    (
+        archive_sha256 FixedString(64),
+        victim_folder  String,
+        rule_id        LowCardinality(String)
+    )
+    ENGINE = ReplacingMergeTree
+    ORDER BY (archive_sha256, victim_folder, rule_id)
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_rules_per_victim_mv
+    TO {db}.extracted_rules_per_victim AS
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        rule_id
+    FROM {db}.extracted_records
+    WHERE splitByChar('/', file_path)[2] != ''
+    """,
+    """
+    INSERT INTO {db}.extracted_rules_per_victim
+    SELECT
+        archive_sha256,
+        splitByChar('/', file_path)[2] AS victim_folder,
+        rule_id
+    FROM {db}.extracted_records
+    WHERE splitByChar('/', file_path)[2] != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.extracted_rules_per_victim)
+    GROUP BY archive_sha256, victim_folder, rule_id
+    """,
 )
 
 

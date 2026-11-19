@@ -765,10 +765,13 @@ class StealerArtifactsReader:
         # over the same ClickHouse pool connection.
         fired, hits, coverage, verdict = await asyncio.gather(
             self._rows(
+                # v1.3.1: tiny-table lookup off extracted_rules_per_victim
+                # keyed on (archive, victim_folder, rule_id). Was a full
+                # scan of extracted_records with splitByChar in WHERE.
                 "SELECT DISTINCT rule_id "  # noqa: S608
-                f"FROM {self._db}.extracted_records FINAL "  # nosec B608
+                f"FROM {self._db}.extracted_rules_per_victim "  # nosec B608
                 "WHERE archive_sha256 = {sha:FixedString(64)} "
-                "  AND splitByChar('/', file_path)[2] = {vf:String}",
+                "  AND victim_folder  = {vf:String}",
                 {"sha": archive_sha256, "vf": victim_folder},
             ),
             self._monitored_domain_hits(archive_sha256, victim_folder),
@@ -832,20 +835,24 @@ class StealerArtifactsReader:
         but filtered to filenames whose rel_path appears at least once in
         extracted_records for the same (archive, victim). Matches the
         Files-tab dedup-by-filename view so the tile and the tree agree."""
+        # v1.3.1: LEFT JOIN against a per-archive slice of
+        # extracted_rows_per_file (direct index seek on the sort key
+        # (archive, file_path)) instead of a full-scan count+group by
+        # over extracted_records.
         rows = await self._rows(
             "SELECT "  # noqa: S608
             "  uniqExact(fa.filename) AS total, "
-            "  uniqExactIf(fa.filename, er.n > 0) AS parsed, "
+            "  uniqExactIf(fa.filename, erf.n > 0) AS parsed, "
             "  round(if(uniqExact(fa.filename) = 0, 0.0, "
-            "    100.0 * uniqExactIf(fa.filename, er.n > 0) / uniqExact(fa.filename)), 1) AS pct "
-            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
+            "    100.0 * uniqExactIf(fa.filename, erf.n > 0) "
+            "    / uniqExact(fa.filename)), 1) AS pct "
+            f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
-            "  SELECT file_path, count() AS n "
-            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            "  SELECT file_path, sum(cnt) AS n "
+            f"  FROM {self._db}.extracted_rows_per_file "  # nosec B608
             "  WHERE archive_sha256 = {sha:FixedString(64)} "
-            "    AND victim_folder = {vf:String} "
             "  GROUP BY file_path"
-            ") AS er ON er.file_path = fa.rel_path "
+            ") AS erf ON erf.file_path = fa.rel_path "
             "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
             "  AND fa.victim_folder = {vf:String} "
             "  AND fa.heuristic_kind NOT IN ('empty','binary')",
@@ -920,25 +927,23 @@ class StealerArtifactsReader:
         return int(rows[0][0]) if rows else 0
 
     async def file_tree(self, archive_sha256: str, victim_folder: str) -> list[ArtifactFileRow]:
-        # rows_emitted was nuked from file_audit in v1.3.5: the pipeline only
-        # ever wrote 0 for it. The real per-file row count lives in
-        # extracted_records, so LEFT JOIN against a count() GROUP BY file_path
-        # subquery and use that. extractor_touched stays on file_audit and
-        # remains the source of truth for "did the ulpextract pre-pass look
-        # at this file", OR'd with "gotractor emitted anything" via the JOIN.
+        # v1.3.1: LEFT JOIN against a per-archive slice of
+        # extracted_rows_per_file (direct index seek on (archive,
+        # file_path)) instead of a full scan+group-by over
+        # extracted_records. extractor_touched still OR'd in so the
+        # legacy ulpextract pre-pass flag still contributes.
         rows = await self._rows(
             "SELECT fa.rel_path, fa.filename, fa.size_bytes, fa.heuristic_kind, "  # noqa: S608
-            "       (coalesce(er.n, 0) > 0) OR fa.extractor_touched AS touched, "
-            "       coalesce(er.n, 0)                               AS rows_emitted, "
+            "       (coalesce(erf.n, 0) > 0) OR fa.extractor_touched AS touched, "
+            "       coalesce(erf.n, 0)                                AS rows_emitted, "
             "       fa.sample_head, fa.file_sha256 "
-            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
-            "LEFT JOIN ( "
-            "  SELECT file_path, count() AS n "
-            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
+            f"FROM {self._db}.file_audit AS fa "  # nosec B608
+            "LEFT JOIN ("
+            "  SELECT file_path, sum(cnt) AS n "
+            f"  FROM {self._db}.extracted_rows_per_file "  # nosec B608
             "  WHERE archive_sha256 = {sha:FixedString(64)} "
-            "    AND splitByChar('/', file_path)[2] = {vf:String} "
-            "  GROUP BY file_path "
-            ") AS er ON er.file_path = fa.rel_path "
+            "  GROUP BY file_path"
+            ") AS erf ON erf.file_path = fa.rel_path "
             "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
             "  AND fa.victim_folder = {vf:String} "
             "ORDER BY fa.rel_path",
