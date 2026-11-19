@@ -315,12 +315,15 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 # catalog-defined). This string is the sentinel we grep in
 # system.tables.create_table_query to decide whether to force-rebuild.
 #
-# v1.3.1 bump: the earlier body had been fixed to key off `family` (1.3.0
-# post-ship patch), so the old sentinel no longer matches on upgraded
-# clusters. The 1.3.1 switchover is from countIf(family IN ...) to
-# uniqExactStateIf(identity_tuple, family IN ...); the sentinel now
-# catches the countIf shape.
-_VICTIM_PROFILES_STALE_SENTINEL = "countIf(family IN"
+# v1.3.1 bump: multiple historical bodies qualify as stale. The sentinel
+# catches `countIf(` (the function name), which is present in both the
+# pre-1.3.0 (rule_id-keyed) and post-b7849e7 (family-keyed) bodies but
+# ABSENT in the new uniqExactStateIf body. On a prod that never saw
+# b7849e7's MV rebuild (lazy sinks only trigger on first insert), the
+# narrower sentinel would miss the original body and the deploy would
+# fail with ILLEGAL_TYPE_OF_ARGUMENT during the backfill (observed on
+# the v1.3.1 prod deploy).
+_VICTIM_PROFILES_STALE_SENTINEL = "countIf("
 
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
 # bodies used `toUInt64(count()) AS <col>`; the new body uses
