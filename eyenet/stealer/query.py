@@ -1218,14 +1218,18 @@ class StealerFailuresReader:
         params["limit"] = limit
         params["offset"] = offset
 
-        base_from = (
-            f"FROM {self._db}.file_audit AS fa FINAL "  # noqa: S608  # nosec B608
-            "LEFT JOIN ("
-            "  SELECT file_path, count() AS n "
-            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
-            "  GROUP BY file_path "
-            ") AS er ON er.file_path = fa.rel_path "
+        # v1.3.1: replace the FULL scan of extracted_records (3.6M rows FINAL
+        # GROUP BY file_path, 4s wall on prod) with an anti-join against the
+        # extracted_file_paths MV (one row per distinct file_path, maintained
+        # on insert). Drop FINAL on file_audit: shape stats are tolerant of
+        # the tiny dup window before a ReplacingMergeTree merge finishes.
+        # self._db is operator config, not user input; no injection risk.
+        where = [w for w in where if w != "er.n = 0"]
+        where.append(
+            f"fa.rel_path NOT IN (SELECT file_path FROM {self._db}.extracted_file_paths)"  # noqa: S608  # nosec B608
         )
+        where_sql = " AND ".join(where)
+        base_from = f"FROM {self._db}.file_audit AS fa "  # nosec B608
 
         total_rows = await self._rows(
             f"SELECT uniqExact({self._SIG_EXPR}) {base_from} WHERE {where_sql}",
@@ -1282,19 +1286,15 @@ class StealerFailuresReader:
         fail_files + shape_buckets come from the same LEFT JOIN the shape
         list uses. crash_files is a cheap count against file_audit where
         parse_error is set."""
+        # v1.3.1: anti-join against extracted_file_paths MV instead of
+        # scanning extracted_records with FINAL. See list_shapes.
+        parsed_in = f"fa.rel_path IN (SELECT file_path FROM {self._db}.extracted_file_paths)"  # noqa: S608  # nosec B608
         cov_rows = await self._rows(
             "SELECT "  # noqa: S608
             "  uniqExact((fa.archive_sha256, fa.victim_folder, fa.filename)) AS total, "
-            "  uniqExactIf((fa.archive_sha256, fa.victim_folder, fa.filename), er.n > 0) AS parsed "
-            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
-            "LEFT JOIN ("
-            "  SELECT archive_sha256, victim_folder, file_path, count() AS n "
-            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
-            "  GROUP BY archive_sha256, victim_folder, file_path"
-            ") AS er "
-            "  ON er.archive_sha256 = fa.archive_sha256 "
-            " AND er.victim_folder = fa.victim_folder "
-            " AND er.file_path = fa.rel_path "
+            "  uniqExactIf((fa.archive_sha256, fa.victim_folder, fa.filename), "
+            f"             {parsed_in}) AS parsed "
+            f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "WHERE fa.victim_folder != '' "
             "  AND fa.heuristic_kind NOT IN ('empty','binary')",
             {},
@@ -1305,15 +1305,10 @@ class StealerFailuresReader:
 
         fail_rows = await self._rows(
             f"SELECT count(), uniqExact({self._SIG_EXPR}) "  # noqa: S608
-            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
-            "LEFT JOIN ("
-            "  SELECT file_path, count() AS n "
-            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
-            "  GROUP BY file_path "
-            ") AS er ON er.file_path = fa.rel_path "
+            f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "WHERE fa.victim_folder != '' "
             "  AND fa.heuristic_kind NOT IN ('empty','binary') "
-            "  AND er.n = 0",
+            f"  AND NOT ({parsed_in})",
             {},
         )
         fail_files = int(fail_rows[0][0] or 0) if fail_rows else 0
@@ -1342,15 +1337,10 @@ class StealerFailuresReader:
             "SELECT fa.archive_sha256, fa.victim_folder, fa.rel_path, "  # noqa: S608
             "       fa.filename, fa.size_bytes, fa.sample_head, "
             "       fa.heuristic_kind "
-            f"FROM {self._db}.file_audit AS fa FINAL "  # nosec B608
-            "LEFT JOIN ("
-            "  SELECT file_path, count() AS n "
-            f"  FROM {self._db}.extracted_records FINAL "  # nosec B608
-            "  GROUP BY file_path "
-            ") AS er ON er.file_path = fa.rel_path "
+            f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "WHERE fa.victim_folder != '' "
             "  AND fa.heuristic_kind NOT IN ('empty','binary') "
-            "  AND er.n = 0 "
+            f"  AND fa.rel_path NOT IN (SELECT file_path FROM {self._db}.extracted_file_paths) "
             f"  AND {self._SIG_EXPR} = {{sig:String}} "
             "LIMIT {limit:UInt32}",
             {"sig": shape_sig, "limit": int(limit)},

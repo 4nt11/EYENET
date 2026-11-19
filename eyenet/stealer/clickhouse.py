@@ -482,6 +482,43 @@ _STATS_ROLLUP: tuple[str, ...] = (
 )
 
 
+# v1.3.1 parse-failures acceleration. GET /v1/stealer/failures was doing
+# a LEFT JOIN against a FULL scan of extracted_records (3.6M rows FINAL,
+# GROUP BY file_path) just to know which files had at least one record.
+# Observed 4.2s wall time for a 25-row page on prod. Fix: maintain a
+# tiny ReplacingMergeTree of the DISTINCT file_paths that have ever
+# emitted an extracted record. The reader anti-joins against this
+# instead of the raw records table.
+_EXTRACTED_PATHS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.extracted_file_paths
+    (
+        file_path String
+    )
+    ENGINE = ReplacingMergeTree
+    ORDER BY file_path
+    {storage_policy_clause}
+    """,
+    # MV fires on every INSERT into extracted_records. It writes every
+    # row's file_path; ReplacingMergeTree collapses dupes on background
+    # merge. Query-time dedup is handled by SELECT DISTINCT (cheap).
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_file_paths_mv
+    TO {db}.extracted_file_paths AS
+    SELECT file_path
+    FROM {db}.extracted_records
+    """,
+    # One-shot backfill. NOT EXISTS gate so this only fires on the first
+    # ensure_schema() call against an existing corpus.
+    """
+    INSERT INTO {db}.extracted_file_paths
+    SELECT DISTINCT file_path
+    FROM {db}.extracted_records
+    WHERE NOT EXISTS (SELECT 1 FROM {db}.extracted_file_paths)
+    """,
+)
+
+
 # v1.3.3 per-victim DOMAIN index. One row per (archive_sha256, victim_folder,
 # domain, source_kind) with a running count. The whole point of this table
 # is detection economics: a future monitored-domain watchlist joins against
@@ -785,6 +822,9 @@ class ClickHouseRecordsSink:
             client.command(stmt.format(db=self._db))
         # v1.3.1 /stats pre-aggregation rollups (4 MVs + one-shot backfill).
         for stmt in _STATS_ROLLUP:
+            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+        # v1.3.1 parse-failures acceleration (1 MV + one-shot backfill).
+        for stmt in _EXTRACTED_PATHS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
 
     def _repair_victim_profiles_if_stale(self, client: Any) -> None:
