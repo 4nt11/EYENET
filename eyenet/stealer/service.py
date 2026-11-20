@@ -309,9 +309,10 @@ def _run_corpus_reclassify() -> int:
     client = get_clickhouse_client()
     db = clickhouse_db()
     FileAuditSink().ensure_schema()
+    # v1.3.5: dropped FINAL; see classifier_io.py.
     rows = client.query(
         "SELECT DISTINCT archive_sha256, victim_folder "  # noqa: S608  # nosec B608
-        f"FROM {db}.file_audit FINAL "
+        f"FROM {db}.file_audit "
         "WHERE victim_folder != '' "
         "ORDER BY archive_sha256, victim_folder"
     ).result_rows

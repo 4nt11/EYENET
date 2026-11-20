@@ -857,9 +857,11 @@ class StealerArtifactsReader:
         extracted_records for the same (archive, victim). Matches the
         Files-tab dedup-by-filename view so the tile and the tree agree."""
         # v1.3.1: LEFT JOIN against a per-archive slice of
-        # extracted_rows_per_file (direct index seek on the sort key
-        # (archive, file_path)) instead of a full-scan count+group by
-        # over extracted_records.
+        # extracted_rows_per_file_counts (flat UInt64 sibling, v1.3.5).
+        # Before: the LEFT JOIN subquery ran uniqExactMerge over the heavy
+        # AggregatingMergeTree, which cost 1.4s of CPU deserializing ~150
+        # MiB of state blobs for one archive. Now it reads plain UInt64
+        # from the refreshable sibling. Counts are up to 5 min stale.
         rows = await self._rows(
             "SELECT "  # noqa: S608
             "  uniqExact(fa.filename) AS total, "
@@ -869,10 +871,9 @@ class StealerArtifactsReader:
             "    / uniqExact(fa.filename)), 1) AS pct "
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
-            "  SELECT file_path, uniqExactMerge(cnt) AS n "
-            f"  FROM {self._db}.extracted_rows_per_file "  # nosec B608
-            "  WHERE archive_sha256 = {sha:FixedString(64)} "
-            "  GROUP BY file_path"
+            "  SELECT file_path, n "
+            f"  FROM {self._db}.extracted_rows_per_file_counts FINAL "  # nosec B608
+            "  WHERE archive_sha256 = {sha:FixedString(64)}"
             ") AS erf ON erf.file_path = fa.rel_path "
             "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
             "  AND fa.victim_folder = {vf:String} "
@@ -948,11 +949,9 @@ class StealerArtifactsReader:
         return int(rows[0][0]) if rows else 0
 
     async def file_tree(self, archive_sha256: str, victim_folder: str) -> list[ArtifactFileRow]:
-        # v1.3.1: LEFT JOIN against a per-archive slice of
-        # extracted_rows_per_file (direct index seek on (archive,
-        # file_path)) instead of a full scan+group-by over
-        # extracted_records. extractor_touched still OR'd in so the
-        # legacy ulpextract pre-pass flag still contributes.
+        # v1.3.5: LEFT JOIN against extracted_rows_per_file_counts (plain
+        # UInt64 sibling, refreshed every 5 min). Same rationale as
+        # _coverage above; drops the per-click 1.4s uniqExactMerge cost.
         rows = await self._rows(
             "SELECT fa.rel_path, fa.filename, fa.size_bytes, fa.heuristic_kind, "  # noqa: S608
             "       (coalesce(erf.n, 0) > 0) OR fa.extractor_touched AS touched, "
@@ -960,10 +959,9 @@ class StealerArtifactsReader:
             "       fa.sample_head, fa.file_sha256 "
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
-            "  SELECT file_path, uniqExactMerge(cnt) AS n "
-            f"  FROM {self._db}.extracted_rows_per_file "  # nosec B608
-            "  WHERE archive_sha256 = {sha:FixedString(64)} "
-            "  GROUP BY file_path"
+            "  SELECT file_path, n "
+            f"  FROM {self._db}.extracted_rows_per_file_counts FINAL "  # nosec B608
+            "  WHERE archive_sha256 = {sha:FixedString(64)}"
             ") AS erf ON erf.file_path = fa.rel_path "
             "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
             "  AND fa.victim_folder = {vf:String} "

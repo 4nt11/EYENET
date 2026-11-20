@@ -506,9 +506,10 @@ def _classify_archive_victims(archive_sha: str) -> None:
 
         client = get_clickhouse_client()
         db = clickhouse_db()
+        # v1.3.5: dropped FINAL; see classifier_io.py.
         rows = client.query(
             "SELECT DISTINCT victim_folder "  # noqa: S608  # nosec B608
-            f"FROM {db}.file_audit FINAL "
+            f"FROM {db}.file_audit "
             "WHERE archive_sha256 = %(sha)s "
             "  AND victim_folder != ''",
             parameters={"sha": archive_sha},

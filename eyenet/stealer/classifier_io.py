@@ -33,9 +33,15 @@ def collect_evidence_sync(client: Any, archive_sha256: str, victim_folder: str) 
     a sync CH client to stay in the same thread as the gotractor daemon
     stream; the async service calls :func:`collect_evidence` instead."""
     db = clickhouse_db()
+    # v1.3.5: dropped FINAL. DISTINCT on the projected (filename, rel_path)
+    # tuple already dedupes the exact rows FINAL would collapse, since those
+    # columns are stable across reindex generations for the same (archive,
+    # victim, file_path, fields-hash) identity. Live diff on prod confirmed
+    # zero symmetric difference between the two forms. 5x speedup on hot
+    # cache; removes the memory-241 trigger during reclassify.
     files_rows = client.query(
         f"SELECT DISTINCT fa.filename, fa.rel_path "  # noqa: S608  # nosec B608
-        f"FROM {db}.file_audit AS fa FINAL "
+        f"FROM {db}.file_audit AS fa "
         "WHERE fa.archive_sha256 = %(sha)s "
         "  AND fa.victim_folder = %(vf)s "
         "  AND fa.heuristic_kind NOT IN ('empty','binary') "
@@ -52,7 +58,7 @@ def collect_evidence_sync(client: Any, archive_sha256: str, victim_folder: str) 
 
     rec_rows = client.query(
         "SELECT DISTINCT er.rule_id, er.fields "  # noqa: S608  # nosec B608
-        f"FROM {db}.extracted_records AS er FINAL "
+        f"FROM {db}.extracted_records AS er "
         "WHERE er.archive_sha256 = %(sha)s "
         "  AND er.victim_folder = %(vf)s",
         parameters={"sha": archive_sha256, "vf": victim_folder},
@@ -84,7 +90,7 @@ async def collect_evidence(client: Any, archive_sha256: str, victim_folder: str)
     db = clickhouse_db()
     files_rows = await client.query(
         f"SELECT DISTINCT fa.filename, fa.rel_path "  # noqa: S608  # nosec B608
-        f"FROM {db}.file_audit AS fa FINAL "
+        f"FROM {db}.file_audit AS fa "
         "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
         "  AND fa.victim_folder = {vf:String} "
         "  AND fa.heuristic_kind NOT IN ('empty','binary') "
@@ -101,7 +107,7 @@ async def collect_evidence(client: Any, archive_sha256: str, victim_folder: str)
 
     rec_rows = await client.query(
         "SELECT DISTINCT er.rule_id, er.fields "  # noqa: S608  # nosec B608
-        f"FROM {db}.extracted_records AS er FINAL "
+        f"FROM {db}.extracted_records AS er "
         "WHERE er.archive_sha256 = {sha:FixedString(64)} "
         "  AND er.victim_folder = {vf:String}",
         parameters={"sha": archive_sha256, "vf": victim_folder},

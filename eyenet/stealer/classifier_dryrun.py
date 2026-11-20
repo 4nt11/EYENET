@@ -95,9 +95,10 @@ async def dry_run(
     client = await get_async_clickhouse_client()
     db = clickhouse_db()
     try:
+        # v1.3.5: dropped FINAL; see classifier_io.py.
         pair_rows = await client.query(
             "SELECT DISTINCT archive_sha256, victim_folder "  # noqa: S608  # nosec B608
-            f"FROM {db}.file_audit FINAL "
+            f"FROM {db}.file_audit "
             "WHERE victim_folder != '' "
             "ORDER BY archive_sha256, victim_folder "
             "LIMIT {n:UInt32}",

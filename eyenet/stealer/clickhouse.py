@@ -419,6 +419,42 @@ _VICTIM_COUNTS: tuple[str, ...] = (
     """,
 )
 
+# v1.3.5 flat-counts sibling for extracted_rows_per_file. Same pattern as
+# victim_counts: the base AggregatingMergeTree keeps heavy uniqExactState
+# columns for reindex-idempotent exactness; a ReplacingMergeTree sibling
+# holds the finalized plain UInt64 scalars, refreshed every 5 minutes by a
+# REFRESHABLE MV. file_tree + _coverage read from here instead of paying
+# ~1.4s of uniqExactState deserialization on every click. Measured on prod:
+# query_duration_ms 1799 / cpu_us 2_422_632 on the base table dropped to
+# tens of ms on the flat sibling.
+_EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.extracted_rows_per_file_counts
+    (
+        archive_sha256 FixedString(64),
+        file_path      String,
+        n              UInt64,
+        refreshed_at   DateTime DEFAULT now()
+    )
+    ENGINE = ReplacingMergeTree(refreshed_at)
+    ORDER BY (archive_sha256, file_path)
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_rows_per_file_counts_refresh
+    REFRESH EVERY 5 MINUTE
+    TO {db}.extracted_rows_per_file_counts
+    AS SELECT
+        archive_sha256,
+        file_path,
+        uniqExactMerge(cnt) AS n,
+        now() AS refreshed_at
+    FROM {db}.extracted_rows_per_file
+    GROUP BY archive_sha256, file_path
+    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 1000000000
+    """,
+)
+
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
 # bodies used `toUInt64(count()) AS <col>`; the new body uses
 # `uniqExactState(_IDENTITY_TUPLE_DDL)`. The sentinel catches the old shape.
@@ -1083,6 +1119,13 @@ class ClickHouseRecordsSink:
         # v1.3.1 parse-failures acceleration (1 MV + one-shot backfill).
         for stmt in _EXTRACTED_PATHS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+        # v1.3.5 flat-counts sibling + refreshable MV for extracted_rows_per_file.
+        # Must run AFTER extracted_rows_per_file itself is created (above).
+        for stmt in _EXTRACTED_ROWS_PER_FILE_COUNTS:
+            client.command(
+                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
+                settings={"allow_experimental_refreshable_materialized_view": 1},
+            )
 
     def _repair_victim_profiles_if_stale(self, client: Any) -> None:
         """Drop the pre-1.3.1 victim_profiles table + MV iff the MV body
