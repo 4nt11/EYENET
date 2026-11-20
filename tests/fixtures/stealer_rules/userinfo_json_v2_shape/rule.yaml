@@ -1,0 +1,108 @@
+id: userinfo_json_v2_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 100
+path_glob: pc_info.json
+description: >
+  pc_info.json - json_v2 cluster host fingerprint. StealC v2 /
+  Acreed / Stealerium builds all emit this file alongside
+  log_info.json (which carries exfil counts, extracted by
+  json_v2_log_info at priority 110).
+
+  Fields captured:
+    PcName               victim NetBIOS hostname; often null when
+                         stealer failed to read it
+    Os                   'Windows 11' / 'Windows 10' - no build number
+    Ip                   egress IP at capture time
+    GPU                  array of GPU model strings
+    RAM                  integer MB
+    ScreenSize           'WxH' string
+    Arch                 'x64' / 'x86'
+    CpuCores             integer logical cores
+    Country              ISO 3166 alpha-2 (coarse, from IP)
+    City                 free-form city name with unicode
+    ZipCode              ZIP/postal code resolved from IP
+    LocalTime            'YYYY-MM-DD HH:MM:SS' local wall clock at
+                         capture, carries timezone offset implicitly
+    LocalAdapterIpList   array of Windows network adapter display
+                         names (localised)
+    IsElevator           true/false, whether the stealer ran elevated
+    ProcessList          array of running process names at capture
+    InstalledSoftware    array of installed software display names;
+                         often null when unimplemented
+    UserName             Windows user name; often null in this format
+    Domain               AD domain or workgroup; often null
+    Hwid                 '<NetBIOS><digits><GUID>' concatenation;
+                         the trailing UUID is the stable Machine GUID
+                         (strip the leading PcName + digits block to
+                         recover the canonical form)
+
+  Required key is Hwid because it is the only field observed as
+  universally non-null across all sampled victims (PcName and Ip can
+  be empty on failed captures).
+match:
+  type: json
+  requires_keys:
+    - Hwid
+extract:
+  paths:
+    ui_computer: $.PcName
+    ui_os: $.Os
+    ui_egress_ip: $.Ip
+    ui_gpu: $.GPU
+    ui_memory: $.RAM
+    ui_screen: $.ScreenSize
+    ui_cpu_arch: $.Arch
+    ui_cpu_count: $.CpuCores
+    ui_country: $.Country
+    ui_city: $.City
+    ui_zip: $.ZipCode
+    ui_local_time: $.LocalTime
+    ui_adapters: $.LocalAdapterIpList
+    ui_elevated: $.IsElevator
+    ui_processes: $.ProcessList
+    ui_software: $.InstalledSoftware
+    ui_user_name: $.UserName
+    ui_user_domain: $.Domain
+    ui_hwid: $.Hwid
+    # ui_machine_guid mirrors $.Hwid and gets regex-stripped below to the
+    # canonical Machine GUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx form).
+    # Keeping ui_hwid raw lets operators see the full stealer-emitted
+    # string; keying on ui_machine_guid lets us JOIN across stealer
+    # families that emit different HWID concat patterns for the same box.
+    ui_machine_guid: $.Hwid
+normalize:
+  # Canonical casing + whitespace trim across the string fields, matching
+  # the pattern established by opus_user_information_txt + redline_* +
+  # lumma_* rules. Country is lowercased because the rest of the catalog
+  # emits two-letter ISO in lowercase.
+  - { verb: strip_whitespace, field: ui_computer }
+  - { verb: strip_whitespace, field: ui_os }
+  - { verb: strip_whitespace, field: ui_egress_ip }
+  - { verb: strip_whitespace, field: ui_screen }
+  - { verb: strip_whitespace, field: ui_cpu_arch }
+  - { verb: strip_whitespace, field: ui_country }
+  - { verb: lowercase,        field: ui_country }
+  - { verb: strip_whitespace, field: ui_city }
+  - { verb: strip_whitespace, field: ui_zip }
+  - { verb: strip_whitespace, field: ui_user_name }
+  - { verb: strip_whitespace, field: ui_user_domain }
+  - { verb: date_parse,       field: ui_local_time, format: iso8601 }
+  # HWID canonicalisation: raw $.Hwid is a concat like
+  # 'DESKTOP-MF1BQLD5572adc21-a065-445e-8b3a-977b7652a372'. Lowercase it
+  # so case-insensitive GROUP BY works WITHIN the json_v2 cluster.
+  - { verb: strip_whitespace, field: ui_hwid }
+  - { verb: lowercase,        field: ui_hwid }
+  # Cross-family identifier: regex-strip the leading hostname + any
+  # non-UUID preamble, leave only the Machine GUID. If the raw value
+  # doesn't contain a UUID, the pattern won't match and the field stays
+  # as-is (operator sees the raw for triage). RE2 does not backtrack,
+  # so '.*?' is linear-time.
+  - { verb: strip_whitespace, field: ui_machine_guid }
+  - { verb: lowercase,        field: ui_machine_guid }
+  - { verb: replace_re2,      field: ui_machine_guid,
+      pattern: '^.*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}).*$',
+      replacement: '\1' }
+ttps:
+  - T1082

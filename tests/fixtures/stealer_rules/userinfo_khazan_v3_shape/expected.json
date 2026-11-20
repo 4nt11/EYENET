@@ -1,0 +1,18 @@
+{
+  "family": null,
+  "fields": {
+    "ui_build_version": "3.0",
+    "ui_capture_time": "16.08.2026 07:58:35",
+    "ui_computer": "PC-08",
+    "ui_country": "ph",
+    "ui_egress_ip": "136.158.63.7",
+    "ui_hwid": "6e829ba46d0d3c2f0e09-c85e54b4-e4eb-faede5d",
+    "ui_machine_guid": "2d8eac4b-eac4-149b-6c62-41ec367c4682",
+    "ui_os": "Windows 10 Pro 22H2 (Build 19045)",
+    "ui_payload_md5": "631bdccbf530ca7bcfe500994902be80",
+    "ui_payload_path": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\Rar$EXa7596.44290\\NexomiaUI_v1.83.261.exe",
+    "ui_smbios_uuid": "{c85e54b4-e4eb}",
+    "ui_user_name": "Administrator",
+    "ui_work_dir": "In memory"
+  }
+}

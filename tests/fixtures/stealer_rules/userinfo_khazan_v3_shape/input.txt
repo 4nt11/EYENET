@@ -1,0 +1,27 @@
+Khazan Cloud [t.me/KhazanCloud]
+
+t.me/KhazanCloud
+t.me/KhazanCloud
+t.me/KhazanCloud
+
+Reserve Link: https://linktr.ee/LogsPlanet
+Buy: @BuzzLogsPlanet
+
+
+Version: 3.0
+
+IP: 136.158.63.7
+Country: PH
+
+Date: 16.08.2026 07:58:35
+MachineID: 2d8eac4b-eac4-149b-6c62-41ec367c4682
+GUID: {c85e54b4-e4eb}
+HWID: 6E829BA46D0D3C2F0E09-c85e54b4-e4eb-FAEDE5D
+
+Path: C:\Users\ADMINI~1\AppData\Local\Temp\Rar$EXa7596.44290\NexomiaUI_v1.83.261.exe
+MD5: 631bdccbf530ca7bcfe500994902be80
+Work Dir: In memory
+
+Windows: Windows 10 Pro 22H2 (Build 19045)
+Computer Name: PC-08
+User Name: Administrator

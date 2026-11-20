@@ -1,0 +1,22 @@
+{
+  "family": null,
+  "fields": {
+    "ui_adapters": "[\"Ethernet\",\"Wi-Fi\"]",
+    "ui_city": "Bahía Blanca",
+    "ui_computer": "DESKTOP-VMCSK2I",
+    "ui_country": "ar",
+    "ui_cpu_arch": "x64",
+    "ui_cpu_count": 12,
+    "ui_egress_ip": "24.232.97.82",
+    "ui_elevated": "false",
+    "ui_gpu": "[\"NVIDIA GeForce GTX 1650\"]",
+    "ui_hwid": "desktop-mf1bqld572adc21-a065-445e-8b3a-977b7652a372",
+    "ui_local_time": "2026-06-25T21:00:17Z",
+    "ui_machine_guid": "572adc21-a065-445e-8b3a-977b7652a372",
+    "ui_memory": 16315,
+    "ui_os": "Windows 11",
+    "ui_processes": "[\"System\",\"smss.exe\"]",
+    "ui_screen": "1920x1080",
+    "ui_zip": "8000"
+  }
+}

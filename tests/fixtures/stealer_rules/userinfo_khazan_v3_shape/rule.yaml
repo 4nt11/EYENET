@@ -1,0 +1,86 @@
+id: userinfo_khazan_v3_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 85
+path_glob: "**information.txt"
+description: >
+  information.txt - Khazan v3.0 cluster shape, observed on Nexomia /
+  RealUI / similar cracked-software droppers aggregated through
+  @KhazanCloud. Distinct from userinfo_khazan_main_shape (Khazan v2)
+  by 'Version: 3.0' (NOT 'Version Build:') and the presence of BOTH
+  MachineID (RFC 4122 UUID) AND GUID (truncated SMBIOS tag) AS
+  SEPARATE keys. HWID is a concatenation of the first 20 hex chars
+  of the SMBIOS UUID + a short tag + the MachineID tail.
+
+  Fields captured:
+    Version       stealer release tag (always '3.0' in sampled
+                  data; a different value is a build drift signal)
+    IP            egress IP at capture
+    Country       ISO-ish country code
+    Date          'DD.MM.YYYY HH:MM:SS' local wall clock at
+                  capture (European convention; opposite of
+                  the US MM/DD pattern)
+    MachineID     Windows Machine GUID (RFC 4122, canonical form)
+    GUID          truncated SMBIOS system UUID, braces included
+    HWID          composite '<hex20>-<tag>-<suffix>' format
+    Path          absolute path of the stealer binary at capture.
+                  'C:\\Users\\...\\AppData\\Local\\Temp\\Rar$EXa...'
+                  is RAR self-extracting dropper
+    MD5           loader MD5 - CAMPAIGN CLUSTER KEY. Two victims
+                  sharing the same MD5 came from the same installer
+                  build, no VirusTotal lookup required.
+    Work Dir      'In memory' or an absolute path
+    Windows       'Windows 10 Pro 22H2 (Build 19045)' OS string
+    Computer Name NetBIOS hostname
+    User Name     Windows user login name
+
+  Required keys catch the v3 shape precisely: 'MachineID' + 'HWID'
+  + 'MD5' is only true for v3; v2 (userinfo_khazan_main_shape) emits
+  'HWID' without 'MachineID' and uses 'Version Build:' instead of
+  'Version:'. Priority 85 sits BELOW Khazan v2 (80) ... wait, HIGHER
+  priority wins ties, so 85 beats 80, and the strict requires_keys
+  prevent misfire on v2 archives.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - MachineID
+    - HWID
+    - MD5
+extract:
+  keys:
+    Version: ui_build_version
+    IP: ui_egress_ip
+    Country: ui_country
+    Date: ui_capture_time
+    MachineID: ui_machine_guid
+    GUID: ui_smbios_uuid
+    HWID: ui_hwid
+    Path: ui_payload_path
+    MD5: ui_payload_md5
+    Work Dir: ui_work_dir
+    Windows: ui_os
+    Computer Name: ui_computer
+    User Name: ui_user_name
+normalize:
+  - { verb: strip_whitespace, field: ui_build_version }
+  - { verb: strip_whitespace, field: ui_egress_ip }
+  - { verb: strip_whitespace, field: ui_country }
+  - { verb: lowercase,        field: ui_country }
+  - { verb: strip_whitespace, field: ui_machine_guid }
+  - { verb: lowercase,        field: ui_machine_guid }
+  - { verb: strip_whitespace, field: ui_hwid }
+  - { verb: lowercase,        field: ui_hwid }
+  - { verb: strip_whitespace, field: ui_payload_path }
+  - { verb: strip_whitespace, field: ui_payload_md5 }
+  - { verb: lowercase,        field: ui_payload_md5 }
+  - { verb: strip_whitespace, field: ui_work_dir }
+  - { verb: strip_whitespace, field: ui_os }
+  - { verb: strip_whitespace, field: ui_computer }
+  - { verb: strip_whitespace, field: ui_user_name }
+  - { verb: strip_whitespace, field: ui_smbios_uuid }
+ttps:
+  - T1082
+  - T1012
