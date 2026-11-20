@@ -62,6 +62,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"eyenet.io/stealer/gotractor/engine"
+	"eyenet.io/stealer/gotractor/sink"
 )
 
 // Daemon owns the live rule set + metrics + command loop.
@@ -87,6 +88,11 @@ type Daemon struct {
 	records   atomic.Uint64
 
 	metrics *metrics
+
+	// v1.4.0: optional direct-to-ClickHouse ingestion. nil = legacy
+	// stdout-record mode. Set by OpenSink before Serve so cmdRun can
+	// branch cheaply on sink.Enabled().
+	sink *sink.CH
 }
 
 // SetBuildInfo records the binary's identity on the daemon. Called once
@@ -95,6 +101,32 @@ func (d *Daemon) SetBuildInfo(version, commit, built string) {
 	d.buildVersion = version
 	d.buildCommit = commit
 	d.buildTime = built
+}
+
+// OpenSink dials the CH DSN and attaches the sink. Empty DSN is a
+// no-op: the daemon stays in legacy stdout-record mode so dev workflows
+// keep working. Call once from main before Serve; a non-nil error means
+// the DSN was set but Dial/Ping failed, which main treats as fatal.
+func (d *Daemon) OpenSink(ctx context.Context, dsn string) error {
+	s, err := sink.Open(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	d.sink = s
+	if s != nil && s.Enabled() {
+		log.Printf("gotractor daemon ch-sink enabled")
+	} else {
+		log.Printf("gotractor daemon ch-sink disabled (legacy stdout-record mode)")
+	}
+	return nil
+}
+
+// CloseSink releases the CH connection pool. Safe on a nil sink.
+func (d *Daemon) CloseSink() error {
+	if d.sink == nil {
+		return nil
+	}
+	return d.sink.Close()
 }
 
 type catalogSnapshot struct {
@@ -295,6 +327,12 @@ type commandEnv struct {
 	ReqID       string `json:"req_id"`
 	Input       string `json:"input,omitempty"`
 	SourceLabel string `json:"source_label,omitempty"`
+	// v1.4.0: with --ch-dsn set, the daemon labels every inserted row
+	// with these columns. Python used to attach them when batching
+	// Python-side; now gotractor writes them directly so they must
+	// arrive on the run command. Both empty when the sink is disabled
+	// (stdout-record mode) -- Python still owns labeling on that path.
+	ArchiveSha256 string `json:"archive_sha256,omitempty"`
 }
 
 func (d *Daemon) dispatch(ctx context.Context, line string, w *lockedWriter) (commandEnv, error) {
@@ -382,6 +420,38 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 		"files":  len(folder.Files),
 	})
 
+	// v1.4.0: when the CH sink is enabled, records flow DIRECTLY into
+	// ClickHouse via a per-archive prepared batch. The stdout path then
+	// carries only metadata (verdict / parse_error / truncated / run_done),
+	// which is at most a few dozen lines per archive. Python's pipeline
+	// no longer buffers the record stream and can stay under a few hundred
+	// MB of RSS regardless of archive size.
+	//
+	// Streaming note: batch.Append buffers rows in the Go-side CH client.
+	// On a 4M-cookie archive the buffer would hit ~800 MB if we only
+	// Send() at end-of-run. batch.Flush() ships the buffered block to CH
+	// natively and resets the buffer while keeping the batch usable;
+	// we call it every _flushEvery records so the Go heap stays bounded
+	// (~2 MB per 10k records * ~200 B/row). One Send() finalises the
+	// INSERT at end-of-run.
+	sinkOn := d.sink != nil && d.sink.Enabled()
+	var batch *sink.ArchiveBatch
+	appendedSinceFlush := 0
+	const flushEvery = 10_000
+	if sinkOn {
+		b, err := d.sink.BeginArchive(context.Background())
+		if err != nil {
+			w.emit(map[string]any{
+				"kind":      "error",
+				"req_id":    cmd.ReqID,
+				"error":     fmt.Sprintf("begin ch batch: %v", err),
+				"kind_code": "ch_begin",
+			})
+			return err
+		}
+		batch = b
+	}
+
 	records := 0
 	rulesFired := map[string]int{}
 	seen := map[string]bool{}
@@ -419,14 +489,61 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 			continue
 		}
 		for _, rec := range bulk.Records {
-			w.emit(map[string]any{
-				"kind":      "record",
-				"req_id":    cmd.ReqID,
-				"rule_id":   r.ID,
-				"family":    r.Family,
-				"file_path": ev.FilePath,
-				"fields":    rec,
-			})
+			if sinkOn {
+				// Normalise the fields map once to the CH column type.
+				fm := make(map[string]string, len(rec))
+				for k, v := range rec {
+					fm[k] = anyToString(v)
+				}
+				if err := batch.Append(
+					cmd.ArchiveSha256,
+					cmd.SourceLabel,
+					extractVictimFolder(ev.FilePath),
+					ev.FilePath,
+					r.ID,
+					r.Family,
+					fm,
+				); err != nil {
+					// Abort the batch, surface the error, return. Matches
+					// prior semantics (mid-archive Python crash abandoned
+					// the in-flight list).
+					_ = batch.Abort()
+					w.emit(map[string]any{
+						"kind":      "error",
+						"req_id":    cmd.ReqID,
+						"rule_id":   r.ID,
+						"file_path": ev.FilePath,
+						"error":     fmt.Sprintf("ch batch append: %v", err),
+						"kind_code": "ch_append",
+					})
+					return err
+				}
+				appendedSinceFlush++
+				if appendedSinceFlush >= flushEvery {
+					if err := batch.Flush(); err != nil {
+						_ = batch.Abort()
+						w.emit(map[string]any{
+							"kind":      "error",
+							"req_id":    cmd.ReqID,
+							"rule_id":   r.ID,
+							"file_path": ev.FilePath,
+							"error":     fmt.Sprintf("ch batch flush: %v", err),
+							"kind_code": "ch_flush",
+						})
+						return err
+					}
+					appendedSinceFlush = 0
+				}
+			} else {
+				w.emit(map[string]any{
+					"kind":      "record",
+					"req_id":    cmd.ReqID,
+					"rule_id":   r.ID,
+					"family":    r.Family,
+					"file_path": ev.FilePath,
+					"fields":    rec,
+				})
+			}
 			records++
 			rulesFired[r.ID]++
 			d.metrics.recordsEmitted.WithLabelValues(r.ID, r.Family).Inc()
@@ -442,6 +559,18 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 				"emitted":    len(bulk.Records),
 				"total_seen": bulk.Total,
 			})
+		}
+	}
+
+	if sinkOn {
+		if err := batch.Send(); err != nil {
+			w.emit(map[string]any{
+				"kind":      "error",
+				"req_id":    cmd.ReqID,
+				"error":     fmt.Sprintf("ch batch send: %v", err),
+				"kind_code": "ch_send",
+			})
+			return err
 		}
 	}
 
@@ -702,4 +831,52 @@ func readFolder(path string) (engine.VictimFolder, error) {
 		return engine.VictimFolder{}, err
 	}
 	return engine.VictimFolder{RootName: filepath.Base(root), Files: files}, nil
+}
+
+// extractVictimFolder returns the per-victim path segment from a Khazan-
+// style archive path. Mirrors Python's _victim_folder_from_path in
+// eyenet/stealer/pipeline.py (segment [1] in 0-indexed split, i.e.
+// the segment AFTER the archive wrapper). Empty when the file sits at
+// archive root (victim_profiles MV filters those out).
+func extractVictimFolder(filePath string) string {
+	// Split on '/', take segments[1]. A file at wrapper root ("foo.txt")
+	// has only one segment -> empty victim. A victim file
+	// ("TG @Khazan.../victim-id/Browsers/cookies.txt") has segments[1]
+	// as the victim id.
+	parts := strings.SplitN(filePath, "/", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[1]
+}
+
+// anyToString narrows the Go `any` values the engine returns into
+// string values for the CH Map(String, String) column. The engine's
+// Record maps are fed by rule regex captures (strings), post-normalise
+// helpers (mostly strings), and the occasional derived int / bool from
+// derive_url_parts friends. Rather than teach CH about a dynamic Map
+// type, we flatten everything to text at the boundary so the schema
+// stays simple.
+func anyToString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case nil:
+		return ""
+	case int:
+		return strconv.Itoa(x)
+	case int32:
+		return strconv.FormatInt(int64(x), 10)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", x)
+	}
 }

@@ -171,12 +171,20 @@ class GotractorDaemon:
         input_path: Path | str,
         *,
         source_label: str = "",
+        archive_sha256: str = "",
     ) -> tuple[Iterator[dict[str, Any]], Queue[RunDone]]:
         """Dispatch a 'run' command. Returns an iterator that yields each
         ``record`` line's ``fields`` dict as gotractor emits it, plus a
         one-shot queue that eventually gets the terminal ``RunDone``.
         Caller is responsible for consuming the iterator to completion
         (otherwise the reader thread will block on a full queue).
+
+        v1.4.0: if the daemon's own ``--ch-dsn`` is set, gotractor inserts
+        records directly into ClickHouse and the iterator yields only
+        verdict / parse_error / truncated / run_done metadata. In that
+        mode we pass ``archive_sha256`` through to the daemon so it can
+        label CH rows without Python round-tripping them. In legacy mode
+        (daemon has no DSN) ``archive_sha256`` is harmless extra JSON.
         """
         if self._proc is None:
             raise RuntimeError("GotractorDaemon.start() first")
@@ -193,6 +201,7 @@ class GotractorDaemon:
                         "req_id": rid,
                         "input": str(input_path),
                         "source_label": source_label,
+                        "archive_sha256": archive_sha256,
                     }
                 )
                 + "\n"

@@ -372,6 +372,12 @@ services:
       # headroom for unar/7zz + the Python service itself on small prod boxes.
       # Override in .env for larger hosts: EYENET_THREADS=all or an integer.
       EYENET_THREADS: ${EYENET_THREADS:-half}
+      # v1.4.0 direct-to-ClickHouse ingestion. When set, gotractor inserts
+      # records straight into stealer.extracted_records via clickhouse-go,
+      # Python never buffers the record stream. Points at the internal CH
+      # service on 9000 (native TCP). Empty disables the direct path and
+      # reverts to v1.3.x behaviour (Python batches via sink.insert_rows).
+      EYENET_GOTRACTOR_CH_DSN: ${EYENET_GOTRACTOR_CH_DSN:-clickhouse://eyenet:${EYENET_CLICKHOUSE_PASSWORD}@clickhouse:9000/stealer}
     volumes:
       - eyenet-data:/var/lib/eyenet  # read captured blobs + scratch extraction space
     depends_on:
