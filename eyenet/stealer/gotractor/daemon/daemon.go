@@ -385,23 +385,151 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 		return fmt.Errorf("'run' needs an 'input' path")
 	}
 	start := time.Now()
-	folder, err := readFolder(cmd.Input)
+
+	// v1.4.1: streaming archive load. listArchive enumerates relative
+	// paths and hands back a lazy loader. Zero file content is in heap
+	// until the engine asks for a specific path. The old readFolder's
+	// pre-load of ALL file contents (which peaked at 4-8 GB on Khazan
+	// archives on the long-lived daemon and never freed OS pages between
+	// archives) is gone.
+	rootName, paths, loader, err := listArchive(cmd.Input)
 	if err != nil {
 		return err
 	}
 	snap := d.catalog.Load()
 	rules := snap.Rules
-	ruleByID := map[string]engine.Rule{}
-	for _, r := range rules {
-		ruleByID[r.ID] = r
+
+	// v1.4.0: direct-to-ClickHouse ingestion. With the sink enabled,
+	// records flow into CH via a prepared batch (Flush every 10k rows);
+	// stdout carries only metadata. Without the sink, we emit record
+	// JSON lines on stdout as legacy clients expect.
+	sinkOn := d.sink != nil && d.sink.Enabled()
+	var batch *sink.ArchiveBatch
+	appendedSinceFlush := 0
+	const flushEvery = 10_000
+	if sinkOn {
+		b, berr := d.sink.BeginArchive(context.Background())
+		if berr != nil {
+			w.emit(map[string]any{
+				"kind":      "error",
+				"req_id":    cmd.ReqID,
+				"error":     fmt.Sprintf("begin ch batch: %v", berr),
+				"kind_code": "ch_begin",
+			})
+			return berr
+		}
+		batch = b
 	}
-	result, runPanic := safeRunRules(rules, folder)
+
+	records := 0
+	rulesFired := map[string]int{}
+
+	// verdictEmit fires between the L1 container pass and the L3 content
+	// stream. Downstream consumers (Python pipeline, operators reading
+	// stdout) see the family tag before any records flow.
+	verdictEmit := func(family any) {
+		w.emit(map[string]any{
+			"kind":   "verdict",
+			"req_id": cmd.ReqID,
+			"family": family,
+			"root":   rootName,
+			"files":  len(paths),
+		})
+	}
+
+	// emit runs per (rule, file) hit from StreamRunRules. Routes records
+	// to the CH sink or stdout depending on sinkOn, flushes the batch
+	// every flushEvery records so the Go side never holds a Khazan
+	// archive's worth of CH buffer.
+	emit := func(h engine.Hit) error {
+		if h.PanicMsg != "" {
+			w.emit(map[string]any{
+				"kind":      "parse_error",
+				"req_id":    cmd.ReqID,
+				"rule_id":   h.Rule.ID,
+				"file_path": h.FilePath,
+				"error":     h.PanicMsg,
+				"kind_code": "panic",
+			})
+			d.metrics.recordsRejected.WithLabelValues(h.Rule.ID).Inc()
+			return nil
+		}
+		for _, rec := range h.Records {
+			if sinkOn {
+				fm := make(map[string]string, len(rec))
+				for k, v := range rec {
+					fm[k] = anyToString(v)
+				}
+				if aerr := batch.Append(
+					cmd.ArchiveSha256,
+					cmd.SourceLabel,
+					extractVictimFolder(h.FilePath),
+					h.FilePath,
+					h.Rule.ID,
+					h.Rule.Family,
+					fm,
+				); aerr != nil {
+					_ = batch.Abort()
+					w.emit(map[string]any{
+						"kind":      "error",
+						"req_id":    cmd.ReqID,
+						"rule_id":   h.Rule.ID,
+						"file_path": h.FilePath,
+						"error":     fmt.Sprintf("ch batch append: %v", aerr),
+						"kind_code": "ch_append",
+					})
+					return aerr
+				}
+				appendedSinceFlush++
+				if appendedSinceFlush >= flushEvery {
+					if ferr := batch.Flush(); ferr != nil {
+						_ = batch.Abort()
+						w.emit(map[string]any{
+							"kind":      "error",
+							"req_id":    cmd.ReqID,
+							"rule_id":   h.Rule.ID,
+							"file_path": h.FilePath,
+							"error":     fmt.Sprintf("ch batch flush: %v", ferr),
+							"kind_code": "ch_flush",
+						})
+						return ferr
+					}
+					appendedSinceFlush = 0
+				}
+			} else {
+				w.emit(map[string]any{
+					"kind":      "record",
+					"req_id":    cmd.ReqID,
+					"rule_id":   h.Rule.ID,
+					"family":    h.Rule.Family,
+					"file_path": h.FilePath,
+					"fields":    rec,
+				})
+			}
+			records++
+			rulesFired[h.Rule.ID]++
+			d.metrics.recordsEmitted.WithLabelValues(h.Rule.ID, h.Rule.Family).Inc()
+		}
+		if h.Truncated {
+			rejected := h.TotalSeen - len(h.Records)
+			d.metrics.recordsRejected.WithLabelValues(h.Rule.ID).Add(float64(rejected))
+			w.emit(map[string]any{
+				"kind":       "truncated",
+				"req_id":     cmd.ReqID,
+				"rule_id":    h.Rule.ID,
+				"file_path":  h.FilePath,
+				"emitted":    len(h.Records),
+				"total_seen": h.TotalSeen,
+			})
+		}
+		return nil
+	}
+
+	_, _, streamErr, runPanic := safeStreamRunRules(rules, paths, loader, d.bulkLimit, verdictEmit, emit)
 	if runPanic != "" {
-		// RunRules took down the whole folder evaluation. We cannot
-		// attribute this to a single file (RunRules does not stream),
-		// so emit one archive-wide parse_error row keyed on an empty
-		// file_path. The Python side writes this onto every file in
-		// the archive that had no better attribution.
+		// Outer-level panic (container-rule eval, glob compile, loader).
+		// Mirrors pre-streaming safeRunRules: one archive-wide
+		// parse_error with empty file_path.
 		w.emit(map[string]any{
 			"kind":      "parse_error",
 			"req_id":    cmd.ReqID,
@@ -411,166 +539,22 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 			"kind_code": "panic",
 		})
 	}
-
-	w.emit(map[string]any{
-		"kind":   "verdict",
-		"req_id": cmd.ReqID,
-		"family": result.Family,
-		"root":   folder.RootName,
-		"files":  len(folder.Files),
-	})
-
-	// v1.4.0: when the CH sink is enabled, records flow DIRECTLY into
-	// ClickHouse via a per-archive prepared batch. The stdout path then
-	// carries only metadata (verdict / parse_error / truncated / run_done),
-	// which is at most a few dozen lines per archive. Python's pipeline
-	// no longer buffers the record stream and can stay under a few hundred
-	// MB of RSS regardless of archive size.
-	//
-	// Streaming note: batch.Append buffers rows in the Go-side CH client.
-	// On a 4M-cookie archive the buffer would hit ~800 MB if we only
-	// Send() at end-of-run. batch.Flush() ships the buffered block to CH
-	// natively and resets the buffer while keeping the batch usable;
-	// we call it every _flushEvery records so the Go heap stays bounded
-	// (~2 MB per 10k records * ~200 B/row). One Send() finalises the
-	// INSERT at end-of-run.
-	sinkOn := d.sink != nil && d.sink.Enabled()
-	var batch *sink.ArchiveBatch
-	appendedSinceFlush := 0
-	const flushEvery = 10_000
-	if sinkOn {
-		b, err := d.sink.BeginArchive(context.Background())
-		if err != nil {
-			w.emit(map[string]any{
-				"kind":      "error",
-				"req_id":    cmd.ReqID,
-				"error":     fmt.Sprintf("begin ch batch: %v", err),
-				"kind_code": "ch_begin",
-			})
-			return err
-		}
-		batch = b
-	}
-
-	records := 0
-	rulesFired := map[string]int{}
-	seen := map[string]bool{}
-	for _, ev := range result.Evaluations {
-		if !ev.Matched || ev.Layer != "content" {
-			continue
-		}
-		key := ev.RuleID + "::" + ev.FilePath
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		r, ok := ruleByID[ev.RuleID]
-		if !ok {
-			continue
-		}
-		var file engine.ContentInput
-		for _, f := range folder.Files {
-			if f.Path == ev.FilePath {
-				file = f
-				break
-			}
-		}
-		bulk, bulkPanic := safeBulkParse(r, file, d.bulkLimit)
-		if bulkPanic != "" {
-			w.emit(map[string]any{
-				"kind":      "parse_error",
-				"req_id":    cmd.ReqID,
-				"rule_id":   r.ID,
-				"file_path": ev.FilePath,
-				"error":     bulkPanic,
-				"kind_code": "panic",
-			})
-			d.metrics.recordsRejected.WithLabelValues(r.ID).Inc()
-			continue
-		}
-		for _, rec := range bulk.Records {
-			if sinkOn {
-				// Normalise the fields map once to the CH column type.
-				fm := make(map[string]string, len(rec))
-				for k, v := range rec {
-					fm[k] = anyToString(v)
-				}
-				if err := batch.Append(
-					cmd.ArchiveSha256,
-					cmd.SourceLabel,
-					extractVictimFolder(ev.FilePath),
-					ev.FilePath,
-					r.ID,
-					r.Family,
-					fm,
-				); err != nil {
-					// Abort the batch, surface the error, return. Matches
-					// prior semantics (mid-archive Python crash abandoned
-					// the in-flight list).
-					_ = batch.Abort()
-					w.emit(map[string]any{
-						"kind":      "error",
-						"req_id":    cmd.ReqID,
-						"rule_id":   r.ID,
-						"file_path": ev.FilePath,
-						"error":     fmt.Sprintf("ch batch append: %v", err),
-						"kind_code": "ch_append",
-					})
-					return err
-				}
-				appendedSinceFlush++
-				if appendedSinceFlush >= flushEvery {
-					if err := batch.Flush(); err != nil {
-						_ = batch.Abort()
-						w.emit(map[string]any{
-							"kind":      "error",
-							"req_id":    cmd.ReqID,
-							"rule_id":   r.ID,
-							"file_path": ev.FilePath,
-							"error":     fmt.Sprintf("ch batch flush: %v", err),
-							"kind_code": "ch_flush",
-						})
-						return err
-					}
-					appendedSinceFlush = 0
-				}
-			} else {
-				w.emit(map[string]any{
-					"kind":      "record",
-					"req_id":    cmd.ReqID,
-					"rule_id":   r.ID,
-					"family":    r.Family,
-					"file_path": ev.FilePath,
-					"fields":    rec,
-				})
-			}
-			records++
-			rulesFired[r.ID]++
-			d.metrics.recordsEmitted.WithLabelValues(r.ID, r.Family).Inc()
-		}
-		if bulk.Truncated {
-			rejected := bulk.Total - len(bulk.Records)
-			d.metrics.recordsRejected.WithLabelValues(r.ID).Add(float64(rejected))
-			w.emit(map[string]any{
-				"kind":       "truncated",
-				"req_id":     cmd.ReqID,
-				"rule_id":    r.ID,
-				"file_path":  ev.FilePath,
-				"emitted":    len(bulk.Records),
-				"total_seen": bulk.Total,
-			})
-		}
+	if streamErr != nil {
+		// Emit sent us an error (CH batch append / flush failure). The
+		// batch is already aborted inside emit. Bubble up so the caller
+		// can decide retry policy.
+		return streamErr
 	}
 
 	if sinkOn {
-		if err := batch.Send(); err != nil {
+		if serr := batch.Send(); serr != nil {
 			w.emit(map[string]any{
 				"kind":      "error",
 				"req_id":    cmd.ReqID,
-				"error":     fmt.Sprintf("ch batch send: %v", err),
+				"error":     fmt.Sprintf("ch batch send: %v", serr),
 				"kind_code": "ch_send",
 			})
-			return err
+			return serr
 		}
 	}
 
@@ -879,4 +863,87 @@ func anyToString(v any) string {
 	default:
 		return fmt.Sprintf("%v", x)
 	}
+}
+
+// listArchive is the streaming counterpart to readFolder. On a directory
+// input it walks the tree and returns ONLY the relative path list plus
+// a lazy loader closure that reads one file on demand. Files no content
+// rule globs match are never read; binary blobs the catalog does not
+// care about cost zero I/O and zero heap. On a single-file input it
+// returns a single path and a loader that reads it on demand.
+//
+// Peak heap under this pattern: one file's content at a time, regardless
+// of archive size. The 4 GB-per-Khazan-archive readFolder peak is gone.
+func listArchive(path string) (rootName string, paths []string, loader engine.PathLoader, err error) {
+	info, serr := os.Stat(path)
+	if serr != nil {
+		return "", nil, nil, serr
+	}
+	if !info.IsDir() {
+		base := filepath.Base(path)
+		loader = func(rel string) (string, error) {
+			if rel != base {
+				return "", fmt.Errorf("single-file input only exposes %q", base)
+			}
+			b, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return "", rerr
+			}
+			return string(b), nil
+		}
+		return base, []string{base}, loader, nil
+	}
+	root := filepath.Clean(path)
+	paths = make([]string, 0, 128)
+	werr := filepath.WalkDir(root, func(p string, d fs.DirEntry, iterErr error) error {
+		if iterErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		rel = filepath.ToSlash(rel)
+		paths = append(paths, rel)
+		return nil
+	})
+	if werr != nil {
+		return "", nil, nil, werr
+	}
+	loader = func(rel string) (string, error) {
+		b, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if rerr != nil {
+			return "", rerr
+		}
+		return string(b), nil
+	}
+	return filepath.Base(root), paths, loader, nil
+}
+
+// safeStreamRunRules wraps engine.StreamRunRules in a defer/recover so a
+// non-BulkParse panic (container-rule evaluation, glob compile, loader
+// crash) takes down just that archive's run, not the daemon. Per-file
+// BulkParse panics are already caught inside the engine via
+// safeBulkParseStream; they surface as Hit.PanicMsg and the stream
+// keeps going. This outer wrapper is the backstop for the handful of
+// paths safeBulkParseStream does not cover.
+//
+// On panic: panicMsg is non-empty, caller emits one archive-wide
+// parse_error (file_path="") to mirror the pre-streaming safeRunRules
+// semantics.
+func safeStreamRunRules(
+	rules []engine.Rule,
+	paths []string,
+	loader engine.PathLoader,
+	bulkLimit int,
+	verdict func(family any),
+	emit func(engine.Hit) error,
+) (family any, rulesFired map[string]int, runErr error, panicMsg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicMsg = fmt.Sprintf("%v", r)
+		}
+	}()
+	family, rulesFired, runErr = engine.StreamRunRules(rules, paths, loader, bulkLimit, verdict, emit)
+	return family, rulesFired, runErr, ""
 }
