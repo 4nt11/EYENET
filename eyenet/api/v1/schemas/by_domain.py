@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Shared DTOs for the Domain View surface (/v1/stealer/by-domain/{domain}/*).
+
+Shipped BEFORE the handler code so backend and frontend can work in parallel
+against a frozen contract. The handlers import these, the FE consumes them
+via the OpenAPI schema. Changes here are contract changes, not refactors.
+
+All endpoints require the ``read:stealer`` scope.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from ._base import ApiSchema
+
+
+class DomainSummary(ApiSchema):
+    """Hero card. All counts are de-duplicated at the (archive, victim_folder,
+    rule_id, file_path, fields-hash) identity tuple. ``raw_domain`` is the
+    operator's input; ``canonical_domain`` is the registrable form we actually
+    queried (e.g. ``www.test.com`` -> ``test.com``). Dates are ISO 8601 UTC.
+    """
+
+    raw_domain: str
+    canonical_domain: str
+    victim_count: int
+    archive_count: int
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
+    credential_count: int
+    live_cookie_count: int  # cookies with expires > now()
+    all_cookie_count: int
+    autofill_count: int
+    history_count: int
+    localstorage_jwt_count: int
+    indicator_hit_count: int
+    reindex_in_flight: bool
+
+
+class DomainCredRow(ApiSchema):
+    host: str
+    url: str
+    login: str
+    password: str
+    scheme: str
+    archive_sha256: str
+    victim_folder: str
+    ingested_at: datetime
+
+
+class DomainCredsResponse(ApiSchema):
+    items: list[DomainCredRow]
+    total: int
+    pages: int
+
+
+class DomainVictimRow(ApiSchema):
+    archive_sha256: str
+    victim_folder: str
+    country: str
+    build_version: str
+    credential_count: int
+    cookie_count: int
+    first_seen_at: datetime | None
+
+
+class DomainVictimsResponse(ApiSchema):
+    items: list[DomainVictimRow]
+    total: int
+    pages: int
+
+
+class DomainSubdomainRow(ApiSchema):
+    """One subdomain under the registrable domain, with its own slice counts."""
+
+    host: str
+    credential_count: int
+    cookie_count: int
+
+
+class DomainSubdomainsResponse(ApiSchema):
+    items: list[DomainSubdomainRow]
+    total: int  # unpaginated count of distinct subdomains
+
+
+class DomainCookieRow(ApiSchema):
+    host: str
+    name: str
+    value: str
+    expires_at: datetime | None  # null for session cookies
+    http_only: bool
+    secure: bool
+    archive_sha256: str
+    victim_folder: str
+
+
+class DomainCookiesResponse(ApiSchema):
+    items: list[DomainCookieRow]
+    total: int
+    pages: int
+
+
+class DomainAutofillRow(ApiSchema):
+    host: str
+    field_name: str
+    value: str
+    archive_sha256: str
+    victim_folder: str
+
+
+class DomainAutofillsResponse(ApiSchema):
+    items: list[DomainAutofillRow]
+    total: int
+    pages: int
+
+
+class DomainHistoryRow(ApiSchema):
+    host: str
+    url: str
+    title: str
+    visit_count: int
+    last_visit_at: datetime | None
+    archive_sha256: str
+    victim_folder: str
+
+
+class DomainHistoryResponse(ApiSchema):
+    items: list[DomainHistoryRow]
+    total: int
+    pages: int
+
+
+class DomainIndicatorRow(ApiSchema):
+    """One indicator rule that fired against this domain.
+
+    Rule catalog is operator-authored so ``severity`` is the string the catalog
+    carries (e.g. ``info``, ``low``, ``medium``, ``high``, ``critical``);
+    callers should treat unknown values as ``info``.
+    """
+
+    rule_id: str
+    rule_name: str
+    severity: str
+    hit_count: int
+    first_hit_at: datetime | None
+    last_hit_at: datetime | None
+
+
+class DomainIndicatorsResponse(ApiSchema):
+    items: list[DomainIndicatorRow]
+    total: int  # unpaginated count; usually small (operators run O(10s) of rules)
