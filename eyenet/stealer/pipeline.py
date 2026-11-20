@@ -17,8 +17,6 @@ import os
 import shutil
 import subprocess  # nosec B404: fixed tools (7zz/unrar/unar), list argv, never a shell
 import tempfile
-import threading
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,12 +33,10 @@ if TYPE_CHECKING:
 
 _log = get_logger()
 
-# Rows per ClickHouse INSERT. Bounds memory + keeps ReplacingMergeTree merges sane.
+# Rows per ClickHouse INSERT. Used by the legacy sink.insert_rows path
+# (backfill CLIs, reclassify dumps). The main pipeline no longer batches
+# through Python since v1.4.0: gotractor writes to CH directly.
 _INSERT_BATCH = 50_000
-# v1.3.3: max pending batches in the ThreadPoolExecutor's queue. See
-# _gotractor_insert_daemon for the backpressure reasoning. 16 batches *
-# 50k rows * ~200 bytes each = ~160 MB in-flight ceiling.
-_PENDING_BATCH_CAP = 16
 # Three-tier dispatch: RAR goes to unrar (RAR5-native, ~25x faster than unar on
 # prod-sized 2GB dumps: measured 10.8s vs 272s), non-RAR to 7zz (multithreaded
 # AES + SIMD CRC for 7z/zip/tar/gz/xz), unar is the last-resort fallback for
@@ -283,93 +279,62 @@ def _gotractor_insert_daemon(
     """
     sink.ensure_schema()
     archive_sha = blob_path.stem  # <sha256>.bin
-    stream, done_q = daemon.run(dest, source_label=source_label)
-    total = 0
+    stream, done_q = daemon.run(
+        dest,
+        source_label=source_label,
+        archive_sha256=archive_sha,
+    )
     families: list[str] = []
     parse_errors: dict[str, tuple[str, str]] = {}
-    batch: list[list[object]] = []
-    # v1.3.2: CH inserts run on a background thread so the stream iteration
-    # never blocks the gotractor daemon's writer. Before: inline insert_rows()
-    # held the stream thread while CH ran a sync HTTP INSERT. The daemon's
-    # 4096-slot emit channel then filled, cmdRun blocked on its own emit,
-    # and run_done never arrived. Observed on prod: gotractor_archives_total
-    # stayed at 0 despite 2.7M cookie records flowing - high-priority rules
-    # (passwords_block_title at prio 80) came after the deadlock point and
-    # never ran their BulkParse.
+    # v1.4.0: gotractor with EYENET_GOTRACTOR_CH_DSN writes records
+    # DIRECTLY to ClickHouse. The stream iterator yields only
+    # verdict / parse_error / truncated metadata here; Python never
+    # sees the record payload, never buffers it, never inserts it.
+    # Dropped: _INSERT_BATCH batching, _PENDING_BATCH_CAP semaphore,
+    # the ThreadPoolExecutor, sink.insert_rows calls.
     #
-    # v1.3.3: bounded semaphore keeps the pending queue capped. Without it
-    # a slow CH (uniqExact backfills ongoing, part merges running) lets
-    # Python's future queue grow unbounded while the daemon emits at full
-    # rate, eating 2-4 GB of pending-batch RAM and OOMing the service on a
-    # tight-memory box. The 16-slot cap means at most 16 * 50k rows * ~200
-    # bytes each = ~160 MB in-flight. When full, pool.submit's wrapper
-    # blocks on sem.acquire; the stream iteration pauses; the gotractor
-    # daemon backpressures through its 4096-slot channel (room to spare);
-    # CH catches up; semaphore releases; iteration resumes. No deadlock
-    # (iteration always resumes once CH flushes a batch), no OOM.
-    insert_futures: list[Future[int]] = []
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ch-insert")
-    pending_sem = threading.BoundedSemaphore(value=_PENDING_BATCH_CAP)
-
-    def _submit(batch_to_insert: list[list[object]]) -> Future[int]:
-        pending_sem.acquire()
-        fut = pool.submit(sink.insert_rows, batch_to_insert)
-        fut.add_done_callback(lambda _f: pending_sem.release())
-        return fut
-
-    try:
-        for msg in stream:
-            if msg["_kind"] == "verdict":
-                fam = msg.get("family")
-                if fam:
-                    families.append(fam)
-                continue
-            if msg["_kind"] == "parse_error":
-                parse_errors[msg.get("file_path", "")] = (
-                    msg.get("kind_code", "panic"),
-                    msg.get("error", ""),
-                )
-                _log.warning(
-                    "stealer.gotractor_parse_error",
-                    archive=archive_sha,
-                    rule_id=msg.get("rule_id") or "",
-                    file_path=msg.get("file_path") or "<archive-wide>",
-                    kind_code=msg.get("kind_code") or "panic",
-                    error=msg.get("error") or "",
-                )
-                continue
-            # Record branch: derive per-victim folder from file_path segment [1]
-            # (second path segment under the archive root, matching the Khazan
-            # wrapper structure <channel_wrapper>/<victim>/<content>). Empty
-            # string if the file is at the archive root; victim_profiles MV
-            # filters those out. See eyenet/stealer/clickhouse.py
-            # _VICTIM_PROFILES for the matching derivation at the MV level.
-            file_path = msg.get("file_path", "")
-            victim_folder = _victim_folder_from_path(file_path)
-            batch.append(
-                [
-                    archive_sha,
-                    source_label,
-                    victim_folder,
-                    file_path,
-                    msg.get("rule_id", ""),
-                    msg.get("family", ""),
-                    {k: str(v) for k, v in (msg.get("fields") or {}).items()},
-                ]
+    # When the daemon runs WITHOUT a DSN (dev workflows, backfill CLIs
+    # that spin up a fresh daemon per invocation), it falls back to the
+    # legacy stdout-record stream. We still drop those records on the
+    # floor here -- the recorded-to-CH operator contract is "daemon
+    # with DSN == prod path, daemon without DSN == dev/test path". The
+    # dropped-record case shows up as an unexpected_record warning so
+    # it never slips past silently.
+    for msg in stream:
+        kind = msg["_kind"]
+        if kind == "verdict":
+            fam = msg.get("family")
+            if fam:
+                families.append(fam)
+            continue
+        if kind == "parse_error":
+            parse_errors[msg.get("file_path", "")] = (
+                msg.get("kind_code", "panic"),
+                msg.get("error", ""),
             )
-            if len(batch) >= _INSERT_BATCH:
-                insert_futures.append(_submit(batch))
-                batch = []
-        if batch:
-            insert_futures.append(_submit(batch))
-        # Drain: every submitted insert must finish before we report a total.
-        # A failed INSERT raises here and bubbles up as the archive's error.
-        for fut in insert_futures:
-            total += fut.result()
-    finally:
-        pool.shutdown(wait=True)
+            _log.warning(
+                "stealer.gotractor_parse_error",
+                archive=archive_sha,
+                rule_id=msg.get("rule_id") or "",
+                file_path=msg.get("file_path") or "<archive-wide>",
+                kind_code=msg.get("kind_code") or "panic",
+                error=msg.get("error") or "",
+            )
+            continue
+        if kind == "record":
+            # Daemon without DSN still emits record lines. Ignore them,
+            # loud so a misconfigured deploy is caught early.
+            _log.warning(
+                "stealer.gotractor_unexpected_record",
+                archive=archive_sha,
+                rule_id=msg.get("rule_id") or "",
+                hint="daemon emitted a record line - set EYENET_GOTRACTOR_CH_DSN",
+            )
+            continue
+        # Other kinds (truncated etc.) already logged by the client.
     try:
-        done = done_q.get(timeout=5.0)
+        done = done_q.get(timeout=10.0)
+        total = done.records
         _log.info(
             "stealer.gotractor_run",
             archive=archive_sha,
@@ -379,7 +344,14 @@ def _gotractor_insert_daemon(
             rules_fired=done.rules_fired,
         )
     except Exception:
-        _log.info("stealer.gotractor_run", archive=archive_sha, records=total, families=families)
+        total = 0
+        _log.info(
+            "stealer.gotractor_run",
+            archive=archive_sha,
+            records=total,
+            families=families,
+            warn="no run_done received before timeout",
+        )
     return total, families, parse_errors
 
 

@@ -61,6 +61,16 @@ func main() {
 	limit := flag.Int("limit", 100000, "bulkParse record cap per file per rule")
 	metricsPort := flag.Int("metrics-port", 0, "daemon: bind Prometheus /metrics on this port (0 disables)")
 	showVersion := flag.Bool("version", false, "print build identity (version, commit, build time) and exit")
+	// v1.4.0: direct-to-ClickHouse ingestion. When set the daemon inserts
+	// every extracted record into CH via clickhouse-go in a per-archive
+	// prepared batch; stdout then carries only metadata (verdict,
+	// parse_error, run_done). Legacy stdout-record mode runs when empty
+	// so dev workflows + records-mode CLI runs keep working unchanged.
+	chDSN := flag.String(
+		"ch-dsn",
+		envOr("EYENET_GOTRACTOR_CH_DSN", ""),
+		"ClickHouse DSN (clickhouse-go URL form). Daemon only. Empty = legacy stdout-record mode.",
+	)
 	flag.Parse()
 
 	if *showVersion {
@@ -90,11 +100,20 @@ func main() {
 			log.Fatalf("daemon boot: %v", err)
 		}
 		d.SetBuildInfo(buildVersion, buildCommit, buildTime)
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cancel()
+		// Open the CH sink if a DSN was provided. Dial failure is fatal
+		// so the operator gets loud feedback instead of silent fallback
+		// to a mode that would then OOM the box (the exact bug the sink
+		// is meant to kill). If the DSN is empty, Open returns (nil, nil)
+		// and the daemon stays in legacy stdout-record mode.
+		if err := d.OpenSink(ctx, *chDSN); err != nil {
+			log.Fatalf("daemon ch sink: %v", err)
+		}
+		defer d.CloseSink()
 		if *metricsPort > 0 {
 			d.ServeMetrics(*metricsPort)
 		}
-		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer cancel()
 		if err := d.Serve(ctx, os.Stdin, os.Stdout); err != nil {
 			log.Fatalf("daemon serve: %v", err)
 		}
