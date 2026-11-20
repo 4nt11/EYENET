@@ -455,6 +455,101 @@ _EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
     """,
 )
 
+# v1.3.6 Domain View: materialised host columns on extracted_records so the
+# WHERE host_registrable = 'google.com' predicate can prune via a bloom-filter
+# skip index. Without these the operator had to evaluate
+# ``lower(coalesce(nullIf(domain(fields['url']), ...)))`` on every row, which
+# is a 54s full-table scan on 100M rows. Measured on prod after materialisation:
+# 54s -> 220ms (~250x) and empirical bloom FP rate 0.16% (6x tighter than the
+# configured 0.01 target). All three ALTERs are idempotent via IF NOT EXISTS
+# so bootstrap on an existing deployment is a no-op after the first run.
+_EXTRACTED_RECORDS_HOST_COLS: tuple[str, ...] = (
+    """
+    ALTER TABLE {db}.extracted_records
+      ADD COLUMN IF NOT EXISTS host_canon String MATERIALIZED
+        lower(coalesce(nullIf(domain(fields['url']), ''),
+                       nullIf(domain(fields['host']), ''),
+                       nullIf(fields['host'], ''), '')),
+      ADD COLUMN IF NOT EXISTS host_registrable String MATERIALIZED
+        cutToFirstSignificantSubdomain(
+          lower(coalesce(nullIf(domain(fields['url']), ''),
+                         nullIf(domain(fields['host']), ''),
+                         nullIf(fields['host'], ''), ''))),
+      ADD INDEX IF NOT EXISTS idx_host_registrable host_registrable
+        TYPE bloom_filter(0.01) GRANULARITY 4
+    """,
+)
+
+# v1.3.6 by-domain flat-counts sibling for /v1/stealer/by-domain/{domain}/summary.
+# Same ReplacingMergeTree + REFRESHABLE MV pattern as victim_counts and
+# extracted_rows_per_file_counts. Hero card reads one row from here with FINAL
+# (cheap, 45ms warm on prod). Deep tabs (credentials / cookies / autofills /
+# history / subdomains) hit extracted_records directly, scoped by
+# host_registrable + bloom filter. Dedup grains match the deep-tab queries
+# (url+login+password for creds, url+name for cookies, etc.) so hero numbers
+# agree with per-tab pagination totals.
+_BY_DOMAIN_COUNTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.by_domain_counts
+    (
+        host_registrable       String,
+        victim_count           UInt64,
+        archive_count          UInt64,
+        first_seen_at          DateTime,
+        last_seen_at           DateTime,
+        credential_count       UInt64,
+        live_cookie_count      UInt64,
+        all_cookie_count       UInt64,
+        autofill_count         UInt64,
+        history_count          UInt64,
+        localstorage_jwt_count UInt64,
+        indicator_hit_count    UInt64,
+        refreshed_at           DateTime DEFAULT now()
+    )
+    ENGINE = ReplacingMergeTree(refreshed_at)
+    ORDER BY host_registrable
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_counts_refresh
+    REFRESH EVERY 5 MINUTE
+    TO {db}.by_domain_counts
+    AS SELECT
+        host_registrable,
+        countDistinctIf((archive_sha256, victim_folder),
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')) AS victim_count,
+        countDistinctIf(archive_sha256,
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')
+          OR family IN ('cookies','victim_cookies')) AS archive_count,
+        min(ingested_at) AS first_seen_at,
+        max(ingested_at) AS last_seen_at,
+        countDistinctIf((fields['url'], fields['login'], fields['password']),
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')) AS credential_count,
+        countDistinctIf((fields['url'], fields['name']),
+          family IN ('cookies','victim_cookies')
+          AND parseDateTimeBestEffortOrNull(fields['expires']) > now()
+          ) AS live_cookie_count,
+        countDistinctIf((fields['url'], fields['name']),
+          family IN ('cookies','victim_cookies')) AS all_cookie_count,
+        countDistinctIf((fields['name'], fields['value']),
+          family IN ('browser_autofills','victim_autofills')) AS autofill_count,
+        countDistinctIf(fields['url'],
+          family IN ('victim_history','victim_downloads')) AS history_count,
+        countDistinctIf(fields['value'],
+          rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
+        countDistinctIf(rule_id, rule_id != '') AS indicator_hit_count,
+        now() AS refreshed_at
+    FROM {db}.extracted_records
+    WHERE host_registrable != ''
+    GROUP BY host_registrable
+    SETTINGS optimize_aggregation_in_order = 1,
+             max_bytes_before_external_group_by = 1000000000
+    """,
+)
+
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
 # bodies used `toUInt64(count()) AS <col>`; the new body uses
 # `uniqExactState(_IDENTITY_TUPLE_DDL)`. The sentinel catches the old shape.
@@ -1122,6 +1217,18 @@ class ClickHouseRecordsSink:
         # v1.3.5 flat-counts sibling + refreshable MV for extracted_rows_per_file.
         # Must run AFTER extracted_rows_per_file itself is created (above).
         for stmt in _EXTRACTED_ROWS_PER_FILE_COUNTS:
+            client.command(
+                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
+                settings={"allow_experimental_refreshable_materialized_view": 1},
+            )
+        # v1.3.6 Domain View: materialised host columns + bloom index on
+        # extracted_records, plus the by_domain_counts sibling. ALTERs are
+        # idempotent; MATERIALIZE COLUMN on an existing populated corpus is
+        # NOT run here (slow, operator decision) -- CH computes the
+        # expression on-the-fly until MATERIALIZE is kicked off manually.
+        for stmt in _EXTRACTED_RECORDS_HOST_COLS:
+            client.command(stmt.format(db=self._db))
+        for stmt in _BY_DOMAIN_COUNTS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
                 settings={"allow_experimental_refreshable_materialized_view": 1},

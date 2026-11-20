@@ -298,6 +298,7 @@ from eyenet.api.v1.stealer.api_list_stealer_families import router as stealer_fa
 from eyenet.api.v1.stealer.api_list_stealer_rules import router as stealer_rules_list_router
 from eyenet.api.v1.stealer.api_reclassify import router as stealer_reclassify_router
 from eyenet.api.v1.stealer.api_reindex import router as stealer_reindex_router
+from eyenet.api.v1.stealer.api_by_domain import router as stealer_by_domain_router
 from eyenet.api.v1.stealer.api_stealer_search import router as stealer_search_router
 from eyenet.api.v1.stealer.api_stealer_stats import router as stealer_stats_router
 from eyenet.api.v1.stealer.api_update_stealer_family import router as stealer_families_update_router
@@ -525,6 +526,7 @@ v1_router.include_router(stealer_channels_router)  # GET /stealer/channels (read
 v1_router.include_router(groups_mark_category_router)  # POST /groups/{id}/category (admin:stealer)
 v1_router.include_router(stealer_stats_router)  # GET /stealer/stats (read:stealer)
 v1_router.include_router(stealer_search_router)  # GET /stealer/search (read:stealer)
+v1_router.include_router(stealer_by_domain_router)  # /stealer/by-domain/{domain}/* (read:stealer)
 v1_router.include_router(stealer_list_artifacts_router)  # GET /stealer/artifacts
 # Child routes BEFORE the greedy {victim_folder:path} detail route; otherwise
 # the detail matcher swallows '/files' etc as part of the folder path and the
