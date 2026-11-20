@@ -344,9 +344,11 @@ services:
       # takes the whole CH process down. Match the prod.lite stack.
       - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
       # users.d auto-loads every *.xml on boot; eyenet profile override
-      # caps per-query memory and gates the refreshable-MV flag. Must
-      # survive container recreation, not just hot-written in place.
-      - ./clickhouse/users.d:/etc/clickhouse-server/users.d:ro
+      # caps per-query memory and gates the refreshable-MV flag. File
+      # mount (not directory) so the CH entrypoint can still write its
+      # auto-generated default-user.xml next to it; a :ro directory mount
+      # crash-loops the container.
+      - ./clickhouse/users.d/zz-eyenet-mem-cap.xml:/etc/clickhouse-server/users.d/zz-eyenet-mem-cap.xml:ro
     # No published ports: reachable only in-network by the processor (service name).
 
   stealer-processor:
