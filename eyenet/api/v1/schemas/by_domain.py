@@ -138,6 +138,36 @@ class DomainHistoryResponse(ApiSchema):
     pages: int
 
 
+class DomainLocalStorageJwtRow(ApiSchema):
+    """One leaked JWT stored in a victim's browser localStorage for this domain.
+
+    Different pivot axis from credentials: a credential pair behind MFA/SSO is
+    often moderate risk; a live-exp JWT IS the session and skips the MFA
+    challenge entirely. Operators should triage by `is_expired` + `expires_at`.
+    """
+
+    host: str                       # display host (may carry scheme if the stealer did)
+    key: str                        # localStorage key name (e.g. 'access_token')
+    jwt_value: str                  # raw JWT; FE truncates for display
+    jwt_subject: str | None         # decoded 'sub' claim (email/username)
+    jwt_issuer: str | None          # decoded 'iss' claim
+    jwt_audience: str | None        # decoded 'aud' claim
+    jwt_algorithm: str | None       # decoded 'alg' from header
+    expires_at: datetime | None     # decoded 'exp' claim
+    is_expired: bool                # expires_at < now(); null-exp is treated as expired
+    archive_sha256: str
+    victim_folder: str
+
+
+class DomainLocalStorageResponse(ApiSchema):
+    items: list[DomainLocalStorageJwtRow]
+    total: int
+    pages: int
+    live_count: int                 # non-expired JWTs in this page's domain match
+    # ^ answer to "do we have any active sessions here?"; checks the FULL match
+    # set not just this page, so an operator sees "3 live, 97 expired" at a glance.
+
+
 class DomainIndicatorRow(ApiSchema):
     """One indicator rule that fired against this domain.
 

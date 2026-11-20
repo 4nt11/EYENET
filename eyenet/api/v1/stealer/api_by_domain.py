@@ -24,6 +24,8 @@ from eyenet.api.v1.schemas.by_domain import (
     DomainHistoryRow,
     DomainIndicatorRow,
     DomainIndicatorsResponse,
+    DomainLocalStorageJwtRow,
+    DomainLocalStorageResponse,
     DomainSubdomainRow,
     DomainSubdomainsResponse,
     DomainSummary,
@@ -299,6 +301,42 @@ async def by_domain_history(
             for r in rows
         ],
         total=total, pages=_pages(total, limit),
+    )
+
+
+@router.get(
+    "/stealer/by-domain/{domain}/localstorage",
+    operation_id="stealer_by_domain_localstorage",
+    response_model=DomainLocalStorageResponse,
+    status_code=200,
+)
+async def by_domain_localstorage(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
+    domain: _DomainParam,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> DomainLocalStorageResponse:
+    offset = (page - 1) * limit
+    try:
+        rows, total, live_count = await _reader.localstorage_jwts(
+            canonical=canonicalize(domain), limit=limit, offset=offset,
+        )
+    except StealerCorpusUninitializedError:
+        return DomainLocalStorageResponse(items=[], total=0, pages=0, live_count=0)
+    except Exception as exc:
+        _bail(exc)
+    return DomainLocalStorageResponse(
+        items=[
+            DomainLocalStorageJwtRow(
+                host=r.host, key=r.key, jwt_value=r.jwt_value,
+                jwt_subject=r.jwt_subject, jwt_issuer=r.jwt_issuer,
+                jwt_audience=r.jwt_audience, jwt_algorithm=r.jwt_algorithm,
+                expires_at=r.expires_at, is_expired=r.is_expired,
+                archive_sha256=r.archive_sha256, victim_folder=r.victim_folder,
+            )
+            for r in rows
+        ],
+        total=total, pages=_pages(total, limit), live_count=live_count,
     )
 
 

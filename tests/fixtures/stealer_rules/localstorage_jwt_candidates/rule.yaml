@@ -1,16 +1,48 @@
 id: localstorage_jwt_candidates
-version: 1
+version: 2
 layer: content
 family: victim_localstorage
 priority: 90
-path_glob: LocalStorage.txt
+path_glob: "**LocalStorage.txt"
 description: >
-  Parity fixture for localStorage JWT capture. Verifies the
-  DOMAIN/KEY/VALUE three-line record parses to the (domain, key,
-  token) triple, that a non-JWT value is skipped, and that the eyJ
-  prefix anchors the capture.
+  The 'webapps stash bearer tokens in localStorage' tell. Many
+  modern webapps use localStorage in PLACE of cookies to hold
+  OAuth access tokens, Firebase ID tokens, Slack session JWTs,
+  Tawk.to visitor JWTs, Supabase keys, etc. Cookie-replay against
+  these sites does NOT land the session - only the localStorage
+  row does.
+
+  Rule captures only the (domain, key, token) triple when the VALUE
+  is a JWT:
+
+    eyJ<base64url header>.<base64url payload>.<base64url sig>
+
+  The 'eyJ' prefix is the magic: base64url of '{"' which starts
+  every JSON-serialized JWT header. Width/length windows:
+    header   15-200 chars (algorithm + kid)
+    payload  40-900 chars (claims)
+    sig      27-120 chars (hmac / RSA / ECDSA)
+
+  Replay: paste the token into the target site's localStorage
+  under the captured key and the webapp treats you as the victim
+  until the exp claim elapses.
+
+  Sibling of localstorage_block (priority 75). This rule fires at
+  85 so the JWT triple is promoted ahead of the general block
+  capture in run_rules key-collision ordering.
+
+  v2 (2026-11-20): renamed emitted fields from ls_jwt_{domain,key,token}
+  to {host,name,value} so this rule participates in the canonical
+  schema shared by cookies_*, autofills_*, credentials_*. The
+  host_registrable MATERIALIZED column on extracted_records
+  auto-populates from domain(fields['host']) which means the
+  Domain View /localstorage endpoint can scope by host_registrable
+  bloom without per-rule carve-outs. Existing v1 rows stay under
+  the old field names until reindex.
 match:
   type: regex
-  pattern: '(?m)^DOMAIN:\s*(?P<ls_jwt_domain>[^\n]+)\nKEY:\s*(?P<ls_jwt_key>[^\n]+)\nVALUE:\s*(?P<ls_jwt_token>eyJ[A-Za-z0-9_-]{15,200}\.eyJ[A-Za-z0-9_-]{40,900}\.[A-Za-z0-9_-]{27,120})$'
+  pattern: '(?m)^DOMAIN:\s*(?P<host>[^\n]+)\nKEY:\s*(?P<name>[^\n]+)\nVALUE:\s*(?P<value>eyJ[A-Za-z0-9_-]{15,200}\.eyJ[A-Za-z0-9_-]{40,900}\.[A-Za-z0-9_-]{27,120})$'
 extract:
-  fields: [ls_jwt_domain, ls_jwt_key, ls_jwt_token]
+  fields: [host, name, value]
+ttps:
+  - T1528

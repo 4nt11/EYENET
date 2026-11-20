@@ -17,7 +17,7 @@ grain. See v1.3.4.4 release notes.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import tldextract
@@ -27,6 +27,69 @@ from eyenet.stealer.clickhouse import clickhouse_db, get_async_clickhouse_client
 
 class StealerCorpusUninitializedError(Exception):
     """Raised when the stealer CH tables do not exist yet (fresh install)."""
+
+
+def _decode_jwt(token: str) -> tuple[dict[str, object] | None, str | None]:
+    """Decode a JWT's header + payload. Returns (claims, alg) or (None, None).
+
+    Does NOT verify the signature. These tokens come from leaked data; we are
+    reading them for intelligence, not authenticating a request. A malformed
+    token returns (None, None) silently so operator triage keeps flowing.
+    """
+    import base64  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    jwt_part_count = 3  # header.payload.signature
+    try:
+        parts = token.strip().split(".")
+        if len(parts) != jwt_part_count:
+            return None, None
+        header_b64, payload_b64, _sig = parts
+        # base64url requires padding for std lib decoder.
+        pad = "=" * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + pad)
+        claims = json.loads(payload_bytes)
+        if not isinstance(claims, dict):
+            return None, None
+        hdr_pad = "=" * (-len(header_b64) % 4)
+        hdr_bytes = base64.urlsafe_b64decode(header_b64 + hdr_pad)
+        hdr = json.loads(hdr_bytes)
+        alg = hdr.get("alg") if isinstance(hdr, dict) else None
+        return claims, str(alg) if alg else None
+    except Exception:
+        return None, None
+
+
+def _exp_to_datetime(claims: dict[str, object] | None) -> datetime | None:
+    if not claims:
+        return None
+    exp = claims.get("exp")
+    if not isinstance(exp, int | float):
+        return None
+    try:
+        return datetime.fromtimestamp(float(exp), tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _is_jwt_expired(exp_at: datetime | None) -> bool:
+    """Null-exp is treated as expired for conservative operator triage."""
+    if exp_at is None:
+        return True
+    return exp_at < datetime.now(tz=UTC)
+
+
+def _aud_as_string(claims: dict[str, object] | None) -> str | None:
+    """`aud` can be a string or an array per RFC 7519. Normalise to a comma
+    list so the DTO stays simple."""
+    if not claims:
+        return None
+    aud = claims.get("aud")
+    if isinstance(aud, str):
+        return aud
+    if isinstance(aud, list):
+        return ", ".join(str(x) for x in aud)
+    return None
 
 
 def canonicalize(raw: str) -> str:
@@ -107,6 +170,21 @@ class HistoryRow:
     title: str
     visit_count: int
     last_visit_at: datetime | None
+    archive_sha256: str
+    victim_folder: str
+
+
+@dataclass(frozen=True, slots=True)
+class LocalStorageJwtRow:
+    host: str
+    key: str
+    jwt_value: str
+    jwt_subject: str | None
+    jwt_issuer: str | None
+    jwt_audience: str | None
+    jwt_algorithm: str | None
+    expires_at: datetime | None
+    is_expired: bool
     archive_sha256: str
     victim_folder: str
 
@@ -509,6 +587,89 @@ class DomainCorpusReader:
             for r in rows.result_rows
         ]
         return items, total_n
+
+    async def localstorage_jwts(
+        self, *, canonical: str, limit: int, offset: int
+    ) -> tuple[list[LocalStorageJwtRow], int, int]:
+        """Leaked JWTs held in victims' browser localStorage for this domain.
+
+        Returns (items, total, live_count). Server-side decodes each JWT's
+        payload (base64url + JSON) to surface sub/iss/aud/exp claims. Does
+        NOT verify the signature; these are stolen tokens, verification is
+        meaningless. ``is_expired`` is computed against now(); a null-exp
+        claim is treated as expired to keep operator triage conservative.
+
+        v1.3.9: the localstorage_jwt_candidates rule was renamed in the
+        same release to emit {host, name, value} in place of the
+        pre-v2 ls_jwt_* fields, so host_registrable now auto-populates
+        via the materialized column and the WHERE uses the bloom index.
+        """
+        client = await self._c()
+        params = {
+            **self._base_params(canonical),
+            "lim": int(limit),
+            "off": int(offset),
+        }
+        try:
+            total_res = await client.query(
+                "SELECT count() "  # noqa: S608
+                f"FROM {self._db}.extracted_records "
+                "WHERE rule_id = 'localstorage_jwt_candidates' "
+                "  AND host_registrable = {d:String}",
+                parameters=params,
+            )
+            total_n = int(total_res.result_rows[0][0]) if total_res.result_rows else 0
+            page_res = await client.query(
+                "SELECT fields['host'], fields['name'], fields['value'], "  # noqa: S608
+                "       archive_sha256, victim_folder "
+                f"FROM {self._db}.extracted_records "
+                "WHERE rule_id = 'localstorage_jwt_candidates' "
+                "  AND host_registrable = {d:String} "
+                "ORDER BY ingested_at DESC "
+                "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                parameters=params,
+            )
+            # Live count: decode every matching JWT to count non-expired ones.
+            # Bounded by total_n (hundreds at scale we have today); add an
+            # exp MATERIALIZED column later if this ever becomes hot.
+            live_res = await client.query(
+                "SELECT fields['value'] "  # noqa: S608
+                f"FROM {self._db}.extracted_records "
+                "WHERE rule_id = 'localstorage_jwt_candidates' "
+                "  AND host_registrable = {d:String}",
+                parameters=params,
+            )
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError("stealer.extracted_records") from exc
+            raise
+        items: list[LocalStorageJwtRow] = []
+        for row in page_res.result_rows:
+            claims, alg = _decode_jwt(str(row[2]))
+            exp_at = _exp_to_datetime(claims)
+            items.append(
+                LocalStorageJwtRow(
+                    host=str(row[0] or ""),
+                    key=str(row[1] or ""),
+                    jwt_value=str(row[2] or ""),
+                    jwt_subject=claims.get("sub") if claims else None,
+                    jwt_issuer=claims.get("iss") if claims else None,
+                    jwt_audience=_aud_as_string(claims),
+                    jwt_algorithm=alg,
+                    expires_at=exp_at,
+                    is_expired=_is_jwt_expired(exp_at),
+                    archive_sha256=str(row[3]),
+                    victim_folder=str(row[4]),
+                )
+            )
+        live_count = 0
+        now = datetime.now(tz=UTC).timestamp()
+        for row in live_res.result_rows:
+            claims, _ = _decode_jwt(str(row[0]))
+            exp = claims.get("exp") if claims else None
+            if isinstance(exp, int | float) and exp > now:
+                live_count += 1
+        return items, total_n, live_count
 
     async def indicators(self, canonical: str) -> list[IndicatorRow]:
         """Rule catalog hits. No pagination, usually O(10s) of rules."""
