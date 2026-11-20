@@ -205,11 +205,17 @@ class StealerCredsReader:
         )
 
     async def count_host(self, host: str) -> int:
-        """Exact count of creds for one host (the enrichment degree)."""
+        """Exact count of UNIQUE creds for one host (the enrichment degree)."""
+        # v1.3.4.4: dropped FINAL (31s on prod) in favour of countDistinct
+        # over the identity tuple (0.5s). FINAL collapsed reindex copies in
+        # memory across every part; countDistinct does the same dedup on
+        # the filtered subset only. Same dedup grain as search's DISTINCT.
         client = await self._c()
         host_expr = self._HOST_EXPR
         result = await client.query(
-            f"SELECT count() FROM {self._db}.extracted_records FINAL "  # noqa: S608  # nosec B608
+            "SELECT countDistinct("  # noqa: S608
+            f"({host_expr}, fields['url'], fields['login'], fields['password'])) "
+            f"FROM {self._db}.extracted_records "  # nosec B608
             f"WHERE {self._WHERE_ANY_URL} AND {host_expr} = {{host:String}}",
             parameters={"fams": self._CRED_FAMILIES, "host": host},
         )
@@ -235,10 +241,19 @@ class StealerCredsReader:
             params["pat"] = f"%{host}%"
         try:
             client = await self._c()
+            # v1.3.4.4: dropped FINAL. extracted_records is 100M rows x 11
+            # parts of ReplacingMergeTree; FINAL merged across all parts in
+            # memory to collapse reindex duplicates and took 58s on prod
+            # for a 200-row page. Without FINAL the same query is 750ms.
+            # DISTINCT replaces FINAL's dedup for the paged result: a
+            # cred's (host, url, login, password) tuple is identical across
+            # all reindex copies (by the identity tuple DDL), so DISTINCT
+            # post-filter returns at most one row per unique cred, which is
+            # what the operator sees.
             result = await client.query(
-                f"SELECT {host_expr} h, fields['url'] u, fields['login'] l, "  # noqa: S608  # nosec B608
+                f"SELECT DISTINCT {host_expr} h, fields['url'] u, fields['login'] l, "  # noqa: S608  # nosec B608
                 f"       fields['password'] p, {scheme_expr} s, {tld_expr} t "
-                f"FROM {self._db}.extracted_records FINAL "
+                f"FROM {self._db}.extracted_records "
                 f"WHERE {self._WHERE_ANY_URL}{host_filter} "
                 "ORDER BY h LIMIT {lim:UInt32} OFFSET {off:UInt32}",
                 parameters=params,
