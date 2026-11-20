@@ -1,0 +1,20 @@
+<!--
+  v1.3.4.3 operator-profile overrides for the eyenet user.
+
+  max_memory_usage: per-query cap. The CH container sees ~4.3 GiB total
+  (cgroup default from Docker) and max_server_memory_usage is 0.9x that
+  (~3.6 GiB). Without a per-query cap, a single heavy classifier/API
+  query can hog the full server budget and starve concurrent gotractor
+  flushes with code: 241. 2.5 GiB leaves ~1.1 GiB headroom for ingest.
+
+  allow_experimental_refreshable_materialized_view: 24.8 gates refreshable
+  MVs behind this flag. victim_counts_refresh depends on it.
+-->
+<clickhouse>
+  <profiles>
+    <default>
+      <max_memory_usage>2500000000</max_memory_usage>
+      <allow_experimental_refreshable_materialized_view>1</allow_experimental_refreshable_materialized_view>
+    </default>
+  </profiles>
+</clickhouse>

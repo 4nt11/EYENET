@@ -343,6 +343,10 @@ services:
       # table created with the policy fails to load (UNKNOWN_POLICY 478) and
       # takes the whole CH process down. Match the prod.lite stack.
       - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      # users.d auto-loads every *.xml on boot; eyenet profile override
+      # caps per-query memory and gates the refreshable-MV flag. Must
+      # survive container recreation, not just hot-written in place.
+      - ./clickhouse/users.d:/etc/clickhouse-server/users.d:ro
     # No published ports: reachable only in-network by the processor (service name).
 
   stealer-processor:

@@ -675,6 +675,13 @@ class StealerArtifactsReader:
         has_corporate: bool | None = None,
         family: str | None = None,
     ) -> tuple[list[ArtifactCardRow], int, int]:
+        # v1.3.4.3: read from victim_counts (ReplacingMergeTree with plain
+        # UInt64 counts, refreshed every 5 min from victim_profiles). The
+        # heavy uniqExactState materialization happens ONCE per refresh
+        # cycle in background, not on every API call. FINAL collapses
+        # overlapping refresh generations keyed on refreshed_at; the table
+        # is ~20k rows so FINAL is sub-second. Counts are up to 5 min stale,
+        # acceptable for an operator UI.
         where = ["1"]
         params: dict[str, object] = {}
         if country:
@@ -689,10 +696,6 @@ class StealerArtifactsReader:
         if has_corporate is not None:
             where.append("has_corporate_marker = {hc:UInt8}")
             params["hc"] = 1 if has_corporate else 0
-        # family=<slug> joins against the verdict table. Hoisted outside
-        # the WHERE on victim_profiles because the verdict column is not
-        # part of that table; semi-join via IN keeps filtering sargable
-        # against the (sha, victim) PK.
         family_join = ""
         if family:
             family_join = (
@@ -708,24 +711,19 @@ class StealerArtifactsReader:
         params["offset"] = offset
 
         total_rows = await self._rows(
-            f"SELECT count() FROM {self._db}.victim_profiles FINAL WHERE {where_sql}",  # nosec B608  # noqa: S608
+            f"SELECT count() FROM {self._db}.victim_counts FINAL WHERE {where_sql}",  # nosec B608  # noqa: S608
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
 
-        # v1.3.1: *_count columns are AggregateFunction(uniqExact, ...) so
-        # finalizeAggregation under FINAL extracts the scalar. SAF(max)
-        # columns (country, traffic_affid, ...) FINAL-merge automatically.
         rows = await self._rows(
             "SELECT "  # noqa: S608
             "  archive_sha256, victim_folder, country, traffic_affid, build_version, "
-            "  finalizeAggregation(creds_count),"
-            "  finalizeAggregation(cookies_count),"
-            "  finalizeAggregation(wallet_vaults_count), "
+            "  creds_count, cookies_count, wallet_vaults_count, "
             "  has_corporate_marker, has_wallet, has_crypter_banner "
-            f"FROM {self._db}.victim_profiles FINAL "  # nosec B608
+            f"FROM {self._db}.victim_counts FINAL "  # nosec B608
             f"WHERE {where_sql} "
-            "ORDER BY (archive_sha256, victim_folder) "
+            "ORDER BY archive_sha256, victim_folder "
             "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
             params,
         )
@@ -748,28 +746,18 @@ class StealerArtifactsReader:
         return out, total, self._page_count(total, limit)
 
     async def detail(self, archive_sha256: str, victim_folder: str) -> ArtifactDetailRow | None:
-        # v1.3.1: *_count columns are AggregateFunction(uniqExact, identity).
-        # finalizeAggregation extracts the scalar under FINAL (which merges
-        # states across parts).
+        # v1.3.4.3: read from victim_counts (see list_cards docstring).
         rows = await self._rows(
             "SELECT "  # noqa: S608
             "  source, country, egress_ip, user_name, computer_name, os_version, "
             "  traffic_affid, build_version, payload_md5, work_dir, "
-            "  finalizeAggregation(creds_count),"
-            "  finalizeAggregation(cookies_count),"
-            "  finalizeAggregation(autofills_count),"
-            "  finalizeAggregation(history_count), "
-            "  finalizeAggregation(downloads_count),"
-            "  finalizeAggregation(processes_count),"
-            "  finalizeAggregation(software_count), "
-            "  finalizeAggregation(discord_tokens_count),"
-            "  finalizeAggregation(steam_tokens_count),"
-            "  finalizeAggregation(google_refresh_count), "
-            "  finalizeAggregation(localstorage_jwt_count),"
-            "  finalizeAggregation(wallet_vaults_count), "
+            "  creds_count, cookies_count, autofills_count, history_count, "
+            "  downloads_count, processes_count, software_count, "
+            "  discord_tokens_count, steam_tokens_count, google_refresh_count, "
+            "  localstorage_jwt_count, wallet_vaults_count, "
             "  has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner, "
             "  webmail_identity, first_corporate_marker, first_wallet_family "
-            f"FROM {self._db}.victim_profiles FINAL "  # nosec B608
+            f"FROM {self._db}.victim_counts FINAL "  # nosec B608
             "WHERE archive_sha256 = {sha:FixedString(64)} "
             "  AND victim_folder = {vf:String} "
             "LIMIT 1",

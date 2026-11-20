@@ -325,6 +325,100 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 # the v1.3.1 prod deploy).
 _VICTIM_PROFILES_STALE_SENTINEL = "countIf("
 
+# v1.3.4.3 flat-counts sibling. victim_profiles holds the exact, reindex-
+# idempotent uniqExactState columns; victim_counts holds the finalized
+# UInt64 scalars, refreshed every 5 minutes by a REFRESHABLE MV. The API
+# list/detail paths read from victim_counts FINAL (sub-100ms on 20k rows),
+# so an operator filter like has_wallet=1 no longer pays the 7s state
+# materialization per request.
+_VICTIM_COUNTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.victim_counts
+    (
+        archive_sha256         FixedString(64),
+        victim_folder          String,
+        source                 LowCardinality(String),
+        country                LowCardinality(String),
+        egress_ip              String,
+        user_name              String,
+        computer_name          String,
+        os_version             String,
+        traffic_affid          LowCardinality(String),
+        build_version          LowCardinality(String),
+        payload_md5            String,
+        work_dir               String,
+        creds_count            UInt64,
+        cookies_count          UInt64,
+        autofills_count        UInt64,
+        history_count          UInt64,
+        downloads_count        UInt64,
+        processes_count        UInt64,
+        software_count         UInt64,
+        discord_tokens_count   UInt64,
+        steam_tokens_count     UInt64,
+        google_refresh_count   UInt64,
+        localstorage_jwt_count UInt64,
+        wallet_vaults_count    UInt64,
+        has_corporate_marker   UInt8,
+        has_webmail_leak       UInt8,
+        has_wallet             UInt8,
+        has_crypter_banner     UInt8,
+        webmail_identity       String,
+        first_corporate_marker String,
+        first_wallet_family    LowCardinality(String),
+        refreshed_at           DateTime DEFAULT now(),
+        INDEX idx_country country TYPE set(0) GRANULARITY 1,
+        INDEX idx_affid traffic_affid TYPE set(0) GRANULARITY 1,
+        INDEX idx_has_wallet has_wallet TYPE set(0) GRANULARITY 1,
+        INDEX idx_has_corporate has_corporate_marker TYPE set(0) GRANULARITY 1
+    )
+    ENGINE = ReplacingMergeTree(refreshed_at)
+    ORDER BY (archive_sha256, victim_folder)
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_counts_refresh
+    REFRESH EVERY 5 MINUTE
+    TO {db}.victim_counts
+    AS SELECT
+        archive_sha256,
+        victim_folder,
+        max(source) AS source,
+        max(country) AS country,
+        max(egress_ip) AS egress_ip,
+        max(user_name) AS user_name,
+        max(computer_name) AS computer_name,
+        max(os_version) AS os_version,
+        max(traffic_affid) AS traffic_affid,
+        max(build_version) AS build_version,
+        max(payload_md5) AS payload_md5,
+        max(work_dir) AS work_dir,
+        uniqExactMerge(creds_count) AS creds_count,
+        uniqExactMerge(cookies_count) AS cookies_count,
+        uniqExactMerge(autofills_count) AS autofills_count,
+        uniqExactMerge(history_count) AS history_count,
+        uniqExactMerge(downloads_count) AS downloads_count,
+        uniqExactMerge(processes_count) AS processes_count,
+        uniqExactMerge(software_count) AS software_count,
+        uniqExactMerge(discord_tokens_count) AS discord_tokens_count,
+        uniqExactMerge(steam_tokens_count) AS steam_tokens_count,
+        uniqExactMerge(google_refresh_count) AS google_refresh_count,
+        uniqExactMerge(localstorage_jwt_count) AS localstorage_jwt_count,
+        uniqExactMerge(wallet_vaults_count) AS wallet_vaults_count,
+        max(has_corporate_marker) AS has_corporate_marker,
+        max(has_webmail_leak) AS has_webmail_leak,
+        max(has_wallet) AS has_wallet,
+        max(has_crypter_banner) AS has_crypter_banner,
+        max(webmail_identity) AS webmail_identity,
+        max(first_corporate_marker) AS first_corporate_marker,
+        max(first_wallet_family) AS first_wallet_family,
+        now() AS refreshed_at
+    FROM {db}.victim_profiles
+    GROUP BY archive_sha256, victim_folder
+    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 1000000000
+    """,
+)
+
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
 # bodies used `toUInt64(count()) AS <col>`; the new body uses
 # `uniqExactState(_IDENTITY_TUPLE_DDL)`. The sentinel catches the old shape.
@@ -950,6 +1044,15 @@ class ClickHouseRecordsSink:
         self._repair_victim_profiles_if_stale(client)
         for stmt in _VICTIM_PROFILES:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+        # v1.3.4.3 flat-counts sibling + refreshable MV. The experimental
+        # flag has to be enabled per-command because refreshable MVs are
+        # still gated in 24.8. Prod also carries it in the eyenet profile
+        # override so SYSTEM REFRESH VIEW works outside this session.
+        for stmt in _VICTIM_COUNTS:
+            client.command(
+                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
+                settings={"allow_experimental_refreshable_materialized_view": 1},
+            )
         # v1.3.3 per-victim domain index (detection engine primitive).
         for stmt in _VICTIM_DOMAINS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
