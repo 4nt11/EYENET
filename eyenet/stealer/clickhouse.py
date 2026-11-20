@@ -550,6 +550,68 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
     """,
 )
 
+# v1.3.8 per-domain per-victim sibling. Backs the Domain View Victims tab
+# (and future by-domain Samples/Antiviruses tabs) with sub-20ms warm lookups
+# instead of scanning extracted_records on every page flip. Keyed on
+# (host_registrable, archive_sha256, victim_folder). Measured on prod:
+# 574ms single-stage -> 12-16ms sibling warm, 679ms cold on google.com.
+# Row count ~730k (host x victim product filtered to actual matches).
+# Same semantic as the single-stage query: per-victim DOMAIN-SCOPED unique
+# cred/cookie counts, so operators see "this victim leaked N test.com creds"
+# and sum(items.cred_count) >= by_domain_counts.credential_count (the latter
+# dedupes credentials ACROSS victims, which is a legitimately different
+# question).
+_BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.by_domain_victim_counts
+    (
+        host_registrable  String,
+        archive_sha256    FixedString(64),
+        victim_folder     String,
+        country           String,
+        build_version     String,
+        loader_md5        String,
+        cred_count        UInt64,
+        cookie_count      UInt64,
+        first_seen_at     DateTime,
+        last_seen_at      DateTime,
+        refreshed_at      DateTime DEFAULT now()
+    )
+    ENGINE = ReplacingMergeTree(refreshed_at)
+    ORDER BY (host_registrable, archive_sha256, victim_folder)
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_victim_counts_refresh
+    REFRESH EVERY 5 MINUTE
+    TO {db}.by_domain_victim_counts
+    AS SELECT
+        er.host_registrable AS host_registrable,
+        er.archive_sha256   AS archive_sha256,
+        er.victim_folder    AS victim_folder,
+        coalesce(any(vc.country), '')       AS country,
+        coalesce(any(vc.build_version), '') AS build_version,
+        coalesce(any(vc.payload_md5), '')   AS loader_md5,
+        countDistinctIf(
+          (er.fields['url'], er.fields['login'], er.fields['password']),
+          er.family IN ('browser_passwords','windows_credentials',
+                        'firefox_logins','combolist')) AS cred_count,
+        countDistinctIf(
+          (er.fields['url'], er.fields['name']),
+          er.family IN ('cookies','victim_cookies')) AS cookie_count,
+        min(er.ingested_at) AS first_seen_at,
+        max(er.ingested_at) AS last_seen_at,
+        now() AS refreshed_at
+    FROM {db}.extracted_records AS er
+    LEFT JOIN {db}.victim_counts AS vc FINAL
+           USING (archive_sha256, victim_folder)
+    WHERE er.host_registrable != ''
+    GROUP BY er.host_registrable, er.archive_sha256, er.victim_folder
+    SETTINGS optimize_aggregation_in_order = 1,
+             max_bytes_before_external_group_by = 1000000000
+    """,
+)
+
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
 # bodies used `toUInt64(count()) AS <col>`; the new body uses
 # `uniqExactState(_IDENTITY_TUPLE_DDL)`. The sentinel catches the old shape.
@@ -1229,6 +1291,14 @@ class ClickHouseRecordsSink:
         for stmt in _EXTRACTED_RECORDS_HOST_COLS:
             client.command(stmt.format(db=self._db))
         for stmt in _BY_DOMAIN_COUNTS:
+            client.command(
+                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
+                settings={"allow_experimental_refreshable_materialized_view": 1},
+            )
+        # v1.3.8 per-domain per-victim sibling (Domain View Victims tab).
+        # Depends on the _EXTRACTED_RECORDS_HOST_COLS block above for the
+        # host_registrable column; MV groups on it.
+        for stmt in _BY_DOMAIN_VICTIM_COUNTS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
                 settings={"allow_experimental_refreshable_materialized_view": 1},

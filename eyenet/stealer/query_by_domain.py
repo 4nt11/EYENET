@@ -69,6 +69,7 @@ class VictimRow:
     credential_count: int
     cookie_count: int
     first_seen_at: datetime | None
+    loader_md5: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,45 +277,50 @@ class DomainCorpusReader:
     async def victims(
         self, *, canonical: str, limit: int, offset: int
     ) -> tuple[list[VictimRow], int]:
-        """Victims affected, ordered by credential_count desc."""
+        """Victims affected, ordered by first_seen_at DESC.
+
+        v1.3.8: reads the by_domain_victim_counts sibling (ReplacingMergeTree,
+        keyed on (host_registrable, archive, victim), ~730k rows on prod).
+        Measured: single-stage original 574ms warm; two-stage interim 149ms;
+        this one-stage sibling lookup 12-16ms warm, 679ms cold. Counts are up
+        to 5 minutes stale because the sibling refreshes on that cadence.
+
+        Per-victim cred_count / cookie_count are DOMAIN-SCOPED unique triples
+        (one victim's unique google.com creds). The hero's credential_count
+        on by_domain_counts is DOMAIN-WIDE unique triples (across victims),
+        so sum(victims.cred_count) >= hero.credential_count when operators
+        see the same cred leaked by multiple victims. This is a correct
+        semantic distinction, not a bug.
+        """
         client = await self._c()
-        hp = self._host_predicate()
         params = {
             **self._base_params(canonical),
-            "creds": self._CRED_FAMILIES,
-            "cookies": self._COOKIE_FAMILIES,
             "lim": int(limit),
             "off": int(offset),
         }
         try:
             total = await client.query(
-                "SELECT countDistinct((archive_sha256, victim_folder)) "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
-                f"WHERE {hp}",
+                "SELECT count() "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts FINAL "
+                "WHERE host_registrable = {d:String}",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
-                "SELECT er.archive_sha256, er.victim_folder, "  # noqa: S608
-                "       any(vc.country), any(vc.build_version), "
-                "       countDistinctIf("
-                "         (er.fields['url'], er.fields['login'], er.fields['password']), "
-                "         family IN {creds:Array(String)}) AS cred_cnt, "
-                "       countDistinctIf((er.fields['url'], er.fields['name']), "
-                "         family IN {cookies:Array(String)}) AS cookie_cnt, "
-                "       min(er.ingested_at) AS fs "
-                f"FROM {self._db}.extracted_records AS er "
-                f"LEFT JOIN {self._db}.victim_counts AS vc FINAL "
-                "       USING (archive_sha256, victim_folder) "
-                f"WHERE {hp} "
-                "GROUP BY er.archive_sha256, er.victim_folder "
-                "ORDER BY cred_cnt DESC, er.archive_sha256 "
+                "SELECT archive_sha256, victim_folder, country, build_version, "  # noqa: S608
+                "       cred_count, cookie_count, first_seen_at, "
+                "       nullIf(loader_md5, '') AS md5 "
+                f"FROM {self._db}.by_domain_victim_counts FINAL "
+                "WHERE host_registrable = {d:String} "
+                "ORDER BY first_seen_at DESC "
                 "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
                 parameters=params,
             )
         except Exception as exc:
             if _is_unknown_table(exc):
-                raise StealerCorpusUninitializedError("stealer.extracted_records") from exc
+                raise StealerCorpusUninitializedError(
+                    "stealer.by_domain_victim_counts"
+                ) from exc
             raise
         items = [
             VictimRow(
@@ -322,6 +328,7 @@ class DomainCorpusReader:
                 country=r[2] or "", build_version=r[3] or "",
                 credential_count=int(r[4] or 0), cookie_count=int(r[5] or 0),
                 first_seen_at=r[6],
+                loader_md5=r[7],
             )
             for r in rows.result_rows
         ]

@@ -6,6 +6,7 @@
     { href: '/tuning/stealer',           label: 'Rules library' },
     { href: '/tuning/stealer/workbench', label: 'Workbench' },
     { href: '/tuning/stealer/failures',  label: 'Parse failures' },
+    { href: '/tuning/stealer/misses',    label: 'Parse misses' },
     { href: '/tuning/stealer/pipeline',  label: 'Normalize pipeline' }
   ];
   const isActive = (href, path) => path === href;

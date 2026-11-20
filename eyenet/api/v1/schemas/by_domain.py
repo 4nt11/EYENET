@@ -63,6 +63,13 @@ class DomainVictimRow(ApiSchema):
     credential_count: int
     cookie_count: int
     first_seen_at: datetime | None
+    # v1.3.7 addition: the installer MD5 that put the stealer on this
+    # machine. Populated only when a userinfo_*_shape rule captured
+    # fields['ui_payload_md5'] during extraction (26% of victims on prod
+    # today; see /v1/stealer/rule-coverage-gaps for the gap). Null when
+    # no fingerprint rule fired for this victim. Operators copy this
+    # directly into SIEM / EDR as a blocking IOC.
+    loader_md5: str | None = None
 
 
 class DomainVictimsResponse(ApiSchema):

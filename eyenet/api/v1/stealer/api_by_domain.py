@@ -163,6 +163,7 @@ async def by_domain_victims(
                 country=r.country, build_version=r.build_version,
                 credential_count=r.credential_count, cookie_count=r.cookie_count,
                 first_seen_at=r.first_seen_at,
+                loader_md5=r.loader_md5,
             )
             for r in rows
         ],
