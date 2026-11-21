@@ -82,6 +82,90 @@ def _any_nonempty_file(root: Path) -> bool:
     return any(f.is_file() and f.stat().st_size > 0 for f in root.rglob("*"))
 
 
+# v1.3.11: gotractor regex rules assume UTF-8 + LF. CRLF leaves a \r
+# before $ that \S+ can't consume so every record match drops. UTF-16
+# text has \0 between every byte so UTF-8-byte regex patterns never match
+# anything. Both are common in ULP drops (Raven uses UTF-8 CRLF; some
+# RU/CN stealers export UTF-16LE). Normalise every text file in the dest
+# tree before gotractor sees it.
+#
+# Extensions kept tight to what gotractor's content rules target. Expand
+# only when a new text family lands.
+_TEXT_NORMALIZE_EXTS: frozenset[str] = frozenset((
+    ".txt", ".csv", ".tsv", ".log", ".ulp", ".list",
+))
+
+
+def _detect_text_bom(blob_path: Path) -> str | None:
+    """Return 'utf-16le' / 'utf-16be' / 'utf-8-sig' if the file carries a
+    BOM, None otherwise. Reads 4 bytes (BOM check only, no heuristics)."""
+    try:
+        with blob_path.open("rb") as f:
+            head = f.read(4)
+    except OSError:
+        return None
+    if head.startswith(b"\xff\xfe\x00\x00") or head.startswith(b"\x00\x00\xfe\xff"):
+        return None  # UTF-32, not handled
+    if head.startswith(b"\xff\xfe"):
+        return "utf-16le"
+    if head.startswith(b"\xfe\xff"):
+        return "utf-16be"
+    if head.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    return None
+
+
+def _normalize_text_tree(root: Path) -> dict[str, int]:
+    """In-place text normalization for every file under ``root`` with a
+    known-text extension. Steps per file:
+
+      1. If a UTF-16 BOM is present, transcode to UTF-8 via iconv. iconv
+         streams, so a 2 GB UTF-16 ULP drop normalises without loading
+         into memory.
+      2. Strip trailing \\r on every line (CRLF -> LF) via sed -i. Also
+         streams.
+
+    Returns {"scanned": N, "utf16": N, "crlf": N, "errors": N}. Never
+    raises - a per-file failure logs + continues; the pipeline can still
+    extract whatever is extractable.
+
+    Subprocess argv is a fixed list (no shell interpolation). The paths
+    come from rglob over a local tempdir - not attacker-controlled."""
+    scanned = utf16 = crlf = errors = 0
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _TEXT_NORMALIZE_EXTS:
+            continue
+        scanned += 1
+        bom = _detect_text_bom(path)
+        try:
+            if bom in {"utf-16le", "utf-16be"}:
+                tmp = path.with_suffix(path.suffix + ".utf8.tmp")
+                with tmp.open("wb") as out:
+                    subprocess.run(  # noqa: S603
+                        ["iconv", "-f", bom.upper().replace("-", ""), "-t", "UTF-8", str(path)],
+                        stdout=out, check=True,
+                    )
+                tmp.replace(path)
+                utf16 += 1
+            # sed strips trailing \r on every line in-place. Safe no-op on
+            # pure LF files; triggers once if CRLF is present anywhere.
+            res = subprocess.run(  # noqa: S603
+                ["sed", "-i", "s/\\r$//", str(path)],
+                check=False, capture_output=True,
+            )
+            if res.returncode != 0:
+                errors += 1
+            else:
+                crlf += 1  # idempotent, approximate counter
+        except (OSError, subprocess.CalledProcessError) as exc:
+            errors += 1
+            _log.warning(
+                "stealer.text_normalize_failed",
+                path=str(path), error=str(exc), error_type=type(exc).__name__,
+            )
+    return {"scanned": scanned, "utf16": utf16, "crlf": crlf, "errors": errors}
+
+
 _ARCHIVE_MAGICS: tuple[bytes, ...] = (
     b"Rar!\x1a\x07",      # RAR 1.5 - 4
     b"Rar!\x1a\x07\x01",  # RAR 5
@@ -197,7 +281,15 @@ def _extract(blob_path: Path, candidates: list[str], dest: Path) -> tuple[str, s
     filename (which lives in postgres), so a suffix check does not work.
     """
     if _is_plain_text_blob(blob_path):
-        shutil.copy2(blob_path, dest / (blob_path.stem + ".txt"))
+        # v1.3.11: nest in a subdir. Gotractor's combolist rules use
+        # path_glob: '**/*.txt' which compiles to a regex requiring a '/'
+        # before the filename (bash-style globstar semantics). A top-level
+        # .txt would not match and emit zero records despite being
+        # correctly classified as combolist. One hard-coded intermediate
+        # dir is enough.
+        sub = dest / "ulp"
+        sub.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(blob_path, sub / (blob_path.stem + ".txt"))
         return "", "passthrough"
     primary = _pick_tool(blob_path)
     attempts = [*candidates, ""]  # "" => no password (unencrypted / watermark-only)
@@ -249,6 +341,21 @@ def process_archive(
             )
         pw, tool = extracted
         _log.debug("stealer.extract_ok", blob=blob_path.name, tool=tool)
+        # v1.3.11: normalise CRLF -> LF + UTF-16 -> UTF-8 on every text
+        # file in the extracted tree. gotractor's regex rules assume
+        # UTF-8/LF; without this ULP .txt drops (Raven CRLF, RU-locale
+        # UTF-16) get a correct container family but zero content-rule
+        # matches. One pass at archive-extract time keeps the downstream
+        # engine simple.
+        norm = _normalize_text_tree(dest)
+        if norm["utf16"] or norm["errors"]:
+            _log.info(
+                "stealer.text_normalize_done",
+                blob=blob_path.name,
+                scanned=norm["scanned"],
+                utf16=norm["utf16"],
+                errors=norm["errors"],
+            )
         records = 0
         families: list[str] = []
         parse_errors: dict[str, tuple[str, str]] = {}

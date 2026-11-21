@@ -243,8 +243,11 @@ func emitRecords(rules []engine.Rule, folder engine.VictimFolder, limit int) {
 				break
 			}
 		}
-		bulk := engine.BulkParse(rr, file, limit)
-		for _, rec := range bulk.Records {
+		// v1.3.11: stream records as they are produced instead of
+		// materialising them in a slice. Yield fires in the same
+		// goroutine; the encoder writes directly to stdout.
+		emitted := 0
+		meta := engine.BulkParse(rr, file, limit, func(rec map[string]any) bool {
 			_ = enc.Encode(map[string]any{
 				"kind":      "record",
 				"rule_id":   rr.ID,
@@ -252,14 +255,16 @@ func emitRecords(rules []engine.Rule, folder engine.VictimFolder, limit int) {
 				"file_path": ev.FilePath,
 				"fields":    rec,
 			})
-		}
-		if bulk.Truncated {
+			emitted++
+			return true
+		})
+		if meta.Truncated {
 			_ = enc.Encode(map[string]any{
 				"kind":       "truncated",
 				"rule_id":    rr.ID,
 				"file_path":  ev.FilePath,
-				"emitted":    len(bulk.Records),
-				"total_seen": bulk.Total,
+				"emitted":    emitted,
+				"total_seen": meta.Total,
 			})
 		}
 	}

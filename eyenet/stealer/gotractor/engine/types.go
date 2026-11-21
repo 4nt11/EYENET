@@ -83,8 +83,18 @@ type RunResult struct {
 	Evaluations []EvalResult   `json:"evaluations"`
 }
 
-// BulkResult is the output of bulkParse: every record a matcher emits
-// for a single (rule, file) pair, bounded by Limit.
+// BulkMeta is the return value of the streaming BulkParse: counts only,
+// no materialised records. The yield callback receives each record as
+// it is produced, so the caller decides how to retain (or drop) them.
+type BulkMeta struct {
+	Total     int  `json:"total"`
+	Truncated bool `json:"truncated"`
+}
+
+// BulkResult is the pre-v1.3.11 shape of BulkParse: every record a
+// matcher emits for a single (rule, file) pair, bounded by Limit, held
+// in a slice. Preserved only for BulkParseCollect (tests, Workbench
+// preview); production callers stream.
 type BulkResult struct {
 	Records   []map[string]any `json:"records"`
 	Total     int              `json:"total"`

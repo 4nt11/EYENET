@@ -439,11 +439,72 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 		})
 	}
 
-	// emit runs per (rule, file) hit from StreamRunRules. Routes records
-	// to the CH sink or stdout depending on sinkOn, flushes the batch
-	// every flushEvery records so the Go side never holds a Khazan
-	// archive's worth of CH buffer.
-	emit := func(h engine.Hit) error {
+	// v1.3.11: split pre-v1.3.11 per-hit emit into per-record + per-hit.
+	// Records stream through onRecord; the engine never materialises a
+	// slice. Per-rule emitted counts are tracked here (previously derived
+	// from len(h.Records)).
+	emittedByRule := make(map[string]int)
+
+	onRecord := func(rule engine.Rule, filePath string, rec map[string]any) error {
+		if sinkOn {
+			fm := make(map[string]string, len(rec))
+			for k, v := range rec {
+				fm[k] = anyToString(v)
+			}
+			if aerr := batch.Append(
+				cmd.ArchiveSha256,
+				cmd.SourceLabel,
+				extractVictimFolder(filePath),
+				filePath,
+				rule.ID,
+				rule.Family,
+				fm,
+			); aerr != nil {
+				_ = batch.Abort()
+				w.emit(map[string]any{
+					"kind":      "error",
+					"req_id":    cmd.ReqID,
+					"rule_id":   rule.ID,
+					"file_path": filePath,
+					"error":     fmt.Sprintf("ch batch append: %v", aerr),
+					"kind_code": "ch_append",
+				})
+				return aerr
+			}
+			appendedSinceFlush++
+			if appendedSinceFlush >= flushEvery {
+				if ferr := batch.Flush(); ferr != nil {
+					_ = batch.Abort()
+					w.emit(map[string]any{
+						"kind":      "error",
+						"req_id":    cmd.ReqID,
+						"rule_id":   rule.ID,
+						"file_path": filePath,
+						"error":     fmt.Sprintf("ch batch flush: %v", ferr),
+						"kind_code": "ch_flush",
+					})
+					return ferr
+				}
+				appendedSinceFlush = 0
+			}
+		} else {
+			w.emit(map[string]any{
+				"kind":      "record",
+				"req_id":    cmd.ReqID,
+				"rule_id":   rule.ID,
+				"family":    rule.Family,
+				"file_path": filePath,
+				"fields":    rec,
+			})
+		}
+		records++
+		rulesFired[rule.ID]++
+		emittedByRule[rule.ID]++
+		d.metrics.recordsEmitted.WithLabelValues(rule.ID, rule.Family).Inc()
+		return nil
+	}
+
+	onHit := func(h engine.Hit) error {
 		if h.PanicMsg != "" {
 			w.emit(map[string]any{
 				"kind":      "parse_error",
@@ -456,78 +517,22 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 			d.metrics.recordsRejected.WithLabelValues(h.Rule.ID).Inc()
 			return nil
 		}
-		for _, rec := range h.Records {
-			if sinkOn {
-				fm := make(map[string]string, len(rec))
-				for k, v := range rec {
-					fm[k] = anyToString(v)
-				}
-				if aerr := batch.Append(
-					cmd.ArchiveSha256,
-					cmd.SourceLabel,
-					extractVictimFolder(h.FilePath),
-					h.FilePath,
-					h.Rule.ID,
-					h.Rule.Family,
-					fm,
-				); aerr != nil {
-					_ = batch.Abort()
-					w.emit(map[string]any{
-						"kind":      "error",
-						"req_id":    cmd.ReqID,
-						"rule_id":   h.Rule.ID,
-						"file_path": h.FilePath,
-						"error":     fmt.Sprintf("ch batch append: %v", aerr),
-						"kind_code": "ch_append",
-					})
-					return aerr
-				}
-				appendedSinceFlush++
-				if appendedSinceFlush >= flushEvery {
-					if ferr := batch.Flush(); ferr != nil {
-						_ = batch.Abort()
-						w.emit(map[string]any{
-							"kind":      "error",
-							"req_id":    cmd.ReqID,
-							"rule_id":   h.Rule.ID,
-							"file_path": h.FilePath,
-							"error":     fmt.Sprintf("ch batch flush: %v", ferr),
-							"kind_code": "ch_flush",
-						})
-						return ferr
-					}
-					appendedSinceFlush = 0
-				}
-			} else {
-				w.emit(map[string]any{
-					"kind":      "record",
-					"req_id":    cmd.ReqID,
-					"rule_id":   h.Rule.ID,
-					"family":    h.Rule.Family,
-					"file_path": h.FilePath,
-					"fields":    rec,
-				})
-			}
-			records++
-			rulesFired[h.Rule.ID]++
-			d.metrics.recordsEmitted.WithLabelValues(h.Rule.ID, h.Rule.Family).Inc()
-		}
 		if h.Truncated {
-			rejected := h.TotalSeen - len(h.Records)
+			rejected := h.TotalSeen - emittedByRule[h.Rule.ID]
 			d.metrics.recordsRejected.WithLabelValues(h.Rule.ID).Add(float64(rejected))
 			w.emit(map[string]any{
 				"kind":       "truncated",
 				"req_id":     cmd.ReqID,
 				"rule_id":    h.Rule.ID,
 				"file_path":  h.FilePath,
-				"emitted":    len(h.Records),
+				"emitted":    emittedByRule[h.Rule.ID],
 				"total_seen": h.TotalSeen,
 			})
 		}
 		return nil
 	}
 
-	_, _, streamErr, runPanic := safeStreamRunRules(rules, paths, loader, d.bulkLimit, verdictEmit, emit)
+	_, _, streamErr, runPanic := safeStreamRunRules(rules, paths, loader, d.bulkLimit, verdictEmit, onRecord, onHit)
 	if runPanic != "" {
 		// Outer-level panic (container-rule eval, glob compile, loader).
 		// Mirrors pre-streaming safeRunRules: one archive-wide
@@ -746,13 +751,13 @@ func (l *lockedWriter) close() {
 // surprise byte sequence) does not take the whole daemon down. On
 // recover the caller emits a parse_error msg attributed to the file,
 // then continues with the next (rule, file) pair.
-func safeBulkParse(r engine.Rule, file engine.ContentInput, limit int) (result engine.BulkResult, panicMsg string) {
+func safeBulkParse(r engine.Rule, file engine.ContentInput, limit int) (result engine.BulkResult, panicMsg string) { //nolint:unused
 	defer func() {
 		if rec := recover(); rec != nil {
 			panicMsg = truncErr(fmt.Sprint(rec))
 		}
 	}()
-	return engine.BulkParse(r, file, limit), ""
+	return engine.BulkParseCollect(r, file, limit), ""
 }
 
 // safeRunRules wraps engine.RunRules. A panic here cannot be attributed
@@ -939,13 +944,14 @@ func safeStreamRunRules(
 	loader engine.PathLoader,
 	bulkLimit int,
 	verdict func(family any),
-	emit func(engine.Hit) error,
+	onRecord func(rule engine.Rule, filePath string, record map[string]any) error,
+	onHit func(engine.Hit) error,
 ) (family any, rulesFired map[string]int, runErr error, panicMsg string) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicMsg = fmt.Sprintf("%v", r)
 		}
 	}()
-	family, rulesFired, runErr = engine.StreamRunRules(rules, paths, loader, bulkLimit, verdict, emit)
+	family, rulesFired, runErr = engine.StreamRunRules(rules, paths, loader, bulkLimit, verdict, onRecord, onHit)
 	return family, rulesFired, runErr, ""
 }

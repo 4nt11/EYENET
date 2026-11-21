@@ -1,6 +1,9 @@
 package engine
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // RunRules evaluates the full ruleset against a victim folder.
 // Container rules (L1) determine the family winner; content rules (L3)
@@ -65,19 +68,34 @@ func RunRules(rules []Rule, folder VictimFolder) RunResult {
 }
 
 // BulkParse walks every record a matcher would emit for a (rule, file)
-// pair. Used by the pipeline to extract credentials from a single file
-// in one shot; also by the Workbench to show all parsed rows. Bounded
-// at limit; returns Truncated=true when total > limit.
-func BulkParse(rule Rule, file ContentInput, limit int) BulkResult {
+// pair and yields each one SYNCHRONOUSLY to the caller via the yield
+// callback. Returns BulkMeta{Total, Truncated} where Total is every
+// record the matcher saw (including rejects and truncation overflow)
+// and Truncated is true when yield did not receive every record.
+//
+// yield returns false => stop iterating, early-exit cleanly. Mirrors
+// the iter.Seq convention used by IterDelimiter / IterJSON / IterXML.
+// NO GOROUTINES, NO CHANNELS. A channel-based generator previously
+// caused a 150k-goroutine leak + 22 GiB RSS before the iter.Seq
+// rewrite; the lesson stuck.
+//
+// limit caps the number of records actually yielded. Rejected records
+// count toward Total but not toward yielded count (semantic preserved
+// from the previous accumulator-based BulkParse). A limit <= 0 means
+// "no caller cap"; math.MaxInt is the only ceiling.
+func BulkParse(
+	rule Rule, file ContentInput, limit int,
+	yield func(map[string]any) bool,
+) BulkMeta {
 	if limit <= 0 {
-		limit = 1000
+		limit = math.MaxInt
 	}
-	records := make([]map[string]any, 0, 64)
-	total := 0
+	var total, yielded int
+	stop := false
 
 	push := func(raw map[string]any) {
 		total++
-		if len(records) >= limit {
+		if stop || yielded >= limit {
 			return
 		}
 		mapped := applyMap(raw, rule.Map)
@@ -88,31 +106,51 @@ func BulkParse(rule Rule, file ContentInput, limit int) BulkResult {
 		if len(rule.Normalize) > 0 {
 			normed = applyNormalize(mapped, rule.Normalize)
 		}
-		records = append(records, escapeNulls(normed))
+		yielded++
+		if !yield(escapeNulls(normed)) {
+			stop = true
+		}
 	}
 
 	switch typeOf(rule.Match) {
 	case "delimiter":
 		for row := range IterDelimiter(rule.Match, rule.Extract, file.Text) {
 			push(row)
+			if stop {
+				break
+			}
 		}
 	case "vdf":
 		for row := range IterVDF(rule.Match, rule.Extract, file.Text) {
 			push(row)
+			if stop {
+				break
+			}
 		}
 	case "xml":
 		for row := range IterXML(rule.Match, rule.Extract, file.Text) {
 			push(row)
+			if stop {
+				break
+			}
 		}
 	case "json":
 		for row := range IterJSON(rule.Match, rule.Extract, file.Text) {
 			push(row)
+			if stop {
+				break
+			}
 		}
 	case "regex":
 		rest := file.Text
-		safety := 10000
-		for rest != "" && safety > 0 {
-			safety--
+		// v1.3.11: was `safety := 10000` since the initial Go port
+		// (commit 77580e0). That silently capped BulkParse to 10k matches
+		// per file per rule regardless of the configured limit; invisible
+		// on stealer-archive files but on raw ULP drops (~2M lines per
+		// 131 MB file) dropped 99.4% of the data. push() caps via limit,
+		// the no-progress fallback either advances past \n or clears rest
+		// to "" (terminating the loop). No runaway path.
+		for rest != "" && !stop {
 			hit := MatchRegex(rule.Match, rule.Extract, ContentInput{Path: file.Path, Text: rest})
 			if hit == nil || len(hit) == 0 {
 				break
@@ -156,7 +194,24 @@ func BulkParse(rule Rule, file ContentInput, limit int) BulkResult {
 		}
 	}
 
-	return BulkResult{Records: records, Total: total, Truncated: total > len(records)}
+	return BulkMeta{Total: total, Truncated: total > yielded}
+}
+
+// BulkParseCollect is the pre-v1.3.11 BulkParse shape: accumulate every
+// record into a slice, return BulkResult. KEPT ONLY FOR TESTS and the
+// Workbench which materialises the full result for display. Production
+// callers (daemon, CLI emit, stream) use the streaming BulkParse above
+// so they never hold more than one record in flight.
+//
+// On a 131 MB ULP drop this holds ~1.93 GiB of RSS. Do not call from the
+// hot path.
+func BulkParseCollect(rule Rule, file ContentInput, limit int) BulkResult {
+	records := make([]map[string]any, 0, 64)
+	meta := BulkParse(rule, file, limit, func(rec map[string]any) bool {
+		records = append(records, rec)
+		return true
+	})
+	return BulkResult{Records: records, Total: meta.Total, Truncated: meta.Truncated}
 }
 
 func filterContent(rules []Rule) []Rule {

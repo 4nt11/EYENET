@@ -138,6 +138,12 @@ func runVerb(verb string, step map[string]any, raw string) (any, bool) {
 			return nil, false
 		}
 		repl, _ := step["replacement"].(string)
+		// v1.3.11: rule catalog authors \1..\9 (sed / Python re.sub
+		// convention) for capture group backreferences. Go's
+		// ReplaceAllString uses $1..$9. Translate so a single rule file
+		// works across all three engines; `$$` to match a literal `$`
+		// keeps users who already wrote Go-style patterns functional.
+		repl = translateBackrefs(repl)
 		return re.ReplaceAllString(raw, repl), true
 	case "date_parse":
 		format, _ := step["format"].(string)
@@ -175,4 +181,39 @@ func parseDate(raw, format string) (any, bool) {
 		return t.UTC().Format("2006-01-02T15:04:05Z"), true
 	}
 	return nil, false
+}
+
+// translateBackrefs rewrites sed / Python re.sub backref syntax to Go's
+// regexp syntax: \1..\9 -> $1..$9. Escaped backslash \\ passes through
+// unchanged so authors who need a literal \1 can write \\1. Existing
+// uses of $ are escaped to $$ so they survive ReplaceAllString's own
+// interpretation.
+func translateBackrefs(s string) string {
+	// Escape any existing literal $ first so we do not accidentally
+	// introduce a Go-style backref from the rule's text.
+	s = strings.ReplaceAll(s, "$", "$$")
+	// Then map \N (1..9) to $N. \\N (escaped backslash) stays as \N.
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '\\' {
+			c := s[i+1]
+			if c >= '1' && c <= '9' {
+				b.WriteByte('$')
+				b.WriteByte(c)
+				i += 2
+				continue
+			}
+			if c == '\\' {
+				b.WriteByte('\\')
+				b.WriteByte('\\')
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }

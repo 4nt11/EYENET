@@ -5,17 +5,22 @@ import (
 	"sort"
 )
 
-// Hit is one (rule, file, BulkParse result) emission from StreamRules.
-// Records may be empty when the rule's regex didn't actually match
-// anything in the file; emit callers use that to decide whether to
-// forward the hit downstream. PanicMsg is non-empty when BulkParse
-// panicked on this (rule, file) pair; in that case Records is nil
-// and the caller should surface the error without rolling back the
-// whole stream.
+// Hit is one (rule, file) emission summary from StreamRunRules, fired
+// AFTER every record for that (rule, file) pair has been pushed through
+// the per-record onRecord callback. Carries metadata only (counts +
+// panic marker); the records themselves stream out via onRecord so no
+// slice accumulation happens at the engine level.
+//
+// v1.3.11: Records was a []map[string]any; held 1.93 GiB on a 131 MB
+// ULP drop because every (rule, file) pair materialised ~1.92M records
+// before the caller saw any of them. Dropped for streaming semantics.
+//
+// PanicMsg is non-empty when BulkParse panicked on this (rule, file)
+// pair; in that case TotalSeen is 0 and the caller surfaces the error
+// without rolling back the whole stream.
 type Hit struct {
 	Rule      Rule
 	FilePath  string
-	Records   []map[string]any
 	Truncated bool
 	TotalSeen int
 	PanicMsg  string
@@ -45,13 +50,17 @@ type PathLoader func(relPath string) (string, error)
 // Returns the container-rule family (nil when no container rule matched,
 // mirrors the RunRules behaviour) and a map of rule_id -> total record
 // count so the daemon can bill rules_fired in run_done.
+// onRecord fires once per record, in the same goroutine as StreamRunRules;
+// return a non-nil error to abort the stream. onHit fires once per
+// (rule, file) summary after all records for that pair have been pushed.
 func StreamRunRules(
 	rules []Rule,
 	paths []string,
 	loader PathLoader,
 	bulkLimit int,
 	verdict func(family any),
-	emit func(Hit) error,
+	onRecord func(rule Rule, filePath string, record map[string]any) error,
+	onHit func(Hit) error,
 ) (family any, rulesFired map[string]int, err error) {
 	// L1: container winner = highest priority matched container rule.
 	// Uses path strings only; zero I/O.
@@ -126,12 +135,25 @@ func StreamRunRules(
 		}
 		file := ContentInput{Path: path, Text: text}
 		for _, r := range toRun {
-			bulk, panicMsg := safeBulkParseStream(r, file, bulkLimit)
+			var emitted int
+			var emitErr error
+			yield := func(rec map[string]any) bool {
+				if eerr := onRecord(r, path, rec); eerr != nil {
+					emitErr = eerr
+					return false
+				}
+				emitted++
+				return true
+			}
+			meta, panicMsg := safeBulkParseStream(r, file, bulkLimit, yield)
+			if emitErr != nil {
+				return family, rulesFired, emitErr
+			}
 			if panicMsg != "" {
 				// A single rule panicking on a single file is a data
 				// concern, not a stream-level failure. Surface it so
 				// the caller can log/emit the error, then continue.
-				if eerr := emit(Hit{
+				if eerr := onHit(Hit{
 					Rule:     r,
 					FilePath: path,
 					PanicMsg: panicMsg,
@@ -140,19 +162,18 @@ func StreamRunRules(
 				}
 				continue
 			}
-			if len(bulk.Records) == 0 && !bulk.Truncated {
+			if emitted == 0 && !meta.Truncated {
 				continue
 			}
-			if eerr := emit(Hit{
+			if eerr := onHit(Hit{
 				Rule:      r,
 				FilePath:  path,
-				Records:   bulk.Records,
-				Truncated: bulk.Truncated,
-				TotalSeen: bulk.Total,
+				Truncated: meta.Truncated,
+				TotalSeen: meta.Total,
 			}); eerr != nil {
 				return family, rulesFired, eerr
 			}
-			rulesFired[r.ID] += len(bulk.Records)
+			rulesFired[r.ID] += emitted
 		}
 		// text falls out of scope after this iteration; GC reclaims
 		// the file content before the next path is loaded.
@@ -164,11 +185,14 @@ func StreamRunRules(
 // malformed file taking down one rule's parser does not abort the entire
 // archive stream. Mirrors the daemon's historical safeBulkParse but lives
 // in the engine package so StreamRunRules can own its own resilience.
-func safeBulkParseStream(r Rule, file ContentInput, limit int) (result BulkResult, panicMsg string) {
+func safeBulkParseStream(
+	r Rule, file ContentInput, limit int,
+	yield func(map[string]any) bool,
+) (meta BulkMeta, panicMsg string) {
 	defer func() {
 		if p := recover(); p != nil {
 			panicMsg = fmt.Sprintf("%v", p)
 		}
 	}()
-	return BulkParse(r, file, limit), ""
+	return BulkParse(r, file, limit, yield), ""
 }
