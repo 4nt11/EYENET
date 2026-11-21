@@ -40,9 +40,33 @@ journal for sensitive evidence, every access logged with a reason.
   Telegram's category cap.
 - **Matrix** (nio), always-invisible (`set_presence=offline` is hard-coded, no
   operator knob), multi-account.
-- **Forum collector** for MyBB-shaped boards (DDoS-Guard clearnet + Tor onion
-  paths), warmed cookie jars, JA3-impersonated TLS via curl-cffi, measured
-  evasion presets.
+- **Forum collector** for MyBB-shaped boards, bypasses measured live against
+  real walls:
+  - **Clearnet, DDoS-Guard + Cloudflare**: TLS is impersonated as real
+    Firefox via `curl-cffi` (target `firefox147`, mirroring the Firefox 152
+    browser that minted the cookie jar), not httpx, because httpx's OpenSSL
+    ClientHello is an unmistakable "Python" tell (35 ciphers, HTTP/1.1).
+    For strict Cloudflare JA4 walls the collector forces exact cipher +
+    signature-algorithm lists via `extra_fp`, captured with
+    `development/poc-browser/capture_ja3.py`.
+  - **Tor onion path**: stays on httpx. Tor wraps the TLS so JA3
+    impersonation is moot through the onion.
+  - **Warmed cookie jars**: UA, JA3/JA4, and cookie-mint browser must all
+    be the same Firefox; a mismatch is a stronger ban signal than no
+    impersonation at all. Jars + accounts are rotated, and spares are kept
+    warm because DDoS-Guard bans the *account*, not the IP.
+  - **Evasion presets**: `smash` / T4 (0.5 to 1.5 seconds between requests)
+    rides clean on raidforums-shaped targets; sustained near-max is
+    deliberately *not* used until bursty human-hours windowing lands,
+    because the wall is per-account rate logic, not the DDoS-Guard
+    volumetric gate.
+  - **Header + decoder coherence**: `Accept-Encoding` is omitted on
+    purpose so each client advertises only the codecs it can actually
+    inflate (gzip/deflate/br/zstd on httpx, curl-cffi sets its own).
+  - **Relative-date parsing** (`Today, HH:MM`, `N hours ago`) is treated
+    as load-bearing: substituting `now()` for a missing timestamp would
+    manufacture false recency and misstamp an old leak as fresh, so the
+    parser raises hard instead of guessing.
 - **Discovery/anchor** services that push candidates into the monitor queue
   and resolve mentions.
 
