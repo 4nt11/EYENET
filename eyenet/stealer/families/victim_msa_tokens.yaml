@@ -1,0 +1,53 @@
+slug: victim_msa_tokens
+name: Microsoft account / Xbox Live session tokens
+status: active
+kind: content
+schema: 2
+first_seen_year: 2020
+aliases: [msa-tokens, xsts-tokens, xbox-live-tokens]
+signature_files:
+  - CredentialsWindows.txt
+loaders: []
+distribution_channels:
+  - inside stealer-log drops (any stealer that calls CredEnumerate and
+    DPAPI-unwraps the MSA / Xbox credential blobs)
+references:
+  - title: Xbox Secure Token Service (XSTS) overview
+    url: https://learn.microsoft.com/en-us/gaming/gdk/_content/gc/live/overview/live_xsts
+  - title: Microsoft account identity token flow
+    url: https://learn.microsoft.com/en-us/graph/auth/
+notes: >
+  Microsoft Account (MSA) session tokens leaked from victim machines,
+  across multiple serialisation shapes. Carved out of the generic
+  windows_credentials family in v1.3.11.1: on prod the windows
+  _credentials row-set came back 52% JSON blob instead of plaintext
+  passwords, and all of them were MSA tokens of one flavour or
+  another. Carving gives operators a dedicated query axis (filter by
+  relying_party, pivot by msa_user_id) without wading through
+  plaintext credential records.
+
+  This family is a BUCKET for multiple rules, one per captured
+  serialisation shape. Current coverage:
+
+    credentials_windows_xsts_jwt   XSTS / Xbox Live JSON-wrapped
+                                   JWTs (Xbox Live, PlayFab, Epic
+                                   Online Services, bethesda.net).
+                                   Keys serialised in deterministic
+                                   order: MsaUserId / HasSignInDisplay
+                                   Claims / IdentityType / Environment
+                                   / Sandbox / TokenType / RelyingParty
+                                   / SubRelyingParty / TokenData.
+
+  Known-not-yet-covered shapes, each will land as its own rule when
+  samples surface:
+    - OAuth refresh tokens in a different Pass serialisation (Epic
+      Games EOS SDK, some Roblox entries)
+    - graph.microsoft.com SSO blobs
+    - older binary PRT (Primary Refresh Token) wrappings
+    - Chromium-Edge `Web Data` MSA entries
+
+  Every token in the family is a session replay primitive: present
+  it to the named service as the victim without touching the MSA
+  password or any MFA challenge. TTLs range from hours (XSTS) to
+  weeks (refresh tokens); is_expired semantics come for free via the
+  exp claim inside each JWT or the service-specific metadata.
