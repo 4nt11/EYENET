@@ -155,17 +155,20 @@ class StealerCredsReader:
         of extracted_records with FINAL + uniqExact (O(N)). After: one
         single-row read + three small GROUP BY/ORDER BY/LIMIT scans over
         pre-aggregated rollup tables (O(1)-ish regardless of corpus size).
-        unique_creds + distinct_hosts are HLL approximations (~1% error).
+        v1.3.12.1: all four columns are uniqHLL12 approximations (~2.5%
+        error). uniqExact state grew unbounded with cardinality and was
+        OOMing the merges; dashboard counters do not need exact precision.
         """
         top_param: dict[str, object] = {"top": int(top)}
         try:
             client = await self._c()
             # self._db is operator config, not user input; no injection risk.
-            # v1.3.1: total_creds is now AggregateFunction(uniqExact, identity),
-            # so uniqExactMerge instead of sum. Reindex-safe by construction.
+            # v1.3.12.1: total_creds + unique_creds + distinct_hosts are all
+            # AggregateFunction(uniqHLL12, ...); uniqHLL12Merge decodes the
+            # fixed ~2.5 KB HLL sketch to a scalar.
             sql_totals = (
-                "SELECT uniqExactMerge(total_creds), uniqMerge(unique_creds),"  # noqa: S608
-                f" uniqMerge(distinct_hosts) FROM {self._db}.stats_rollup_totals"  # nosec B608
+                "SELECT uniqHLL12Merge(total_creds), uniqHLL12Merge(unique_creds),"  # noqa: S608
+                f" uniqHLL12Merge(distinct_hosts) FROM {self._db}.stats_rollup_totals"  # nosec B608
             )
             result = await client.query(sql_totals)
             scalars = result.result_rows[0]
@@ -177,19 +180,19 @@ class StealerCredsReader:
             raise
         by_scheme, by_tld, top_hosts = await asyncio.gather(
             self._buckets(
-                f"SELECT scheme, uniqExactMerge(cnt) c "  # noqa: S608  # nosec B608
+                f"SELECT scheme, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_scheme "
                 "GROUP BY scheme ORDER BY c DESC",
                 {},
             ),
             self._buckets(
-                f"SELECT tld, uniqExactMerge(cnt) c "  # noqa: S608  # nosec B608
+                f"SELECT tld, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_tld "
                 "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}",
                 top_param,
             ),
             self._buckets(
-                f"SELECT host, uniqExactMerge(cnt) c "  # noqa: S608  # nosec B608
+                f"SELECT host, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_host "
                 "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}",
                 top_param,

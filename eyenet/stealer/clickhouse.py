@@ -152,13 +152,13 @@ _EXTRACTED_ROWS_PER_FILE_MV = f"""
     SELECT
         archive_sha256,
         file_path,
-        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     GROUP BY archive_sha256, file_path
     """  # noqa: S608  # nosec B608
 _EXTRACTED_ROWS_PER_FILE_BACKFILL = f"""
     INSERT INTO {{db}}.extracted_rows_per_file
-    SELECT archive_sha256, file_path, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+    SELECT archive_sha256, file_path, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE NOT EXISTS (SELECT 1 FROM {{db}}.extracted_rows_per_file)
     GROUP BY archive_sha256, file_path
@@ -420,13 +420,13 @@ _VICTIM_COUNTS: tuple[str, ...] = (
 )
 
 # v1.3.5 flat-counts sibling for extracted_rows_per_file. Same pattern as
-# victim_counts: the base AggregatingMergeTree keeps heavy uniqExactState
-# columns for reindex-idempotent exactness; a ReplacingMergeTree sibling
+# victim_counts: the base AggregatingMergeTree keeps the aggregate state
+# column for reindex-idempotent dedup; a ReplacingMergeTree sibling
 # holds the finalized plain UInt64 scalars, refreshed every 5 minutes by a
 # REFRESHABLE MV. file_tree + _coverage read from here instead of paying
-# ~1.4s of uniqExactState deserialization on every click. Measured on prod:
-# query_duration_ms 1799 / cpu_us 2_422_632 on the base table dropped to
-# tens of ms on the flat sibling.
+# the base table's aggregate-state deserialization on every click.
+# v1.3.12.1 swapped the base from uniqExact -> uniqHLL12 to cap per-bucket
+# state at ~2.5 KiB (counts are a dashboard stat, ~2.5% error is fine).
 _EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
     """
     CREATE TABLE IF NOT EXISTS {db}.extracted_rows_per_file_counts
@@ -447,7 +447,7 @@ _EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
     AS SELECT
         archive_sha256,
         file_path,
-        uniqExactMerge(cnt) AS n,
+        uniqHLL12Merge(cnt) AS n,
         now() AS refreshed_at
     FROM {db}.extracted_rows_per_file
     GROUP BY archive_sha256, file_path
@@ -712,9 +712,9 @@ _STATS_ROLLUP_TOTALS_MV = f"""
     TO {{db}}.stats_rollup_totals AS
     SELECT
         'all' AS bucket,
-        uniqExactState({_IDENTITY_TUPLE_DDL}) AS total_creds,
-        uniqState(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
-        uniqState({_HOST_EXPR_DDL}) AS distinct_hosts
+        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS total_creds,
+        uniqHLL12State(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
+        uniqHLL12State({_HOST_EXPR_DDL}) AS distinct_hosts
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE}
     GROUP BY bucket
@@ -724,7 +724,7 @@ _STATS_ROLLUP_SCHEME_MV = f"""
     TO {{db}}.stats_rollup_scheme AS
     SELECT
         {_SCHEME_EXPR_DDL} AS scheme,
-        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
     GROUP BY scheme
@@ -734,7 +734,7 @@ _STATS_ROLLUP_TLD_MV = f"""
     TO {{db}}.stats_rollup_tld AS
     SELECT
         {_TLD_EXPR_DDL} AS tld,
-        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
     GROUP BY tld
@@ -744,7 +744,7 @@ _STATS_ROLLUP_HOST_MV = f"""
     TO {{db}}.stats_rollup_host AS
     SELECT
         {_HOST_EXPR_DDL} AS host,
-        uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
     GROUP BY host
@@ -753,9 +753,9 @@ _STATS_ROLLUP_TOTALS_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_totals
     SELECT
         'all' AS bucket,
-        uniqExactState({_IDENTITY_TUPLE_DDL}) AS total_creds,
-        uniqState(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
-        uniqState({_HOST_EXPR_DDL}) AS distinct_hosts
+        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS total_creds,
+        uniqHLL12State(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
+        uniqHLL12State({_HOST_EXPR_DDL}) AS distinct_hosts
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE}
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_totals)
@@ -763,7 +763,7 @@ _STATS_ROLLUP_TOTALS_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_SCHEME_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_scheme
-    SELECT {_SCHEME_EXPR_DDL} AS scheme, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+    SELECT {_SCHEME_EXPR_DDL} AS scheme, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_scheme)
@@ -771,7 +771,7 @@ _STATS_ROLLUP_SCHEME_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_TLD_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_tld
-    SELECT {_TLD_EXPR_DDL} AS tld, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+    SELECT {_TLD_EXPR_DDL} AS tld, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_tld)
@@ -779,7 +779,7 @@ _STATS_ROLLUP_TLD_BACKFILL = f"""
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_HOST_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_host
-    SELECT {_HOST_EXPR_DDL} AS host, uniqExactState({_IDENTITY_TUPLE_DDL}) AS cnt
+    SELECT {_HOST_EXPR_DDL} AS host, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_host)
@@ -791,9 +791,9 @@ _STATS_ROLLUP: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_totals
     (
         bucket         LowCardinality(String),
-        total_creds    AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        unique_creds   AggregateFunction(uniq, Tuple(String, String, String)),
-        distinct_hosts AggregateFunction(uniq, String)
+        total_creds    AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        unique_creds   AggregateFunction(uniqHLL12, Tuple(String, String, String)),
+        distinct_hosts AggregateFunction(uniqHLL12, String)
     )
     ENGINE = AggregatingMergeTree
     ORDER BY bucket
@@ -804,7 +804,7 @@ _STATS_ROLLUP: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_scheme
     (
         scheme LowCardinality(String),
-        cnt    AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
+        cnt    AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY scheme
@@ -815,7 +815,7 @@ _STATS_ROLLUP: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_tld
     (
         tld LowCardinality(String),
-        cnt AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
+        cnt AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY tld
@@ -826,7 +826,7 @@ _STATS_ROLLUP: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_host
     (
         host String,
-        cnt  AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
+        cnt  AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY host
@@ -887,7 +887,7 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
     (
         archive_sha256 FixedString(64),
         file_path      String,
-        cnt            AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE})
+        cnt            AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE})
     )
     ENGINE = AggregatingMergeTree
     ORDER BY (archive_sha256, file_path)
