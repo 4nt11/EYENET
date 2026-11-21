@@ -16,9 +16,9 @@
   </span>
   <span class="value" style="color:{color};">
     {value}{#if unit}<span class="unit">{unit}</span>{/if}
-    {#if sub}<span class="inline-sub">{sub}</span>{/if}
     {#if loader}<span class="spin"><CircleNotch size={14} weight="regular" /></span>{/if}
   </span>
+  {#if sub}<span class="sub">{sub}</span>{/if}
 </div>
 
 <style>
@@ -36,7 +36,7 @@
   .label :global(svg) { flex: 0 0 auto; color: var(--text-faint); }
   .value { display: inline-flex; align-items: baseline; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-22); font-weight: var(--fw-medium); letter-spacing: var(--tracking-data); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .unit { font-size: var(--fs-13); color: var(--text-muted); margin-left: 3px; }
-  .inline-sub { font-family: var(--font-mono); font-size: var(--fs-13); letter-spacing: var(--tracking-data); color: var(--text-faint); font-weight: var(--fw-regular); }
+  .sub { display: block; font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: var(--tracking-data); color: var(--text-faint); font-weight: var(--fw-regular); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spin { display: inline-flex; align-items: center; color: var(--accent-text); animation: spin 1.6s linear infinite; }
   @keyframes spin {
     from { transform: rotate(0deg); }

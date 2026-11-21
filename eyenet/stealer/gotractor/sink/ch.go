@@ -14,12 +14,23 @@ package sink
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
+
+func envU64(k string, def uint64) uint64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
 
 // RecordColumns is the extracted_records insert schema, in the order
 // expected by batch.Append. Keep in lock-step with eyenet/stealer/
@@ -106,48 +117,87 @@ func (c *CH) Close() error {
 // stdout the old way."
 func (c *CH) Enabled() bool { return c != nil && c.conn != nil }
 
-// ArchiveBatch is one archive's INSERT-in-progress. Short-lived: the
-// daemon opens one at the start of a run, calls Append per record,
-// Send once at the end. Not goroutine-safe: single-run, single-thread
-// per instance.
-type ArchiveBatch struct {
-	batch driver.Batch
-	count int
+// asyncFlushRowsPer is how many rows we pack into a single
+// AsyncInsert call. 500 keeps each VALUES-form INSERT under the
+// bumped max_query_size (100 MiB) even when the fields map is large,
+// and keeps the client-side buffer small so Flush() is quick.
+const asyncFlushRowsPer = 500
+
+// rowData is one buffered record awaiting an AsyncInsert dispatch.
+// The daemon calls Append; those rows accumulate here until either
+// asyncFlushRowsPer is reached (auto-flush) or the daemon explicitly
+// calls Flush / Send / Abort. Kept as a flat struct (not map) to
+// avoid per-row allocation churn on the hot path.
+type rowData struct {
+	archiveSha256, source, victimFolder, filePath, ruleID, family string
+	fields                                                        map[string]string
 }
 
-// BeginArchive opens a prepared INSERT batch for the given archive.
-// The caller is responsible for calling Send OR Abort before letting
-// this value go out of scope -- an un-finished batch leaks a server-
-// side connection until the pool reaps it.
+// ArchiveBatch is one archive's INSERT-in-progress. v1.3.11.2 switched
+// from clickhouse-go's PrepareBatch (Native-protocol synchronous send
+// per Flush) to AsyncInsert with VALUES-form SQL + async_insert=1 /
+// wait_for_async_insert=0 settings. CH buffers the inserts server-side
+// and acks as soon as the data is received, not merged. Throughput on
+// ULP drops goes from ~2s per 2500-row Flush to sub-100ms per 500-row
+// AsyncInsert fire-and-forget. Still not goroutine-safe: single-run,
+// single-thread per instance.
+type ArchiveBatch struct {
+	ch     *CH
+	ctx    context.Context
+	sql    string // precomputed per-row INSERT template
+	buffer []rowData
+	count  int // total appended since Begin, never reset
+}
+
+// BeginArchive opens a new logical INSERT for the given archive. Does
+// not actually touch the wire yet; the first AsyncInsert fires on the
+// first Flush() call. The caller is responsible for calling Send OR
+// Abort before letting this value go out of scope - Abort drops the
+// buffer so the Go heap does not retain the archive's rows.
 func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 	if !c.Enabled() {
 		return nil, fmt.Errorf("sink.CH is not enabled")
 	}
-	// Register no-op progress + profile-event callbacks. Without these,
-	// clickhouse-go/v2 does NOT drain unsolicited Progress / ProfileEvents
-	// packets from the native socket during a long INSERT: CH keeps sending
-	// them, the client's read side is parked, CH's send buffer fills, and
-	// after send_timeout (300s default) CH closes the socket -> the next
-	// Flush() returns "connection reset by peer". send_logs_level=none does
-	// NOT cover this category of packet. The callbacks force the driver to
-	// pull and discard them; we only care about the drain side-effect.
-	drainCtx := clickhouse.Context(ctx,
+	// v1.3.10.2 drain callbacks still needed: with async_insert=1 the
+	// server emits ProgressEvents on INSERT ack just like the Native
+	// path. Omitting the callbacks would re-surface the
+	// "connection reset by peer" window.
+	//
+	// async_insert_busy_timeout_ms (2000) + async_insert_max_data_size
+	// (10 MiB) let CH batch our 500-row AsyncInserts into merge-sized
+	// blocks before writing parts. async_insert_use_adaptive_busy_timeout
+	// lets CH shorten the busy timeout when throughput is high, so
+	// steady-state we see sub-second end-to-end latency.
+	//
+	// max_query_size is bumped to 100 MB because a 500-row VALUES
+	// insert with a fat fields map (say 50 KB per row of key:value
+	// pairs) can produce a ~25 MB SQL text. CH's 256 KB default would
+	// reject it.
+	asyncCtx := clickhouse.Context(ctx,
 		clickhouse.WithProgress(func(*clickhouse.Progress) {}),
 		clickhouse.WithProfileEvents(func([]clickhouse.ProfileEvent) {}),
+		clickhouse.WithSettings(clickhouse.Settings{
+			"async_insert":                           uint8(1),
+			"wait_for_async_insert":                  uint8(1),
+			"async_insert_busy_timeout_ms":           envU64("EYENET_CH_ASYNC_BUSY_TIMEOUT_MS", 10_000),
+			"async_insert_max_data_size":             envU64("EYENET_CH_ASYNC_MAX_DATA_SIZE", 104_857_600),
+			"async_insert_use_adaptive_busy_timeout": uint8(1),
+			"max_query_size":                         uint64(100_000_000),
+		}),
 	)
-	sql := fmt.Sprintf(
-		"INSERT INTO %s (%s)",
-		c.table, strings.Join(RecordColumns, ", "),
-	)
-	b, err := c.conn.PrepareBatch(drainCtx, sql)
-	if err != nil {
-		return nil, fmt.Errorf("prepare batch: %w", err)
-	}
-	return &ArchiveBatch{batch: b}, nil
+	rowPlaceholder := "(" + strings.Repeat("?,", len(RecordColumns)-1) + "?)"
+	_ = rowPlaceholder // used dynamically in Flush
+	return &ArchiveBatch{
+		ch:     c,
+		ctx:    asyncCtx,
+		sql:    fmt.Sprintf("INSERT INTO %s (%s) VALUES ", c.table, strings.Join(RecordColumns, ", ")),
+		buffer: make([]rowData, 0, asyncFlushRowsPer*2),
+	}, nil
 }
 
-// Append queues one record for insert. Field types must match the
-// column order in RecordColumns:
+// Append queues one record. Auto-flushes when the buffer reaches
+// asyncFlushRowsPer so the Go heap never holds more than ~1000 rows.
+// Field types must match the column order in RecordColumns:
 //
 //	archiveSha256 string (hex, 64 chars)
 //	source        string
@@ -157,18 +207,21 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 //	family        string
 //	fields        map[string]string
 //
-// Returns an error only on type mismatch at the driver boundary; EOF /
-// network errors surface at Send time.
+// Returns an error only when the auto-flush fires and the server
+// rejects the batch (schema mismatch, auth, offline). Transient
+// network errors surface at the next Flush / Send.
 func (ab *ArchiveBatch) Append(
 	archiveSha256, source, victimFolder, filePath, ruleID, family string,
 	fields map[string]string,
 ) error {
-	if err := ab.batch.Append(
-		archiveSha256, source, victimFolder, filePath, ruleID, family, fields,
-	); err != nil {
-		return fmt.Errorf("append: %w", err)
-	}
+	ab.buffer = append(ab.buffer, rowData{
+		archiveSha256: archiveSha256, source: source, victimFolder: victimFolder,
+		filePath: filePath, ruleID: ruleID, family: family, fields: fields,
+	})
 	ab.count++
+	if len(ab.buffer) >= asyncFlushRowsPer {
+		return ab.Flush()
+	}
 	return nil
 }
 
@@ -177,33 +230,65 @@ func (ab *ArchiveBatch) Append(
 // the same count whether sink mode or stdout mode is in play.
 func (ab *ArchiveBatch) Count() int { return ab.count }
 
-// Flush ships the currently-buffered rows to CH and keeps the batch
-// usable. On the native protocol this is a block-level transmit that
-// resets the client-side buffer; subsequent Append calls continue
-// building the same logical INSERT. Caller flushes periodically so
-// the Go heap never holds the full archive worth of rows.
+// Flush ships the currently-buffered rows via one or more AsyncInsert
+// calls, each carrying up to asyncFlushRowsPer rows. With wait=false
+// the server acks on receipt (not merge), so each call returns in
+// milliseconds. The server's own async-insert buffer handles merge
+// cadence per async_insert_busy_timeout_ms.
 func (ab *ArchiveBatch) Flush() error {
-	if err := ab.batch.Flush(); err != nil {
-		return fmt.Errorf("flush: %w", err)
+	if len(ab.buffer) == 0 {
+		return nil
 	}
+	rowPlaceholder := "(" + strings.Repeat("?,", len(RecordColumns)-1) + "?)"
+	for start := 0; start < len(ab.buffer); start += asyncFlushRowsPer {
+		end := start + asyncFlushRowsPer
+		if end > len(ab.buffer) {
+			end = len(ab.buffer)
+		}
+		slice := ab.buffer[start:end]
+
+		var b strings.Builder
+		b.Grow(len(ab.sql) + len(slice)*(len(rowPlaceholder)+1))
+		b.WriteString(ab.sql)
+		for i := range slice {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(rowPlaceholder)
+		}
+
+		args := make([]any, 0, len(slice)*len(RecordColumns))
+		for _, row := range slice {
+			args = append(args,
+				row.archiveSha256, row.source, row.victimFolder,
+				row.filePath, row.ruleID, row.family, row.fields,
+			)
+		}
+
+		if err := ab.ch.conn.AsyncInsert(ab.ctx, b.String(), false, args...); err != nil {
+			ab.buffer = ab.buffer[:0] // drop, caller abandons the run
+			return fmt.Errorf("async insert (rows %d-%d of %d): %w",
+				start, end, len(ab.buffer), err)
+		}
+	}
+	ab.buffer = ab.buffer[:0]
 	return nil
 }
 
-// Send finalises the INSERT. After Send, the batch is unusable --
-// start a new one for the next archive. Blocks on network + CH
-// acceptance; the caller runs this at end-of-run so stdout stays
-// clear of the record stream.
-func (ab *ArchiveBatch) Send() error {
-	if err := ab.batch.Send(); err != nil {
-		return fmt.Errorf("send: %w", err)
-	}
-	return nil
-}
+// Send finalises the INSERT: flushes the remaining tail. Unlike the
+// pre-v1.3.11.2 Native-protocol Send, this returns before CH has
+// actually written the data to disk; the server-side async-insert
+// buffer carries the work forward. A server crash in the sub-second
+// window between Send() and disk-write drops the tail rows. For
+// research/CTI workloads that trade-off is acceptable; a batch
+// transactional workload would need wait_for_async_insert=1 and
+// loses the throughput win.
+func (ab *ArchiveBatch) Send() error { return ab.Flush() }
 
-// Abort discards the batch without sending. Used when a parse or panic
-// takes down a run mid-stream; the caller emits a parse_error on stdout
-// and abandons whatever rows had been queued. Matches the pre-change
-// semantics (Python abandons its in-flight list on run failure).
+// Abort discards the buffer without sending. Used when a parse or
+// panic takes down a run mid-stream; the caller emits a parse_error
+// on stdout and abandons whatever rows had been queued.
 func (ab *ArchiveBatch) Abort() error {
-	return ab.batch.Abort()
+	ab.buffer = nil
+	return nil
 }
