@@ -66,7 +66,7 @@ class GotractorDaemon:
         rules_dir: Path | str,
         families_dir: Path | str,
         metrics_port: int | None = None,
-        bulk_limit: int = 100_000,
+        bulk_limit: int = 10_000_000,
     ) -> None:
         self._rules_dir = str(rules_dir)
         self._families_dir = str(families_dir)

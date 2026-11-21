@@ -58,7 +58,13 @@ func main() {
 	familiesDir := flag.String("families-dir", envOr("EYENET_STEALER_FAMILIES_DIR", ""), "family catalog directory")
 	input := flag.String("input", "", "victim folder (or single file) to evaluate (records / summary)")
 	mode := flag.String("mode", "records", "records | summary | daemon | selftest | extract-wallets")
-	limit := flag.Int("limit", 100000, "bulkParse record cap per file per rule")
+	// v1.3.11.1: default raised from 100000 to 10M. Pre-v1.3.11 BulkParse
+	// accumulated records in a slice, so 100k was a sane memory guard.
+	// Post-streaming the memory bound is one-record-in-flight, and the
+	// 100k cap was silently truncating raw ULP drops (~1.9M lines per
+	// 131 MB file) at 5% yield. 10M stays conservative for genuinely
+	// pathological rules while unblocking normal corpora.
+	limit := flag.Int("limit", 10_000_000, "bulkParse record cap per file per rule")
 	metricsPort := flag.Int("metrics-port", 0, "daemon: bind Prometheus /metrics on this port (0 disables)")
 	showVersion := flag.Bool("version", false, "print build identity (version, commit, build time) and exit")
 	// v1.4.0: direct-to-ClickHouse ingestion. When set the daemon inserts
