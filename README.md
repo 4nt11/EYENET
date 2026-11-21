@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<meta name="google-site-verification" content="FQ0HUlE1sZ6s494L094ldtIXJKxBJ1xhv8WfuWGrw7E" />
 
 > # :rotating_light: HEY MORON, THIS PROJECT IS IN EXPERIMENTAL PHASE. :rotating_light:
 > # USE AT YOUR OWN RISK! :3
