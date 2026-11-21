@@ -26,11 +26,28 @@ type Hit struct {
 	PanicMsg  string
 }
 
-// PathLoader reads a file's content on demand. Paths are relative to
-// the folder root; the loader implementation is responsible for the
-// actual I/O. Returning a non-nil error causes the engine to skip the
-// file; the stream continues with the next path.
-type PathLoader func(relPath string) (string, error)
+// PathLoader streams a file's content to the engine in one or more
+// chunks. The loader opens the file, reads a window (default 16 MiB)
+// at a time with a trailing overlap (default 64 KiB) prepended to the
+// next window, and invokes yield once per chunk. isLast is true on the
+// final chunk so the engine can drop any cross-chunk state.
+//
+// Small files (smaller than the window size) are delivered as a single
+// chunk with isLast=true; behaviour is identical to the pre-v1.3.12
+// single-string loader. Only very large files (ULP drops, raw memory
+// dumps) materialise multiple chunks.
+//
+// v1.3.12: was `func(rel string) (string, error)`. Reading whole files
+// pinned 1.65 GiB of heap on a single prod ULP (daemon.listArchive.func3
+// pprof trace). The streaming API lets the daemon's loader keep peak
+// RSS flat regardless of input size; the CH sink's ReplacingMergeTree
+// key `(archive_sha256, rule_id, file_path, cityHash64(fields))` dedupes
+// any over-emission from the overlap region, so the engine does not
+// need to track byte offsets.
+//
+// Returning a non-nil error from the loader (or from yield) aborts the
+// per-path stream. The archive stream continues with the next path.
+type PathLoader func(relPath string, yield func(chunk string, isLast bool) error) error
 
 // StreamRunRules is the memory-bounded counterpart to RunRules. L1
 // container pass runs on paths only (no I/O for container rules). L3
@@ -44,8 +61,13 @@ type PathLoader func(relPath string) (string, error)
 // of archive size. Files no content rule globs match are never read;
 // binary cookie DBs and other non-rule assets cost zero I/O + zero RAM.
 //
-// bulkLimit bounds records per (rule, file) pair; same semantics as the
-// non-streaming BulkParse.
+// v1.3.12: bulkLimit parameter removed. The pre-streaming engine capped
+// records per (rule, file) to protect the daemon's heap. With the file
+// loader now streaming chunks AND the CH sink streaming inserts, the
+// only valid backpressure signal is CH refusing the next AsyncInsert;
+// a Go-side counter dropping rows on the floor to spare CH's feelings
+// is exactly what v1.3.11.1 did wrong (6.6 M records lost on the first
+// prod archive).
 //
 // Returns the container-rule family (nil when no container rule matched,
 // mirrors the RunRules behaviour) and a map of rule_id -> total record
@@ -57,7 +79,6 @@ func StreamRunRules(
 	rules []Rule,
 	paths []string,
 	loader PathLoader,
-	bulkLimit int,
 	verdict func(family any),
 	onRecord func(rule Rule, filePath string, record map[string]any) error,
 	onHit func(Hit) error,
@@ -127,56 +148,81 @@ func StreamRunRules(
 			// No content rule cares about this path. Skip load entirely.
 			continue
 		}
-		text, rerr := loader(path)
-		if rerr != nil {
+		// Per-rule accumulators for the HIT summary. Chunked loaders may
+		// invoke the yield closure many times; we tally emitted and
+		// TotalSeen across all chunks and fire onHit once per (rule,
+		// file) after the loader returns.
+		emittedByRule := make(map[string]int, len(toRun))
+		totalByRule := make(map[string]int, len(toRun))
+		truncByRule := make(map[string]bool, len(toRun))
+		panicByRule := make(map[string]string, len(toRun))
+		var emitErr error
+		loaderErr := loader(path, func(chunk string, isLast bool) error {
+			file := ContentInput{Path: path, Text: chunk}
+			for _, r := range toRun {
+				if panicByRule[r.ID] != "" {
+					// A prior chunk panicked this rule; skip it on the
+					// remaining chunks so one bad chunk does not keep
+					// re-tripping the same recover.
+					continue
+				}
+				var emitted int
+				yield := func(rec map[string]any) bool {
+					if eerr := onRecord(r, path, rec); eerr != nil {
+						emitErr = eerr
+						return false
+					}
+					emitted++
+					return true
+				}
+				meta, panicMsg := safeBulkParseStream(r, file, yield)
+				emittedByRule[r.ID] += emitted
+				totalByRule[r.ID] += meta.Total
+				if meta.Truncated {
+					truncByRule[r.ID] = true
+				}
+				if panicMsg != "" {
+					panicByRule[r.ID] = panicMsg
+				}
+				if emitErr != nil {
+					return emitErr
+				}
+			}
+			_ = isLast
+			return nil
+		})
+		if emitErr != nil {
+			return family, rulesFired, emitErr
+		}
+		if loaderErr != nil {
 			// Unreadable file is a data concern, not a fatal engine
-			// concern. Skip and continue.
+			// concern. Skip and continue with the next path.
 			continue
 		}
-		file := ContentInput{Path: path, Text: text}
 		for _, r := range toRun {
-			var emitted int
-			var emitErr error
-			yield := func(rec map[string]any) bool {
-				if eerr := onRecord(r, path, rec); eerr != nil {
-					emitErr = eerr
-					return false
-				}
-				emitted++
-				return true
-			}
-			meta, panicMsg := safeBulkParseStream(r, file, bulkLimit, yield)
-			if emitErr != nil {
-				return family, rulesFired, emitErr
-			}
-			if panicMsg != "" {
-				// A single rule panicking on a single file is a data
-				// concern, not a stream-level failure. Surface it so
-				// the caller can log/emit the error, then continue.
-				if eerr := onHit(Hit{
-					Rule:     r,
-					FilePath: path,
-					PanicMsg: panicMsg,
-				}); eerr != nil {
+			if panicMsg := panicByRule[r.ID]; panicMsg != "" {
+				if eerr := onHit(Hit{Rule: r, FilePath: path, PanicMsg: panicMsg}); eerr != nil {
 					return family, rulesFired, eerr
 				}
 				continue
 			}
-			if emitted == 0 && !meta.Truncated {
+			emitted := emittedByRule[r.ID]
+			if emitted == 0 && !truncByRule[r.ID] {
 				continue
 			}
 			if eerr := onHit(Hit{
 				Rule:      r,
 				FilePath:  path,
-				Truncated: meta.Truncated,
-				TotalSeen: meta.Total,
+				Truncated: truncByRule[r.ID],
+				TotalSeen: totalByRule[r.ID],
 			}); eerr != nil {
 				return family, rulesFired, eerr
 			}
 			rulesFired[r.ID] += emitted
 		}
-		// text falls out of scope after this iteration; GC reclaims
-		// the file content before the next path is loaded.
+		// chunk strings from the loader go out of scope as the loader's
+		// yield returns; the loader is expected to reuse its read buffer
+		// so peak RSS stays flat.
 	}
 	return family, rulesFired, nil
 }
@@ -186,7 +232,7 @@ func StreamRunRules(
 // archive stream. Mirrors the daemon's historical safeBulkParse but lives
 // in the engine package so StreamRunRules can own its own resilience.
 func safeBulkParseStream(
-	r Rule, file ContentInput, limit int,
+	r Rule, file ContentInput,
 	yield func(map[string]any) bool,
 ) (meta BulkMeta, panicMsg string) {
 	defer func() {
@@ -194,5 +240,9 @@ func safeBulkParseStream(
 			panicMsg = fmt.Sprintf("%v", p)
 		}
 	}()
-	return BulkParse(r, file, limit, yield), ""
+	// v1.3.12: limit=0 (unbounded) always. BulkParse treats <=0 as
+	// "no cap" and the chunked loader bounds working memory per chunk,
+	// so a 1 GiB input cannot blow the heap the way the single-string
+	// loader used to.
+	return BulkParse(r, file, 0, yield), ""
 }

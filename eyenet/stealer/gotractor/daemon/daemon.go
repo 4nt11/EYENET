@@ -69,7 +69,6 @@ import (
 type Daemon struct {
 	rulesDir    string
 	familiesDir string
-	bulkLimit   int
 
 	// Build identity, populated by main via SetBuildInfo. Surfaced in
 	// the stats command + logged on Serve() so the exact binary behind
@@ -192,15 +191,13 @@ func newMetrics(reg *prometheus.Registry) *metrics {
 
 // New boots a Daemon, loads the initial catalog, and starts the
 // fsnotify watcher. Caller is expected to call Serve to run the loop.
-func New(rulesDir, familiesDir string, bulkLimit int) (*Daemon, error) {
-	if bulkLimit <= 0 {
-		bulkLimit = 100000
-	}
+//
+// v1.3.12: bulkLimit parameter removed. See engine.StreamRunRules doc.
+func New(rulesDir, familiesDir string) (*Daemon, error) {
 	reg := prometheus.NewRegistry()
 	d := &Daemon{
 		rulesDir:    rulesDir,
 		familiesDir: familiesDir,
-		bulkLimit:   bulkLimit,
 		startedAt:   time.Now(),
 		metrics:     newMetrics(reg),
 	}
@@ -532,7 +529,7 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 		return nil
 	}
 
-	_, _, streamErr, runPanic := safeStreamRunRules(rules, paths, loader, d.bulkLimit, verdictEmit, onRecord, onHit)
+	_, _, streamErr, runPanic := safeStreamRunRules(rules, paths, loader, verdictEmit, onRecord, onHit)
 	if runPanic != "" {
 		// Outer-level panic (container-rule eval, glob compile, loader).
 		// Mirrors pre-streaming safeRunRules: one archive-wide
@@ -881,6 +878,76 @@ func anyToString(v any) string {
 //
 // Peak heap under this pattern: one file's content at a time, regardless
 // of archive size. The 4 GB-per-Khazan-archive readFolder peak is gone.
+// chunkedLoadThreshold is the file size (bytes) at or below which the
+// loader reads the whole file into one chunk. Anything larger streams
+// in windowSize-wide chunks with chunkOverlap bytes of overlap between
+// consecutive chunks. 16 MiB is a comfortable trade-off: small enough
+// to keep peak RSS flat, large enough that RE2 setup + GC churn per
+// chunk stay negligible.
+const (
+	chunkedLoadThreshold = 16 * 1024 * 1024 // 16 MiB
+	windowSize           = 16 * 1024 * 1024 // 16 MiB
+	chunkOverlap         = 64 * 1024        // 64 KiB upper bound on any one record match
+)
+
+// streamFile reads `path` in windowSize-wide chunks with chunkOverlap
+// bytes of trailing context prepended to each subsequent chunk, and
+// calls yield(chunk, isLast) once per chunk. Small files (<= threshold)
+// stream as a single chunk. Overlap guarantees any record whose match
+// is shorter than chunkOverlap bytes cannot straddle a window boundary
+// silently; records emitted from the overlap region of the Nth chunk
+// may repeat from the Nth chunk, but ReplacingMergeTree in CH dedupes
+// on the (archive_sha256, rule_id, file_path, cityHash64(fields)) key
+// so the sink absorbs the over-emit.
+func streamFile(path string, yield func(chunk string, isLast bool) error) error {
+	f, oerr := os.Open(path)
+	if oerr != nil {
+		return oerr
+	}
+	defer f.Close()
+	info, serr := f.Stat()
+	if serr != nil {
+		return serr
+	}
+	size := info.Size()
+	if size <= int64(chunkedLoadThreshold) {
+		b, rerr := io.ReadAll(f)
+		if rerr != nil {
+			return rerr
+		}
+		return yield(string(b), true)
+	}
+	// Reused across windows: first chunkOverlap bytes hold the tail of
+	// the previous window; the remaining windowSize-chunkOverlap bytes
+	// get fresh data. The slice is allocated once per file.
+	buf := make([]byte, windowSize)
+	var tail int // bytes carried over from previous window (0 on first pass)
+	for {
+		freshStart := tail
+		freshCap := windowSize - freshStart
+		n, rerr := io.ReadFull(f, buf[freshStart:freshStart+freshCap])
+		if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
+			return rerr
+		}
+		filled := freshStart + n
+		isLast := rerr == io.EOF || rerr == io.ErrUnexpectedEOF || filled < windowSize
+		if filled == 0 {
+			return nil
+		}
+		if err := yield(string(buf[:filled]), isLast); err != nil {
+			return err
+		}
+		if isLast {
+			return nil
+		}
+		// Carry the last chunkOverlap bytes to the front of the next
+		// window. copy() is in-place safe for overlapping src/dst when
+		// src starts at or after dst (true here).
+		copy(buf[:chunkOverlap], buf[filled-chunkOverlap:filled])
+		tail = chunkOverlap
+	}
+}
+
 func listArchive(path string) (rootName string, paths []string, loader engine.PathLoader, err error) {
 	info, serr := os.Stat(path)
 	if serr != nil {
@@ -888,15 +955,11 @@ func listArchive(path string) (rootName string, paths []string, loader engine.Pa
 	}
 	if !info.IsDir() {
 		base := filepath.Base(path)
-		loader = func(rel string) (string, error) {
+		loader = func(rel string, yield func(string, bool) error) error {
 			if rel != base {
-				return "", fmt.Errorf("single-file input only exposes %q", base)
+				return fmt.Errorf("single-file input only exposes %q", base)
 			}
-			b, rerr := os.ReadFile(path)
-			if rerr != nil {
-				return "", rerr
-			}
-			return string(b), nil
+			return streamFile(path, yield)
 		}
 		return base, []string{base}, loader, nil
 	}
@@ -917,12 +980,8 @@ func listArchive(path string) (rootName string, paths []string, loader engine.Pa
 	if werr != nil {
 		return "", nil, nil, werr
 	}
-	loader = func(rel string) (string, error) {
-		b, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if rerr != nil {
-			return "", rerr
-		}
-		return string(b), nil
+	loader = func(rel string, yield func(string, bool) error) error {
+		return streamFile(filepath.Join(root, filepath.FromSlash(rel)), yield)
 	}
 	return filepath.Base(root), paths, loader, nil
 }
@@ -942,7 +1001,6 @@ func safeStreamRunRules(
 	rules []engine.Rule,
 	paths []string,
 	loader engine.PathLoader,
-	bulkLimit int,
 	verdict func(family any),
 	onRecord func(rule engine.Rule, filePath string, record map[string]any) error,
 	onHit func(engine.Hit) error,
@@ -952,6 +1010,6 @@ func safeStreamRunRules(
 			panicMsg = fmt.Sprintf("%v", r)
 		}
 	}()
-	family, rulesFired, runErr = engine.StreamRunRules(rules, paths, loader, bulkLimit, verdict, onRecord, onHit)
+	family, rulesFired, runErr = engine.StreamRunRules(rules, paths, loader, verdict, onRecord, onHit)
 	return family, rulesFired, runErr, ""
 }
