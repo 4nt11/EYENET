@@ -82,6 +82,40 @@ def _any_nonempty_file(root: Path) -> bool:
     return any(f.is_file() and f.stat().st_size > 0 for f in root.rglob("*"))
 
 
+_ARCHIVE_MAGICS: tuple[bytes, ...] = (
+    b"Rar!\x1a\x07",      # RAR 1.5 - 4
+    b"Rar!\x1a\x07\x01",  # RAR 5
+    b"PK\x03\x04",        # ZIP / docx / jar
+    b"PK\x05\x06",        # ZIP (empty)
+    b"PK\x07\x08",        # ZIP (spanned)
+    b"7z\xbc\xaf\x27\x1c",  # 7z
+    b"\x1f\x8b",          # gzip / tar.gz
+    b"\xfd7zXZ\x00",      # xz
+    b"BZh",               # bzip2
+    b"ustar",             # tar POSIX (offset 257, but prefix check is fine as fallback)
+)
+
+
+def _is_plain_text_blob(blob_path: Path) -> bool:
+    """True iff the first 1 KiB has no archive signature and is predominantly
+    printable ASCII/UTF-8. Used to short-circuit the archive extraction ladder
+    for raw ULP .txt drops stored as ``<sha>.bin``. Conservative: 95%
+    printable-or-whitespace cutoff keeps binaries with the occasional ASCII
+    header from accidentally matching."""
+    try:
+        with blob_path.open("rb") as f:
+            head = f.read(1024)
+    except OSError:
+        return False
+    if not head:
+        return False
+    for magic in _ARCHIVE_MAGICS:
+        if head.startswith(magic):
+            return False
+    printable = sum(1 for b in head if b in (0x09, 0x0A, 0x0D) or 0x20 <= b <= 0x7E)
+    return printable / len(head) >= 0.95
+
+
 def _pick_tool(blob_path: Path) -> str:
     """Pick extractor from the override env var, or the first 8 magic bytes:
     RAR to unrar, everything else to 7zz. Override forces one tool."""
@@ -155,13 +189,15 @@ def _extract(blob_path: Path, candidates: list[str], dest: Path) -> tuple[str, s
 
     v1.3.10.1: raw ULP .txt drops (Raven-style "free #NN.txt" lists at GB
     scale) are not archives, they are plain-text url:login:password dumps.
-    Short-circuit: copy the .txt into ``dest`` and let gotractor's combolist
-    rule chew it directly. Previously the pipeline ran the full archive
-    ladder on them, every password failed, and every attachment died as
-    "no password opened the archive".
+    Detection reads the first 1 KiB and checks for known archive magic
+    (RAR / ZIP / 7z / gzip / xz / tar); none of those AND >=95% printable
+    ASCII/UTF-8 means plain text. Short-circuit: copy the blob into
+    ``dest`` and let gotractor's combolist rule chew it directly. The
+    blob on disk is named ``<sha256>.bin`` regardless of the original
+    filename (which lives in postgres), so a suffix check does not work.
     """
-    if blob_path.suffix.lower() == ".txt":
-        shutil.copy2(blob_path, dest / blob_path.name)
+    if _is_plain_text_blob(blob_path):
+        shutil.copy2(blob_path, dest / (blob_path.stem + ".txt"))
         return "", "passthrough"
     primary = _pick_tool(blob_path)
     attempts = [*candidates, ""]  # "" => no password (unencrypted / watermark-only)
