@@ -13,9 +13,11 @@
 # two data dirs to an SSD path (edit the volumes to driver_opts binds).
 # Postgres (the irreplaceable corpus) + ClickHouse local cache MUST be on SSD.
 #
-# RAM budget @ 16 GB (core + stealer): postgres ~2G, clickhouse capped 4G,
-# 12 python workers ~2.5G, nats/tor/flaresolverr ~0.7G, OS ~0.7G, so ~10G total.
-# ~6 G headroom for query/spacy/verifier spikes. Comfortable.
+# RAM budget @ 16 GB (core + stealer): postgres ~2G, clickhouse capped 8G,
+# 12 python workers ~2.5G, nats/tor/flaresolverr ~0.7G, OS ~0.7G, so ~14G total.
+# ~2 G headroom for query/spacy/verifier spikes. Tight but fine since the
+# CH 4G cap was contending with reindex merges and OOMing user queries;
+# doubled to 8G after the v1.3.12.1 HLL12 landing for reindex headroom.
 services:
   # ClickHouse is Wasabi-primary (local disk = cache). Cap it hard so a big
   # query can't balloon and swap the box. CH 24.8 reads the cgroup limit and
@@ -24,7 +26,7 @@ services:
   # ponytail: cgroup-aware cap, add an explicit max_server_memory_usage xml only
   # if CH ever ignores the cgroup limit (it does not on 24.8).
   clickhouse:
-    mem_limit: 4g
+    mem_limit: 8g
     # Wasabi-primary tiered storage: the stealer ULP corpus lives in a Wasabi
     # bucket, with a local SSD cache in front (see clickhouse/config.d/
     # wasabi-storage.xml). Credentials are injected via env vars (from_env in
