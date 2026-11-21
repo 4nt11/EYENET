@@ -56,10 +56,9 @@ journal for sensitive evidence, every access logged with a reason.
     impersonation at all. Jars + accounts are rotated, and spares are kept
     warm because DDoS-Guard bans the *account*, not the IP.
   - **Evasion presets**: `smash` / T4 (0.5 to 1.5 seconds between requests)
-    rides clean on raidforums-shaped targets; sustained near-max is
+    rides clean against measured targets; sustained near-max is
     deliberately *not* used until bursty human-hours windowing lands,
-    because the wall is per-account rate logic, not the DDoS-Guard
-    volumetric gate.
+    because the wall is per-account rate logic, not the volumetric gate.
   - **Header + decoder coherence**: `Accept-Encoding` is omitted on
     purpose so each client advertises only the codecs it can actually
     inflate (gzip/deflate/br/zstd on httpx, curl-cffi sets its own).
@@ -68,7 +67,11 @@ journal for sensitive evidence, every access logged with a reason.
     manufacture false recency and misstamp an old leak as fresh, so the
     parser raises hard instead of guessing.
 - **Discovery/anchor** services that push candidates into the monitor queue
-  and resolve mentions.
+  and resolve mentions. The payoff is **artifact-to-group resolution**: a
+  Telegram group mentioned inside a forum post surfaces as both an
+  artifact (queryable with every other indicator) *and* a first-class group
+  you can start monitoring in one click. The forum mention becomes the
+  collector target, instead of the analyst manually hunting the handle.
 
 ### Pipelines
 
@@ -97,15 +100,33 @@ The operator UI covers the current set of pages:
 - **Actors / Actor groups / Personas / Candidates** for identity work.
 - **Collectors / Sources / Collector settings / Proxies / Identities** for
   wiring and rotating accounts.
-- **Stealer** dashboard: credential stat tiles, families, by-domain search.
+- **Stealer** dashboard: credential stat tiles, families, by-domain search,
+  and per-victim drawers ("stealer artifacts") that open the full record set
+  for one infected host.
 - **Artifacts** browser (indicators extracted from messages + documents).
-- **Incidents / Linkages / Monitored groups** for correlated-event work.
-- **Graph** explorer with expand + saved graphs.
-- **Search** across indexed documents.
-- **Reader / Lab** for the analyst's desk work.
-- **Control** panel for admin.
+- **Incidents / Linkages** for correlated-event work.
+- **Monitored groups**: the list of groups EYENET is currently watching, the
+  ones it has seen but is not watching, and the button to start watching one.
+- **Graph** explorer: a graph-map with a transform system for fast in-place
+  correlation (expand an entity, pivot through saved transforms, keep the
+  graph for later).
+- **Search**: global, not just documents. One box over actors, threads,
+  messages, channels, groups, nicknames, and extracted artifacts.
+- **Reader**: the analyst's window into every piece of data EYENET has
+  scraped, shown per source and per group / category. You read a forum
+  without ever opening the forum, and without burning a personal account on
+  it. Every scraped piece lands as-is, byte-for-byte, so the record carries
+  maximum forensic weight.
+- **Lab** for the analyst's desk work (scratchpad, ad-hoc queries, local
+  experiments).
+- **Control**: the killswitch. In an emergency the control page stops every
+  EYENET service at once. Heavily guarded on purpose.
 - **Clearance** tier views. Tier-gated reads at every API surface.
-- **Health / Tuning** for operator diagnostics.
+- **Health**: live service and pipeline diagnostics.
+- **Tuning**: the operator workbench. Covers the gotractor rule + family
+  catalog, parse misses, parse failures, canonicalized shapes, and a local
+  rule-authoring workbench so a new extraction rule can be tried against
+  real archives before it ships.
 - **Auth** with MFA.
 
 ### Backend API
