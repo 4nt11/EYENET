@@ -116,7 +116,7 @@ class StealerProcessorService(ServiceBase):
         if self._records_sink is not None:
             try:
                 self._records_sink.ensure_schema()
-            except Exception as exc:  # noqa: BLE001 - log and continue; CH may be booting
+            except Exception as exc:
                 _log.warning("stealer.processor.ensure_schema_failed", error=str(exc))
         if self._gotractor is not None:
             self._gotractor.start()

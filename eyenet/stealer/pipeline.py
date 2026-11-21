@@ -151,7 +151,18 @@ def _extract(blob_path: Path, candidates: list[str], dest: Path) -> tuple[str, s
     """Try each password candidate (then no-password) until the archive extracts
     with real content. Returns (password, tool) on success, or None if nothing
     opened it. Candidates are ordered best-first, so the usual case extracts
-    exactly once."""
+    exactly once.
+
+    v1.3.10.1: raw ULP .txt drops (Raven-style "free #NN.txt" lists at GB
+    scale) are not archives, they are plain-text url:login:password dumps.
+    Short-circuit: copy the .txt into ``dest`` and let gotractor's combolist
+    rule chew it directly. Previously the pipeline ran the full archive
+    ladder on them, every password failed, and every attachment died as
+    "no password opened the archive".
+    """
+    if blob_path.suffix.lower() == ".txt":
+        shutil.copy2(blob_path, dest / blob_path.name)
+        return "", "passthrough"
     primary = _pick_tool(blob_path)
     attempts = [*candidates, ""]  # "" => no password (unencrypted / watermark-only)
     for pw in attempts:
