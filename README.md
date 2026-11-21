@@ -18,24 +18,150 @@ sibling of DECNET. Built for **small operators** (the analyst running a few
 collectors, not an enterprise SOC) with an **operator-grade evidence** posture:
 retain full content, audit every access, never hobble the operator.
 
+## What EYENET is (and is not)
+
+**It is** a self-hosted observation and correlation stack for messaging and
+forum activity. You wire up collectors (Telegram, Matrix, forum boards), the
+pipeline normalizes everything into messages with identities, attachments, and
+derived behavioral primitives, then surfaces actors, crews, linkages, infostealer
+victims, and incidents through a SvelteKit UI and a versioned HTTP API.
+
+**It is not** an enterprise SIEM, a SOAR, a honeypot, or a malware sandbox. It
+does not try to be real-time. It does try to hold full evidence that a court
+or a sober adult would accept: hash-chained audit log, signed file-access
+journal for sensitive evidence, every access logged with a reason.
+
+## What is shipped
+
+### Collectors
+
+- **Telegram** (user-mode via Telethon), multi-account with identity rotation
+  and health, invisible mode, backfill on attach, attachment capture past
+  Telegram's category cap.
+- **Matrix** (nio), always-invisible (`set_presence=offline` is hard-coded, no
+  operator knob), multi-account.
+- **Forum collector** for MyBB-shaped boards (DDoS-Guard clearnet + Tor onion
+  paths), warmed cookie jars, JA3-impersonated TLS via curl-cffi, measured
+  evasion presets.
+- **Discovery/anchor** services that push candidates into the monitor queue
+  and resolve mentions.
+
+### Pipelines
+
+- **Stealer / ULP corpus pipeline**. Telegram cap-bypass capture, decrypt
+  ladder for archives, gotractor Go engine (DSL-driven rule extraction, chunked
+  streaming file ingest, 100+ MiB archives at ~160 MiB RSS), ClickHouse
+  landing with ReplacingMergeTree dedup on identity tuple. Rollup
+  aggregates use `uniqHLL12` HLL sketches with fixed state size (see the
+  v1.3.12.1 release notes if you like a good schema story).
+- **Document pipeline** (M10, in progress). Classifier assigns a sensitivity
+  tier at reception; parsing happens inside an **nsjail** cage whose
+  containment is re-proven on every boot. Fail-closed by default.
+- **Incident classifier**. 16-label model on Hugging Face (`4nt11/eyenet-incident`)
+  flags posts for the ransomware / stealer / combolist / infra-sale queues.
+- **Linker + verifier**. Actors across collectors get merged into personas;
+  the verifier runs stylometric and identity checks on the candidates.
+- **Graph explorer**. Operator-driven expansion of entities (actors,
+  documents, artifacts, cases) through a shared graph index with saved graphs
+  and notes.
+
+### Frontend (SvelteKit at `eyenet-fe/`)
+
+The operator UI covers the current set of pages:
+
+- **Cases / Evidence** (attachments, documents, logs, reclassify flow).
+- **Actors / Actor groups / Personas / Candidates** for identity work.
+- **Collectors / Sources / Collector settings / Proxies / Identities** for
+  wiring and rotating accounts.
+- **Stealer** dashboard: credential stat tiles, families, by-domain search.
+- **Artifacts** browser (indicators extracted from messages + documents).
+- **Incidents / Linkages / Monitored groups** for correlated-event work.
+- **Graph** explorer with expand + saved graphs.
+- **Search** across indexed documents.
+- **Reader / Lab** for the analyst's desk work.
+- **Control** panel for admin.
+- **Clearance** tier views. Tier-gated reads at every API surface.
+- **Health / Tuning** for operator diagnostics.
+- **Auth** with MFA.
+
+### Backend API
+
+- Versioned `v1` HTTP API (see [`development/API_PLAN.md`](development/API_PLAN.md)).
+- JWT auth with per-user scopes/grants, MFA (TOTP), lockout, rate limits.
+- Clearance tiers gating reads.
+- Hash-chained audit log in a separate physical database for tamper-evidence.
+- Prometheus metrics on every service; OpenTelemetry traces propagated across
+  the bus.
+
 ## Running
 
-EYENET ships as a Docker Compose stack. There is no "install on bare metal" path.
+EYENET ships as a Docker Compose stack. There is no "install on bare metal"
+path.
 
 ```bash
 cp deploy/docker/env.example deploy/docker/.env
-# edit .env: set EYENET_DOMAIN, EYENET_ACME_EMAIL, CH creds, Postgres creds, ...
+# edit .env: EYENET_DOMAIN, EYENET_ACME_EMAIL, CH + Postgres creds, etc.
 deploy/docker/deploy.sh deploy
 ```
 
-`deploy.sh deploy` builds the images on the host, tags them with the current
-version, brings the stack up with the stealer profile, verifies health, and
-prunes old versions. `deploy.sh rollback [VER]` repoints the live tag at a
-retained version. `deploy.sh versions` lists what is retained vs. running.
+`deploy.sh deploy` builds images on the host, tags them with the current
+version, brings up the stack with the `stealer` profile, verifies health, and
+prunes old versions.
+
+- `deploy.sh rollback [VER]` repoints the live tag at a retained version.
+- `deploy.sh versions` lists retained vs. running.
 
 The composition is `compose.yaml` + `compose.prod.lite.yaml` with the `stealer`
 profile (core services + ULP extractors; no observability, classifier, or
 incidents). Edit `deploy/docker/deploy.sh` if the box should run more.
+
+## Operating
+
+Everything is a subcommand of the `eyenet` CLI inside the `api` or
+`stealer-processor` container. The ones you actually touch:
+
+### User + access management
+
+```bash
+# create a user
+docker exec docker-api-1 eyenet user create alice --email alice@example.com
+
+# scopes (grants)
+docker exec docker-api-1 eyenet scopes grant   alice stealer:read
+docker exec docker-api-1 eyenet scopes revoke  alice stealer:read
+docker exec docker-api-1 eyenet scopes list    alice
+
+# reset things when someone loses their phone
+docker exec docker-api-1 eyenet user reset-password alice
+docker exec docker-api-1 eyenet user reset-mfa     alice
+docker exec docker-api-1 eyenet user unlock-mfa    alice
+```
+
+### Stealer corpus
+
+```bash
+# fire a full corpus reindex over the bus (processor handles it async)
+docker exec docker-stealer-processor-1 eyenet stealer-reindex
+
+# dry run: list what would be reindexed
+docker exec docker-stealer-processor-1 eyenet stealer-reindex --dry-run
+
+# reindex ONE attachment urgently
+docker exec docker-stealer-processor-1 eyenet stealer-reindex \
+    --attachment <uuid> --urgent
+
+# housekeeping sweeps
+docker exec docker-stealer-processor-1 eyenet artifact-checksum-sweep
+docker exec docker-stealer-processor-1 eyenet stealer-reclassify
+```
+
+### Everything else
+
+The CLI also owns identity sync, discovery backfill, document ingest, incident
+classifier training and inference, graph service, linker, verifier, panic
+sweep, and the per-service daemons (`api`, `supervisor`, `anchor`, `engine`,
+`geo`, `search-indexer`, `classifier`, ...). `eyenet --help` enumerates the
+full set, which is longer than this README should be.
 
 ## Documentation
 
@@ -47,6 +173,7 @@ incidents). Edit `deploy/docker/deploy.sh` if the box should run more.
 | [`development/API_PLAN.md`](development/API_PLAN.md) | HTTP API spec (source of truth for `v1` routes) |
 | [`development/MODELS.md`](development/MODELS.md) | table-by-table schema reference |
 | [`development/CLASSIFIER_PLAN.md`](development/CLASSIFIER_PLAN.md) | Document Classifier design + build plan |
+| [`development/STEALER_PIPELINE.md`](development/STEALER_PIPELINE.md) | Stealer / ULP pipeline design |
 
 ## License
 
