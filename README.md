@@ -18,9 +18,11 @@ sibling of DECNET. It is built for **small operators** — the analyst running a
 few collectors, not an enterprise SOC — and takes an **operator-grade evidence**
 posture: retain full content, audit every access, never hobble the operator.
 
-> **Status:** pre-public (no migrations yet; schema changes are
-> `rm data/*.db && eyenet init`). Milestones M1–M9 shipped; **M10 — Document
-> Classifier** is in progress. See [`PLAN.md`](PLAN.md) for the roadmap and
+> **Status:** experimental. Alembic migrations are the source of truth
+> (`eyenet init` runs `upgrade_to_head`; see
+> [`CLAUDE.md`](CLAUDE.md) section 1 for the schema-change workflow).
+> Milestones M1 through M9 shipped; **M10, Document Classifier**, is in
+> progress. See [`PLAN.md`](PLAN.md) for the roadmap and
 > [`CLAUDE.md`](CLAUDE.md) for architecture and conventions.
 
 ---

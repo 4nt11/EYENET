@@ -101,9 +101,9 @@ One-shot root bootstrap, mirroring `decnet init` (`decnet/cli/init.py`). Uses
 `--purge` (with `--deinit`: also wipe `data_dir`/logs + user/group),
 `--user/--group/--install-dir/--venv-dir/--data-dir`, `--prefix` (test root).
 
-**Command name:** `eyenet deploy` — NOT `eyenet init`. `eyenet init` is the
-existing DB-init command (`rm data/*.db && eyenet init`); host provisioning is a
-distinct concern and must not overload it.
+**Command name:** `eyenet deploy`, NOT `eyenet init`. `eyenet init` is the
+existing DB-init command (runs Alembic `upgrade_to_head` on both DBs); host
+provisioning is a distinct concern and must not overload it.
 
 ## 6. Security hardening
 
