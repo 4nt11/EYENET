@@ -105,6 +105,19 @@ class StealerProcessorService(ServiceBase):
         return self._instance_id
 
     async def on_subscribe(self) -> None:
+        # v1.3.10: bootstrap schema at service startup, not lazily on first
+        # archive. Prior pattern only called records_sink.ensure_schema()
+        # from inside _gotractor_insert_daemon (per-archive), which meant
+        # new tables/MVs/columns in a release didn't materialize until the
+        # next archive actually flowed. On a quiet dev stack or a prod
+        # window with no incoming captures, schema drift was invisible.
+        # Calling it here is idempotent (every CREATE is IF NOT EXISTS)
+        # and runs once at boot.
+        if self._records_sink is not None:
+            try:
+                self._records_sink.ensure_schema()
+            except Exception as exc:  # noqa: BLE001 - log and continue; CH may be booting
+                _log.warning("stealer.processor.ensure_schema_failed", error=str(exc))
         if self._gotractor is not None:
             self._gotractor.start()
 

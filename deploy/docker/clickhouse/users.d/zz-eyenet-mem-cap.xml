@@ -13,8 +13,12 @@
 <clickhouse>
   <profiles>
     <default>
-      <max_memory_usage>2500000000</max_memory_usage>
+      <max_memory_usage>8000000000</max_memory_usage>
       <allow_experimental_refreshable_materialized_view>1</allow_experimental_refreshable_materialized_view>
+      <!-- v1.3.10: belt-and-suspenders with the sink's progress drain
+           callbacks. 1800s covers any realistic single-archive INSERT. -->
+      <send_timeout>1800</send_timeout>
+      <receive_timeout>1800</receive_timeout>
     </default>
   </profiles>
 </clickhouse>

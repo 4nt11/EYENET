@@ -463,20 +463,41 @@ _EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
 # 54s -> 220ms (~250x) and empirical bloom FP rate 0.16% (6x tighter than the
 # configured 0.01 target). All three ALTERs are idempotent via IF NOT EXISTS
 # so bootstrap on an existing deployment is a no-op after the first run.
+# v1.3.10 extended coverage: original expression only matched browser_passwords
+# (url + host). Cookies store the host as fields['cookie_domain'] with a leading
+# dot (.criteo.com), history uses fields['visit_url'], and both were rendering
+# host_canon = '' -- the /by-domain cookies tab returned zero rows for every
+# domain because the bloom index pruned every granule. The coalesce chain now
+# covers all three families; trim(LEADING '.') strips the cookie-domain prefix
+# so google.com matches both passwords and cookies through one predicate.
+_HOST_CANON_EXPR = (
+    "lower(coalesce("
+    "nullIf(domain(fields['url']), ''),"
+    "nullIf(domain(fields['visit_url']), ''),"
+    "nullIf(domain(fields['host']), ''),"
+    "nullIf(fields['host'], ''),"
+    "nullIf(trim(LEADING '.' FROM fields['cookie_domain']), ''),"
+    "''))"
+)
+
 _EXTRACTED_RECORDS_HOST_COLS: tuple[str, ...] = (
-    """
-    ALTER TABLE {db}.extracted_records
+    f"""
+    ALTER TABLE {{db}}.extracted_records
       ADD COLUMN IF NOT EXISTS host_canon String MATERIALIZED
-        lower(coalesce(nullIf(domain(fields['url']), ''),
-                       nullIf(domain(fields['host']), ''),
-                       nullIf(fields['host'], ''), '')),
+        {_HOST_CANON_EXPR},
       ADD COLUMN IF NOT EXISTS host_registrable String MATERIALIZED
-        cutToFirstSignificantSubdomain(
-          lower(coalesce(nullIf(domain(fields['url']), ''),
-                         nullIf(domain(fields['host']), ''),
-                         nullIf(fields['host'], ''), ''))),
+        cutToFirstSignificantSubdomain({_HOST_CANON_EXPR}),
       ADD INDEX IF NOT EXISTS idx_host_registrable host_registrable
         TYPE bloom_filter(0.01) GRANULARITY 4
+    """,
+    # For a deployment that already has the columns from v1.3.6, bring them
+    # up to the extended expression. CH silently no-ops MODIFY COLUMN when the
+    # new expression equals the stored one, so this is safe to run every boot.
+    f"""
+    ALTER TABLE {{db}}.extracted_records
+      MODIFY COLUMN host_canon String MATERIALIZED {_HOST_CANON_EXPR},
+      MODIFY COLUMN host_registrable String MATERIALIZED
+        cutToFirstSignificantSubdomain({_HOST_CANON_EXPR})
     """,
 )
 
@@ -528,19 +549,43 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
         countDistinctIf((fields['url'], fields['login'], fields['password']),
           family IN ('browser_passwords','windows_credentials',
                      'firefox_logins','combolist')) AS credential_count,
-        countDistinctIf((fields['url'], fields['name']),
+        -- v1.3.10: cookies store identity as (cookie_domain, cookie_name) and
+        -- expiry as an epoch in cookie_expires_epoch / expires_epoch. The old
+        -- (fields['url'], fields['name']) tuple was empty on every cookie row
+        -- so LIVE/ALL both rendered 0 (or 1 when an accidental row had both).
+        countDistinctIf((trim(LEADING '.' FROM fields['cookie_domain']),
+                         coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
           family IN ('cookies','victim_cookies')
-          AND parseDateTimeBestEffortOrNull(fields['expires']) > now()
+          AND fromUnixTimestamp(toUInt32OrZero(coalesce(
+                nullIf(fields['cookie_expires_epoch'], ''),
+                nullIf(fields['expires_epoch'], ''), '0'))) > now()
           ) AS live_cookie_count,
-        countDistinctIf((fields['url'], fields['name']),
+        countDistinctIf((trim(LEADING '.' FROM fields['cookie_domain']),
+                         coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
           family IN ('cookies','victim_cookies')) AS all_cookie_count,
-        countDistinctIf((fields['name'], fields['value']),
-          family IN ('browser_autofills','victim_autofills')) AS autofill_count,
-        countDistinctIf(fields['url'],
+        -- v1.3.10: autofills always resolve host_registrable='' (Chromium
+        -- Web Data has no URL per row), so this per-host bucket is always
+        -- 0. The Autofills tab uses a victim-pool join to display real
+        -- rows; a correct hero counter needs a dedicated live query on the
+        -- summary endpoint (see RENAME_EXTRACTED_INDICATORS_SCOPE.md).
+        -- Hard-coded 0 here keeps the MV honest; FE renders as a dash.
+        0 AS autofill_count,
+        -- v1.3.10: history rule emits fields['visit_url'], not ['url'].
+        -- The old expression counted 0 for every domain. visit_downloads
+        -- still uses 'url' so we coalesce both.
+        countDistinctIf(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
           family IN ('victim_history','victim_downloads')) AS history_count,
         countDistinctIf(fields['value'],
           rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
-        countDistinctIf(rule_id, rule_id != '') AS indicator_hit_count,
+        -- v1.3.9 bug: this used to be countDistinctIf(rule_id, rule_id != '')
+        -- which counted every extraction rule as an "indicator hit" and
+        -- surfaced a flashy "N INDICATOR HITS" badge on every domain with
+        -- data. The real indicator concept is a join against the operator-
+        -- authored monitored_domains watchlist (see query.py
+        -- _monitored_domain_hits). Hard-coded to 0 until that join is wired
+        -- into the summary MV; the Indicators tab endpoint still returns
+        -- real rule-id counts for the tab contents.
+        0 AS indicator_hit_count,
         now() AS refreshed_at
     FROM {db}.extracted_records
     WHERE host_registrable != ''

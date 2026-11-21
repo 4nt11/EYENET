@@ -28,7 +28,8 @@ export const NAV = [
       { slug: 'stealer', label: 'Stealer corpus', href: '/stealer', built: true, desc: 'ULP credentials + per-victim artifact drawer over the stealer corpus · read:stealer',
         children: [
           { slug: 'stealer-ulp', label: 'ULP credentials', href: '/stealer', built: true, desc: 'Stealer-log credentials · search by host + distribution charts' },
-          { slug: 'stealer-artifacts', label: 'Artifacts', href: '/stealer/artifacts', built: true, desc: 'Per-victim archive drawer · credentials, cookies, techniques, monitored-domain hits' }
+          { slug: 'stealer-artifacts', label: 'Artifacts', href: '/stealer/artifacts', built: true, desc: 'Per-victim archive drawer · credentials, cookies, techniques, monitored-domain hits' },
+          { slug: 'stealer-by-domain', label: 'Domain View', href: '/stealer/by-domain', built: true, desc: 'Domain-keyed reverse lookup: creds, cookies, autofills, history, JWTs, indicators per domain' }
         ] }
     ]
   },

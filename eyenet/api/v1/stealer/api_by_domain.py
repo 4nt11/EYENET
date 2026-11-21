@@ -14,8 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from eyenet.api.deps import CurrentUser, RequireScope
 from eyenet.api.v1.schemas.by_domain import (
+    DomainAntivirusesResponse,
+    DomainAntivirusRow,
     DomainAutofillRow,
     DomainAutofillsResponse,
+    DomainSampleAvBreakdown,
+    DomainSampleDetailResponse,
+    DomainSampleLoaderPath,
+    DomainSampleRow,
+    DomainSamplesResponse,
     DomainCookieRow,
     DomainCookiesResponse,
     DomainCredRow,
@@ -75,12 +82,20 @@ async def by_domain_summary(
         s = await _reader.summary(canonical)
     except StealerCorpusUninitializedError:
         return DomainSummary(
-            raw_domain=domain, canonical_domain=canonical,
-            victim_count=0, archive_count=0,
-            first_seen_at=None, last_seen_at=None,
-            credential_count=0, live_cookie_count=0, all_cookie_count=0,
-            autofill_count=0, history_count=0, localstorage_jwt_count=0,
-            indicator_hit_count=0, reindex_in_flight=False,
+            raw_domain=domain,
+            canonical_domain=canonical,
+            victim_count=0,
+            archive_count=0,
+            first_seen_at=None,
+            last_seen_at=None,
+            credential_count=0,
+            live_cookie_count=0,
+            all_cookie_count=0,
+            autofill_count=0,
+            history_count=0,
+            localstorage_jwt_count=0,
+            indicator_hit_count=0,
+            reindex_in_flight=False,
         )
     except Exception as exc:
         _bail(exc)
@@ -127,13 +142,19 @@ async def by_domain_credentials(
     return DomainCredsResponse(
         items=[
             DomainCredRow(
-                host=r.host, url=r.url, login=r.login, password=r.password,
-                scheme=r.scheme, archive_sha256=r.archive_sha256,
-                victim_folder=r.victim_folder, ingested_at=r.ingested_at,
+                host=r.host,
+                url=r.url,
+                login=r.login,
+                password=r.password,
+                scheme=r.scheme,
+                archive_sha256=r.archive_sha256,
+                victim_folder=r.victim_folder,
+                ingested_at=r.ingested_at,
             )
             for r in rows
         ],
-        total=total, pages=_pages(total, limit),
+        total=total,
+        pages=_pages(total, limit),
     )
 
 
@@ -161,15 +182,19 @@ async def by_domain_victims(
     return DomainVictimsResponse(
         items=[
             DomainVictimRow(
-                archive_sha256=r.archive_sha256, victim_folder=r.victim_folder,
-                country=r.country, build_version=r.build_version,
-                credential_count=r.credential_count, cookie_count=r.cookie_count,
+                archive_sha256=r.archive_sha256,
+                victim_folder=r.victim_folder,
+                country=r.country,
+                build_version=r.build_version,
+                credential_count=r.credential_count,
+                cookie_count=r.cookie_count,
                 first_seen_at=r.first_seen_at,
                 loader_md5=r.loader_md5,
             )
             for r in rows
         ],
-        total=total, pages=_pages(total, limit),
+        total=total,
+        pages=_pages(total, limit),
     )
 
 
@@ -193,7 +218,8 @@ async def by_domain_subdomains(
     return DomainSubdomainsResponse(
         items=[
             DomainSubdomainRow(
-                host=r.host, credential_count=r.credential_count,
+                host=r.host,
+                credential_count=r.credential_count,
                 cookie_count=r.cookie_count,
             )
             for r in rows
@@ -218,7 +244,10 @@ async def by_domain_cookies(
     offset = (page - 1) * limit
     try:
         rows, total = await _reader.cookies(
-            canonical=canonicalize(domain), limit=limit, offset=offset, live_only=live_only,
+            canonical=canonicalize(domain),
+            limit=limit,
+            offset=offset,
+            live_only=live_only,
         )
     except StealerCorpusUninitializedError:
         return DomainCookiesResponse(items=[], total=0, pages=0)
@@ -227,13 +256,19 @@ async def by_domain_cookies(
     return DomainCookiesResponse(
         items=[
             DomainCookieRow(
-                host=r.host, name=r.name, value=r.value, expires_at=r.expires_at,
-                http_only=r.http_only, secure=r.secure,
-                archive_sha256=r.archive_sha256, victim_folder=r.victim_folder,
+                host=r.host,
+                name=r.name,
+                value=r.value,
+                expires_at=r.expires_at,
+                http_only=r.http_only,
+                secure=r.secure,
+                archive_sha256=r.archive_sha256,
+                victim_folder=r.victim_folder,
             )
             for r in rows
         ],
-        total=total, pages=_pages(total, limit),
+        total=total,
+        pages=_pages(total, limit),
     )
 
 
@@ -252,7 +287,9 @@ async def by_domain_autofills(
     offset = (page - 1) * limit
     try:
         rows, total = await _reader.autofills(
-            canonical=canonicalize(domain), limit=limit, offset=offset,
+            canonical=canonicalize(domain),
+            limit=limit,
+            offset=offset,
         )
     except StealerCorpusUninitializedError:
         return DomainAutofillsResponse(items=[], total=0, pages=0)
@@ -261,12 +298,122 @@ async def by_domain_autofills(
     return DomainAutofillsResponse(
         items=[
             DomainAutofillRow(
-                host=r.host, field_name=r.field_name, value=r.value,
-                archive_sha256=r.archive_sha256, victim_folder=r.victim_folder,
+                field_name=r.field_name,
+                value=r.value,
+                archive_sha256=r.archive_sha256,
+                victim_folder=r.victim_folder,
             )
             for r in rows
         ],
-        total=total, pages=_pages(total, limit),
+        total=total,
+        pages=_pages(total, limit),
+    )
+
+
+@router.get(
+    "/stealer/by-domain/{domain}/samples",
+    operation_id="stealer_by_domain_samples",
+    response_model=DomainSamplesResponse,
+    status_code=200,
+)
+async def by_domain_samples(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
+    domain: _DomainParam,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> DomainSamplesResponse:
+    try:
+        rows, domain_total = await _reader.samples(
+            canonical=canonicalize(domain),
+            limit=limit,
+        )
+    except StealerCorpusUninitializedError:
+        return DomainSamplesResponse(items=[], domain_total_victims=0)
+    except Exception as exc:
+        _bail(exc)
+    return DomainSamplesResponse(
+        items=[
+            DomainSampleRow(
+                loader_md5=r.loader_md5,
+                family_slug=r.family_slug,
+                victim_count=r.victim_count,
+                archive_count=r.archive_count,
+                first_seen_at=r.first_seen_at,
+                last_seen_at=r.last_seen_at,
+                top_bypass_av_name=r.top_bypass_av_name,
+                top_bypass_rate=r.top_bypass_rate,
+            )
+            for r in rows
+        ],
+        domain_total_victims=domain_total,
+    )
+
+
+@router.get(
+    "/stealer/by-domain/{domain}/samples/{loader_md5}",
+    operation_id="stealer_by_domain_sample_detail",
+    response_model=DomainSampleDetailResponse,
+    status_code=200,
+)
+async def by_domain_sample_detail(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
+    domain: _DomainParam,
+    loader_md5: Annotated[str, Path(min_length=32, max_length=64)],
+) -> DomainSampleDetailResponse:
+    try:
+        detail = await _reader.sample_detail(
+            canonical=canonicalize(domain),
+            loader_md5=loader_md5,
+        )
+    except StealerCorpusUninitializedError:
+        return DomainSampleDetailResponse(loader_paths=[], av_breakdown=[])
+    except Exception as exc:
+        _bail(exc)
+    return DomainSampleDetailResponse(
+        loader_paths=[
+            DomainSampleLoaderPath(path=p.path, victim_count=p.victim_count)
+            for p in detail.loader_paths
+        ],
+        av_breakdown=[
+            DomainSampleAvBreakdown(
+                av_name=a.av_name,
+                active_count=a.active_count,
+                total_count=a.total_count,
+            )
+            for a in detail.av_breakdown
+        ],
+    )
+
+
+@router.get(
+    "/stealer/by-domain/{domain}/antiviruses",
+    operation_id="stealer_by_domain_antiviruses",
+    response_model=DomainAntivirusesResponse,
+    status_code=200,
+)
+async def by_domain_antiviruses(
+    _: Annotated[CurrentUser, Depends(RequireScope("read:stealer"))],
+    domain: _DomainParam,
+) -> DomainAntivirusesResponse:
+    try:
+        rows, domain_total = await _reader.antiviruses(canonical=canonicalize(domain))
+    except StealerCorpusUninitializedError:
+        return DomainAntivirusesResponse(items=[], domain_total_victims=0)
+    except Exception as exc:
+        _bail(exc)
+    return DomainAntivirusesResponse(
+        items=[
+            DomainAntivirusRow(
+                av_name=r.av_name,
+                victim_count=r.victim_count,
+                active_count=r.active_count,
+                disabled_count=r.disabled_count,
+                unknown_count=r.unknown_count,
+                first_seen_at=r.first_seen_at,
+                last_seen_at=r.last_seen_at,
+            )
+            for r in rows
+        ],
+        domain_total_victims=domain_total,
     )
 
 
@@ -285,7 +432,9 @@ async def by_domain_history(
     offset = (page - 1) * limit
     try:
         rows, total = await _reader.history(
-            canonical=canonicalize(domain), limit=limit, offset=offset,
+            canonical=canonicalize(domain),
+            limit=limit,
+            offset=offset,
         )
     except StealerCorpusUninitializedError:
         return DomainHistoryResponse(items=[], total=0, pages=0)
@@ -294,13 +443,18 @@ async def by_domain_history(
     return DomainHistoryResponse(
         items=[
             DomainHistoryRow(
-                host=r.host, url=r.url, title=r.title,
-                visit_count=r.visit_count, last_visit_at=r.last_visit_at,
-                archive_sha256=r.archive_sha256, victim_folder=r.victim_folder,
+                host=r.host,
+                url=r.url,
+                title=r.title,
+                visit_count=r.visit_count,
+                last_visit_at=r.last_visit_at,
+                archive_sha256=r.archive_sha256,
+                victim_folder=r.victim_folder,
             )
             for r in rows
         ],
-        total=total, pages=_pages(total, limit),
+        total=total,
+        pages=_pages(total, limit),
     )
 
 
@@ -319,7 +473,9 @@ async def by_domain_localstorage(
     offset = (page - 1) * limit
     try:
         rows, total, live_count = await _reader.localstorage_jwts(
-            canonical=canonicalize(domain), limit=limit, offset=offset,
+            canonical=canonicalize(domain),
+            limit=limit,
+            offset=offset,
         )
     except StealerCorpusUninitializedError:
         return DomainLocalStorageResponse(items=[], total=0, pages=0, live_count=0)
@@ -328,15 +484,23 @@ async def by_domain_localstorage(
     return DomainLocalStorageResponse(
         items=[
             DomainLocalStorageJwtRow(
-                host=r.host, key=r.key, jwt_value=r.jwt_value,
-                jwt_subject=r.jwt_subject, jwt_issuer=r.jwt_issuer,
-                jwt_audience=r.jwt_audience, jwt_algorithm=r.jwt_algorithm,
-                expires_at=r.expires_at, is_expired=r.is_expired,
-                archive_sha256=r.archive_sha256, victim_folder=r.victim_folder,
+                host=r.host,
+                key=r.key,
+                jwt_value=r.jwt_value,
+                jwt_subject=r.jwt_subject,
+                jwt_issuer=r.jwt_issuer,
+                jwt_audience=r.jwt_audience,
+                jwt_algorithm=r.jwt_algorithm,
+                expires_at=r.expires_at,
+                is_expired=r.is_expired,
+                archive_sha256=r.archive_sha256,
+                victim_folder=r.victim_folder,
             )
             for r in rows
         ],
-        total=total, pages=_pages(total, limit), live_count=live_count,
+        total=total,
+        pages=_pages(total, limit),
+        live_count=live_count,
     )
 
 
@@ -362,8 +526,12 @@ async def by_domain_indicators(
     return DomainIndicatorsResponse(
         items=[
             DomainIndicatorRow(
-                rule_id=r.rule_id, rule_name=r.rule_name, severity=r.severity,
-                hit_count=r.hit_count, first_hit_at=r.first_hit_at, last_hit_at=r.last_hit_at,
+                rule_id=r.rule_id,
+                rule_name=r.rule_name,
+                severity=r.severity,
+                hit_count=r.hit_count,
+                first_hit_at=r.first_hit_at,
+                last_hit_at=r.last_hit_at,
             )
             for r in rows
         ],

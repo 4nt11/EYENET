@@ -406,7 +406,9 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 	sinkOn := d.sink != nil && d.sink.Enabled()
 	var batch *sink.ArchiveBatch
 	appendedSinceFlush := 0
-	const flushEvery = 10_000
+	// 2.5k keeps each server-side flush short enough that CH's send buffer
+	// never fills past its send_timeout window -- see sink/ch.go send_logs_level note.
+	const flushEvery = 2_500
 	if sinkOn {
 		b, berr := d.sink.BeginArchive(context.Background())
 		if berr != nil {

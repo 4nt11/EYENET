@@ -109,7 +109,10 @@ class DomainCookiesResponse(ApiSchema):
 
 
 class DomainAutofillRow(ApiSchema):
-    host: str
+    # v1.3.10: `host` dropped. Autofills carry no per-domain context in any
+    # stealer corpus (Chromium Web Data stores them globally); the row now
+    # represents an autofill from a victim that also leaked to the queried
+    # domain. See query_by_domain.AutofillRow for the semantics shift.
     field_name: str
     value: str
     archive_sha256: str
@@ -146,15 +149,15 @@ class DomainLocalStorageJwtRow(ApiSchema):
     challenge entirely. Operators should triage by `is_expired` + `expires_at`.
     """
 
-    host: str                       # display host (may carry scheme if the stealer did)
-    key: str                        # localStorage key name (e.g. 'access_token')
-    jwt_value: str                  # raw JWT; FE truncates for display
-    jwt_subject: str | None         # decoded 'sub' claim (email/username)
-    jwt_issuer: str | None          # decoded 'iss' claim
-    jwt_audience: str | None        # decoded 'aud' claim
-    jwt_algorithm: str | None       # decoded 'alg' from header
-    expires_at: datetime | None     # decoded 'exp' claim
-    is_expired: bool                # expires_at < now(); null-exp is treated as expired
+    host: str  # display host (may carry scheme if the stealer did)
+    key: str  # localStorage key name (e.g. 'access_token')
+    jwt_value: str  # raw JWT; FE truncates for display
+    jwt_subject: str | None  # decoded 'sub' claim (email/username)
+    jwt_issuer: str | None  # decoded 'iss' claim
+    jwt_audience: str | None  # decoded 'aud' claim
+    jwt_algorithm: str | None  # decoded 'alg' from header
+    expires_at: datetime | None  # decoded 'exp' claim
+    is_expired: bool  # expires_at < now(); null-exp is treated as expired
     archive_sha256: str
     victim_folder: str
 
@@ -163,9 +166,66 @@ class DomainLocalStorageResponse(ApiSchema):
     items: list[DomainLocalStorageJwtRow]
     total: int
     pages: int
-    live_count: int                 # non-expired JWTs in this page's domain match
+    live_count: int  # non-expired JWTs in this page's domain match
     # ^ answer to "do we have any active sessions here?"; checks the FULL match
     # set not just this page, so an operator sees "3 live, 97 expired" at a glance.
+
+
+class DomainAntivirusRow(ApiSchema):
+    """One AV product aggregated across the victim pool for this domain.
+
+    State breakdown drives the stacked active/disabled/unknown bar on the
+    Antiviruses tab. av_name is always non-empty; the "no AV detected" row
+    is reconstructed FE-side from (domain_total_victims - sum(victim_count)).
+    """
+
+    av_name: str
+    victim_count: int
+    active_count: int
+    disabled_count: int
+    unknown_count: int
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
+
+
+class DomainSampleRow(ApiSchema):
+    loader_md5: str
+    family_slug: str
+    victim_count: int
+    archive_count: int
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
+    top_bypass_av_name: str
+    top_bypass_rate: float
+
+
+class DomainSamplesResponse(ApiSchema):
+    items: list[DomainSampleRow]
+    domain_total_victims: int
+
+
+class DomainSampleLoaderPath(ApiSchema):
+    path: str
+    victim_count: int
+
+
+class DomainSampleAvBreakdown(ApiSchema):
+    av_name: str
+    active_count: int
+    total_count: int
+
+
+class DomainSampleDetailResponse(ApiSchema):
+    loader_paths: list[DomainSampleLoaderPath]
+    av_breakdown: list[DomainSampleAvBreakdown]
+
+
+class DomainAntivirusesResponse(ApiSchema):
+    items: list[DomainAntivirusRow]
+    domain_total_victims: int  # pool size, matches the Victims tab counter
+    # ^ FE denominator for "% OF DOMAIN" column (Domain total mode). The
+    # "Known-AV subset" mode's denominator is sum(items.victim_count), so
+    # the FE computes that locally without a second round trip.
 
 
 class DomainIndicatorRow(ApiSchema):

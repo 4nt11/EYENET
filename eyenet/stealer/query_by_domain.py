@@ -79,6 +79,13 @@ def _is_jwt_expired(exp_at: datetime | None) -> bool:
     return exp_at < datetime.now(tz=UTC)
 
 
+def _claim_str(claims: dict[str, object] | None, key: str) -> str | None:
+    if not claims:
+        return None
+    v = claims.get(key)
+    return v if isinstance(v, str) else None
+
+
 def _aud_as_string(claims: dict[str, object] | None) -> str | None:
     """`aud` can be a string or an array per RFC 7519. Normalise to a comma
     list so the DTO stays simple."""
@@ -156,7 +163,12 @@ class CookieRow:
 
 @dataclass(frozen=True, slots=True)
 class AutofillRow:
-    host: str
+    # v1.3.10 semantics shift: stealer-emitted autofills carry no URL (the
+    # Chromium `Web Data` autofill table is keyed on name+value, not domain).
+    # So "autofills for google.com" is meaningless; we now return autofills
+    # from the VICTIM POOL that leaked to google.com -- i.e. what those
+    # victims typed into forms anywhere. The `host` field is dropped because
+    # the rendered row no longer has a per-domain meaning.
     field_name: str
     value: str
     archive_sha256: str
@@ -165,6 +177,11 @@ class AutofillRow:
 
 @dataclass(frozen=True, slots=True)
 class HistoryRow:
+    # v1.3.10: gotractor's history rule emits visit_url + visit_title only.
+    # No visit_count, no last_visit timestamp -- Chromium's `History` DB
+    # carries both, but the parsing rule skips them. Keeping the fields here
+    # as 0 / None so the DTO shape stays stable; wire real values when the
+    # rule is extended.
     host: str
     url: str
     title: str
@@ -172,6 +189,61 @@ class HistoryRow:
     last_visit_at: datetime | None
     archive_sha256: str
     victim_folder: str
+
+
+@dataclass(frozen=True, slots=True)
+class SampleRow:
+    # v1.3.10 Samples tab: one row per distinct loader/payload MD5
+    # across the victim pool for this domain. family_slug comes from
+    # victim_family_verdict (classifier output, slug like 'stealc',
+    # 'lumma', 'redline'). top_bypass_* precomputed on the backend so
+    # the list view can colour-code the row without calling the detail
+    # endpoint; av_name='' + rate=0 means no AV overlap for this md5.
+    loader_md5: str
+    family_slug: str
+    victim_count: int
+    archive_count: int
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
+    top_bypass_av_name: str
+    top_bypass_rate: float
+
+
+@dataclass(frozen=True, slots=True)
+class SampleLoaderPath:
+    path: str
+    victim_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SampleAvBreakdown:
+    av_name: str
+    active_count: int
+    total_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SampleDetail:
+    # Drill-down payload fetched when the operator expands a sample row.
+    # Keeps the list query cheap; this one only runs on explicit click.
+    loader_paths: list[SampleLoaderPath]
+    av_breakdown: list[SampleAvBreakdown]
+
+
+@dataclass(frozen=True, slots=True)
+class AntivirusRow:
+    # v1.3.10 Antiviruses tab: per-AV aggregate across the victim pool
+    # that leaked to this domain. State breakdown lets the UI render the
+    # stacked active/disabled/unknown bar. Bypass rate is computed FE-side
+    # as active_count/victim_count. av_name == '' is the null-AV bucket
+    # (victims in the pool whose fingerprint lacks os_av_name).
+    av_name: str
+    victim_count: int
+    active_count: int
+    disabled_count: int
+    unknown_count: int
+    first_seen_at: datetime | None
+    last_seen_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,26 +345,50 @@ class DomainCorpusReader:
         """Hero card numbers. v1.3.6: reads the ``by_domain_counts`` sibling
         (ReplacingMergeTree, 231k registrables, refreshed every 5 min). FINAL
         is cheap on a 231k-row table; measured 45 ms warm, 560 ms cold. Zero
-        state-blob deserialization, no heavy aggregation at read time."""
+        state-blob deserialization, no heavy aggregation at read time.
+
+        v1.3.10: autofills carry no URL, so the MV's per-host aggregate for
+        them is always 0 (autofill rows never land in a domain bucket). The
+        real "autofills from victims that leaked to this domain" number is
+        a victim-pool sum across ``victim_counts.autofills_count``, run in
+        parallel here (~90 ms warm on prod). Same number is used by the
+        Autofills tab footer so hero + tab agree.
+        """
+        import asyncio  # noqa: PLC0415
+
         client = await self._c()
+        params = self._base_params(canonical)
         try:
-            res = await client.query(
+            summary_coro = client.query(
                 "SELECT host_registrable, victim_count, archive_count, "  # noqa: S608
                 "       first_seen_at, last_seen_at, credential_count, "
                 "       live_cookie_count, all_cookie_count, autofill_count, "
                 "       history_count, localstorage_jwt_count, indicator_hit_count "
                 f"FROM {self._db}.by_domain_counts FINAL "  # nosec B608
                 "WHERE host_registrable = {d:String}",
-                parameters=self._base_params(canonical),
+                parameters=params,
             )
+            autofill_coro = client.query(
+                # Pool-join sum: tallies each victim's own autofill count
+                # once. See the autofills() tab method for the corresponding
+                # paginated view. Both numbers describe the same slice.
+                "SELECT toUInt64(coalesce(sum(vc.autofills_count), 0)) "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts AS bvc FINAL "  # nosec B608
+                f"INNER JOIN {self._db}.victim_counts AS vc FINAL "
+                "  USING (archive_sha256, victim_folder) "
+                "WHERE bvc.host_registrable = {d:String}",
+                parameters=params,
+            )
+            res, afc_res = await asyncio.gather(summary_coro, autofill_coro)
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
                     "stealer.by_domain_counts does not exist yet"
                 ) from exc
             raise
+        autofill_count = int(afc_res.result_rows[0][0]) if afc_res.result_rows else 0
         if not res.result_rows:
-            return DomainSummaryRow(canonical, 0, 0, None, None, 0, 0, 0, 0, 0, 0, 0)
+            return DomainSummaryRow(canonical, 0, 0, None, None, 0, 0, 0, autofill_count, 0, 0, 0)
         r = res.result_rows[0]
         return DomainSummaryRow(
             canonical_domain=r[0] or canonical,
@@ -303,7 +399,7 @@ class DomainCorpusReader:
             credential_count=int(r[5] or 0),
             live_cookie_count=int(r[6] or 0),
             all_cookie_count=int(r[7] or 0),
-            autofill_count=int(r[8] or 0),
+            autofill_count=autofill_count,
             history_count=int(r[9] or 0),
             localstorage_jwt_count=int(r[10] or 0),
             indicator_hit_count=int(r[11] or 0),
@@ -324,7 +420,7 @@ class DomainCorpusReader:
         try:
             total = await client.query(
                 "SELECT countDistinct((fields['url'], fields['login'], fields['password'])) "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}",
                 parameters=params,
             )
@@ -333,7 +429,7 @@ class DomainCorpusReader:
                 f"SELECT DISTINCT {self._HOST_EXPR} h, fields['url'] u, fields['login'] l, "  # noqa: S608
                 f"       fields['password'] p, {self._SCHEME_EXPR} s, "
                 "       archive_sha256, victim_folder, ingested_at "
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp} "
                 "ORDER BY ingested_at DESC "
                 "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
@@ -345,8 +441,14 @@ class DomainCorpusReader:
             raise
         items = [
             CredRow(
-                host=r[0], url=r[1], login=r[2], password=r[3], scheme=r[4],
-                archive_sha256=r[5], victim_folder=r[6], ingested_at=r[7],
+                host=r[0],
+                url=r[1],
+                login=r[2],
+                password=r[3],
+                scheme=r[4],
+                archive_sha256=r[5],
+                victim_folder=r[6],
+                ingested_at=r[7],
             )
             for r in rows.result_rows
         ]
@@ -379,7 +481,7 @@ class DomainCorpusReader:
         try:
             total = await client.query(
                 "SELECT count() "  # noqa: S608
-                f"FROM {self._db}.by_domain_victim_counts FINAL "
+                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
                 "WHERE host_registrable = {d:String}",
                 parameters=params,
             )
@@ -388,7 +490,7 @@ class DomainCorpusReader:
                 "SELECT archive_sha256, victim_folder, country, build_version, "  # noqa: S608
                 "       cred_count, cookie_count, first_seen_at, "
                 "       nullIf(loader_md5, '') AS md5 "
-                f"FROM {self._db}.by_domain_victim_counts FINAL "
+                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
                 "WHERE host_registrable = {d:String} "
                 "ORDER BY first_seen_at DESC "
                 "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
@@ -396,15 +498,16 @@ class DomainCorpusReader:
             )
         except Exception as exc:
             if _is_unknown_table(exc):
-                raise StealerCorpusUninitializedError(
-                    "stealer.by_domain_victim_counts"
-                ) from exc
+                raise StealerCorpusUninitializedError("stealer.by_domain_victim_counts") from exc
             raise
         items = [
             VictimRow(
-                archive_sha256=r[0], victim_folder=r[1],
-                country=r[2] or "", build_version=r[3] or "",
-                credential_count=int(r[4] or 0), cookie_count=int(r[5] or 0),
+                archive_sha256=r[0],
+                victim_folder=r[1],
+                country=r[2] or "",
+                build_version=r[3] or "",
+                credential_count=int(r[4] or 0),
+                cookie_count=int(r[5] or 0),
                 first_seen_at=r[6],
                 loader_md5=r[7],
             )
@@ -425,7 +528,7 @@ class DomainCorpusReader:
         try:
             total = await client.query(
                 f"SELECT countDistinct({self._HOST_EXPR}) "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE {hp}",
                 parameters=params,
             )
@@ -436,7 +539,7 @@ class DomainCorpusReader:
                 "         family IN {creds:Array(String)}) AS cred_cnt, "
                 "       countDistinctIf((fields['url'], fields['name']), "
                 "         family IN {cookies:Array(String)}) AS cookie_cnt "
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE {hp} "
                 "GROUP BY host "
                 "ORDER BY cred_cnt DESC "
@@ -458,32 +561,44 @@ class DomainCorpusReader:
     ) -> tuple[list[CookieRow], int]:
         client = await self._c()
         hp = self._host_predicate()
-        live_filter = (
-            " AND parseDateTimeBestEffortOrNull(fields['expires']) > now()" if live_only else ""
-        )
         params = {
             **self._base_params(canonical),
             "fams": self._COOKIE_FAMILIES,
             "lim": int(limit),
             "off": int(offset),
         }
+        # Field-name reality (v1.3.10): gotractor emits cookie_name / cookie_value /
+        # cookie_expires_epoch / cookie_secure for victim_cookies, and drops the
+        # cookie_ prefix on expires_epoch + secure for the plain cookies family.
+        # http_only is NOT extracted by any current rule -> always 0 for now.
+        name_expr = "coalesce(nullIf(fields['cookie_name'], ''), fields['name'])"
+        value_expr = "coalesce(nullIf(fields['cookie_value'], ''), fields['value'])"
+        expires_expr = (
+            "fromUnixTimestamp(toUInt32OrZero(coalesce("
+            "nullIf(fields['cookie_expires_epoch'], ''), "
+            "nullIf(fields['expires_epoch'], ''), '0')))"
+        )
+        secure_expr = (
+            "toUInt8(coalesce(nullIf(fields['cookie_secure'], ''), "
+            "fields['secure'], '0') IN ('1', 'true', 'TRUE', 'True'))"
+        )
+        host_expr = "trim(LEADING '.' FROM fields['cookie_domain'])"
+        live_filter = f" AND {expires_expr} > now()" if live_only else ""
         try:
             total = await client.query(
-                "SELECT countDistinct((fields['url'], fields['name'])) "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
+                f"SELECT countDistinct(({host_expr}, {name_expr})) "  # noqa: S608
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}{live_filter}",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
-                f"SELECT DISTINCT {self._HOST_EXPR} h, fields['name'], fields['value'], "  # noqa: S608
-                "       parseDateTimeBestEffortOrNull(fields['expires']) AS expires_at, "
-                "       toUInt8(coalesce(fields['http_only'], '0') "
-                "         IN ('1', 'true', 'TRUE', 'True')) AS http_only, "
-                "       toUInt8(coalesce(fields['secure'], '0') "
-                "         IN ('1', 'true', 'TRUE', 'True')) AS secure, "
+                f"SELECT DISTINCT {host_expr} h, {name_expr} AS n, {value_expr} AS v, "  # noqa: S608
+                f"       {expires_expr} AS expires_at, "
+                "       0 AS http_only, "
+                f"       {secure_expr} AS secure, "
                 "       archive_sha256, victim_folder "
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}{live_filter} "
                 "ORDER BY ingested_at DESC "
                 "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
@@ -495,9 +610,14 @@ class DomainCorpusReader:
             raise
         items = [
             CookieRow(
-                host=r[0], name=r[1], value=r[2], expires_at=r[3],
-                http_only=bool(r[4]), secure=bool(r[5]),
-                archive_sha256=r[6], victim_folder=r[7],
+                host=r[0],
+                name=r[1],
+                value=r[2],
+                expires_at=r[3],
+                http_only=bool(r[4]),
+                secure=bool(r[5]),
+                archive_sha256=r[6],
+                victim_folder=r[7],
             )
             for r in rows.result_rows
         ]
@@ -506,29 +626,51 @@ class DomainCorpusReader:
     async def autofills(
         self, *, canonical: str, limit: int, offset: int
     ) -> tuple[list[AutofillRow], int]:
+        # v1.3.10: victim-pool join. Chromium autofills carry no URL, so a
+        # per-domain filter would hit zero rows. Instead we build the set of
+        # (archive_sha256, victim_folder) pairs that leaked anything to this
+        # domain, then return every autofill those victims produced.
+        # Real field names in the corpus: form_key / form_value.
         client = await self._c()
         hp = self._host_predicate()
         params = {
             **self._base_params(canonical),
-            "fams": self._AUTOFILL_FAMILIES,
+            "fams": ["victim_autofills", "browser_autofills"],
             "lim": int(limit),
             "off": int(offset),
         }
+        victim_pool_cte = (
+            "WITH victim_pool AS ("  # noqa: S608 # nosec B608
+            "  SELECT DISTINCT archive_sha256, victim_folder "
+            f"  FROM {self._db}.extracted_records "
+            f"  WHERE {hp}"
+            ")"
+        )
         try:
+            # v1.3.10: total via victim_counts.autofills_count pool-sum
+            # (~90 ms warm) instead of countDistinct((form_key, form_value))
+            # across the full autofill family (~430 ms). Same number as the
+            # hero stat; see summary() for the shared pattern. Pagination
+            # below still works on distinct (form_key, form_value) rows.
             total = await client.query(
-                "SELECT countDistinct((fields['name'], fields['value'])) "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
-                f"WHERE family IN {{fams:Array(String)}} AND {hp}",
+                "SELECT toUInt64(coalesce(sum(vc.autofills_count), 0)) "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts AS bvc FINAL "  # nosec B608
+                f"INNER JOIN {self._db}.victim_counts AS vc FINAL "
+                "  USING (archive_sha256, victim_folder) "
+                "WHERE bvc.host_registrable = {d:String}",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
-                f"SELECT DISTINCT {self._HOST_EXPR} h, fields['name'], fields['value'], "  # noqa: S608
-                "       archive_sha256, victim_folder "
-                f"FROM {self._db}.extracted_records "
-                f"WHERE family IN {{fams:Array(String)}} AND {hp} "
-                "ORDER BY ingested_at DESC "
-                "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                f"{victim_pool_cte} "  # noqa: S608
+                f"SELECT DISTINCT er.fields['form_key'] AS fk, "
+                f"       er.fields['form_value'] AS fv, "
+                f"       er.archive_sha256, er.victim_folder "
+                f"FROM {self._db}.extracted_records er "  # nosec B608
+                f"INNER JOIN victim_pool vp USING (archive_sha256, victim_folder) "
+                f"WHERE er.family IN {{fams:Array(String)}} "
+                f"ORDER BY er.ingested_at DESC "
+                f"LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
                 parameters=params,
             )
         except Exception as exc:
@@ -537,12 +679,297 @@ class DomainCorpusReader:
             raise
         items = [
             AutofillRow(
-                host=r[0], field_name=r[1], value=r[2],
-                archive_sha256=r[3], victim_folder=r[4],
+                field_name=r[0],
+                value=r[1],
+                archive_sha256=r[2],
+                victim_folder=r[3],
             )
             for r in rows.result_rows
         ]
         return items, total_n
+
+    async def antiviruses(
+        self,
+        *,
+        canonical: str,
+    ) -> tuple[list[AntivirusRow], int]:
+        """Per-AV aggregate for victims that leaked to this domain.
+
+        Returns (rows, domain_total_victims):
+          - rows: one AntivirusRow per distinct non-empty os_av_name across
+            the victim pool, ranked by victim_count DESC. Each row's state
+            counts cover active / disabled / unknown breakdowns.
+          - domain_total_victims: distinct (archive, victim) in the pool.
+            FE derives the "no AV detected" row as domain_total minus
+            sum(named-AV victim_count), and the % denominators from this
+            same number (Domain total mode) or sum(named-AV counts)
+            (Known-AV subset mode).
+
+        No pagination: AV name cardinality is tiny (dozens) and UI shows
+        the whole list ranked.
+        """
+        client = await self._c()
+        params = {
+            **self._base_params(canonical),
+            "fp_fam": "victim_fingerprint",
+        }
+        try:
+            res = await client.query(
+                # Two-stage aggregate. Inner groups per (archive, victim) so
+                # ReplacingMergeTree duplicates and multi-row fingerprints
+                # collapse to one per victim; outer groups by AV name. Only
+                # named AVs land here; the null-AV row is reconstructed FE
+                # side from the domain total. av_state is lowered once for
+                # consistent countIf matching.
+                #
+                # Victim pool reads from by_domain_victim_counts
+                # (ReplacingMergeTree ORDER BY (host_registrable, archive,
+                # victim), the same sibling the Victims tab uses). WHERE on
+                # host_registrable is a primary-key range scan: measured ~90ms
+                # on prod for google.com. Also keeps the Antiviruses tab's
+                # pool semantics identical to the Victims tab (same table),
+                # so operator counts never diverge between the two surfaces.
+                "WITH victim_pool AS ("  # noqa: S608 # nosec B608
+                "  SELECT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  WHERE host_registrable = {d:String}"
+                "), "
+                "victim_av AS ("
+                "  SELECT archive_sha256, victim_folder, "
+                "         any(fields['os_av_name']) AS av_name, "
+                "         any(lower(fields['os_av_state'])) AS av_state, "
+                "         min(ingested_at) AS first_seen, "
+                "         max(ingested_at) AS last_seen "
+                f"  FROM {self._db}.extracted_records er "
+                "  INNER JOIN victim_pool vp USING (archive_sha256, victim_folder) "
+                "  WHERE er.family = {fp_fam:String} "
+                "    AND er.fields['os_av_name'] != '' "
+                "  GROUP BY archive_sha256, victim_folder"
+                ") "
+                "SELECT av_name, "
+                "       count() AS victim_count, "
+                "       countIf(av_state = 'active') AS active_count, "
+                "       countIf(av_state = 'disabled') AS disabled_count, "
+                "       countIf(av_state NOT IN ('active','disabled')) AS unknown_count, "
+                "       min(first_seen) AS first_seen_at, "
+                "       max(last_seen) AS last_seen_at "
+                "FROM victim_av "
+                "WHERE av_name != '' "
+                "GROUP BY av_name "
+                "ORDER BY victim_count DESC",
+                parameters=params,
+            )
+            total_res = await client.query(
+                # Victim pool size via the same sibling table. Mirrors the
+                # Victims tab counter query so the two surfaces always
+                # agree on the "N victims for this domain" number.
+                "SELECT count() "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
+                "WHERE host_registrable = {d:String}",
+                parameters=params,
+            )
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError("stealer.extracted_records") from exc
+            raise
+        rows = [
+            AntivirusRow(
+                av_name=str(r[0] or ""),
+                victim_count=int(r[1] or 0),
+                active_count=int(r[2] or 0),
+                disabled_count=int(r[3] or 0),
+                unknown_count=int(r[4] or 0),
+                first_seen_at=r[5],
+                last_seen_at=r[6],
+            )
+            for r in res.result_rows
+        ]
+        domain_total = int(total_res.result_rows[0][0]) if total_res.result_rows else 0
+        return rows, domain_total
+
+    async def samples(
+        self,
+        *,
+        canonical: str,
+        limit: int = 50,
+    ) -> tuple[list[SampleRow], int]:
+        """Per-sample aggregate for the Samples tab.
+
+        Returns (rows, domain_total_victims). rows are ranked by victim
+        count DESC, capped at ``limit`` (50 covers the long tail). The
+        null-sample row ("no loader metadata") is reconstructed FE-side
+        from domain_total minus sum(victim_count).
+
+        Measured on prod (v1.3.10, google.com, warm): 293 ms, 249 MiB
+        read, 1.18M rows. Dominated by the fingerprint ``fields`` Map
+        read. See development/VICTIM_FINGERPRINT_SIBLING_SCOPE.md for
+        the sibling-table fix when this becomes hot.
+        """
+        client = await self._c()
+        params = {
+            **self._base_params(canonical),
+            "fp_fam": "victim_fingerprint",
+            "lim": int(limit),
+        }
+        try:
+            res = await client.query(
+                "WITH victim_pool AS ("  # noqa: S608 # nosec B608
+                "  SELECT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  WHERE host_registrable = {d:String}"
+                "), "
+                "victim_sample AS ("
+                "  SELECT er.archive_sha256, er.victim_folder, "
+                "         any(er.fields['ui_payload_md5']) AS payload_md5, "
+                "         any(er.fields['os_av_name']) AS av_name, "
+                "         any(lower(er.fields['os_av_state'])) AS av_state, "
+                "         min(er.ingested_at) AS first_seen, "
+                "         max(er.ingested_at) AS last_seen "
+                f"  FROM {self._db}.extracted_records er "
+                "  INNER JOIN victim_pool vp USING (archive_sha256, victim_folder) "
+                "  WHERE er.family = {fp_fam:String} "
+                "    AND er.fields['ui_payload_md5'] NOT IN ('', 'unknown', '-') "
+                "  GROUP BY er.archive_sha256, er.victim_folder"
+                "), "
+                "victim_full AS ("
+                "  SELECT vs.*, coalesce(vd.slug, '') AS family_slug "
+                "  FROM victim_sample vs "
+                "  LEFT JOIN (SELECT archive_sha256, victim_folder, slug "
+                f"             FROM {self._db}.victim_family_verdict FINAL) vd "
+                "    USING (archive_sha256, victim_folder)"
+                "), "
+                "md5_av AS ("
+                "  SELECT payload_md5, av_name, "
+                "         countIf(av_state = 'active') AS active_c, count() AS total_c "
+                "  FROM victim_full WHERE av_name != '' "
+                "  GROUP BY payload_md5, av_name"
+                "), "
+                "md5_top_bypass AS ("
+                "  SELECT payload_md5, "
+                "         argMax(av_name, active_c / total_c) AS top_bypass_av, "
+                "         max(active_c / total_c) AS top_bypass_rate "
+                "  FROM md5_av WHERE total_c > 0 "
+                "  GROUP BY payload_md5"
+                ") "
+                "SELECT vf.payload_md5, "
+                "       topK(1)(vf.family_slug)[1] AS family, "
+                "       count() AS victim_count, "
+                "       countDistinct(vf.archive_sha256) AS archive_count, "
+                "       min(vf.first_seen) AS first_seen, "
+                "       max(vf.last_seen) AS last_seen, "
+                "       coalesce(any(mtb.top_bypass_av), '') AS top_bypass_av, "
+                "       coalesce(max(mtb.top_bypass_rate), toFloat64(0)) AS top_bypass_rate "
+                "FROM victim_full vf "
+                "LEFT JOIN md5_top_bypass mtb USING (payload_md5) "
+                "GROUP BY vf.payload_md5 "
+                "ORDER BY victim_count DESC "
+                "LIMIT {lim:UInt32}",
+                parameters=params,
+            )
+            total_res = await client.query(
+                "SELECT count() "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
+                "WHERE host_registrable = {d:String}",
+                parameters=params,
+            )
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError("stealer.extracted_records") from exc
+            raise
+        rows = [
+            SampleRow(
+                loader_md5=str(r[0] or ""),
+                family_slug=str(r[1] or ""),
+                victim_count=int(r[2] or 0),
+                archive_count=int(r[3] or 0),
+                first_seen_at=r[4],
+                last_seen_at=r[5],
+                top_bypass_av_name=str(r[6] or ""),
+                top_bypass_rate=float(r[7] or 0.0),
+            )
+            for r in res.result_rows
+        ]
+        domain_total = int(total_res.result_rows[0][0]) if total_res.result_rows else 0
+        return rows, domain_total
+
+    async def sample_detail(
+        self,
+        *,
+        canonical: str,
+        loader_md5: str,
+    ) -> SampleDetail:
+        """Drill-down payload for one sample. Two queries run in parallel
+        would be ideal; sequential here to keep the client code simple -
+        the operator only fetches this on explicit expand so the cost is
+        a per-click amortisation, not every page load.
+        """
+        client = await self._c()
+        params = {
+            **self._base_params(canonical),
+            "md5": loader_md5,
+            "fp_fam": "victim_fingerprint",
+        }
+        try:
+            paths_res = await client.query(
+                "WITH victim_pool AS ("  # noqa: S608
+                "  SELECT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  WHERE host_registrable = {d:String}"
+                ") "
+                "SELECT er.fields['ui_payload_path'] AS p, "
+                "       countDistinct((er.archive_sha256, er.victim_folder)) AS n "
+                f"FROM {self._db}.extracted_records er "  # nosec B608
+                "INNER JOIN victim_pool vp USING (archive_sha256, victim_folder) "
+                "WHERE er.family = {fp_fam:String} "
+                "  AND er.fields['ui_payload_md5'] = {md5:String} "
+                "  AND er.fields['ui_payload_path'] != '' "
+                "GROUP BY p "
+                "ORDER BY n DESC "
+                "LIMIT 3",
+                parameters=params,
+            )
+            av_res = await client.query(
+                "WITH victim_pool AS ("  # noqa: S608 # nosec B608
+                "  SELECT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  WHERE host_registrable = {d:String}"
+                "), vs AS ("
+                "  SELECT er.archive_sha256, er.victim_folder, "
+                "         any(er.fields['os_av_name']) AS av_name, "
+                "         any(lower(er.fields['os_av_state'])) AS av_state "
+                f"  FROM {self._db}.extracted_records er "
+                "  INNER JOIN victim_pool vp USING (archive_sha256, victim_folder) "
+                "  WHERE er.family = {fp_fam:String} "
+                "    AND er.fields['ui_payload_md5'] = {md5:String} "
+                "  GROUP BY er.archive_sha256, er.victim_folder"
+                ") "
+                "SELECT av_name, "
+                "       countIf(av_state = 'active') AS active_c, "
+                "       count() AS total_c "
+                "FROM vs "
+                "WHERE av_name != '' "
+                "GROUP BY av_name "
+                "ORDER BY active_c / total_c DESC",
+                parameters=params,
+            )
+        except Exception as exc:
+            if _is_unknown_table(exc):
+                raise StealerCorpusUninitializedError("stealer.extracted_records") from exc
+            raise
+        return SampleDetail(
+            loader_paths=[
+                SampleLoaderPath(path=str(r[0]), victim_count=int(r[1] or 0))
+                for r in paths_res.result_rows
+            ],
+            av_breakdown=[
+                SampleAvBreakdown(
+                    av_name=str(r[0]),
+                    active_count=int(r[1] or 0),
+                    total_count=int(r[2] or 0),
+                )
+                for r in av_res.result_rows
+            ],
+        )
 
     async def history(
         self, *, canonical: str, limit: int, offset: int
@@ -555,23 +982,33 @@ class DomainCorpusReader:
             "lim": int(limit),
             "off": int(offset),
         }
+        # v1.3.10: real history field names are visit_url + visit_title +
+        # visit_time (raw string; parsed here instead of in gotractor so the
+        # rule survives the format variance DD.MM.YYYY HH:MM:SS /
+        # DD.MM.YYYY, HH:MM:SS / ISO8601). Rule does not extract visit_count
+        # (the stealer dump drops it). visit_time falls back to ingested_at
+        # on rows from older reindexes that landed before the rule was fixed.
+        url_expr = "coalesce(nullIf(fields['visit_url'], ''), fields['url'])"
+        title_expr = "coalesce(nullIf(fields['visit_title'], ''), fields['title'])"
+        lv_expr = "coalesce(parseDateTimeBestEffortOrNull(fields['visit_time']), ingested_at)"
         try:
             total = await client.query(
-                "SELECT countDistinct(fields['url']) "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
+                f"SELECT countDistinct({url_expr}) "  # noqa: S608
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
-                f"SELECT DISTINCT {self._HOST_EXPR} h, fields['url'], fields['title'], "  # noqa: S608
-                "       toUInt64OrZero(coalesce(fields['visit_count'], '0')) AS vc, "
-                "       parseDateTimeBestEffortOrNull(fields['last_visit']) AS lv, "
-                "       archive_sha256, victim_folder "
-                f"FROM {self._db}.extracted_records "
+                f"SELECT DISTINCT {self._HOST_EXPR} h, {url_expr} AS u, "  # noqa: S608
+                f"       {title_expr} AS t, "
+                f"       toUInt64OrZero(coalesce(fields['visit_count'], '0')) AS vc, "
+                f"       {lv_expr} AS lv, "
+                f"       archive_sha256, victim_folder "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp} "
-                "ORDER BY lv DESC NULLS LAST, ingested_at DESC "
-                "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                f"ORDER BY lv DESC, ingested_at DESC "
+                f"LIMIT {{lim:UInt32}} OFFSET {{off:UInt32}}",
                 parameters=params,
             )
         except Exception as exc:
@@ -580,9 +1017,13 @@ class DomainCorpusReader:
             raise
         items = [
             HistoryRow(
-                host=r[0], url=r[1], title=r[2] or "",
-                visit_count=int(r[3] or 0), last_visit_at=r[4],
-                archive_sha256=r[5], victim_folder=r[6],
+                host=r[0],
+                url=r[1],
+                title=r[2] or "",
+                visit_count=int(r[3] or 0),
+                last_visit_at=r[4],
+                archive_sha256=r[5],
+                victim_folder=r[6],
             )
             for r in rows.result_rows
         ]
@@ -613,7 +1054,7 @@ class DomainCorpusReader:
         try:
             total_res = await client.query(
                 "SELECT count() "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 "WHERE rule_id = 'localstorage_jwt_candidates' "
                 "  AND host_registrable = {d:String}",
                 parameters=params,
@@ -622,7 +1063,7 @@ class DomainCorpusReader:
             page_res = await client.query(
                 "SELECT fields['host'], fields['name'], fields['value'], "  # noqa: S608
                 "       archive_sha256, victim_folder "
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 "WHERE rule_id = 'localstorage_jwt_candidates' "
                 "  AND host_registrable = {d:String} "
                 "ORDER BY ingested_at DESC "
@@ -634,7 +1075,7 @@ class DomainCorpusReader:
             # exp MATERIALIZED column later if this ever becomes hot.
             live_res = await client.query(
                 "SELECT fields['value'] "  # noqa: S608
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 "WHERE rule_id = 'localstorage_jwt_candidates' "
                 "  AND host_registrable = {d:String}",
                 parameters=params,
@@ -652,8 +1093,8 @@ class DomainCorpusReader:
                     host=str(row[0] or ""),
                     key=str(row[1] or ""),
                     jwt_value=str(row[2] or ""),
-                    jwt_subject=claims.get("sub") if claims else None,
-                    jwt_issuer=claims.get("iss") if claims else None,
+                    jwt_subject=_claim_str(claims, "sub"),
+                    jwt_issuer=_claim_str(claims, "iss"),
                     jwt_audience=_aud_as_string(claims),
                     jwt_algorithm=alg,
                     expires_at=exp_at,
@@ -685,7 +1126,7 @@ class DomainCorpusReader:
                 "       countDistinct((archive_sha256, victim_folder, file_path, "
                 "                      cityHash64(toString(fields)))) AS hits, "
                 "       min(ingested_at) AS first_hit, max(ingested_at) AS last_hit "
-                f"FROM {self._db}.extracted_records "
+                f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE rule_id != '' AND {hp} "
                 "GROUP BY rule_id "
                 "ORDER BY hits DESC",
@@ -698,8 +1139,12 @@ class DomainCorpusReader:
         # rule_name + severity resolution deferred to the handler.
         return [
             IndicatorRow(
-                rule_id=r[0], rule_name="", severity="info",
-                hit_count=int(r[1] or 0), first_hit_at=r[2], last_hit_at=r[3],
+                rule_id=r[0],
+                rule_name="",
+                severity="info",
+                hit_count=int(r[1] or 0),
+                first_hit_at=r[2],
+                last_hit_at=r[3],
             )
             for r in rows.result_rows
         ]

@@ -215,9 +215,21 @@ def process_archive(
                     source_label,
                 )
             except Exception as exc:
-                # never fail pipeline on gotractor side
-                _log.warning(
-                    "stealer.gotractor_failed", error=str(exc), error_type=type(exc).__name__
+                # v1.3.10: a gotractor failure USED to be swallowed as a
+                # warning and the pipeline reported success with records=0,
+                # silently losing 99%+ of an archive on a flush RST. Now it
+                # propagates: the attachment lands in STEALER_FAILED and is
+                # explicitly re-runnable. Wallet + classifier passes are
+                # skipped because they depend on records being present.
+                _log.error(
+                    "stealer.gotractor_failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                return ProcessResult(
+                    ok=False,
+                    password_used=pw,
+                    error=f"gotractor insert failed: {exc}",
                 )
         # v1.3.2 wallet-vault extraction pass. Runs after the DSL records
         # pass because browser-wallet LevelDB vaults are a pre-DSL binary

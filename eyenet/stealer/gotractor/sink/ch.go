@@ -70,6 +70,15 @@ func Open(ctx context.Context, dsn string) (*CH, error) {
 		opts.MaxIdleConns = 2
 	}
 	opts.ConnMaxLifetime = 30 * time.Minute
+	// Suppress unsolicited server->client log packets during long INSERTs.
+	// Without this CH's TCPHandler::sendProfileEvents() blocks on a full
+	// send buffer, trips send_timeout (300s), and RSTs the socket -- the
+	// client sees "connection reset by peer" on the next batch.Flush().
+	// ponytail: send_logs_level=none, revisit if we ever want server logs.
+	if opts.Settings == nil {
+		opts.Settings = clickhouse.Settings{}
+	}
+	opts.Settings["send_logs_level"] = "none"
 	conn, err := clickhouse.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open conn: %w", err)
@@ -114,11 +123,23 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 	if !c.Enabled() {
 		return nil, fmt.Errorf("sink.CH is not enabled")
 	}
+	// Register no-op progress + profile-event callbacks. Without these,
+	// clickhouse-go/v2 does NOT drain unsolicited Progress / ProfileEvents
+	// packets from the native socket during a long INSERT: CH keeps sending
+	// them, the client's read side is parked, CH's send buffer fills, and
+	// after send_timeout (300s default) CH closes the socket -> the next
+	// Flush() returns "connection reset by peer". send_logs_level=none does
+	// NOT cover this category of packet. The callbacks force the driver to
+	// pull and discard them; we only care about the drain side-effect.
+	drainCtx := clickhouse.Context(ctx,
+		clickhouse.WithProgress(func(*clickhouse.Progress) {}),
+		clickhouse.WithProfileEvents(func([]clickhouse.ProfileEvent) {}),
+	)
 	sql := fmt.Sprintf(
 		"INSERT INTO %s (%s)",
 		c.table, strings.Join(RecordColumns, ", "),
 	)
-	b, err := c.conn.PrepareBatch(ctx, sql)
+	b, err := c.conn.PrepareBatch(drainCtx, sql)
 	if err != nil {
 		return nil, fmt.Errorf("prepare batch: %w", err)
 	}

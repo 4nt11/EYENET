@@ -37,14 +37,17 @@ description: >
   Khazan branding banners mid-file do not break the stream: the
   regex uses finditer and skips non-matching blocks.
 match:
+  # v1.3.10: (?i) case-insensitive. Stealers write Url:/Title:/Time: in
+  # mixed case across families (Vidar uppercase, Khazan title case, older
+  # Redline mixed); the original uppercase-only pattern missed ~half the
+  # corpus. visit_time stays a RAW string; the strict iso8601 normalize
+  # dropped every DD.MM.YYYY HH:MM:SS value (the actual stealer format).
+  # CH parses it on query via parseDateTimeBestEffortOrNull.
   type: regex
-  pattern: '(?m)^URL:\s*(?P<visit_url>[^\n]+)\nTITLE:\s*(?P<visit_title>[^\n]+)\nTIME:\s*(?P<visit_time>[^\n]+)$'
+  pattern: '(?im)^URL:\s*(?P<visit_url>[^\n]+)\nTITLE:\s*(?P<visit_title>[^\n]+)\nTIME:\s*(?P<visit_time>[^\n]+)$'
 extract:
   fields: [visit_url, visit_title, visit_time]
 normalize:
-  - field: visit_time
-    verb: date_parse
-    format: iso8601
   - verb: derive_url_parts
     field: visit_url
     host_to: host

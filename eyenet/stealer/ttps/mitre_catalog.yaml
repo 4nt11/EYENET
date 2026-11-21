@@ -65,6 +65,12 @@ techniques:
     tactic_id: TA0009
     url: https://attack.mitre.org/techniques/T1115/
 
+  T1012:
+    name: Query Registry
+    tactic: Discovery
+    tactic_id: TA0007
+    url: https://attack.mitre.org/techniques/T1012/
+
   T1217:
     name: Browser Information Discovery
     tactic: Discovery
