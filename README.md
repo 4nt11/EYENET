@@ -1,5 +1,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
+> # :rotating_light: HEY MORON, THIS PROJECT IS IN EXPERIMENTAL PHASE. :rotating_light:
+> # USE AT YOUR OWN RISK! :3
+>
+> Schema changes land weekly. Migrations exist but are not bulletproof.
+> Prod-shaped bugs will land in your lap. If you are reading this and
+> thinking "neat, let me run it on real data," think again, then do
+> whatever you want anyway, you beautiful cowboy.
+
+---
+
 # EYENET
 
 Observation framework for **forensic analysis of threat actors**. EYENET
