@@ -58,13 +58,13 @@ func main() {
 	familiesDir := flag.String("families-dir", envOr("EYENET_STEALER_FAMILIES_DIR", ""), "family catalog directory")
 	input := flag.String("input", "", "victim folder (or single file) to evaluate (records / summary)")
 	mode := flag.String("mode", "records", "records | summary | daemon | selftest | extract-wallets")
-	// v1.3.11.1: default raised from 100000 to 10M. Pre-v1.3.11 BulkParse
-	// accumulated records in a slice, so 100k was a sane memory guard.
-	// Post-streaming the memory bound is one-record-in-flight, and the
-	// 100k cap was silently truncating raw ULP drops (~1.9M lines per
-	// 131 MB file) at 5% yield. 10M stays conservative for genuinely
-	// pathological rules while unblocking normal corpora.
-	limit := flag.Int("limit", 10_000_000, "bulkParse record cap per file per rule")
+	// v1.3.12: --limit is now a no-op kept for CLI compatibility. The
+	// engine streams records through BulkParse and the CH sink streams
+	// them into AsyncInserts; working memory per archive is bounded by
+	// the chunked file loader (16 MiB window), NOT by a record count.
+	// CH refusing an AsyncInsert is the only valid backpressure signal.
+	// See development/FILE_INGEST_STREAMING_SCOPE.md.
+	limit := flag.Int("limit", 0, "deprecated no-op; kept for CLI compatibility")
 	metricsPort := flag.Int("metrics-port", 0, "daemon: bind Prometheus /metrics on this port (0 disables)")
 	showVersion := flag.Bool("version", false, "print build identity (version, commit, build time) and exit")
 	// v1.4.0: direct-to-ClickHouse ingestion. When set the daemon inserts
@@ -101,7 +101,8 @@ func main() {
 	}
 
 	if *mode == "daemon" {
-		d, err := daemon.New(*rulesDir, *familiesDir, *limit)
+		_ = limit
+		d, err := daemon.New(*rulesDir, *familiesDir)
 		if err != nil {
 			log.Fatalf("daemon boot: %v", err)
 		}
