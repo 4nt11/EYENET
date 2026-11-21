@@ -181,18 +181,18 @@ _VICTIM_PROFILES_SELECT_CORE = f"""
         max(coalesce(nullIf(fields['ui_build_version'], ''), nullIf(fields['build_tag'], ''), '')) AS build_version,
         max(fields['ui_payload_md5']) AS payload_md5,
         max(fields['ui_work_dir']) AS work_dir,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family IN ('browser_passwords','combolist','windows_credentials','json_v2')) AS creds_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family IN ('cookies','victim_cookies')) AS cookies_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_autofills') AS autofills_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_history') AS history_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_downloads') AS downloads_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_processes') AS processes_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_software') AS software_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'discord_tokens') AS discord_tokens_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'steam_accounts') AS steam_tokens_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, family = 'google_oauth_tokens') AS google_refresh_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
-        uniqExactStateIf({_IDENTITY_TUPLE_DDL}, rule_id LIKE 'wallet_vault_leveldb:%') AS wallet_vaults_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family IN ('browser_passwords','combolist','windows_credentials','json_v2')) AS creds_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family IN ('cookies','victim_cookies')) AS cookies_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_autofills') AS autofills_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_history') AS history_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_downloads') AS downloads_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_processes') AS processes_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'victim_software') AS software_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'discord_tokens') AS discord_tokens_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'steam_accounts') AS steam_tokens_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, family = 'google_oauth_tokens') AS google_refresh_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
+        uniqHLL12StateIf({_IDENTITY_TUPLE_DDL}, rule_id LIKE 'wallet_vault_leveldb:%') AS wallet_vaults_count,
         maxIf(toUInt8(1), rule_id = 'software_corporate_marker') AS has_corporate_marker,
         maxIf(toUInt8(1), rule_id = 'history_webmail_identity') AS has_webmail_leak,
         maxIf(toUInt8(1), rule_id LIKE 'wallet_vault_leveldb:%' OR family = 'exodus_wallet') AS has_wallet,
@@ -262,18 +262,18 @@ _VICTIM_PROFILES: tuple[str, ...] = (
         build_version          SimpleAggregateFunction(max, LowCardinality(String)),
         payload_md5            SimpleAggregateFunction(max, String),
         work_dir               SimpleAggregateFunction(max, String),
-        creds_count            AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        cookies_count          AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        autofills_count        AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        history_count          AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        downloads_count        AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        processes_count        AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        software_count         AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        discord_tokens_count   AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        steam_tokens_count     AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        google_refresh_count   AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        localstorage_jwt_count AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
-        wallet_vaults_count    AggregateFunction(uniqExact, {_IDENTITY_TUPLE_TYPE}),
+        creds_count            AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        cookies_count          AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        autofills_count        AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        history_count          AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        downloads_count        AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        processes_count        AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        software_count         AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        discord_tokens_count   AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        steam_tokens_count     AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        google_refresh_count   AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        localstorage_jwt_count AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
+        wallet_vaults_count    AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE}),
         has_corporate_marker   SimpleAggregateFunction(max, UInt8),
         has_webmail_leak       SimpleAggregateFunction(max, UInt8),
         has_wallet             SimpleAggregateFunction(max, UInt8),
@@ -315,15 +315,14 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 # catalog-defined). This string is the sentinel we grep in
 # system.tables.create_table_query to decide whether to force-rebuild.
 #
-# v1.3.1 bump: multiple historical bodies qualify as stale. The sentinel
-# catches `countIf(` (the function name), which is present in both the
-# pre-1.3.0 (rule_id-keyed) and post-b7849e7 (family-keyed) bodies but
-# ABSENT in the new uniqExactStateIf body. On a prod that never saw
-# b7849e7's MV rebuild (lazy sinks only trigger on first insert), the
-# narrower sentinel would miss the original body and the deploy would
-# fail with ILLEGAL_TYPE_OF_ARGUMENT during the backfill (observed on
-# the v1.3.1 prod deploy).
-_VICTIM_PROFILES_STALE_SENTINEL = "countIf("
+# v1.3.12.1 bump: the v1.3.1-to-v1.3.12.0 MV body uses uniqExactStateIf,
+# which grew unbounded with cardinality and triggered code 241 merges on
+# prod (victim_profiles max merge peak 3.47 GiB). The sentinel now
+# catches `uniqExactStateIf(` so an upgrade from v1.3.12.0 force-
+# rebuilds the MV with the uniqHLL12StateIf body. Pre-v1.3.1 boxes
+# (sentinel: `countIf(`) are stale by a different path; they need a
+# manual repair or a fresh install -- EYENET has none in the wild.
+_VICTIM_PROFILES_STALE_SENTINEL = "uniqExactStateIf("
 
 # v1.3.4.3 flat-counts sibling. victim_profiles holds the exact, reindex-
 # idempotent uniqExactState columns; victim_counts holds the finalized
@@ -393,18 +392,18 @@ _VICTIM_COUNTS: tuple[str, ...] = (
         max(build_version) AS build_version,
         max(payload_md5) AS payload_md5,
         max(work_dir) AS work_dir,
-        uniqExactMerge(creds_count) AS creds_count,
-        uniqExactMerge(cookies_count) AS cookies_count,
-        uniqExactMerge(autofills_count) AS autofills_count,
-        uniqExactMerge(history_count) AS history_count,
-        uniqExactMerge(downloads_count) AS downloads_count,
-        uniqExactMerge(processes_count) AS processes_count,
-        uniqExactMerge(software_count) AS software_count,
-        uniqExactMerge(discord_tokens_count) AS discord_tokens_count,
-        uniqExactMerge(steam_tokens_count) AS steam_tokens_count,
-        uniqExactMerge(google_refresh_count) AS google_refresh_count,
-        uniqExactMerge(localstorage_jwt_count) AS localstorage_jwt_count,
-        uniqExactMerge(wallet_vaults_count) AS wallet_vaults_count,
+        uniqHLL12Merge(creds_count) AS creds_count,
+        uniqHLL12Merge(cookies_count) AS cookies_count,
+        uniqHLL12Merge(autofills_count) AS autofills_count,
+        uniqHLL12Merge(history_count) AS history_count,
+        uniqHLL12Merge(downloads_count) AS downloads_count,
+        uniqHLL12Merge(processes_count) AS processes_count,
+        uniqHLL12Merge(software_count) AS software_count,
+        uniqHLL12Merge(discord_tokens_count) AS discord_tokens_count,
+        uniqHLL12Merge(steam_tokens_count) AS steam_tokens_count,
+        uniqHLL12Merge(google_refresh_count) AS google_refresh_count,
+        uniqHLL12Merge(localstorage_jwt_count) AS localstorage_jwt_count,
+        uniqHLL12Merge(wallet_vaults_count) AS wallet_vaults_count,
         max(has_corporate_marker) AS has_corporate_marker,
         max(has_webmail_leak) AS has_webmail_leak,
         max(has_wallet) AS has_wallet,
@@ -658,10 +657,15 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
 )
 
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
-# bodies used `toUInt64(count()) AS <col>`; the new body uses
-# `uniqExactState(_IDENTITY_TUPLE_DDL)`. The sentinel catches the old shape.
-_STATS_ROLLUP_STALE_SENTINEL = "toUInt64(count())"
-_EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "toUInt64(count())"
+# bodies used `toUInt64(count()) AS <col>`; the next body used
+# `uniqExactState(_IDENTITY_TUPLE_DDL)`.
+# v1.3.12.1 bump: uniqExact grew unbounded with cardinality and OOMed
+# merges (3.70 GiB peak). New body uses uniqHLL12State (~2.5 KB fixed state,
+# ~2.5% error, fine for dashboard counters). The sentinel now catches
+# `uniqExactState(` so an upgrade from v1.3.12.0 force-rebuilds. Pre-v1.3.1
+# `toUInt64(count())` bodies need a manual repair or a fresh install.
+_STATS_ROLLUP_STALE_SENTINEL = "uniqExactState("
+_EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "uniqExactState("
 
 
 # v1.3.1 /stats pre-aggregation. Before: GET /v1/stealer/stats ran 4 FULL
@@ -1282,6 +1286,17 @@ class ClickHouseRecordsSink:
         self._repair_victim_profiles_if_stale(client)
         for stmt in _VICTIM_PROFILES:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+        # v1.3.12.1 repair victim_counts_refresh if it still uses
+        # uniqExactMerge over columns that are now uniqHLL12 aggregates.
+        # Drops the refresh MV + target; the CREATE IF NOT EXISTS below
+        # rebuilds both, and the next 5-min refresh repopulates
+        # victim_counts from the rebuilt victim_profiles.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="victim_counts_refresh",
+            target_name="victim_counts",
+            sentinel="uniqExactMerge(",
+        )
         # v1.3.4.3 flat-counts sibling + refreshable MV. The experimental
         # flag has to be enabled per-command because refreshable MVs are
         # still gated in 24.8. Prod also carries it in the eyenet profile
@@ -1321,6 +1336,14 @@ class ClickHouseRecordsSink:
         # v1.3.1 parse-failures acceleration (1 MV + one-shot backfill).
         for stmt in _EXTRACTED_PATHS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+        # v1.3.12.1 repair extracted_rows_per_file_counts_refresh if it still
+        # uses uniqExactMerge over a column that is now uniqHLL12.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="extracted_rows_per_file_counts_refresh",
+            target_name="extracted_rows_per_file_counts",
+            sentinel="uniqExactMerge(",
+        )
         # v1.3.5 flat-counts sibling + refreshable MV for extracted_rows_per_file.
         # Must run AFTER extracted_rows_per_file itself is created (above).
         for stmt in _EXTRACTED_ROWS_PER_FILE_COUNTS:
