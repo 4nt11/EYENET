@@ -26,7 +26,6 @@
 
   let domain = $derived($page.params.domain);
 
-  onMount(() => loadDomainVictims(domain, { page: 1 }));
 
   let lastDomain = $state(null);
   $effect(() => {

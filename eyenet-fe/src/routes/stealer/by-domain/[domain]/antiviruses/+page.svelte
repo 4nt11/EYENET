@@ -31,7 +31,6 @@
   };
 
   let domain = $derived($page.params.domain);
-  onMount(() => loadDomainAntiviruses(domain));
 
   let lastDomain = $state(null);
   $effect(() => {

@@ -24,8 +24,6 @@
 
   let domain = $derived($page.params.domain);
 
-  onMount(() => loadDomainCredentials(domain, { page: 1 }));
-
   let lastDomain = $state(null);
   $effect(() => {
     if (domain && domain !== lastDomain) {

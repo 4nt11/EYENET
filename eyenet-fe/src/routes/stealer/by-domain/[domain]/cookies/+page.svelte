@@ -33,7 +33,6 @@
 
   let domain = $derived($page.params.domain);
 
-  onMount(() => loadDomainCookies(domain, { page: 1, live_only: cookiesCtx.live_only }));
 
   let lastDomain = $state(null);
   $effect(() => {

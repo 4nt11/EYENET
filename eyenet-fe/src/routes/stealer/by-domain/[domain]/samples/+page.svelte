@@ -35,7 +35,6 @@
   };
 
   let domain = $derived($page.params.domain);
-  onMount(() => loadDomainSamples(domain));
 
   let lastDomain = $state(null);
   $effect(() => {

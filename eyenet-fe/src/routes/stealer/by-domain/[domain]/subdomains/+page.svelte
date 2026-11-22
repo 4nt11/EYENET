@@ -12,7 +12,6 @@
 
   let domain = $derived($page.params.domain);
 
-  onMount(() => loadDomainSubdomains(domain));
 
   let lastDomain = $state(null);
   $effect(() => {

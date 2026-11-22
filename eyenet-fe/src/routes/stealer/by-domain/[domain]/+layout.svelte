@@ -44,7 +44,6 @@
   const tabHref = (slug) => `/stealer/by-domain/${encodeURIComponent(domain)}/${slug}`;
   const isActive = (slug, path) => path?.endsWith(`/${slug}`) || (slug === 'credentials' && path?.endsWith(`/${encodeURIComponent(domain)}`));
 
-  onMount(() => loadDomainSummary(domain));
 
   let lastDomain = $state(null);
   $effect(() => {

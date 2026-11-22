@@ -23,7 +23,6 @@
 
   let domain = $derived($page.params.domain);
 
-  onMount(() => loadDomainHistory(domain, { page: 1 }));
 
   let lastDomain = $state(null);
   $effect(() => {
