@@ -239,6 +239,25 @@ print('base OK')
 	log "preflight OK"
 }
 
+# ---- make sure the two app DBs exist, on ANY volume state ------------------------------
+# The postgres image's init script (./postgres/init) creates eyenet + eyenet_audit ONLY on
+# a truly EMPTY volume. A box whose PGDATA predates that script, or whose first boot failed
+# partway, has an initialised volume and the init dir is skipped FOREVER ~ so `eyenet` never
+# appears and every service crash-loops on connect with `database "eyenet" does not exist`
+# (nico-g, 2026-11-22). Re-run the SAME idempotent SQL against the LIVE server on each
+# deploy: its `WHERE NOT EXISTS (...) \gexec` is a no-op when the DBs already exist and
+# creates them when they do not, independent of whether the init script ever fired. One
+# invocation from here = single-threaded, so no concurrent-CREATE-DATABASE race (which is
+# exactly why this does NOT live in the per-service boot path). Local psql in the pg
+# container is trust-auth (see DB_SERVICE note above), so no password is needed.
+ensure_databases() {
+	log "ensuring $DB_MAIN + $DB_AUDIT exist (idempotent, any volume state)"
+	componer up -d --wait "$DB_SERVICE"
+	componer exec -T "$DB_SERVICE" \
+		psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+		-f /docker-entrypoint-initdb.d/01-create-eyenet-dbs.sql
+}
+
 # ---- verbs -----------------------------------------------------------------------------
 
 deploy() {
@@ -281,6 +300,7 @@ deploy() {
 	log "building $version (git $EYENET_GIT_SHA)"
 	componer build
 	preflight || exit 1
+	ensure_databases
 	componer up -d
 	check "$version"
 
