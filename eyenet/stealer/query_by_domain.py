@@ -419,7 +419,7 @@ class DomainCorpusReader:
         }
         try:
             total = await client.query(
-                "SELECT countDistinct((fields['url'], fields['user'], fields['password'])) "  # noqa: S608
+                "SELECT uniqHLL12((fields['url'], fields['user'], fields['password'])) "  # noqa: S608
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}",
                 parameters=params,
@@ -527,7 +527,7 @@ class DomainCorpusReader:
         }
         try:
             total = await client.query(
-                f"SELECT countDistinct({self._HOST_EXPR}) "  # noqa: S608
+                f"SELECT uniqHLL12({self._HOST_EXPR}) "  # noqa: S608
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE {hp}",
                 parameters=params,
@@ -535,9 +535,9 @@ class DomainCorpusReader:
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
                 f"SELECT {self._HOST_EXPR} AS host, "  # noqa: S608
-                "       countDistinctIf((fields['url'], fields['user'], fields['password']), "
+                "       uniqHLL12If((fields['url'], fields['user'], fields['password']), "
                 "         family IN {creds:Array(String)}) AS cred_cnt, "
-                "       countDistinctIf((fields['url'], fields['name']), "
+                "       uniqHLL12If((fields['url'], fields['name']), "
                 "         family IN {cookies:Array(String)}) AS cookie_cnt "
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE {hp} "
@@ -586,7 +586,7 @@ class DomainCorpusReader:
         live_filter = f" AND {expires_expr} > now()" if live_only else ""
         try:
             total = await client.query(
-                f"SELECT countDistinct(({host_expr}, {name_expr})) "  # noqa: S608
+                f"SELECT uniqHLL12(({host_expr}, {name_expr})) "  # noqa: S608
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}{live_filter}",
                 parameters=params,
@@ -648,7 +648,7 @@ class DomainCorpusReader:
         )
         try:
             # v1.3.10: total via victim_counts.autofills_count pool-sum
-            # (~90 ms warm) instead of countDistinct((form_key, form_value))
+            # (~90 ms warm) instead of uniqHLL12((form_key, form_value))
             # across the full autofill family (~430 ms). Same number as the
             # hero stat; see summary() for the shared pattern. Pagination
             # below still works on distinct (form_key, form_value) rows.
@@ -854,7 +854,7 @@ class DomainCorpusReader:
                 "SELECT vf.payload_md5, "
                 "       topK(1)(vf.family_slug)[1] AS family, "
                 "       count() AS victim_count, "
-                "       countDistinct(vf.archive_sha256) AS archive_count, "
+                "       uniqHLL12(vf.archive_sha256) AS archive_count, "
                 "       min(vf.first_seen) AS first_seen, "
                 "       max(vf.last_seen) AS last_seen, "
                 "       coalesce(any(mtb.top_bypass_av), '') AS top_bypass_av, "
@@ -917,7 +917,7 @@ class DomainCorpusReader:
                 "  WHERE host_registrable = {d:String}"
                 ") "
                 "SELECT er.fields['ui_payload_path'] AS p, "
-                "       countDistinct((er.archive_sha256, er.victim_folder)) AS n "
+                "       uniqHLL12((er.archive_sha256, er.victim_folder)) AS n "
                 f"FROM {self._db}.extracted_records er "  # nosec B608
                 "INNER JOIN victim_pool vp USING (archive_sha256, victim_folder) "
                 "WHERE er.family = {fp_fam:String} "
@@ -993,7 +993,7 @@ class DomainCorpusReader:
         lv_expr = "coalesce(parseDateTimeBestEffortOrNull(fields['visit_time']), ingested_at)"
         try:
             total = await client.query(
-                f"SELECT countDistinct({url_expr}) "  # noqa: S608
+                f"SELECT uniqHLL12({url_expr}) "  # noqa: S608
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}",
                 parameters=params,
@@ -1123,7 +1123,7 @@ class DomainCorpusReader:
             # rule catalog in-process.
             rows = await client.query(
                 "SELECT rule_id, "  # noqa: S608
-                "       countDistinct((archive_sha256, victim_folder, file_path, "
+                "       uniqHLL12((archive_sha256, victim_folder, file_path, "
                 "                      cityHash64(toString(fields)))) AS hits, "
                 "       min(ingested_at) AS first_hit, max(ingested_at) AS last_hit "
                 f"FROM {self._db}.extracted_records "  # nosec B608

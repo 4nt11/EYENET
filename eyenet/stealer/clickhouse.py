@@ -291,8 +291,8 @@ _VICTIM_PROFILES: tuple[str, ...] = (
     {{storage_policy_clause}}
     """,
     # v1.3.1: switched the *_count columns from SAF(sum, UInt64) +
-    # countIf(...) in the MV body to AggregateFunction(uniqExact, identity_tuple)
-    # + uniqExactStateIf(identity_tuple, predicate). The identity tuple
+    # countIf(...) in the MV body to AggregateFunction(uniqHLL12, identity_tuple)
+    # + uniqHLL12StateIf(identity_tuple, predicate). The identity tuple
     # matches extracted_records' ReplacingMergeTree ORDER BY so a reindex
     # re-inserting the same row contributes the same tuple, and the counter
     # dedups. Correctness is a schema property, not an operator procedure.
@@ -318,11 +318,11 @@ _VICTIM_PROFILES: tuple[str, ...] = (
 # v1.3.12.1 bump: the v1.3.1-to-v1.3.12.0 MV body uses uniqExactStateIf,
 # which grew unbounded with cardinality and triggered code 241 merges on
 # prod (victim_profiles max merge peak 3.47 GiB). The sentinel now
-# catches `uniqExactStateIf(` so an upgrade from v1.3.12.0 force-
+# catches `uniqHLL12StateIf(` so an upgrade from v1.3.12.0 force-
 # rebuilds the MV with the uniqHLL12StateIf body. Pre-v1.3.1 boxes
 # (sentinel: `countIf(`) are stale by a different path; they need a
 # manual repair or a fresh install -- EYENET has none in the wild.
-_VICTIM_PROFILES_STALE_SENTINEL = "uniqExactStateIf("
+_VICTIM_PROFILES_STALE_SENTINEL = "uniqHLL12StateIf("
 
 # v1.3.4.3 flat-counts sibling. victim_profiles holds the exact, reindex-
 # idempotent uniqExactState columns; victim_counts holds the finalized
@@ -536,30 +536,30 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
     TO {db}.by_domain_counts
     AS SELECT
         host_registrable,
-        countDistinctIf((archive_sha256, victim_folder),
+        uniqHLL12If((archive_sha256, victim_folder),
           family IN ('browser_passwords','windows_credentials',
                      'firefox_logins','combolist')) AS victim_count,
-        countDistinctIf(archive_sha256,
+        uniqHLL12If(archive_sha256,
           family IN ('browser_passwords','windows_credentials',
                      'firefox_logins','combolist')
           OR family IN ('cookies','victim_cookies')) AS archive_count,
         min(ingested_at) AS first_seen_at,
         max(ingested_at) AS last_seen_at,
-        countDistinctIf((fields['url'], fields['user'], fields['password']),
+        uniqHLL12If((fields['url'], fields['user'], fields['password']),
           family IN ('browser_passwords','windows_credentials',
                      'firefox_logins','combolist')) AS credential_count,
         -- v1.3.10: cookies store identity as (cookie_domain, cookie_name) and
         -- expiry as an epoch in cookie_expires_epoch / expires_epoch. The old
         -- (fields['url'], fields['name']) tuple was empty on every cookie row
         -- so LIVE/ALL both rendered 0 (or 1 when an accidental row had both).
-        countDistinctIf((trim(LEADING '.' FROM fields['cookie_domain']),
+        uniqHLL12If((trim(LEADING '.' FROM fields['cookie_domain']),
                          coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
           family IN ('cookies','victim_cookies')
           AND fromUnixTimestamp(toUInt32OrZero(coalesce(
                 nullIf(fields['cookie_expires_epoch'], ''),
                 nullIf(fields['expires_epoch'], ''), '0'))) > now()
           ) AS live_cookie_count,
-        countDistinctIf((trim(LEADING '.' FROM fields['cookie_domain']),
+        uniqHLL12If((trim(LEADING '.' FROM fields['cookie_domain']),
                          coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
           family IN ('cookies','victim_cookies')) AS all_cookie_count,
         -- v1.3.10: autofills always resolve host_registrable='' (Chromium
@@ -572,11 +572,11 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
         -- v1.3.10: history rule emits fields['visit_url'], not ['url'].
         -- The old expression counted 0 for every domain. visit_downloads
         -- still uses 'url' so we coalesce both.
-        countDistinctIf(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
+        uniqHLL12If(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
           family IN ('victim_history','victim_downloads')) AS history_count,
-        countDistinctIf(fields['value'],
+        uniqHLL12If(fields['value'],
           rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
-        -- v1.3.9 bug: this used to be countDistinctIf(rule_id, rule_id != '')
+        -- v1.3.9 bug: this used to be uniqHLL12If(rule_id, rule_id != '')
         -- which counted every extraction rule as an "indicator hit" and
         -- surfaced a flashy "N INDICATOR HITS" badge on every domain with
         -- data. The real indicator concept is a join against the operator-
@@ -636,11 +636,11 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
         coalesce(any(vc.country), '')       AS country,
         coalesce(any(vc.build_version), '') AS build_version,
         coalesce(any(vc.payload_md5), '')   AS loader_md5,
-        countDistinctIf(
+        uniqHLL12If(
           (er.fields['url'], er.fields['user'], er.fields['password']),
           er.family IN ('browser_passwords','windows_credentials',
                         'firefox_logins','combolist')) AS cred_count,
-        countDistinctIf(
+        uniqHLL12If(
           (er.fields['url'], er.fields['name']),
           er.family IN ('cookies','victim_cookies')) AS cookie_count,
         min(er.ingested_at) AS first_seen_at,
@@ -666,7 +666,7 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
 # reference the login field at all, so the same sentinel is a no-op
 # for them (their bodies still match the current uniqHLL12 shape).
 _STATS_ROLLUP_STALE_SENTINEL = "fields['login']"
-_EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "uniqExactState("
+_EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "uniqHLL12State("
 
 
 # v1.3.1 /stats pre-aggregation. Before: GET /v1/stealer/stats ran 4 FULL
@@ -1296,7 +1296,7 @@ class ClickHouseRecordsSink:
             client,
             mv_name="victim_counts_refresh",
             target_name="victim_counts",
-            sentinel="uniqExactMerge(",
+            sentinel="uniqHLL12Merge(",
         )
         # v1.3.4.3 flat-counts sibling + refreshable MV. The experimental
         # flag has to be enabled per-command because refreshable MVs are
@@ -1314,7 +1314,7 @@ class ClickHouseRecordsSink:
         for stmt in _MONITORED_DOMAINS:
             client.command(stmt.format(db=self._db))
         # v1.3.1 one-shot repair for the rollups whose counter type changed
-        # from SAF(sum, UInt64) to AggregateFunction(uniqExact, identity_tuple).
+        # from SAF(sum, UInt64) to AggregateFunction(uniqHLL12, identity_tuple).
         # The sentinel is the pre-1.3.1 MV body's `toUInt64(count())`; if present
         # the MV + target are dropped and the CREATE IF NOT EXISTS below
         # rebuilds them with the new body, then the NOT EXISTS backfill fires.
@@ -1343,7 +1343,7 @@ class ClickHouseRecordsSink:
             client,
             mv_name="extracted_rows_per_file_counts_refresh",
             target_name="extracted_rows_per_file_counts",
-            sentinel="uniqExactMerge(",
+            sentinel="uniqHLL12Merge(",
         )
         # v1.3.5 flat-counts sibling + refreshable MV for extracted_rows_per_file.
         # Must run AFTER extracted_rows_per_file itself is created (above).
@@ -1359,6 +1359,15 @@ class ClickHouseRecordsSink:
         # expression on-the-fly until MATERIALIZE is kicked off manually.
         for stmt in _EXTRACTED_RECORDS_HOST_COLS:
             client.command(stmt.format(db=self._db))
+        # v1.3.12.2 repair by_domain_counts_refresh if it still uses
+        # countDistinctIf (unbounded exact state, OOMed at 7.5 GiB on
+        # prod against 157M rows). Drop + rebuild with uniqHLL12If body.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="by_domain_counts_refresh",
+            target_name="by_domain_counts",
+            sentinel="countDistinctIf(",
+        )
         for stmt in _BY_DOMAIN_COUNTS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
@@ -1367,6 +1376,13 @@ class ClickHouseRecordsSink:
         # v1.3.8 per-domain per-victim sibling (Domain View Victims tab).
         # Depends on the _EXTRACTED_RECORDS_HOST_COLS block above for the
         # host_registrable column; MV groups on it.
+        # v1.3.12.2 repair: same countDistinctIf -> uniqHLL12If swap.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="by_domain_victim_counts_refresh",
+            target_name="by_domain_victim_counts",
+            sentinel="countDistinctIf(",
+        )
         for stmt in _BY_DOMAIN_VICTIM_COUNTS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
@@ -1564,7 +1580,7 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
         filename             String,
         heuristic_kind       LowCardinality(String),
         occurrences          SimpleAggregateFunction(sum, UInt64),
-        archive_count_state  AggregateFunction(uniqExact, FixedString(64)),
+        archive_count_state  AggregateFunction(uniqHLL12, FixedString(64)),
         sample_head_state    AggregateFunction(any, String)
     )
     ENGINE = AggregatingMergeTree
@@ -1578,7 +1594,7 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
         filename,
         heuristic_kind,
         toUInt64(1) AS occurrences,
-        uniqExactState(archive_sha256) AS archive_count_state,
+        uniqHLL12State(archive_sha256) AS archive_count_state,
         anyState(sample_head) AS sample_head_state
     FROM {db}.file_audit
     WHERE extractor_touched = 0 AND heuristic_kind NOT IN ('empty','binary')
@@ -1591,7 +1607,7 @@ _FILE_AUDIT_V127: tuple[str, ...] = (
         filename,
         heuristic_kind,
         toUInt64(1) AS occurrences,
-        uniqExactState(archive_sha256) AS archive_count_state,
+        uniqHLL12State(archive_sha256) AS archive_count_state,
         anyState(sample_head) AS sample_head_state
     FROM {db}.file_audit
     WHERE extractor_touched = 0 AND heuristic_kind NOT IN ('empty','binary')
@@ -1738,6 +1754,19 @@ class FileAuditSink:
                 db=self._db,
                 storage_policy_clause=_storage_policy_clause(),
             )
+        )
+        # v1.3.12.2 repair file_audit_per_archive if it still uses
+        # AggregateFunction(uniqExact, ...) + uniqExactState. Swap to
+        # uniqHLL12 across the board for consistency with the rest of
+        # the corpus. Dropping the target discards the archive-count
+        # aggregate state; the backfill INSERT (NOT EXISTS gated in the
+        # _FILE_AUDIT_V127 block) repopulates from the live file_audit
+        # table.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="file_audit_per_archive_mv",
+            target_name="file_audit_per_archive",
+            sentinel="uniqExactState(",
         )
         for stmt in _FILE_AUDIT_V127:
             client.command(stmt.format(db=self._db))

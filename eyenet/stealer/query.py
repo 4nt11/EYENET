@@ -216,7 +216,7 @@ class StealerCredsReader:
         client = await self._c()
         host_expr = self._HOST_EXPR
         result = await client.query(
-            "SELECT countDistinct("  # noqa: S608
+            "SELECT uniqHLL12("  # noqa: S608
             f"({host_expr}, fields['url'], fields['user'], fields['password'])) "
             f"FROM {self._db}.extracted_records "  # nosec B608
             f"WHERE {self._WHERE_ANY_URL} AND {host_expr} = {{host:String}}",
@@ -402,7 +402,7 @@ class FileAuditReader:
             ),
             # uniqExact against the roll-up ORDER BY key: cheap read of a small table.
             self._scalar(
-                "SELECT uniqExact(archive_sha256) FROM {db:Identifier}.file_audit_per_archive",
+                "SELECT uniqHLL12(archive_sha256) FROM {db:Identifier}.file_audit_per_archive",
                 {"db": self._db},
             ),
         )
@@ -427,7 +427,7 @@ class FileAuditReader:
                 "SELECT filename,"
                 "       heuristic_kind,"
                 "       sum(occurrences)                  AS occurrences,"
-                "       uniqExactMerge(archive_count_state) AS archive_count,"
+                "       uniqHLL12Merge(archive_count_state) AS archive_count,"
                 "       anyMerge(sample_head_state)        AS sample_head"
                 "  FROM {db:Identifier}.file_audit_per_unknown_file"
                 "  GROUP BY filename, heuristic_kind"
@@ -436,7 +436,7 @@ class FileAuditReader:
                 {"db": self._db, "lim": int(limit), "off": int(off)},
             ),
             self._scalar(
-                "SELECT uniqExact((filename, heuristic_kind))"
+                "SELECT uniqHLL12((filename, heuristic_kind))"
                 "  FROM {db:Identifier}.file_audit_per_unknown_file",
                 {"db": self._db},
             ),
@@ -854,7 +854,7 @@ class StealerArtifactsReader:
         ProcessList.txt, cookies.txt, etc. The MV also summed raw row
         counts, double-counting rel_path dupes from reindex passes.
 
-        Definition: total = uniqExact(filename) over non-empty / non-binary
+        Definition: total = uniqHLL12(filename) over non-empty / non-binary
         file_audit rows in this (archive, victim). parsed = same uniqExact
         but filtered to filenames whose rel_path appears at least once in
         extracted_records for the same (archive, victim). Matches the
@@ -867,11 +867,11 @@ class StealerArtifactsReader:
         # from the refreshable sibling. Counts are up to 5 min stale.
         rows = await self._rows(
             "SELECT "  # noqa: S608
-            "  uniqExact(fa.filename) AS total, "
-            "  uniqExactIf(fa.filename, erf.n > 0) AS parsed, "
-            "  round(if(uniqExact(fa.filename) = 0, 0.0, "
-            "    100.0 * uniqExactIf(fa.filename, erf.n > 0) "
-            "    / uniqExact(fa.filename)), 1) AS pct "
+            "  uniqHLL12(fa.filename) AS total, "
+            "  uniqHLL12If(fa.filename, erf.n > 0) AS parsed, "
+            "  round(if(uniqHLL12(fa.filename) = 0, 0.0, "
+            "    100.0 * uniqHLL12If(fa.filename, erf.n > 0) "
+            "    / uniqHLL12(fa.filename)), 1) AS pct "
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
             "  SELECT file_path, n "
@@ -930,7 +930,7 @@ class StealerArtifactsReader:
         if the watchlist ever grows into the millions, revisit this.
         """
         rows = await self._rows(
-            "SELECT uniqExact(domain) AS n FROM ("  # noqa: S608
+            "SELECT uniqHLL12(domain) AS n FROM ("  # noqa: S608
             "  SELECT vd.domain "
             f"  FROM {self._db}.victim_domains AS vd "  # nosec B608
             f"  INNER JOIN {self._db}.monitored_domains AS md "
@@ -1263,7 +1263,7 @@ class StealerFailuresReader:
         base_from = f"FROM {self._db}.file_audit AS fa "  # nosec B608
 
         total_rows = await self._rows(
-            f"SELECT uniqExact({self._SIG_EXPR}) {base_from} WHERE {where_sql}",
+            f"SELECT uniqHLL12({self._SIG_EXPR}) {base_from} WHERE {where_sql}",
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
@@ -1273,8 +1273,8 @@ class StealerFailuresReader:
             f"  {self._SIG_EXPR}                        AS sig, "
             "  any(substring(fa.sample_head, 1, 200)) AS preview, "
             "  count()                                AS n_files, "
-            "  uniqExact((fa.archive_sha256, fa.victim_folder)) AS n_victims, "
-            "  uniqExact(fa.archive_sha256)           AS n_archives, "
+            "  uniqHLL12((fa.archive_sha256, fa.victim_folder)) AS n_victims, "
+            "  uniqHLL12(fa.archive_sha256)           AS n_archives, "
             "  any(fa.sample_head)                    AS sample, "
             "  any(fa.archive_sha256)                 AS sample_sha, "
             "  any(fa.victim_folder)                  AS sample_vf, "
@@ -1322,8 +1322,8 @@ class StealerFailuresReader:
         parsed_in = f"fa.rel_path IN (SELECT file_path FROM {self._db}.extracted_file_paths)"  # noqa: S608  # nosec B608
         cov_rows = await self._rows(
             "SELECT "  # noqa: S608
-            "  uniqExact((fa.archive_sha256, fa.victim_folder, fa.filename)) AS total, "
-            "  uniqExactIf((fa.archive_sha256, fa.victim_folder, fa.filename), "
+            "  uniqHLL12((fa.archive_sha256, fa.victim_folder, fa.filename)) AS total, "
+            "  uniqHLL12If((fa.archive_sha256, fa.victim_folder, fa.filename), "
             f"             {parsed_in}) AS parsed "
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "WHERE fa.victim_folder != '' "
@@ -1335,7 +1335,7 @@ class StealerFailuresReader:
         coverage_pct = round(100.0 * parsed_files / total_files, 1) if total_files else 0.0
 
         fail_rows = await self._rows(
-            f"SELECT count(), uniqExact({self._SIG_EXPR}) "  # noqa: S608
+            f"SELECT count(), uniqHLL12({self._SIG_EXPR}) "  # noqa: S608
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "WHERE fa.victim_folder != '' "
             "  AND fa.heuristic_kind NOT IN ('empty','binary') "
