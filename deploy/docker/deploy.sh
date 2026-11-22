@@ -266,18 +266,30 @@ deploy() {
 		log "not a git checkout: nothing names this release. Not deploying."
 		exit 78
 	fi
-	# Prod only takes TAGGED releases: HEAD must be exactly on a git tag. No loose commits.
-	if ! tag=$(git -C "$ROOT" describe --exact-match --tags HEAD 2>/dev/null); then
+	# Prod only takes TAGGED releases: HEAD must be exactly on a git tag. No loose
+	# commits -- a release must be a name you can point at. EYENET_DEV=1 (the same
+	# flag that opts into localhost TLS below) relaxes this for dev/test boxes: an
+	# untagged branch deploys under a commit-named version `g<shortsha>` instead of a
+	# release tag. `g<sha>` is a valid leading-alnum token, so it satisfies FORMAT and
+	# the docker tag charset exactly like a real tag does -- retention/rollback/prune
+	# treat it identically.
+	if tag=$(git -C "$ROOT" describe --exact-match --tags HEAD 2>/dev/null); then
+		name="$tag"
+	elif [ "${EYENET_DEV:-}" = "1" ]; then
+		name="g$(git -C "$ROOT" rev-parse --short HEAD)"
+		log "EYENET_DEV=1: HEAD is not on a tag; deploying untagged branch as \`$name\`"
+	else
 		log "HEAD is not on a git tag. Tag the release (\`git tag -a vX.Y.Z\`), make sure"
 		log "the server has it, then deploy. Prod only publishes named releases."
+		log "(Set EYENET_DEV=1 to deploy an untagged branch on a dev/test box.)"
 		exit 78
 	fi
 	# status --porcelain, not diff: UNTRACKED files enter the build context too, so a new
-	# uncommitted module changes the image and the tag would lie. Mark it -dirty.
+	# uncommitted module changes the image and the name would lie. Mark it -dirty.
 	dirty=""
 	if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
 		dirty="-dirty"
-		log "working tree is dirty: \`$tag\` does not describe the build; marking -dirty"
+		log "working tree is dirty: \`$name\` does not describe the build; marking -dirty"
 	fi
 
 	# A live deploy needs the DNS domain so Caddy can provision Let's Encrypt TLS for it. A
@@ -290,7 +302,7 @@ deploy() {
 		exit 78
 	fi
 
-	version="$stamp-$tag$dirty"
+	version="$stamp-$name$dirty"
 	export EYENET_VERSION="$version" # consumed as a build arg -> the OCI label
 	# Full git SHA baked into the gotractor binary via -ldflags so
 	# `gotractor --version` in prod reports the exact commit, and the
