@@ -1253,6 +1253,34 @@ _MONITORED_DOMAINS: tuple[str, ...] = (
 )
 
 
+def _repair_mv_if_stale(
+    client: Any,
+    *,
+    db: str,
+    mv_name: str,
+    target_name: str,
+    sentinel: str,
+) -> None:
+    """Drop {mv_name} + {target_name} iff the stored MV body contains
+    {sentinel}. The follow-on CREATE IF NOT EXISTS then rebuilds both
+    with the new body and the NOT EXISTS backfill repopulates.
+
+    Module-level so both ClickHouseRecordsSink and FileAuditSink can
+    use it without inheritance. `db` is operator-set config, not user
+    input; no injection risk.
+    """
+    query = (
+        "SELECT create_table_query FROM system.tables "  # noqa: S608  # nosec B608
+        f"WHERE database = '{db}' AND name = '{mv_name}'"
+    )
+    rows = client.query(query).result_rows
+    if not rows or sentinel not in (rows[0][0] or ""):
+        return
+    client.command(f"DROP VIEW IF EXISTS {db}.{mv_name}")
+    client.command(f"TRUNCATE TABLE IF EXISTS {db}.{target_name}")
+    client.command(f"DROP TABLE IF EXISTS {db}.{target_name}")
+
+
 class ClickHouseRecordsSink:
     """Connection + schema + batched insert for ``<db>.extracted_records``.
 
@@ -1407,27 +1435,11 @@ class ClickHouseRecordsSink:
         target_name: str,
         sentinel: str,
     ) -> None:
-        """Drop {mv_name} + {target_name} iff the stored MV body contains
-        {sentinel}. The follow-on CREATE IF NOT EXISTS then rebuilds both
-        with the new body and the NOT EXISTS backfill repopulates from
-        extracted_records. Idempotent: once rebuilt, the sentinel no
-        longer matches, so later ensure_schema() calls are no-ops.
-
-        Safe for the stealer rollups because their data is pure
-        derivation of extracted_records; the authoritative rows stay
-        untouched.
-        """
-        # self._db is operator-set config, not user input; no injection risk.
-        query = (
-            "SELECT create_table_query FROM system.tables "  # noqa: S608  # nosec B608
-            f"WHERE database = '{self._db}' AND name = '{mv_name}'"
+        """Instance wrapper -- delegates to the module-level helper so
+        FileAuditSink can call the same code without inheriting."""
+        _repair_mv_if_stale(
+            client, db=self._db, mv_name=mv_name, target_name=target_name, sentinel=sentinel,
         )
-        rows = client.query(query).result_rows
-        if not rows or sentinel not in (rows[0][0] or ""):
-            return
-        client.command(f"DROP VIEW IF EXISTS {self._db}.{mv_name}")
-        client.command(f"TRUNCATE TABLE IF EXISTS {self._db}.{target_name}")
-        client.command(f"DROP TABLE IF EXISTS {self._db}.{target_name}")
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:
         batch: list[list[Any]] = list(rows)
@@ -1755,17 +1767,18 @@ class FileAuditSink:
                 storage_policy_clause=_storage_policy_clause(),
             )
         )
-        # v1.3.12.2 repair file_audit_per_archive if it still uses
-        # AggregateFunction(uniqExact, ...) + uniqExactState. Swap to
-        # uniqHLL12 across the board for consistency with the rest of
-        # the corpus. Dropping the target discards the archive-count
-        # aggregate state; the backfill INSERT (NOT EXISTS gated in the
-        # _FILE_AUDIT_V127 block) repopulates from the live file_audit
-        # table.
-        self._repair_mv_if_stale(
+        # v1.3.12.2 repair file_audit_per_unknown_file if it still uses
+        # AggregateFunction(uniqExact, ...) + uniqExactState on the
+        # archive_count_state column. Swap to uniqHLL12 across the board
+        # for consistency with the rest of the corpus. Dropping the
+        # target discards the archive-count aggregate state; the backfill
+        # INSERT (NOT EXISTS gated in the _FILE_AUDIT_V127 block)
+        # repopulates from the live file_audit table.
+        _repair_mv_if_stale(
             client,
-            mv_name="file_audit_per_archive_mv",
-            target_name="file_audit_per_archive",
+            db=self._db,
+            mv_name="file_audit_per_unknown_file_mv",
+            target_name="file_audit_per_unknown_file",
             sentinel="uniqExactState(",
         )
         for stmt in _FILE_AUDIT_V127:
