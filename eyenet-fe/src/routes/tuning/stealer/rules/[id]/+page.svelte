@@ -784,7 +784,13 @@
   .topbar h2 { margin: 0; font-family: var(--font-sans); font-size: var(--fs-16); font-weight: var(--fw-semibold); color: var(--text); }
   .topbar h2 .mono { font-family: var(--font-mono); color: var(--accent-text); }
   .topbar .spacer { flex: 1; }
-  .topbar .saved { color: var(--accent-text); font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+  .topbar .saved {
+    padding: 3px 8px;
+    border: 1px solid var(--accent); border-radius: var(--radius-sm);
+    background: var(--accent-fill); color: var(--accent-text);
+    font-family: var(--font-mono); font-size: var(--fs-11);
+    letter-spacing: var(--tracking-label); text-transform: uppercase;
+  }
   .topbar .errbar { color: var(--red-text); font-family: var(--font-mono); font-size: var(--fs-11); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: flex-start; }
