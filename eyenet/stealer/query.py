@@ -178,23 +178,33 @@ class StealerCredsReader:
                     "stealer.extracted_records table does not exist yet"
                 ) from exc
             raise
+        # v1.3.12.2 spill guard: stats_rollup_host carries 6.5M+ rows on
+        # prod and the GROUP BY + ORDER BY + LIMIT builds a hash table
+        # large enough to blow the per-query cap (3.73 GiB). Force an
+        # external group-by at 200 MiB so the box never OOMs on a tab
+        # refresh. Same guard on the sibling scheme/tld queries for
+        # consistency even though their row counts are small today.
+        _SPILL = " SETTINGS max_bytes_before_external_group_by = 200000000"
         by_scheme, by_tld, top_hosts = await asyncio.gather(
             self._buckets(
                 f"SELECT scheme, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_scheme "
-                "GROUP BY scheme ORDER BY c DESC",
+                "GROUP BY scheme ORDER BY c DESC"
+                + _SPILL,
                 {},
             ),
             self._buckets(
                 f"SELECT tld, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_tld "
-                "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}",
+                "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}"
+                + _SPILL,
                 top_param,
             ),
             self._buckets(
                 f"SELECT host, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_host "
-                "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}",
+                "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}"
+                + _SPILL,
                 top_param,
             ),
         )

@@ -414,7 +414,7 @@ _VICTIM_COUNTS: tuple[str, ...] = (
         now() AS refreshed_at
     FROM {db}.victim_profiles
     GROUP BY archive_sha256, victim_folder
-    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 1000000000
+    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
     """,
 )
 
@@ -450,7 +450,7 @@ _EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
         now() AS refreshed_at
     FROM {db}.extracted_rows_per_file
     GROUP BY archive_sha256, file_path
-    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 1000000000
+    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
     """,
 )
 
@@ -590,7 +590,7 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
     WHERE host_registrable != ''
     GROUP BY host_registrable
     SETTINGS optimize_aggregation_in_order = 1,
-             max_bytes_before_external_group_by = 1000000000
+             max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
     """,
 )
 
@@ -652,7 +652,7 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
     WHERE er.host_registrable != ''
     GROUP BY er.host_registrable, er.archive_sha256, er.victim_folder
     SETTINGS optimize_aggregation_in_order = 1,
-             max_bytes_before_external_group_by = 1000000000
+             max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
     """,
 )
 
