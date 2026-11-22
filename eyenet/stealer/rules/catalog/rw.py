@@ -101,6 +101,16 @@ def read_rule(slug: str) -> dict[str, Any]:
     return doc
 
 
+def validate_rule(rule: dict[str, Any]) -> None:
+    """Public entry point for rule validation. Raises ValueError on any
+    shape, slug, or field-name violation. Called by the API's
+    `/stealer/rules/validate` endpoint (lets the FE "Validate" button
+    exercise the same path a Create/Update would take, without writing)
+    and by the catalog linter CLI.
+    """
+    _validate_rule_shape(rule)
+
+
 def write_rule(rule: dict[str, Any], *, allow_overwrite: bool) -> dict[str, Any]:
     """Validate + atomically write a rule YAML. Returns the stored dict.
 

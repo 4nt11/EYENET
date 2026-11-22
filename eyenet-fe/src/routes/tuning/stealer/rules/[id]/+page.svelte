@@ -6,7 +6,7 @@
   import PredicateNode from '$lib/components/PredicateNode.svelte';
   import QuickPicker from '$lib/components/QuickPicker.svelte';
   import CodeBlock from '$lib/components/CodeBlock.svelte';
-  import { getRule, createRule, updateRule, deleteRule } from '$lib/stealerRulesApi.svelte.js';
+  import { getRule, createRule, updateRule, deleteRule, validateRule } from '$lib/stealerRulesApi.svelte.js';
   import { listFamilies } from '$lib/stealerFamiliesApi.svelte.js';
   import * as yaml from 'js-yaml';
 
@@ -297,6 +297,22 @@
     }
   }
 
+  // Dry-run validation: hits POST /stealer/rules/validate so the operator
+  // can catch shape / slug / canonical-field errors before Save. Sets
+  // saveMsg on success, error on failure; both render in the top bar.
+  async function onValidate() {
+    busy = true; saveMsg = null; error = null;
+    try {
+      const res = await validateRule(cleanRule);
+      if (res?.valid) saveMsg = 'Valid.';
+      else error = res?.error ?? 'validation failed';
+    } catch (e) {
+      error = String(e?.message ?? e);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function onDelete() {
     if (isNew) return;
     if (!confirm(`Delete rule ${slug}? This writes to disk and cannot be undone through the UI.`)) return;
@@ -396,6 +412,7 @@
       <div class="spacer"></div>
       {#if saveMsg}<span class="saved">{saveMsg}</span>{/if}
       {#if error}<span class="errbar" title={error}>{error}</span>{/if}
+      <button class="btn-ghost" disabled={busy} onclick={onValidate}>Validate</button>
       <button class="btn-ghost" disabled={busy || isNew} onclick={onDelete}>Delete</button>
       <button class="btn-primary" disabled={busy} onclick={onSave}>{isNew ? 'Create' : 'Save'}</button>
     </div>

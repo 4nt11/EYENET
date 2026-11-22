@@ -51,3 +51,9 @@ export async function updateRule(id, rule) {
 export async function deleteRule(id) {
   return await apiDelete(`/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
 }
+
+// Dry-run validation: the server returns {valid: bool, error: string|null}
+// WITHOUT writing anything. Powers the "Validate" button in the rule editor.
+export async function validateRule(rule) {
+  return await apiPost('/stealer/rules/validate', rule, { auth: true });
+}
