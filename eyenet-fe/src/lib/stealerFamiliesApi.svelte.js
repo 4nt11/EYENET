@@ -1,4 +1,4 @@
-// Thin client for /v1/stealer/families CRUD. Same fallback pattern as
+// Thin client for /v1/v1/stealer/families CRUD. Same fallback pattern as
 // stealerRulesApi: reads fall back to the static /stealer-families.json
 // export when the API isn't reachable; writes fail loudly.
 
@@ -18,7 +18,7 @@ async function tryStatic() {
 
 export async function listFamilies() {
   try {
-    const r = await apiGet('/stealer/families', { auth: true });
+    const r = await apiGet('/v1/stealer/families', { auth: true });
     return r?.families ?? r ?? [];
   } catch {
     const s = await tryStatic();
@@ -29,7 +29,7 @@ export async function listFamilies() {
 
 export async function getFamily(slug) {
   try {
-    return await apiGet(`/stealer/families/${encodeURIComponent(slug)}`, { auth: true });
+    return await apiGet(`/v1/stealer/families/${encodeURIComponent(slug)}`, { auth: true });
   } catch {
     const s = await tryStatic();
     if (!s) throw new Error('getFamily: API and static both failed');
@@ -40,13 +40,13 @@ export async function getFamily(slug) {
 }
 
 export async function createFamily(family) {
-  return await apiPost('/stealer/families', family, { auth: true });
+  return await apiPost('/v1/stealer/families', family, { auth: true });
 }
 
 export async function updateFamily(slug, family) {
-  return await apiPut(`/stealer/families/${encodeURIComponent(slug)}`, family, { auth: true });
+  return await apiPut(`/v1/stealer/families/${encodeURIComponent(slug)}`, family, { auth: true });
 }
 
 export async function deleteFamily(slug) {
-  return await apiDelete(`/stealer/families/${encodeURIComponent(slug)}`, { auth: true });
+  return await apiDelete(`/v1/stealer/families/${encodeURIComponent(slug)}`, { auth: true });
 }

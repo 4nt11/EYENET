@@ -19,7 +19,7 @@ async function tryStatic() {
 
 export async function listRules() {
   try {
-    const r = await apiGet('/stealer/rules', { auth: true });
+    const r = await apiGet('/v1/stealer/rules', { auth: true });
     return r?.rules ?? r ?? [];
   } catch {
     const s = await tryStatic();
@@ -30,7 +30,7 @@ export async function listRules() {
 
 export async function getRule(id) {
   try {
-    return await apiGet(`/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
+    return await apiGet(`/v1/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
   } catch {
     const s = await tryStatic();
     if (!s) throw new Error('getRule: API and static both failed');
@@ -41,19 +41,19 @@ export async function getRule(id) {
 }
 
 export async function createRule(rule) {
-  return await apiPost('/stealer/rules', rule, { auth: true });
+  return await apiPost('/v1/stealer/rules', rule, { auth: true });
 }
 
 export async function updateRule(id, rule) {
-  return await apiPut(`/stealer/rules/${encodeURIComponent(id)}`, rule, { auth: true });
+  return await apiPut(`/v1/stealer/rules/${encodeURIComponent(id)}`, rule, { auth: true });
 }
 
 export async function deleteRule(id) {
-  return await apiDelete(`/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
+  return await apiDelete(`/v1/stealer/rules/${encodeURIComponent(id)}`, { auth: true });
 }
 
 // Dry-run validation: the server returns {valid: bool, error: string|null}
 // WITHOUT writing anything. Powers the "Validate" button in the rule editor.
 export async function validateRule(rule) {
-  return await apiPost('/stealer/rules/validate', rule, { auth: true });
+  return await apiPost('/v1/stealer/rules/validate', rule, { auth: true });
 }
