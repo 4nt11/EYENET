@@ -258,6 +258,36 @@ ensure_databases() {
 		-f /docker-entrypoint-initdb.d/01-create-eyenet-dbs.sql
 }
 
+# ---- dev TLS: self-provision a readable localhost cert -------------------------------
+# The api binds 8443 with TLS and loads ./tls/cert.pem + key.pem (mounted ro). The
+# container runs as uid 10001 (USER eyenet in the Dockerfile), so a key minted under
+# the host operator's umask as 0600/owned-by-host-uid is UNREADABLE inside the jail and
+# hypercorn dies at load_cert_chain with `PermissionError: [Errno 13]` (nico-g,
+# 2026-11-22). On a dev box (EYENET_DEV=1) generate a throwaway self-signed localhost
+# cert if absent, and ALWAYS make both files world-readable so uid 10001 can read them
+# (a dev self-signed key is disposable; world-read is fine). Gated on EYENET_DEV: prod
+# certs are operator-managed and we never touch their perms.
+ensure_dev_tls() {
+	[ "${EYENET_DEV:-}" = "1" ] || return 0
+	tls_dir="$ROOT/deploy/docker/tls"
+	mkdir -p "$tls_dir"
+	if [ ! -f "$tls_dir/cert.pem" ] || [ ! -f "$tls_dir/key.pem" ]; then
+		command -v openssl >/dev/null 2>&1 || {
+			log "EYENET_DEV=1 but no cert in deploy/docker/tls and openssl is not on PATH."
+			log "Install openssl or drop a readable cert.pem/key.pem there yourself."
+			exit 1
+		}
+		log "EYENET_DEV=1: generating self-signed localhost TLS into deploy/docker/tls"
+		openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+			-keyout "$tls_dir/key.pem" -out "$tls_dir/cert.pem" \
+			-subj /CN=localhost >/dev/null 2>&1
+	fi
+	# uid 10001 (container user) must read both; this also repairs a pre-existing
+	# cert minted with a too-strict umask -- the exact nico-g failure.
+	chmod 755 "$tls_dir"
+	chmod 644 "$tls_dir/cert.pem" "$tls_dir/key.pem"
+}
+
 # ---- verbs -----------------------------------------------------------------------------
 
 deploy() {
@@ -313,6 +343,7 @@ deploy() {
 	componer build
 	preflight || exit 1
 	ensure_databases
+	ensure_dev_tls
 	componer up -d
 	check "$version"
 
