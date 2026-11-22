@@ -1387,15 +1387,21 @@ class ClickHouseRecordsSink:
         # expression on-the-fly until MATERIALIZE is kicked off manually.
         for stmt in _EXTRACTED_RECORDS_HOST_COLS:
             client.command(stmt.format(db=self._db))
-        # v1.3.12.2 repair by_domain_counts_refresh if it still uses
-        # countDistinctIf (unbounded exact state, OOMed at 7.5 GiB on
-        # prod against 157M rows). Drop + rebuild with uniqHLL12If body.
-        self._repair_mv_if_stale(
-            client,
-            mv_name="by_domain_counts_refresh",
-            target_name="by_domain_counts",
-            sentinel="countDistinctIf(",
-        )
+        # v1.3.12.2 repair the two by_domain refresh MVs if either
+        # sentinel still matches:
+        #   - countDistinctIf(   -- unbounded exact state (first OOM)
+        #   - max_bytes_before_external_group_by = 1000000000  -- old
+        #     1 GB spill threshold left refreshes blowing the 7.2 GiB
+        #     server cap after the uniqHLL12 swap. New DDL sets 200 MiB.
+        # Each sentinel check is a separate call; whichever matches
+        # the live body triggers the drop+rebuild.
+        for sentinel in ("countDistinctIf(", "max_bytes_before_external_group_by = 1000000000"):
+            self._repair_mv_if_stale(
+                client,
+                mv_name="by_domain_counts_refresh",
+                target_name="by_domain_counts",
+                sentinel=sentinel,
+            )
         for stmt in _BY_DOMAIN_COUNTS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
@@ -1404,13 +1410,14 @@ class ClickHouseRecordsSink:
         # v1.3.8 per-domain per-victim sibling (Domain View Victims tab).
         # Depends on the _EXTRACTED_RECORDS_HOST_COLS block above for the
         # host_registrable column; MV groups on it.
-        # v1.3.12.2 repair: same countDistinctIf -> uniqHLL12If swap.
-        self._repair_mv_if_stale(
-            client,
-            mv_name="by_domain_victim_counts_refresh",
-            target_name="by_domain_victim_counts",
-            sentinel="countDistinctIf(",
-        )
+        # v1.3.12.2 repair: same sentinel set as the totals MV above.
+        for sentinel in ("countDistinctIf(", "max_bytes_before_external_group_by = 1000000000"):
+            self._repair_mv_if_stale(
+                client,
+                mv_name="by_domain_victim_counts_refresh",
+                target_name="by_domain_victim_counts",
+                sentinel=sentinel,
+            )
         for stmt in _BY_DOMAIN_VICTIM_COUNTS:
             client.command(
                 stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
