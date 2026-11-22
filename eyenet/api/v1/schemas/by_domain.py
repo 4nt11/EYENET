@@ -41,7 +41,7 @@ class DomainSummary(ApiSchema):
 class DomainCredRow(ApiSchema):
     host: str
     url: str
-    login: str
+    user: str
     password: str
     scheme: str
     archive_sha256: str
