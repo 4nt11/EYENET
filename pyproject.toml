@@ -143,6 +143,7 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5",
+  "pytest-testmon>=2.1",
   "pytest-xdist>=3.6",
   "pytest-timeout>=2.3",
   "pytest-randomly>=3.15",
@@ -155,6 +156,11 @@ dev = [
   "freezegun>=1.5",
   "respx>=0.21",
   "testcontainers[nats]>=4.7",
+  # API fuzzing (tests/schema/test_schemathesis.py imports it at collection)
+  # + mutation testing. Were a separate `deferred` extra; folded in because
+  # they are plain test tooling and the split only broke collection.
+  "schemathesis>=3.34",
+  "mutmut>=2.5",
 
   # load
   "locust>=2.31",
@@ -166,13 +172,6 @@ dev = [
   "deptry>=0.20",
   "pip-audit>=2.7",
   "detect-secrets>=1.5",
-]
-
-deferred = [
-  # earned when Graph API has OpenAPI
-  "schemathesis>=3.34",
-  # earned when primitive suite is stable
-  "mutmut>=2.5",
 ]
 
 # M10 Document Classifier — extraction parser libraries. DELIBERATELY NOT in the
@@ -249,12 +248,6 @@ addopts = [
   "-m", "unit or contract",
   "--cov=eyenet",
   "--cov-report=term-missing",
-  # TODO(EYENET v0.2): raise back to 89+ once eyenet/calibration has
-  # unit-test backfill. M5 dropped total coverage ~89% -> ~85% — the
-  # calibration CLI / TOML validators / sweep helpers are
-  # integration-tested via `eyenet calibrate run` against the real corpus,
-  # not unit-tested. Operator decision 2026-05-23: gate at 85 until v0.2.
-  "--cov-fail-under=84",
   "--timeout=30",
 ]
 

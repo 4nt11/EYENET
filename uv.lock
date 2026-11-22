@@ -1195,7 +1195,7 @@ wheels = [
 
 [[package]]
 name = "eyenet"
-version = "1.3.11.1"
+version = "1.3.12.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -1255,10 +1255,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-deferred = [
-    { name = "mutmut" },
-    { name = "schemathesis" },
-]
 dev = [
     { name = "bandit" },
     { name = "deptry" },
@@ -1268,6 +1264,7 @@ dev = [
     { name = "hypothesis" },
     { name = "hypothesis-jsonschema" },
     { name = "locust" },
+    { name = "mutmut" },
     { name = "mypy" },
     { name = "pip-audit" },
     { name = "polyfactory" },
@@ -1276,10 +1273,12 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
     { name = "pytest-randomly" },
+    { name = "pytest-testmon" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "schemathesis" },
     { name = "syrupy" },
     { name = "testcontainers", extra = ["nats"] },
 ]
@@ -1331,7 +1330,7 @@ requires-dist = [
     { name = "idna", specifier = ">=3.7" },
     { name = "locust", marker = "extra == 'dev'", specifier = ">=2.31" },
     { name = "matrix-nio", extras = ["e2e"], specifier = ">=0.24" },
-    { name = "mutmut", marker = "extra == 'deferred'", specifier = ">=2.5" },
+    { name = "mutmut", marker = "extra == 'dev'", specifier = ">=2.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "nats-py", specifier = ">=2.7" },
     { name = "opentele", specifier = ">=1.15" },
@@ -1360,6 +1359,7 @@ requires-dist = [
     { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
     { name = "pytest-randomly", marker = "extra == 'dev'", specifier = ">=3.15" },
+    { name = "pytest-testmon", marker = "extra == 'dev'", specifier = ">=2.1" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6" },
     { name = "python-docx", marker = "extra == 'extract'", specifier = ">=1.1,<2.0" },
@@ -1368,7 +1368,7 @@ requires-dist = [
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "rich", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-    { name = "schemathesis", marker = "extra == 'deferred'", specifier = ">=3.34" },
+    { name = "schemathesis", marker = "extra == 'dev'", specifier = ">=3.34" },
     { name = "spacy", specifier = ">=3.7,<4.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "sqlglot", specifier = ">=25,<31" },
@@ -1389,7 +1389,7 @@ requires-dist = [
     { name = "uuid7", specifier = ">=0.1" },
     { name = "zstandard", specifier = ">=0.22" },
 ]
-provides-extras = ["dev", "deferred", "extract", "incidents"]
+provides-extras = ["dev", "extract", "incidents"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4075,6 +4075,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/27/b3/36192dacc0f470ac2cc516f73e01739c9a48a8224f76beada4f85e1c8a89/pytest_randomly-4.1.0.tar.gz", hash = "sha256:47f1d9746c3bc3efabd53ae1ebfb8bb385cf3d4df4b505b6d58d9c97a3dfe70f", size = 14302, upload-time = "2026-04-20T13:01:51.831Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9a/db/2df9a1fca597a273f957a559c20c2d95d629928384507b2afa43ba6909d1/pytest_randomly-4.1.0-py3-none-any.whl", hash = "sha256:f55e89e53367b090c0c053697d7f9d77595543d0e0516c93978b50c0f6b252f9", size = 8353, upload-time = "2026-04-20T13:01:50.382Z" },
+]
+
+[[package]]
+name = "pytest-testmon"
+version = "2.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "coverage" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/8d/09e1844c02caacfd9f39d73726e2cbe905a9444466598c2fa119e8e305df/pytest_testmon-2.3.1.tar.gz", hash = "sha256:d6056e00bbb80aa2438241bb7b2d37f8e3b7826c2e503cb447d93d31c9e5a9e1", size = 25345, upload-time = "2026-11-19T15:32:12.113Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/2a/d1f98f6ce102a94aaf353063187102d49422a0ac04f7bc93d19196808228/pytest_testmon-2.3.1-py3-none-any.whl", hash = "sha256:695bd3c2e3ed38b06244ae5697f51d68cefb4ebbf4785496c5cd1ed5c80a8fa1", size = 27425, upload-time = "2026-11-19T15:32:10.521Z" },
 ]
 
 [[package]]

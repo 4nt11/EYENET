@@ -154,3 +154,6 @@ package-lock.json
 
 # design exports (FE drawer mockups, HTML + assets); reference only, not shipped
 development/design-*/
+
+# pytest-testmon local test-selection DB (per-machine, never shared)
+.testmondata
