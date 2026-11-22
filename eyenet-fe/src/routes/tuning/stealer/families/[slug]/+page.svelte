@@ -3,7 +3,9 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Dropdown from '$lib/components/Dropdown.svelte';
+  import CodeBlock from '$lib/components/CodeBlock.svelte';
   import { getFamily, createFamily, updateFamily, deleteFamily } from '$lib/stealerFamiliesApi.svelte.js';
+  import * as yaml from 'js-yaml';
 
   const STATUS_OPTS = ['active', 'new', 'dormant', 'retired', 'suspected'].map((v) => ({ v, l: v }));
   // Discriminator for the per-victim classifier (Phase 2+). Only
@@ -68,7 +70,46 @@
     if (!out.first_seen_year) delete out.first_seen_year;
     return out;
   });
-  const jsonPreview = $derived(JSON.stringify(cleanFamily, null, 2));
+  // Families live on disk as YAML; render the preview in the same shape so
+  // what the operator sees is what gets written. Block style (no inline
+  // brackets), long strings unfolded (lineWidth: -1).
+  const yamlPreview = $derived(
+    yaml.dump(cleanFamily, { indent: 2, lineWidth: -1, noRefs: true, quotingType: '"' })
+  );
+  // Two-way sync between the form and an editable YAML buffer, same shape
+  // as the rules editor. form -> buffer when the form changes AND the
+  // buffer matches the last-known-dumped value (no unsaved buffer edits);
+  // buffer -> form when the operator edits and the YAML parses cleanly.
+  let yamlBuffer = $state('');
+  let yamlParseErr = $state(null);
+  let lastDumped = '';
+  $effect(() => {
+    if (yamlPreview !== lastDumped) {
+      if (yamlBuffer === lastDumped || yamlBuffer === '') {
+        yamlBuffer = yamlPreview;
+      }
+      lastDumped = yamlPreview;
+    }
+  });
+  $effect(() => {
+    if (!yamlBuffer || yamlBuffer === lastDumped) return;
+    try {
+      const parsed = yaml.load(yamlBuffer);
+      if (parsed && typeof parsed === 'object' && parsed.slug) {
+        // Spread into family so Svelte 5 reactivity picks up every field.
+        // Normalize list fields to arrays so the form's each-blocks don't
+        // choke if the YAML omitted them.
+        for (const k of ['aliases', 'signature_files', 'loaders', 'distribution_channels', 'references']) {
+          parsed[k] ??= [];
+        }
+        family = { ...family, ...parsed };
+        yamlParseErr = null;
+        lastDumped = yamlBuffer;
+      }
+    } catch (e) {
+      yamlParseErr = e?.reason || e?.message || String(e);
+    }
+  });
 
   async function onSave() {
     busy = true; saveMsg = null; error = null;
@@ -257,10 +298,16 @@
       <aside class="jsonpanel">
         <header>
           <span class="n">.</span>
-          <span class="label">Family YAML preview</span>
-          <span class="hint">live, write to disk on save</span>
+          <span class="label">Family YAML</span>
+          <span class="hint">
+            {#if yamlParseErr}
+              parse error: {yamlParseErr}
+            {:else}
+              editable, syncs both ways with the form
+            {/if}
+          </span>
         </header>
-        <pre class="json mono">{jsonPreview}</pre>
+        <CodeBlock bind:code={yamlBuffer} lang="yaml" editable wrap showLineNumbers maxHeight="70vh" />
       </aside>
     </div>
   {/if}
@@ -281,7 +328,13 @@
   .topbar h2 { margin: 0; font-family: var(--font-sans); font-size: var(--fs-16); font-weight: var(--fw-semibold); color: var(--text); }
   .topbar h2 .mono { font-family: var(--font-mono); color: var(--accent-text); }
   .topbar .spacer { flex: 1; }
-  .topbar .saved { color: var(--accent-text); font-family: var(--font-mono); font-size: var(--fs-11); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+  .topbar .saved {
+    padding: 3px 8px;
+    border: 1px solid var(--accent); border-radius: var(--radius-sm);
+    background: var(--accent-fill); color: var(--accent-text);
+    font-family: var(--font-mono); font-size: var(--fs-11);
+    letter-spacing: var(--tracking-label); text-transform: uppercase;
+  }
   .topbar .errbar { color: var(--red-text); font-family: var(--font-mono); font-size: var(--fs-11); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .status-chip {
