@@ -342,17 +342,24 @@ class DomainCorpusReader:
         return {"d": canonical}
 
     async def summary(self, canonical: str) -> DomainSummaryRow:
-        """Hero card numbers. v1.3.6: reads the ``by_domain_counts`` sibling
-        (ReplacingMergeTree, 231k registrables, refreshed every 5 min). FINAL
-        is cheap on a 231k-row table; measured 45 ms warm, 560 ms cold. Zero
-        state-blob deserialization, no heavy aggregation at read time.
+        """Hero card numbers.
 
-        v1.3.10: autofills carry no URL, so the MV's per-host aggregate for
-        them is always 0 (autofill rows never land in a domain bucket). The
-        real "autofills from victims that leaked to this domain" number is
-        a victim-pool sum across ``victim_counts.autofills_count``, run in
-        parallel here (~90 ms warm on prod). Same number is used by the
-        Autofills tab footer so hero + tab agree.
+        v1.3.12.2: by_domain_counts is now an incremental AggregatingMergeTree
+        (every INSERT into extracted_records adds per-host HLL12 state
+        deltas, CH merges in the background). Reads decode with
+        uniqHLL12Merge(state_col) + GROUP BY host_registrable. Three
+        columns that are not persisted in state:
+
+          autofill_count       -- per-host aggregate is always 0 because
+                                  autofill rows carry no host_registrable;
+                                  we pool-sum across victim_counts.autofills
+                                  via the by_domain_victim_counts join.
+          live_cookie_count    -- time-dependent (now() drifts), computed
+                                  here against extracted_records with the
+                                  host_registrable bloom-indexed predicate.
+          indicator_hit_count  -- the real indicator concept is a join
+                                  against monitored_domains; still 0 here
+                                  until that's wired.
         """
         import asyncio  # noqa: PLC0415
 
@@ -360,12 +367,18 @@ class DomainCorpusReader:
         params = self._base_params(canonical)
         try:
             summary_coro = client.query(
-                "SELECT host_registrable, victim_count, archive_count, "  # noqa: S608
-                "       first_seen_at, last_seen_at, credential_count, "
-                "       live_cookie_count, all_cookie_count, autofill_count, "
-                "       history_count, localstorage_jwt_count, indicator_hit_count "
-                f"FROM {self._db}.by_domain_counts FINAL "  # nosec B608
-                "WHERE host_registrable = {d:String}",
+                "SELECT host_registrable, "  # noqa: S608
+                "       uniqHLL12Merge(victim_count_state)     AS victim_count, "
+                "       uniqHLL12Merge(archive_count_state)    AS archive_count, "
+                "       min(first_seen_at)                     AS first_seen_at, "
+                "       max(last_seen_at)                      AS last_seen_at, "
+                "       uniqHLL12Merge(credential_count_state) AS credential_count, "
+                "       uniqHLL12Merge(all_cookie_count_state) AS all_cookie_count, "
+                "       uniqHLL12Merge(history_count_state)    AS history_count, "
+                "       uniqHLL12Merge(localstorage_jwt_count_state) AS localstorage_jwt_count "
+                f"FROM {self._db}.by_domain_counts "  # nosec B608
+                "WHERE host_registrable = {d:String} "
+                "GROUP BY host_registrable",
                 parameters=params,
             )
             autofill_coro = client.query(
@@ -379,7 +392,24 @@ class DomainCorpusReader:
                 "WHERE bvc.host_registrable = {d:String}",
                 parameters=params,
             )
-            res, afc_res = await asyncio.gather(summary_coro, autofill_coro)
+            # live_cookie_count computed at read time: the AggregatingMergeTree
+            # cannot carry a now()-dependent filter without re-aggregating on
+            # every tick. The host_registrable bloom index keeps the scan
+            # tight (same row volume as one page of the Cookies tab).
+            live_cookie_coro = client.query(
+                "SELECT uniqHLL12((trim(LEADING '.' FROM fields['cookie_domain']), "  # noqa: S608
+                "       coalesce(nullIf(fields['cookie_name'], ''), fields['name']))) "
+                f"FROM {self._db}.extracted_records "  # nosec B608
+                "WHERE host_registrable = {d:String} "
+                "  AND family IN ('cookies','victim_cookies') "
+                "  AND fromUnixTimestamp(toUInt32OrZero(coalesce("
+                "        nullIf(fields['cookie_expires_epoch'], ''), "
+                "        nullIf(fields['expires_epoch'], ''), '0'))) > now()",
+                parameters=params,
+            )
+            res, afc_res, live_res = await asyncio.gather(
+                summary_coro, autofill_coro, live_cookie_coro
+            )
         except Exception as exc:
             if _is_unknown_table(exc):
                 raise StealerCorpusUninitializedError(
@@ -387,8 +417,11 @@ class DomainCorpusReader:
                 ) from exc
             raise
         autofill_count = int(afc_res.result_rows[0][0]) if afc_res.result_rows else 0
+        live_cookie_count = int(live_res.result_rows[0][0]) if live_res.result_rows else 0
         if not res.result_rows:
-            return DomainSummaryRow(canonical, 0, 0, None, None, 0, 0, 0, autofill_count, 0, 0, 0)
+            return DomainSummaryRow(
+                canonical, 0, 0, None, None, 0, live_cookie_count, 0, autofill_count, 0, 0, 0,
+            )
         r = res.result_rows[0]
         return DomainSummaryRow(
             canonical_domain=r[0] or canonical,
@@ -397,12 +430,12 @@ class DomainCorpusReader:
             first_seen_at=r[3],
             last_seen_at=r[4],
             credential_count=int(r[5] or 0),
-            live_cookie_count=int(r[6] or 0),
-            all_cookie_count=int(r[7] or 0),
+            live_cookie_count=live_cookie_count,
+            all_cookie_count=int(r[6] or 0),
             autofill_count=autofill_count,
-            history_count=int(r[9] or 0),
-            localstorage_jwt_count=int(r[10] or 0),
-            indicator_hit_count=int(r[11] or 0),
+            history_count=int(r[7] or 0),
+            localstorage_jwt_count=int(r[8] or 0),
+            indicator_hit_count=0,
         )
 
     async def credentials(

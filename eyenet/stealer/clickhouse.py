@@ -509,88 +509,101 @@ _EXTRACTED_RECORDS_HOST_COLS: tuple[str, ...] = (
 # (url+login+password for creds, url+name for cookies, etc.) so hero numbers
 # agree with per-tab pagination totals.
 _BY_DOMAIN_COUNTS: tuple[str, ...] = (
+    # v1.3.12.2: converted from refreshable ReplacingMergeTree (full rebuild
+    # every 5 minutes, OOMed at 7.5 GiB over 157M rows) to incremental
+    # AggregatingMergeTree. Every INSERT block into extracted_records adds
+    # per-group HLL12 state deltas; CH merges them in background per
+    # host_registrable. Aggregation state is tiny (HLL12 is ~2.5 KB fixed)
+    # and bounded, so there is no corpus-wide memory pressure at any point.
+    # live_cookie_count / autofill_count / indicator_hit_count were dropped
+    # from the table -- the first is time-dependent (now() drifts) and the
+    # last two were constants. The summary endpoint computes live_cookie_count
+    # on demand against extracted_records with the host_registrable bloom
+    # filter (cheap, same row count as the paginated Cookies tab).
     """
     CREATE TABLE IF NOT EXISTS {db}.by_domain_counts
     (
-        host_registrable       String,
-        victim_count           UInt64,
-        archive_count          UInt64,
-        first_seen_at          DateTime,
-        last_seen_at           DateTime,
-        credential_count       UInt64,
-        live_cookie_count      UInt64,
-        all_cookie_count       UInt64,
-        autofill_count         UInt64,
-        history_count          UInt64,
-        localstorage_jwt_count UInt64,
-        indicator_hit_count    UInt64,
-        refreshed_at           DateTime DEFAULT now()
+        host_registrable             String,
+        victim_count_state           AggregateFunction(uniqHLL12, Tuple(FixedString(64), String)),
+        archive_count_state          AggregateFunction(uniqHLL12, FixedString(64)),
+        first_seen_at                SimpleAggregateFunction(min, DateTime),
+        last_seen_at                 SimpleAggregateFunction(max, DateTime),
+        credential_count_state       AggregateFunction(uniqHLL12, Tuple(String, String, String)),
+        all_cookie_count_state       AggregateFunction(uniqHLL12, Tuple(String, String)),
+        history_count_state          AggregateFunction(uniqHLL12, String),
+        localstorage_jwt_count_state AggregateFunction(uniqHLL12, String)
     )
-    ENGINE = ReplacingMergeTree(refreshed_at)
+    ENGINE = AggregatingMergeTree
     ORDER BY host_registrable
     {storage_policy_clause}
     """,
     """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_counts_refresh
-    REFRESH EVERY 5 MINUTE
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_counts_mv
     TO {db}.by_domain_counts
     AS SELECT
         host_registrable,
-        uniqHLL12If((archive_sha256, victim_folder),
+        uniqHLL12StateIf((archive_sha256, victim_folder),
           family IN ('browser_passwords','windows_credentials',
-                     'firefox_logins','combolist')) AS victim_count,
-        uniqHLL12If(archive_sha256,
+                     'firefox_logins','combolist')) AS victim_count_state,
+        uniqHLL12StateIf(archive_sha256,
           family IN ('browser_passwords','windows_credentials',
                      'firefox_logins','combolist')
-          OR family IN ('cookies','victim_cookies')) AS archive_count,
+          OR family IN ('cookies','victim_cookies')) AS archive_count_state,
         min(ingested_at) AS first_seen_at,
         max(ingested_at) AS last_seen_at,
-        uniqHLL12If((fields['url'], fields['user'], fields['password']),
+        uniqHLL12StateIf((fields['url'], fields['user'], fields['password']),
           family IN ('browser_passwords','windows_credentials',
-                     'firefox_logins','combolist')) AS credential_count,
-        -- v1.3.10: cookies store identity as (cookie_domain, cookie_name) and
-        -- expiry as an epoch in cookie_expires_epoch / expires_epoch. The old
-        -- (fields['url'], fields['name']) tuple was empty on every cookie row
-        -- so LIVE/ALL both rendered 0 (or 1 when an accidental row had both).
-        uniqHLL12If((trim(LEADING '.' FROM fields['cookie_domain']),
-                         coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
-          family IN ('cookies','victim_cookies')
-          AND fromUnixTimestamp(toUInt32OrZero(coalesce(
-                nullIf(fields['cookie_expires_epoch'], ''),
-                nullIf(fields['expires_epoch'], ''), '0'))) > now()
-          ) AS live_cookie_count,
-        uniqHLL12If((trim(LEADING '.' FROM fields['cookie_domain']),
-                         coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
-          family IN ('cookies','victim_cookies')) AS all_cookie_count,
-        -- v1.3.10: autofills always resolve host_registrable='' (Chromium
-        -- Web Data has no URL per row), so this per-host bucket is always
-        -- 0. The Autofills tab uses a victim-pool join to display real
-        -- rows; a correct hero counter needs a dedicated live query on the
-        -- summary endpoint (see RENAME_EXTRACTED_INDICATORS_SCOPE.md).
-        -- Hard-coded 0 here keeps the MV honest; FE renders as a dash.
-        0 AS autofill_count,
+                     'firefox_logins','combolist')) AS credential_count_state,
+        -- v1.3.10: cookies store identity as (cookie_domain, cookie_name).
+        -- The live-cookie predicate on fromUnixTimestamp(...) > now() lives
+        -- at read time (see query_by_domain.summary); here we aggregate ALL
+        -- cookies seen, because the AggregatingMergeTree cannot carry a
+        -- now()-dependent filter without re-aggregating every tick.
+        uniqHLL12StateIf((trim(LEADING '.' FROM fields['cookie_domain']),
+                          coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
+          family IN ('cookies','victim_cookies')) AS all_cookie_count_state,
         -- v1.3.10: history rule emits fields['visit_url'], not ['url'].
-        -- The old expression counted 0 for every domain. visit_downloads
-        -- still uses 'url' so we coalesce both.
-        uniqHLL12If(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
-          family IN ('victim_history','victim_downloads')) AS history_count,
-        uniqHLL12If(fields['value'],
-          rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count,
-        -- v1.3.9 bug: this used to be uniqHLL12If(rule_id, rule_id != '')
-        -- which counted every extraction rule as an "indicator hit" and
-        -- surfaced a flashy "N INDICATOR HITS" badge on every domain with
-        -- data. The real indicator concept is a join against the operator-
-        -- authored monitored_domains watchlist (see query.py
-        -- _monitored_domain_hits). Hard-coded to 0 until that join is wired
-        -- into the summary MV; the Indicators tab endpoint still returns
-        -- real rule-id counts for the tab contents.
-        0 AS indicator_hit_count,
-        now() AS refreshed_at
+        -- visit_downloads still uses 'url' so we coalesce both.
+        uniqHLL12StateIf(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
+          family IN ('victim_history','victim_downloads')) AS history_count_state,
+        uniqHLL12StateIf(fields['value'],
+          rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count_state
     FROM {db}.extracted_records
     WHERE host_registrable != ''
     GROUP BY host_registrable
-    SETTINGS optimize_aggregation_in_order = 1,
-             max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
+    """,
+    # One-shot backfill from the existing corpus. NOT EXISTS gate so this
+    # only fires on the first ensure_schema() call against an existing
+    # populated extracted_records (new installs skip it because the live
+    # MV handles every INSERT from byte zero).
+    """
+    INSERT INTO {db}.by_domain_counts
+    SELECT
+        host_registrable,
+        uniqHLL12StateIf((archive_sha256, victim_folder),
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')) AS victim_count_state,
+        uniqHLL12StateIf(archive_sha256,
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')
+          OR family IN ('cookies','victim_cookies')) AS archive_count_state,
+        min(ingested_at) AS first_seen_at,
+        max(ingested_at) AS last_seen_at,
+        uniqHLL12StateIf((fields['url'], fields['user'], fields['password']),
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')) AS credential_count_state,
+        uniqHLL12StateIf((trim(LEADING '.' FROM fields['cookie_domain']),
+                          coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
+          family IN ('cookies','victim_cookies')) AS all_cookie_count_state,
+        uniqHLL12StateIf(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
+          family IN ('victim_history','victim_downloads')) AS history_count_state,
+        uniqHLL12StateIf(fields['value'],
+          rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count_state
+    FROM {db}.extracted_records
+    WHERE host_registrable != ''
+      AND NOT EXISTS (SELECT 1 FROM {db}.by_domain_counts)
+    GROUP BY host_registrable
+    SETTINGS max_bytes_before_external_group_by = 200000000
     """,
 )
 
@@ -1387,30 +1400,28 @@ class ClickHouseRecordsSink:
         # expression on-the-fly until MATERIALIZE is kicked off manually.
         for stmt in _EXTRACTED_RECORDS_HOST_COLS:
             client.command(stmt.format(db=self._db))
-        # v1.3.12.2 repair the two by_domain refresh MVs if either
-        # sentinel still matches:
-        #   - countDistinctIf(   -- unbounded exact state (first OOM)
-        #   - max_bytes_before_external_group_by = 1000000000  -- old
-        #     1 GB spill threshold left refreshes blowing the 7.2 GiB
-        #     server cap after the uniqHLL12 swap. New DDL sets 200 MiB.
-        # Each sentinel check is a separate call; whichever matches
-        # the live body triggers the drop+rebuild.
-        for sentinel in ("countDistinctIf(", "max_bytes_before_external_group_by = 1000000000"):
-            self._repair_mv_if_stale(
-                client,
-                mv_name="by_domain_counts_refresh",
-                target_name="by_domain_counts",
-                sentinel=sentinel,
-            )
+        # v1.3.12.2: by_domain_counts was converted from a refreshable
+        # ReplacingMergeTree (full rebuild every 5 min, OOMed at 7.5 GiB
+        # over 157M rows) to an incremental AggregatingMergeTree. The old
+        # MV was named by_domain_counts_refresh; the new one is
+        # by_domain_counts_mv and the target table schema changed too, so
+        # both must be dropped on upgrade. Sentinel `REFRESH EVERY` catches
+        # the old refreshable body; the follow-on CREATE TABLE +
+        # CREATE MATERIALIZED VIEW + backfill rebuild into the new shape.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="by_domain_counts_refresh",
+            target_name="by_domain_counts",
+            sentinel="REFRESH EVERY",
+        )
         for stmt in _BY_DOMAIN_COUNTS:
-            client.command(
-                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
-                settings={"allow_experimental_refreshable_materialized_view": 1},
-            )
+            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
         # v1.3.8 per-domain per-victim sibling (Domain View Victims tab).
         # Depends on the _EXTRACTED_RECORDS_HOST_COLS block above for the
         # host_registrable column; MV groups on it.
-        # v1.3.12.2 repair: same sentinel set as the totals MV above.
+        # v1.3.12.2 repair: still on the refreshable pattern until a
+        # follow-up conversion; sentinels catch both the pre-uniqHLL12
+        # state (countDistinctIf) and the lax spill threshold.
         for sentinel in ("countDistinctIf(", "max_bytes_before_external_group_by = 1000000000"):
             self._repair_mv_if_stale(
                 client,
