@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <meta name="google-site-verification" content="FQ0HUlE1sZ6s494L094ldtIXJKxBJ1xhv8WfuWGrw7E" />
 
-> # :rotating_light: HEY MORON, THIS PROJECT IS IN EXPERIMENTAL PHASE. :rotating_light:
-> # USE AT YOUR OWN RISK! :3
+> # :rotating_light: HEY MORON, SOME PARTS OF THIS PROJECT ARE IN EXPERIMENTAL PHASE. :rotating_light:
+> # USE THE STEALER MODULES AT YOUR OWN RISK! :3
 >
-> Schema changes land weekly. Migrations exist but are not bulletproof.
-> Prod-shaped bugs will land in your lap. If you are reading this and
-> thinking "neat, let me run it on real data," think again, then do
-> whatever you want anyway, you beautiful cowboy.
+> Clickhouse schema changes land weekly.
+> Prod-shaped bugs will land in your lap.
+> Some DDLs still need more performance testing. If you are reading this and
+> thinking "neat, let me run it on real data,", it'll probably be slow. But then,
+> who am I to tell you what to do? :3
 
 ---
 
