@@ -217,7 +217,7 @@ class StealerCredsReader:
         host_expr = self._HOST_EXPR
         result = await client.query(
             "SELECT countDistinct("  # noqa: S608
-            f"({host_expr}, fields['url'], fields['login'], fields['password'])) "
+            f"({host_expr}, fields['url'], fields['user'], fields['password'])) "
             f"FROM {self._db}.extracted_records "  # nosec B608
             f"WHERE {self._WHERE_ANY_URL} AND {host_expr} = {{host:String}}",
             parameters={"fams": self._CRED_FAMILIES, "host": host},
@@ -254,7 +254,7 @@ class StealerCredsReader:
             # post-filter returns at most one row per unique cred, which is
             # what the operator sees.
             result = await client.query(
-                f"SELECT DISTINCT {host_expr} h, fields['url'] u, fields['login'] l, "  # noqa: S608  # nosec B608
+                f"SELECT DISTINCT {host_expr} h, fields['url'] u, fields['user'] l, "  # noqa: S608  # nosec B608
                 f"       fields['password'] p, {scheme_expr} s, {tld_expr} t "
                 f"FROM {self._db}.extracted_records "
                 f"WHERE {self._WHERE_ANY_URL}{host_filter} "

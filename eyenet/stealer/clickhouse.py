@@ -545,7 +545,7 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
           OR family IN ('cookies','victim_cookies')) AS archive_count,
         min(ingested_at) AS first_seen_at,
         max(ingested_at) AS last_seen_at,
-        countDistinctIf((fields['url'], fields['login'], fields['password']),
+        countDistinctIf((fields['url'], fields['user'], fields['password']),
           family IN ('browser_passwords','windows_credentials',
                      'firefox_logins','combolist')) AS credential_count,
         -- v1.3.10: cookies store identity as (cookie_domain, cookie_name) and
@@ -637,7 +637,7 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
         coalesce(any(vc.build_version), '') AS build_version,
         coalesce(any(vc.payload_md5), '')   AS loader_md5,
         countDistinctIf(
-          (er.fields['url'], er.fields['login'], er.fields['password']),
+          (er.fields['url'], er.fields['user'], er.fields['password']),
           er.family IN ('browser_passwords','windows_credentials',
                         'firefox_logins','combolist')) AS cred_count,
         countDistinctIf(
@@ -656,15 +656,16 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
     """,
 )
 
-# v1.3.1 stats-rollup and extracted_rows_per_file switchover. The 1.3.0-era
-# bodies used `toUInt64(count()) AS <col>`; the next body used
-# `uniqExactState(_IDENTITY_TUPLE_DDL)`.
-# v1.3.12.1 bump: uniqExact grew unbounded with cardinality and OOMed
-# merges (3.70 GiB peak). New body uses uniqHLL12State (~2.5 KB fixed state,
-# ~2.5% error, fine for dashboard counters). The sentinel now catches
-# `uniqExactState(` so an upgrade from v1.3.12.0 force-rebuilds. Pre-v1.3.1
-# `toUInt64(count())` bodies need a manual repair or a fresh install.
-_STATS_ROLLUP_STALE_SENTINEL = "uniqExactState("
+# v1.3.1 stats-rollup and extracted_rows_per_file switchover.
+# v1.3.12.1 bump: uniqExact -> uniqHLL12 (~2.5 KB fixed state, ~2.5% error).
+# v1.3.12.2 bump: stats_rollup_totals_mv's unique_creds tuple was reading
+# `fields['login']`, which the DSL NEVER emits -- every creds rule emits
+# `fields['user']` instead. The sentinel now catches `fields['login']`
+# so an upgrade from v1.3.12.0 or v1.3.12.1 force-rebuilds that one MV
+# with the correct field name. The other four rollup MVs do not
+# reference the login field at all, so the same sentinel is a no-op
+# for them (their bodies still match the current uniqHLL12 shape).
+_STATS_ROLLUP_STALE_SENTINEL = "fields['login']"
 _EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "uniqExactState("
 
 
@@ -717,7 +718,7 @@ _STATS_ROLLUP_TOTALS_MV = f"""
     SELECT
         'all' AS bucket,
         uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS total_creds,
-        uniqHLL12State(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
+        uniqHLL12State(({_HOST_EXPR_DDL}, fields['user'], fields['password'])) AS unique_creds,
         uniqHLL12State({_HOST_EXPR_DDL}) AS distinct_hosts
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE}
@@ -758,7 +759,7 @@ _STATS_ROLLUP_TOTALS_BACKFILL = f"""
     SELECT
         'all' AS bucket,
         uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS total_creds,
-        uniqHLL12State(({_HOST_EXPR_DDL}, fields['login'], fields['password'])) AS unique_creds,
+        uniqHLL12State(({_HOST_EXPR_DDL}, fields['user'], fields['password'])) AS unique_creds,
         uniqHLL12State({_HOST_EXPR_DDL}) AS distinct_hosts
     FROM {{db}}.extracted_records
     WHERE {_STATS_WHERE}
