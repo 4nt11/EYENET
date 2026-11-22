@@ -81,7 +81,7 @@
         <thead>
           <tr>
             <th>Host</th>
-            <th>Login</th>
+            <th>User</th>
             <th>Password</th>
             <th>Scheme</th>
             <th>Archive</th>
