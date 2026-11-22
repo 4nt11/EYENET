@@ -1,0 +1,28 @@
+id: echo_steam_tokens
+version: 1
+layer: content
+family: steam_accounts
+priority: 85
+path_glob: "**Tokens/steam_tokens.txt"
+requires_container_family: echo
+description: >
+  Steam session tokens inside Echo's Tokens/steam_tokens.txt.
+  Format in the first Echo sample is a placeholder
+  "No Steam tokens found."; no populated sample has been seen yet,
+  so the token pattern is a conservative JWT shape (base64url three
+  parts separated by dots) that will catch Steam refresh tokens and
+  loginsecuretokens. Expect to tighten the pattern once a populated
+  file lands.
+
+  Reject pattern eats the placeholder so empty logs do not emit a
+  bogus record.
+match:
+  type: regex
+  pattern: '(?m)^(?P<steam_jwt>eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})$'
+  pre_contains: 'eyJ'
+reject_patterns:
+  - '(?i)^no\s+steam\s+tokens\s+found\.?$'
+extract:
+  fields: [steam_jwt]
+ttps:
+  - T1528

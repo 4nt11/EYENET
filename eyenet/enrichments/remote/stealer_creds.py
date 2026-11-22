@@ -63,15 +63,15 @@ async def _resolve_domain(ctx: ExpandContext, src_id: UUID) -> str:
 def _cred_node(c: CredRow) -> ExpandNode:
     return ExpandNode(
         entity_type="artifact",
-        entity_id=uuid5(_NS, f"{c.host}|{c.login}|{c.password}"),
-        title=c.login or c.host,
+        entity_id=uuid5(_NS, f"{c.host}|{c.user}|{c.password}"),
+        title=c.user or c.host,
         status=None,
         source_id=None,
         fields={
             "kind": "credential",
             "ephemeral": True,
             "host": c.host,
-            "login": c.login,
+            "user": c.user,
             "password": c.password,
             "scheme": c.scheme,
             "url": c.url,

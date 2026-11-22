@@ -69,7 +69,7 @@ export const CANONICAL_FIELDS = {
   // Credential record shape.
   cred: {
     'cred.url':      ['url', 'host', 'target'],
-    'cred.user':     ['login', 'username', 'user'],
+    'cred.user':     ['user', 'login', 'username'],
     'cred.password': ['password', 'pass'],
     'cred.browser':  ['browser', 'soft', 'profile', 'software'],
   },

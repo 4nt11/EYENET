@@ -88,7 +88,7 @@
   // (passwords_block_title: soft/host/login, passwords_block_divider:
   // url/username, credentials_windows: target/user, firefox_logins).
   const credUrl = (f) => firstField(f, ['url', 'host', 'target']);
-  const credUser = (f) => firstField(f, ['login', 'username', 'user']);
+  const credUser = (f) => firstField(f, ['user', 'login', 'username']);
   const credPw = (f) => firstField(f, ['password']);
   const credBrowser = (f) => firstField(f, ['browser', 'soft', 'profile']);
   // Cookie row shape: netscape_cookies emits host/name/value/expires/path,

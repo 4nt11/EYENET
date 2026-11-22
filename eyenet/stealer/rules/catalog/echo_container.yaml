@@ -1,0 +1,43 @@
+id: echo_container
+version: 1
+layer: container
+family: echo
+priority: 110
+description: >
+  Echo Stealer victim-folder predicate. Anchors on the folder-shape
+  invariant: SystemInfo/ + Clipboard/ + History/ + Tokens/, with the
+  four well-known inner files present.
+
+  Four-of-four presence is a strong signature even when an aggregator
+  repacks the drop and flips the 'Version: Echo Stealer' literal
+  inside SystemInfo/information.txt. Priority 110 so Echo wins over
+  the generic Opus (110) collision would only happen if all four
+  Echo-specific inner files AND UserInformation.txt were present,
+  which is not an observed shape.
+
+  Mutual-exclusion arm rejects the three families that share the
+  'SystemInfo/'-ish or 'information.txt'-ish bait to make
+  disambiguation one-sided:
+
+    * json_v2 (pc_info.json)          -- StealC v2 / Acreed / Stealerium
+    * lumma / stealc classic (System.txt)
+    * khazan v29 (information.txt at the ROOT -- Echo nests it under
+      SystemInfo/ instead)
+match:
+  type: folder
+  predicate:
+    and:
+      - path: SystemInfo/information.txt
+      - path: Clipboard/clipboard.txt
+      - path: Tokens/discord_tokens.txt
+      - path: Tokens/steam_tokens.txt
+      - or:
+          - path: History/Chrome_Default_history.txt
+          - path: History/Edge_Default_history.txt
+      - not: { path: pc_info.json }
+      - not: { path: System.txt }
+      - not: { path: information.txt }
+      - not: { path: UserInformation.txt }
+ttps:
+  - T1005
+  - T1082

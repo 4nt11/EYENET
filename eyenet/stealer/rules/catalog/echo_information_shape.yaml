@@ -1,0 +1,56 @@
+id: echo_information_shape
+version: 1
+layer: content
+family: victim_fingerprint
+priority: 80
+path_glob: "**SystemInfo/information.txt"
+requires_container_family: echo
+description: >
+  Echo Stealer's SystemInfo/information.txt is a Key: Value block
+  followed by three bracketed free-text sections ([Hardware], [Processes],
+  [Software]) that the keyvalue parser ignores naturally (no 'Key:
+  Value' shape). The dominant keys we care about are at the top.
+
+  Fields NOT emitted on purpose:
+    - MAC (no canonical field for a MAC address yet; add one if we
+      decide to pivot on it)
+    - the Hardware / Processes / Software sections (free text lists;
+      future enhancement: a dedicated content rule that emits the
+      process list as separate records)
+
+  Version line is 'Version: Echo Stealer' on an unrepacked build;
+  aggregators are expected to flip it, so we do NOT reject on
+  absence. The folder shape (echo_container) is the load-bearing
+  signal; this rule's job is just to extract the victim fingerprint.
+match:
+  type: keyvalue
+  separator: ": "
+  strip_whitespace: true
+  requires_keys:
+    - Ip
+    - MachineID
+    - HWID
+extract:
+  keys:
+    Ip: ui_egress_ip
+    Country: ui_country
+    City: ui_city
+    Version: ui_build_version
+    Date: ui_capture_time
+    MachineID: ui_machine_guid
+    GUID: ui_guid
+    HWID: ui_hwid
+    Path: ui_payload_path
+    Work Dir: ui_work_dir
+    Windows: ui_os
+    Install Date: install_date
+    AV: ui_av_name
+    Computer Name: ui_computer
+    User Name: ui_user_name
+    Display Resolution: ui_screen
+    Keyboard Languages: ui_keyboards
+    Local Time: ui_local_time
+    TimeZone: ui_timezone
+ttps:
+  - T1082
+  - T1016

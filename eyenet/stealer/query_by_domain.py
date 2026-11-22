@@ -122,7 +122,7 @@ def _is_unknown_table(exc: Exception) -> bool:
 class CredRow:
     host: str
     url: str
-    login: str
+    user: str
     password: str
     scheme: str
     archive_sha256: str
@@ -419,14 +419,14 @@ class DomainCorpusReader:
         }
         try:
             total = await client.query(
-                "SELECT countDistinct((fields['url'], fields['login'], fields['password'])) "  # noqa: S608
+                "SELECT countDistinct((fields['url'], fields['user'], fields['password'])) "  # noqa: S608
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp}",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
-                f"SELECT DISTINCT {self._HOST_EXPR} h, fields['url'] u, fields['login'] l, "  # noqa: S608
+                f"SELECT DISTINCT {self._HOST_EXPR} h, fields['url'] u, fields['user'] l, "  # noqa: S608
                 f"       fields['password'] p, {self._SCHEME_EXPR} s, "
                 "       archive_sha256, victim_folder, ingested_at "
                 f"FROM {self._db}.extracted_records "  # nosec B608
@@ -443,7 +443,7 @@ class DomainCorpusReader:
             CredRow(
                 host=r[0],
                 url=r[1],
-                login=r[2],
+                user=r[2],
                 password=r[3],
                 scheme=r[4],
                 archive_sha256=r[5],
@@ -535,7 +535,7 @@ class DomainCorpusReader:
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
             rows = await client.query(
                 f"SELECT {self._HOST_EXPR} AS host, "  # noqa: S608
-                "       countDistinctIf((fields['url'], fields['login'], fields['password']), "
+                "       countDistinctIf((fields['url'], fields['user'], fields['password']), "
                 "         family IN {creds:Array(String)}) AS cred_cnt, "
                 "       countDistinctIf((fields['url'], fields['name']), "
                 "         family IN {cookies:Array(String)}) AS cookie_cnt "

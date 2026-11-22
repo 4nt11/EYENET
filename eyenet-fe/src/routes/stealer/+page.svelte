@@ -25,7 +25,7 @@
 
   const COLUMNS = [
     { key: 'host', header: 'Host', mono: true, width: '260px' },
-    { key: 'login', header: 'Login', mono: true },
+    { key: 'user', header: 'User', mono: true },
     { key: 'password', header: 'Password', mono: true },
     { key: 'scheme', header: 'Scheme', mono: true, width: '90px' },
     { key: 'tld', header: 'TLD', mono: true, width: '70px' }

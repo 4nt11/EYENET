@@ -38,7 +38,7 @@ class StealerCred(ApiSchema):
 
     host: str
     url: str
-    login: str
+    user: str
     password: str
     scheme: str
     tld: str

@@ -144,7 +144,7 @@ async def by_domain_credentials(
             DomainCredRow(
                 host=r.host,
                 url=r.url,
-                login=r.login,
+                user=r.user,
                 password=r.password,
                 scheme=r.scheme,
                 archive_sha256=r.archive_sha256,

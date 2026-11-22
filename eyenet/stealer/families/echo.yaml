@@ -1,0 +1,60 @@
+slug: echo
+name: Echo Stealer
+status: active
+kind: stealer
+schema: 2
+first_seen_year: 2026
+aliases: []
+signature_files:
+  - SystemInfo/information.txt
+  - Clipboard/clipboard.txt
+  - History/
+  - Tokens/discord_tokens.txt
+  - Tokens/steam_tokens.txt
+loaders:
+  - process_hollowing
+  - upx_packed
+distribution_channels:
+  - direct_telegram_sale
+references:
+  - title: N/A
+    url: N/A
+notes: >
+  Echo Stealer. First surfaced to EYENET on 2026-11-21 via a direct
+  Telegram contact with the self-described dev (@Netfrezzy). Zero
+  public footprint at discovery -- no open-web hits for the product
+  name OR the dev handle. $400 quoted; builder + panel; claimed
+  features: process hollowing, UPX packing, credential + token +
+  wallet + clipboard + history grab, and an active CRYPTO SENDER
+  (wallet drainer) that auto-moves captured wallet material to an
+  operator-controlled address.
+
+  Operational implication for the UI: an Echo-tagged victim's
+  wallet is likely ALREADY drained between stealer capture and the
+  log landing in our feed. Any wallet finding on an Echo victim
+  should carry a "funds likely already moved -- do NOT recommend
+  recovery" badge. This is the DIFFERENTIATOR from passive
+  stealers where seed material might still be fund-bearing.
+
+  Czech locale tell: the sample's Telegram/tdata_error.txt carries
+  'Slozka tdata nenalezena' = Czech for "tdata folder not found".
+  Suggests a CZ or CZ-influenced builder. Not conclusive but a
+  strong pointer, worth cross-referencing when more Echo samples
+  surface.
+
+  Shape invariants (survive aggregator repacks that flip the
+  'Version: Echo Stealer' literal):
+
+    SystemInfo/information.txt      Key: Value block
+    Clipboard/clipboard.txt         one item per non-empty line
+    History/<Browser>_<Profile>_history.txt   URL/Title/Time triples
+                                              separated by a 60-dash
+                                              rule; Time is a 17-digit
+                                              Chromium WebKit epoch
+                                              microseconds since 1601
+    Tokens/discord_tokens.txt       may contain the placeholder
+    Tokens/steam_tokens.txt          "No X tokens found."; rules
+                                     MUST reject that line.
+
+  No Credentials/ or Cookies/ folder observed in the first sample;
+  confirm presence/absence when more Echo logs land.

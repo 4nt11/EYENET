@@ -1,0 +1,28 @@
+id: echo_discord_tokens
+version: 1
+layer: content
+family: discord_tokens
+priority: 85
+path_glob: "**Tokens/discord_tokens.txt"
+requires_container_family: echo
+description: >
+  Discord session tokens inside Echo's Tokens/discord_tokens.txt.
+  The file may contain the human placeholder "No Discord tokens
+  found." when the stealer failed to locate any -- the reject
+  pattern filters that line so empty logs do not emit a bogus
+  record.
+
+  When populated, format is the standard Discord token triple
+  (<base64url user_id>.<base64url timestamp>.<hmac>). Pattern is
+  the same shape used by discord_tokens_plain for other stealer
+  families.
+match:
+  type: regex
+  pattern: '(?m)^(?P<discord_token>[A-Za-z0-9_-]{24,28}\.[A-Za-z0-9_-]{6,8}\.[A-Za-z0-9_-]{25,45})$'
+  pre_contains: '.'
+reject_patterns:
+  - '(?i)^no\s+discord\s+tokens\s+found\.?$'
+extract:
+  fields: [discord_token]
+ttps:
+  - T1528

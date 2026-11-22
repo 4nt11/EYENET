@@ -1,0 +1,35 @@
+id: echo_history_block
+version: 1
+layer: content
+family: victim_history
+priority: 80
+path_glob: "**History/*_history.txt"
+requires_container_family: echo
+description: >
+  Chromium / Edge history records as dumped by Echo Stealer.
+  Three-line records separated by a 60-dash rule:
+
+    URL: <url>
+    Title: <page title>
+    Time: 13439311457992173
+    ------------------------------------------------------------
+
+  Time is a 17-digit Chromium WebKit epoch (microseconds since
+  1601-01-01). We capture it as a raw string into `visit_time`;
+  downstream normalisation can convert if/when we need wall-clock
+  timestamps from it.
+
+  Files may carry a leading '# Chrome_Default History' / '# Collected:'
+  comment pair; the regex only matches the URL/Title/Time triple so
+  the comments are naturally ignored.
+
+  Title captures Unicode (the sample has math-bold ancient-script
+  group names from the victim's Telegram tabs); the pattern is
+  codepoint-safe.
+match:
+  type: regex
+  pattern: '(?m)^URL: (?P<visit_url>[^\n]+)\nTitle: (?P<visit_title>[^\n]*)\nTime: (?P<visit_time>\d+)\s*$'
+extract:
+  fields: [visit_url, visit_title, visit_time]
+ttps:
+  - T1217

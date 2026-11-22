@@ -92,15 +92,15 @@
           </tr>
         </thead>
         <tbody>
-          {#each credentialsCtx.items as r, i (`${r.archive_sha256}:${r.victim_folder}:${r.url}:${r.login}:${i}`)}
-            {@const rowKey = `${r.archive_sha256}:${r.victim_folder}:${r.url}:${r.login}:${i}`}
+          {#each credentialsCtx.items as r, i (`${r.archive_sha256}:${r.victim_folder}:${r.url}:${r.user}:${i}`)}
+            {@const rowKey = `${r.archive_sha256}:${r.victim_folder}:${r.url}:${r.user}:${i}`}
             <tr>
               <td class="mono host"><span title={r.url}>{r.host}</span></td>
-              <td class="mono login" title={r.login}>
-                {#if r.login}
-                  {r.login}
+              <td class="mono user" title={r.user}>
+                {#if r.user}
+                  {r.user}
                 {:else}
-                  <span class="no-data">no login captured</span>
+                  <span class="no-data">no user captured</span>
                 {/if}
               </td>
               <td class="mono pw">
@@ -187,7 +187,7 @@
 
   .mono { font-family: var(--font-mono); font-size: var(--fs-12); }
   td.host { color: var(--text); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  td.login { color: var(--text-body); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.user { color: var(--text-body); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* No-data chip: EYENET metadata label, visually distinct from stealer-captured
      data. Hollow bordered pill in italic sans so it never gets mistaken for a

@@ -1,0 +1,26 @@
+id: echo_clipboard_item
+version: 1
+layer: content
+family: victim_clipboard
+priority: 75
+path_glob: "**Clipboard/clipboard.txt"
+requires_container_family: echo
+description: >
+  One record per non-empty line of Echo's Clipboard/clipboard.txt.
+  Rejects 1 or 2-character lines (noise) so a lone period or bracket
+  does not create a record; everything longer is preserved verbatim
+  (including leading whitespace in code pastes) for downstream
+  semantic tagging.
+
+  Observed in the sample: a Python pip install, a Python run command
+  pointing at a file in the victim's Downloads folder -- textbook
+  dev-leak material.
+match:
+  type: regex
+  pattern: '(?m)^(?P<clipboard_item>\S.*?\S|\S)\s*$'
+reject_patterns:
+  - '^.{1,2}$'
+extract:
+  fields: [clipboard_item]
+ttps:
+  - T1115

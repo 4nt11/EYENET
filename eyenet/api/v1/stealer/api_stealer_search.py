@@ -47,7 +47,7 @@ async def stealer_search(
             StealerCred(
                 host=r.host,
                 url=r.url,
-                login=r.login,
+                user=r.user,
                 password=r.password,
                 scheme=r.scheme,
                 tld=r.tld,
