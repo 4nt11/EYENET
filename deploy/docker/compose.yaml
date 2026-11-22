@@ -85,11 +85,19 @@ services:
     environment:
       POSTGRES_USER: eyenet
       POSTGRES_PASSWORD: ${EYENET_PG_PASSWORD:?set EYENET_PG_PASSWORD in deploy/docker/.env}
-      # Maintenance DB only; the cutover creates eyenet + eyenet_audit.
+      # Maintenance DB only. The two application databases (`eyenet` +
+      # `eyenet_audit`) are created on first boot of an empty volume by
+      # the init script mounted below; the Alembic upgrade_to_head that
+      # the api service runs on startup then populates their schemas.
       POSTGRES_DB: postgres
     command: ["postgres", "-c", "max_connections=200"]
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # docker-entrypoint runs every *.sql in this dir on first boot
+      # of an EMPTY PGDATA volume and then skips it forever after.
+      # Our init creates the two databases; Alembic owns everything
+      # schema-shaped from that point on.
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U eyenet -d postgres"]
       interval: 5s
