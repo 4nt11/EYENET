@@ -22,6 +22,7 @@ from typing import Any
 import yaml
 
 from eyenet.stealer.families import valid_slugs as _family_slugs
+from eyenet.stealer.rules.fields import validate_rule_fields
 
 _log = logging.getLogger(__name__)
 _VENDORED = Path(__file__).resolve().parent
@@ -158,6 +159,10 @@ def _validate_rule_shape(rule: dict[str, Any]) -> None:
             rule["id"],
             fam,
         )
+    # v1.3.12.2: every emitted field name must be in the canonical vocabulary.
+    # Catches typos + silently-diverging aliases (login vs user vs username)
+    # at the rule-authoring layer, so readers never have to support the mess.
+    validate_rule_fields(rule)
 
 
 def _atomic_write(path: Path, body: str) -> None:

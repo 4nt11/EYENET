@@ -1605,6 +1605,57 @@ from eyenet.calibration.cli import app as calibrate_app  # noqa: E402
 app.add_typer(calibrate_app, name="calibrate", help="M5 calibration grid + artifact tooling")
 
 
+@app.command("stealer-rules-lint")
+def stealer_rules_lint(  # pragma: no cover
+    catalog_dir: Path | None = typer.Option(
+        None,
+        "--catalog-dir",
+        help="Rule catalog to lint. Defaults to EYENET_STEALER_RULES_DIR or the vendored dir.",
+    ),
+) -> None:
+    """Validate every rule in the catalog against the canonical field vocabulary.
+
+    Exits non-zero (and lists offenders) on the first rule that emits a
+    non-canonical field name. See eyenet/stealer/rules/fields.py for the
+    whitelist and the reason this exists.
+    """
+    import yaml  # noqa: PLC0415
+
+    from eyenet.stealer.rules.fields import validate_rule_fields  # noqa: PLC0415
+
+    root = catalog_dir or Path(
+        os.environ.get("EYENET_STEALER_RULES_DIR")
+        or Path(__file__).resolve().parents[1] / "stealer" / "rules" / "catalog"
+    )
+    if not root.is_dir():
+        typer.echo(f"error: catalog dir not found: {root}", err=True)
+        raise typer.Exit(code=2)
+
+    checked = 0
+    failed: list[tuple[Path, str]] = []
+    for y in sorted(root.glob("*.yaml")):
+        try:
+            rule = yaml.safe_load(y.read_text(encoding="utf-8"))
+        except Exception as exc:
+            failed.append((y, f"yaml parse: {exc}"))
+            continue
+        if not isinstance(rule, dict):
+            failed.append((y, "root is not a mapping"))
+            continue
+        try:
+            validate_rule_fields(rule)
+            checked += 1
+        except ValueError as exc:
+            failed.append((y, str(exc)))
+
+    typer.echo(f"checked {checked} rule(s) in {root}")
+    if failed:
+        for path, msg in failed:
+            typer.echo(f"  FAIL {path.name}: {msg}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("ok: all rules emit canonical field names")
+
+
 @app.command("stealer-reclassify")
 def stealer_reclassify(  # pragma: no cover
     archive_sha: str | None = typer.Option(
