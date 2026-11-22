@@ -236,12 +236,27 @@ budget chasing them as refactor regressions until you've reproduced under
 
 ### 3.4 Coverage gate
 
-`--cov-fail-under=84` in pyproject. Coverage is computed over `eyenet/`,
-with `tests/`, `eyenet/cli/__main__.py`, and the live-service-only
-collectors (`bus/nats.py`, `collectors/telegram/real.py`, `auth.py`,
-`collectors/matrix/real.py`) omitted. A delta-no-drop guard
-(`coverage_no_drop` in `.githooks/lib/coverage.sh`) refuses any decrease
-from `.coverage-baseline`. Update the baseline only when intentional.
+The coverage floor lives in **CI** (`.github/workflows/tests.yml`), not in
+`addopts` and not in the hooks. The `fast` job runs
+`pytest -m "unit or integration or contract" --cov=eyenet --cov-fail-under=95`.
+Coverage is computed over `eyenet/`, with `tests/`,
+`eyenet/cli/__main__.py`, and the live-service-only collectors
+(`bus/nats.py`, `collectors/telegram/real.py`, `auth.py`,
+`collectors/matrix/real.py`) omitted via `[tool.coverage.run]`.
+
+The old delta-no-drop guard (`coverage_no_drop` + `.coverage-baseline`) was
+**removed** (2026-11-22): it refused commits on 0.02% drifts and was pure
+devex tax. Only the absolute floor remains. `pyproject` `addopts` still carries
+`--cov=eyenet --cov-report=term-missing` for local reporting, but no
+`--cov-fail-under` (a manual `pytest` run no longer fails on coverage).
+
+**The hook split** (see `.githooks/`): `pre-commit` runs `pytest --testmon`
+(affected tests only, no coverage) for a fast local loop; `pre-push` runs only
+the local-must-run guards (`git lfs`, secret-filename); the full ruff + mypy +
+test + coverage + pip-audit gate moved to CI on every push and PR. CI also runs
+an `e2e` job (`EYENET_E2E=1`, Postgres + NATS via testcontainers) -- the only
+automated coverage of the Postgres dialect code prod actually ships (the fast
+tier runs on in-memory SQLite, the test-speed backend).
 
 ---
 

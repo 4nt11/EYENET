@@ -76,23 +76,24 @@ step "deptry"
 deptry eyenet
 ok "deps clean"
 
-step "pytest unit+contract with coverage gate (>=80% + no delta drop) TODO(EYENET v0.2): raise back to 89+"
-# Gate lowered 85 -> 84 (2026-11-17) and now 84 -> 80 (2026-11-18). The stealer
-# artifact drawer + async readers landed a lot of ClickHouse-shaped production
-# code whose remaining untested surface wants integration tests against live
-# ClickHouse, not more mocks. The tight delta-no-drop kept blocking commits for
-# 0.02% drifts from async-conversion branch collapses. 80% gives headroom
-# without disabling the floor. Raise back once the pre-commit/pre-push split +
-# testmon followup lands. Baseline refreshed below.
-pytest -m "unit or contract" -q \
-  --cov=eyenet \
-  --cov-report=json:coverage.json \
-  --cov-report=term-missing \
-  --cov-fail-under=80 \
-  --no-header \
-  -x
-
-. "$SCRIPT_DIR/lib/coverage.sh"
-coverage_no_drop coverage.json .coverage-baseline
+step "pytest AFFECTED tests only (testmon); full suite + coverage gate run at pre-push"
+# The pre-commit/pre-push split this file used to promise, now landed: the
+# per-commit gate runs ONLY the tests whose covered code changed (testmon,
+# tracked in .testmondata, git-ignored + per-machine), and the coverage floor
+# + delta-no-drop moved wholesale to pre-push. The commit loop stays fast; the
+# thorough gate runs once per push, where it belongs.
+#
+# Flag notes (all three are load-bearing, do not drop one):
+#   --no-cov        testmon drives coverage.py itself; pytest-cov (baked into
+#                   addopts as --cov=eyenet) would fight it for the tracer.
+#   -o addopts=""   clears the baked `-m "unit or contract"` (testmon DISABLES
+#                   its own selection the moment any -m is present) and the
+#                   --cov flags, in one move. --timeout is re-added explicitly
+#                   since the cleared addopts carried it.
+#   first run       a cold .testmondata primes the map (runs everything once);
+#                   every commit after reruns only what your change touched.
+# e2e tests self-skip without EYENET_E2E=1, so an untouched-but-affected e2e
+# never actually executes here.
+pytest --testmon --no-cov -o addopts="" --timeout=30 -q --no-header -x
 
 ok "pre-commit OK"

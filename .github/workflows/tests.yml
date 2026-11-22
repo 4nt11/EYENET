@@ -1,0 +1,92 @@
+# Full correctness gate, lifted off the pre-push hook (which was a half-hour
+# wall on every push). pre-commit now runs testmon (affected tests only) for the
+# fast local loop; pre-push keeps only the local-must-run guards (git-lfs +
+# secret-filename). THIS is where the thorough gate lives now.
+#
+# Two jobs:
+#   fast  -- unit+integration+contract on in-memory SQLite (the test-speed
+#            backend; prod ships Postgres), no services, + ruff + mypy + the
+#            absolute coverage floor + pip-audit. Minutes, runs on every push/PR.
+#   e2e   -- EYENET_E2E=1, the Postgres + NATS parity/backend tests via
+#            testcontainers (Docker-in-runner). This is the ONLY automated
+#            coverage of the dialect-specific code prod actually runs -- the
+#            class of bug that broke the fresh deploy. Slower, runs here so it
+#            never has to run on anyone's machine.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: fast (sqlite) + lint + types + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv + Python 3.12
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync dev deps
+        run: uv sync --extra dev
+
+      - name: Install spaCy model (es_core_news_sm)
+        run: uv run python scripts/install_models.py
+
+      - name: ruff check
+        run: uv run ruff check eyenet tests
+
+      - name: mypy --strict
+        run: uv run mypy --strict eyenet
+
+      # Same selection the pre-push gate used; absolute --cov-fail-under floor
+      # only (the brittle delta-no-drop guard was removed, it failed on 0.02%
+      # drifts). No service containers: this tier is in-memory SQLite.
+      - name: pytest (unit + integration + contract) + coverage floor
+        run: >
+          uv run pytest -m "unit or integration or contract" -q
+          --cov=eyenet --cov-report=term-missing --cov-fail-under=95 --no-header
+
+      - name: pip-audit --strict
+        run: uv run pip-audit --strict
+
+  e2e:
+    name: e2e (postgres + nats via testcontainers)
+    runs-on: ubuntu-latest
+    env:
+      EYENET_E2E: "1"
+      # Ryuk (the testcontainers reaper) is redundant on an ephemeral CI runner
+      # and occasionally flakes on Actions; the runner is torn down anyway.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv + Python 3.12
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync dev deps
+        run: uv sync --extra dev
+
+      - name: Install spaCy model (es_core_news_sm)
+        run: uv run python scripts/install_models.py
+
+      # testcontainers starts Postgres + NATS from Docker on the runner; no
+      # `services:` block needed. These are the parity/backend tests that are
+      # skipped locally without EYENET_E2E=1.
+      - name: pytest e2e
+        run: uv run pytest -m e2e -q --no-header
