@@ -22,10 +22,14 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from eyenet.telemetry.logging import get_logger
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from clickhouse_connect.driver.client import Client
+
+_log = get_logger()
 
 _CREATE_DB = "CREATE DATABASE IF NOT EXISTS {db}"
 
@@ -179,6 +183,21 @@ _EXTRACTED_ROWS_PER_FILE_BACKFILL = f"""
     GROUP BY archive_sha256, file_path
     """  # noqa: S608  # nosec B608
 
+# v1.4: extracted_rows_per_file_counts is now a plain VIEW finalizing
+# extracted_rows_per_file (incremental AMT) at read, replacing the killed
+# REFRESH-EVERY MV + ReplacingMergeTree cache. Same name + column shape
+# (archive_sha256, file_path, n) so file-tree/coverage readers keep their
+# FROM clause; they only drop the FINAL keyword.
+_EXTRACTED_ROWS_PER_FILE_COUNTS_VIEW = """
+    CREATE VIEW IF NOT EXISTS {db}.extracted_rows_per_file_counts AS
+    SELECT
+        archive_sha256,
+        file_path,
+        uniqHLL12Merge(cnt) AS n
+    FROM {db}.extracted_rows_per_file
+    GROUP BY archive_sha256, file_path
+    """
+
 # victim_profiles MV body + backfill. Shared across both: the SELECT core
 # is identical; only the wrapping (INSERT ... vs CREATE MATERIALIZED VIEW)
 # differs. Keep them literally separate to match the original structure.
@@ -320,81 +339,17 @@ _VICTIM_PROFILES: tuple[str, ...] = (
     _VICTIM_PROFILES_BACKFILL,
 )
 
-
-# v1.3.1 one-shot repair sentinel. The pre-1.3.1 MV body counted creds by
-# `rule_id LIKE 'passwords_%'` (never matches: real rule_ids are
-# passwords_block_title, combolist_*, credentials_windows, etc.) and
-# cookies by `rule_id = 'cookies_netscape_tsv'` (misses the bulk
-# netscape_cookies hits). Prod was showing 0 creds / 0 cookies on
-# 3.6M-row extracted_records. The new MV keys off `family` (stable,
-# catalog-defined). This string is the sentinel we grep in
-# system.tables.create_table_query to decide whether to force-rebuild.
-#
-# v1.3.12.1 bump: the v1.3.1-to-v1.3.12.0 MV body uses uniqExactStateIf,
-# which grew unbounded with cardinality and triggered code 241 merges on
-# prod (victim_profiles max merge peak 3.47 GiB). The sentinel now
-# catches `uniqHLL12StateIf(` so an upgrade from v1.3.12.0 force-
-# rebuilds the MV with the uniqHLL12StateIf body. Pre-v1.3.1 boxes
-# (sentinel: `countIf(`) are stale by a different path; they need a
-# manual repair or a fresh install -- EYENET has none in the wild.
-_VICTIM_PROFILES_STALE_SENTINEL = "uniqHLL12StateIf("
-
-# v1.3.4.3 flat-counts sibling. victim_profiles holds the exact, reindex-
-# idempotent uniqExactState columns; victim_counts holds the finalized
-# UInt64 scalars, refreshed every 5 minutes by a REFRESHABLE MV. The API
-# list/detail paths read from victim_counts FINAL (sub-100ms on 20k rows),
-# so an operator filter like has_wallet=1 no longer pays the 7s state
-# materialization per request.
-_VICTIM_COUNTS: tuple[str, ...] = (
-    """
-    CREATE TABLE IF NOT EXISTS {db}.victim_counts
-    (
-        archive_sha256         FixedString(64),
-        victim_folder          String,
-        source                 LowCardinality(String),
-        country                LowCardinality(String),
-        egress_ip              String,
-        user_name              String,
-        computer_name          String,
-        os_version             String,
-        traffic_affid          LowCardinality(String),
-        build_version          LowCardinality(String),
-        payload_md5            String,
-        work_dir               String,
-        creds_count            UInt64,
-        cookies_count          UInt64,
-        autofills_count        UInt64,
-        history_count          UInt64,
-        downloads_count        UInt64,
-        processes_count        UInt64,
-        software_count         UInt64,
-        discord_tokens_count   UInt64,
-        steam_tokens_count     UInt64,
-        google_refresh_count   UInt64,
-        localstorage_jwt_count UInt64,
-        wallet_vaults_count    UInt64,
-        has_corporate_marker   UInt8,
-        has_webmail_leak       UInt8,
-        has_wallet             UInt8,
-        has_crypter_banner     UInt8,
-        webmail_identity       String,
-        first_corporate_marker String,
-        first_wallet_family    LowCardinality(String),
-        refreshed_at           DateTime DEFAULT now(),
-        INDEX idx_country country TYPE set(0) GRANULARITY 1,
-        INDEX idx_affid traffic_affid TYPE set(0) GRANULARITY 1,
-        INDEX idx_has_wallet has_wallet TYPE set(0) GRANULARITY 1,
-        INDEX idx_has_corporate has_corporate_marker TYPE set(0) GRANULARITY 1
-    )
-    ENGINE = ReplacingMergeTree(refreshed_at)
-    ORDER BY (archive_sha256, victim_folder)
-    {storage_policy_clause}
-    """,
-    """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.victim_counts_refresh
-    REFRESH EVERY 5 MINUTE
-    TO {db}.victim_counts
-    AS SELECT
+# v1.4: victim_counts is now a plain VIEW that finalizes victim_profiles
+# (incremental AMT) at read, replacing the killed REFRESH-EVERY MV + its
+# ReplacingMergeTree cache (the 5-min full rescan was the O(table) OOM shape).
+# victim_profiles is ~40k rows so finalizing per read is ms-cheap, and it is
+# ALWAYS fresh (no 5-min lag). Column shape matches the old victim_counts table
+# (finalized scalars) so readers keep `FROM victim_counts`; they only drop the
+# `FINAL` keyword (a view cannot take FINAL). This is the same body the old
+# victim_counts_refresh MV used, minus the now()-refreshed_at cache column.
+_VICTIM_COUNTS_VIEW = """
+    CREATE VIEW IF NOT EXISTS {db}.victim_counts AS
+    SELECT
         archive_sha256,
         victim_folder,
         max(source) AS source,
@@ -425,49 +380,29 @@ _VICTIM_COUNTS: tuple[str, ...] = (
         max(has_crypter_banner) AS has_crypter_banner,
         max(webmail_identity) AS webmail_identity,
         max(first_corporate_marker) AS first_corporate_marker,
-        max(first_wallet_family) AS first_wallet_family,
-        now() AS refreshed_at
+        max(first_wallet_family) AS first_wallet_family
     FROM {db}.victim_profiles
     GROUP BY archive_sha256, victim_folder
-    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
-    """,
-)
+    """
 
-# v1.3.5 flat-counts sibling for extracted_rows_per_file. Same pattern as
-# victim_counts: the base AggregatingMergeTree keeps the aggregate state
-# column for reindex-idempotent dedup; a ReplacingMergeTree sibling
-# holds the finalized plain UInt64 scalars, refreshed every 5 minutes by a
-# REFRESHABLE MV. file_tree + _coverage read from here instead of paying
-# the base table's aggregate-state deserialization on every click.
-# v1.3.12.1 swapped the base from uniqExact -> uniqHLL12 to cap per-bucket
-# state at ~2.5 KiB (counts are a dashboard stat, ~2.5% error is fine).
-_EXTRACTED_ROWS_PER_FILE_COUNTS: tuple[str, ...] = (
-    """
-    CREATE TABLE IF NOT EXISTS {db}.extracted_rows_per_file_counts
-    (
-        archive_sha256 FixedString(64),
-        file_path      String,
-        n              UInt64,
-        refreshed_at   DateTime DEFAULT now()
-    )
-    ENGINE = ReplacingMergeTree(refreshed_at)
-    ORDER BY (archive_sha256, file_path)
-    {storage_policy_clause}
-    """,
-    """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_rows_per_file_counts_refresh
-    REFRESH EVERY 5 MINUTE
-    TO {db}.extracted_rows_per_file_counts
-    AS SELECT
-        archive_sha256,
-        file_path,
-        uniqHLL12Merge(cnt) AS n,
-        now() AS refreshed_at
-    FROM {db}.extracted_rows_per_file
-    GROUP BY archive_sha256, file_path
-    SETTINGS optimize_aggregation_in_order = 1, max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
-    """,
-)
+
+# v1.3.1 one-shot repair sentinel. The pre-1.3.1 MV body counted creds by
+# `rule_id LIKE 'passwords_%'` (never matches: real rule_ids are
+# passwords_block_title, combolist_*, credentials_windows, etc.) and
+# cookies by `rule_id = 'cookies_netscape_tsv'` (misses the bulk
+# netscape_cookies hits). Prod was showing 0 creds / 0 cookies on
+# 3.6M-row extracted_records. The new MV keys off `family` (stable,
+# catalog-defined). This string is the sentinel we grep in
+# system.tables.create_table_query to decide whether to force-rebuild.
+#
+# v1.3.12.1 bump: the v1.3.1-to-v1.3.12.0 MV body uses uniqExactStateIf,
+# which grew unbounded with cardinality and triggered code 241 merges on
+# prod (victim_profiles max merge peak 3.47 GiB). The sentinel now
+# catches `uniqHLL12StateIf(` so an upgrade from v1.3.12.0 force-
+# rebuilds the MV with the uniqHLL12StateIf body. Pre-v1.3.1 boxes
+# (sentinel: `countIf(`) are stale by a different path; they need a
+# manual repair or a fresh install -- EYENET has none in the wild.
+_VICTIM_PROFILES_STALE_SENTINEL = "uniqHLL12StateIf("
 
 # v1.3.6 Domain View: materialised host columns on extracted_records so the
 # WHERE host_registrable = 'google.com' predicate can prune via a bloom-filter
@@ -587,11 +522,23 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
     WHERE host_registrable != ''
     GROUP BY host_registrable
     """,
-    # One-shot backfill from the existing corpus. NOT EXISTS gate so this
-    # only fires on the first ensure_schema() call against an existing
-    # populated extracted_records (new installs skip it because the live
-    # MV handles every INSERT from byte zero).
-    """
+)
+
+# One-shot backfill from an EXISTING corpus, GATED by size. The full-corpus
+# `GROUP BY host_registrable` builds ~8 HLL12 states across every
+# registrable-domain group at once; on the prod firehose that OOMed the 4 GiB
+# per-query cap (code 241) even WITH external_group_by, and aborted the
+# reindex. We no longer try to backfill a large corpus: on a fresh install (and
+# after a from-zero DB rebuild) the live MV populates by_domain_counts from byte
+# zero as rows ingest, so the backfill is only for a SMALL upgrade-in-place
+# where the corpus already exists and is not being re-ingested. Above the gate
+# we SKIP and log -- the operator repopulates by running a corpus reindex, which
+# re-inserts every archive through the MV with bounded per-block memory.
+# ponytail: single-pass fits the 4 GiB cap well under a few hundred k distinct
+# hosts; _BACKFILL_MAX_HOSTS is set conservatively so it never OOMs, and any
+# corpus large enough to matter populates incrementally via (re)ingest instead.
+_BACKFILL_MAX_HOSTS = 250_000
+_BY_DOMAIN_COUNTS_BACKFILL = """
     INSERT INTO {db}.by_domain_counts
     SELECT
         host_registrable,
@@ -616,73 +563,9 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
           rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count_state
     FROM {db}.extracted_records
     WHERE host_registrable != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.by_domain_counts)
     GROUP BY host_registrable
     SETTINGS max_bytes_before_external_group_by = 200000000
-    """,
-)
-
-# v1.3.8 per-domain per-victim sibling. Backs the Domain View Victims tab
-# (and future by-domain Samples/Antiviruses tabs) with sub-20ms warm lookups
-# instead of scanning extracted_records on every page flip. Keyed on
-# (host_registrable, archive_sha256, victim_folder). Measured on prod:
-# 574ms single-stage -> 12-16ms sibling warm, 679ms cold on google.com.
-# Row count ~730k (host x victim product filtered to actual matches).
-# Same semantic as the single-stage query: per-victim DOMAIN-SCOPED unique
-# cred/cookie counts, so operators see "this victim leaked N test.com creds"
-# and sum(items.cred_count) >= by_domain_counts.credential_count (the latter
-# dedupes credentials ACROSS victims, which is a legitimately different
-# question).
-_BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
     """
-    CREATE TABLE IF NOT EXISTS {db}.by_domain_victim_counts
-    (
-        host_registrable  String,
-        archive_sha256    FixedString(64),
-        victim_folder     String,
-        country           String,
-        build_version     String,
-        loader_md5        String,
-        cred_count        UInt64,
-        cookie_count      UInt64,
-        first_seen_at     DateTime,
-        last_seen_at      DateTime,
-        refreshed_at      DateTime DEFAULT now()
-    )
-    ENGINE = ReplacingMergeTree(refreshed_at)
-    ORDER BY (host_registrable, archive_sha256, victim_folder)
-    {storage_policy_clause}
-    """,
-    """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_victim_counts_refresh
-    REFRESH EVERY 5 MINUTE
-    TO {db}.by_domain_victim_counts
-    AS SELECT
-        er.host_registrable AS host_registrable,
-        er.archive_sha256   AS archive_sha256,
-        er.victim_folder    AS victim_folder,
-        coalesce(any(vc.country), '')       AS country,
-        coalesce(any(vc.build_version), '') AS build_version,
-        coalesce(any(vc.payload_md5), '')   AS loader_md5,
-        uniqHLL12If(
-          (er.fields['url'], er.fields['user'], er.fields['password']),
-          er.family IN ('browser_passwords','windows_credentials',
-                        'firefox_logins','combolist')) AS cred_count,
-        uniqHLL12If(
-          (er.fields['url'], er.fields['name']),
-          er.family IN ('cookies','victim_cookies')) AS cookie_count,
-        min(er.ingested_at) AS first_seen_at,
-        max(er.ingested_at) AS last_seen_at,
-        now() AS refreshed_at
-    FROM {db}.extracted_records AS er
-    LEFT JOIN {db}.victim_counts AS vc FINAL
-           USING (archive_sha256, victim_folder)
-    WHERE er.host_registrable != ''
-    GROUP BY er.host_registrable, er.archive_sha256, er.victim_folder
-    SETTINGS optimize_aggregation_in_order = 1,
-             max_bytes_before_external_group_by = 200000000, max_memory_usage = 5000000000
-    """,
-)
 
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover.
 # v1.3.12.1 bump: uniqExact -> uniqHLL12 (~2.5 KB fixed state, ~2.5% error).
@@ -710,10 +593,15 @@ _EXTRACTED_ROWS_PER_FILE_STALE_SENTINEL = "uniqHLL12State("
 #   - stats_rollup_scheme:  per-scheme sum. Tiny cardinality (http/https
 #     +/android).
 #   - stats_rollup_tld:     per-tld sum. Hundreds of keys.
-#   - stats_rollup_host:    per-host sum. Tens of thousands at prod scale.
 #
-# The HOST/SCHEME/TLD expressions must stay in lock-step with the Python
-# reader (eyenet/stealer/query.py StealerCredsReader._{HOST,SCHEME,TLD}_EXPR)
+# The global per-host leaderboard (stats_rollup_host) was DROPPED: a
+# full-corpus GROUP BY host over millions of registrable domains OOMed the
+# 4 GiB per-query cap on backfill, and the "top hosts" number is vanity
+# (google/facebook/roblox for every corpus). See CH_ROLLUP_PLANES_REVISED
+# D1. _HOST_EXPR_DDL is retained: count_host/search still use it at read.
+#
+# The SCHEME/TLD expressions must stay in lock-step with the Python
+# reader (eyenet/stealer/query.py StealerCredsReader._{SCHEME,TLD}_EXPR)
 # so pre-rollup and post-rollup buckets agree. If you change one, change
 # the other AND bump _STATS_ROLLUP_STALE_SENTINEL to force rebuild.
 _CRED_FAMS_LITERAL = "('browser_passwords', 'windows_credentials', 'firefox_logins', 'combolist')"
@@ -772,16 +660,6 @@ _STATS_ROLLUP_TLD_MV = f"""
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
     GROUP BY tld
     """  # noqa: S608  # nosec B608
-_STATS_ROLLUP_HOST_MV = f"""
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_host_mv
-    TO {{db}}.stats_rollup_host AS
-    SELECT
-        {_HOST_EXPR_DDL} AS host,
-        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
-    WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
-    GROUP BY host
-    """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_TOTALS_BACKFILL = f"""
     INSERT INTO {{db}}.stats_rollup_totals
     SELECT
@@ -809,14 +687,6 @@ _STATS_ROLLUP_TLD_BACKFILL = f"""
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
       AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_tld)
     GROUP BY tld
-    """  # noqa: S608  # nosec B608
-_STATS_ROLLUP_HOST_BACKFILL = f"""
-    INSERT INTO {{db}}.stats_rollup_host
-    SELECT {_HOST_EXPR_DDL} AS host, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
-    WHERE {_STATS_WHERE} AND notEmpty({_HOST_EXPR_DDL})
-      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_host)
-    GROUP BY host
     """  # noqa: S608  # nosec B608
 
 _STATS_ROLLUP: tuple[str, ...] = (
@@ -855,23 +725,11 @@ _STATS_ROLLUP: tuple[str, ...] = (
     {{storage_policy_clause}}
     """,
     _STATS_ROLLUP_TLD_MV,
-    f"""
-    CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_host
-    (
-        host String,
-        cnt  AggregateFunction(uniqHLL12, {_IDENTITY_TUPLE_TYPE})
-    )
-    ENGINE = AggregatingMergeTree
-    ORDER BY host
-    {{storage_policy_clause}}
-    """,
-    _STATS_ROLLUP_HOST_MV,
     # One-shot backfill: NOT EXISTS gate so each only fires on the first
     # ensure_schema() call against an existing corpus.
     _STATS_ROLLUP_TOTALS_BACKFILL,
     _STATS_ROLLUP_SCHEME_BACKFILL,
     _STATS_ROLLUP_TLD_BACKFILL,
-    _STATS_ROLLUP_HOST_BACKFILL,
 )
 
 
@@ -1347,26 +1205,15 @@ class ClickHouseRecordsSink:
         self._repair_victim_profiles_if_stale(client)
         for stmt in _VICTIM_PROFILES:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.3.12.1 repair victim_counts_refresh if it still uses
-        # uniqExactMerge over columns that are now uniqHLL12 aggregates.
-        # Drops the refresh MV + target; the CREATE IF NOT EXISTS below
-        # rebuilds both, and the next 5-min refresh repopulates
-        # victim_counts from the rebuilt victim_profiles.
-        self._repair_mv_if_stale(
-            client,
-            mv_name="victim_counts_refresh",
-            target_name="victim_counts",
-            sentinel="uniqHLL12Merge(",
-        )
-        # v1.3.4.3 flat-counts sibling + refreshable MV. The experimental
-        # flag has to be enabled per-command because refreshable MVs are
-        # still gated in 24.8. Prod also carries it in the eyenet profile
-        # override so SYSTEM REFRESH VIEW works outside this session.
-        for stmt in _VICTIM_COUNTS:
-            client.command(
-                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
-                settings={"allow_experimental_refreshable_materialized_view": 1},
-            )
+        # v1.4: KILLED the REFRESH-EVERY victim_counts MV + its ReplacingMergeTree
+        # cache (the 5-min full rescan was the O(table) OOM shape). victim_counts
+        # is REPLACED IN PLACE by a same-named VIEW over victim_profiles
+        # (incremental AMT, kept) that finalizes at read -- readers keep working,
+        # always fresh, no rescan (CH_ROLLUP_PLANES_REVISED D2). Drop the old MV
+        # first, then the old table (so the name is free), then create the view.
+        client.command(f"DROP VIEW IF EXISTS {self._db}.victim_counts_refresh")
+        client.command(f"DROP TABLE IF EXISTS {self._db}.victim_counts")
+        client.command(_VICTIM_COUNTS_VIEW.format(db=self._db))
         # v1.3.3 per-victim domain index (detection engine primitive).
         for stmt in _VICTIM_DOMAINS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
@@ -1382,7 +1229,6 @@ class ClickHouseRecordsSink:
             "stats_rollup_totals_mv",
             "stats_rollup_scheme_mv",
             "stats_rollup_tld_mv",
-            "stats_rollup_host_mv",
             "extracted_rows_per_file_mv",
         ):
             self._repair_mv_if_stale(
@@ -1391,27 +1237,25 @@ class ClickHouseRecordsSink:
                 target_name=mv.removesuffix("_mv"),
                 sentinel=_STATS_ROLLUP_STALE_SENTINEL,
             )
-        # v1.3.1 /stats pre-aggregation rollups (4 MVs + one-shot backfill).
+        # v1.4: drop the vanity global per-host leaderboard. Its backfill
+        # (GROUP BY host over the full corpus) OOMed the 4 GiB cap and the
+        # number is vanity (CH_ROLLUP_PLANES_REVISED D1). Idempotent: a no-op
+        # once the objects are gone.
+        client.command(f"DROP VIEW IF EXISTS {self._db}.stats_rollup_host_mv")
+        client.command(f"DROP TABLE IF EXISTS {self._db}.stats_rollup_host")
+        # v1.3.1 /stats pre-aggregation rollups (3 MVs + one-shot backfill).
         for stmt in _STATS_ROLLUP:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
         # v1.3.1 parse-failures acceleration (1 MV + one-shot backfill).
         for stmt in _EXTRACTED_PATHS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.3.12.1 repair extracted_rows_per_file_counts_refresh if it still
-        # uses uniqExactMerge over a column that is now uniqHLL12.
-        self._repair_mv_if_stale(
-            client,
-            mv_name="extracted_rows_per_file_counts_refresh",
-            target_name="extracted_rows_per_file_counts",
-            sentinel="uniqHLL12Merge(",
-        )
-        # v1.3.5 flat-counts sibling + refreshable MV for extracted_rows_per_file.
-        # Must run AFTER extracted_rows_per_file itself is created (above).
-        for stmt in _EXTRACTED_ROWS_PER_FILE_COUNTS:
-            client.command(
-                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
-                settings={"allow_experimental_refreshable_materialized_view": 1},
-            )
+        # v1.4: KILLED the REFRESH-EVERY extracted_rows_per_file_counts MV + cache
+        # (O(table) rescan). REPLACED IN PLACE by a same-named VIEW over
+        # extracted_rows_per_file (incremental AMT, kept). Drop old MV + table,
+        # then create the view.
+        client.command(f"DROP VIEW IF EXISTS {self._db}.extracted_rows_per_file_counts_refresh")
+        client.command(f"DROP TABLE IF EXISTS {self._db}.extracted_rows_per_file_counts")
+        client.command(_EXTRACTED_ROWS_PER_FILE_COUNTS_VIEW.format(db=self._db))
         # v1.3.6 Domain View: materialised host columns + bloom index on
         # extracted_records, plus the by_domain_counts sibling. ALTERs are
         # idempotent; MATERIALIZE COLUMN on an existing populated corpus is
@@ -1435,24 +1279,45 @@ class ClickHouseRecordsSink:
         )
         for stmt in _BY_DOMAIN_COUNTS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.3.8 per-domain per-victim sibling (Domain View Victims tab).
-        # Depends on the _EXTRACTED_RECORDS_HOST_COLS block above for the
-        # host_registrable column; MV groups on it.
-        # v1.3.12.2 repair: still on the refreshable pattern until a
-        # follow-up conversion; sentinels catch both the pre-uniqHLL12
-        # state (countDistinctIf) and the lax spill threshold.
-        for sentinel in ("countDistinctIf(", "max_bytes_before_external_group_by = 1000000000"):
-            self._repair_mv_if_stale(
-                client,
-                mv_name="by_domain_victim_counts_refresh",
-                target_name="by_domain_victim_counts",
-                sentinel=sentinel,
+        self._backfill_by_domain_counts(client)
+        # v1.4: KILLED by_domain_victim_counts + its REFRESH-EVERY MV. This
+        # was the worst offender: a 5-min full rescan JOIN of extracted_records
+        # (268M) against victim_counts -> the firehose-scale OOM. The Domain-View
+        # Victims tab rewires to a live/incremental per-host query later
+        # (CH_ROLLUP_PLANES_REVISED D2). Idempotent drop.
+        client.command(f"DROP VIEW IF EXISTS {self._db}.by_domain_victim_counts_refresh")
+        client.command(f"DROP TABLE IF EXISTS {self._db}.by_domain_victim_counts")
+
+    def _backfill_by_domain_counts(self, client: Any) -> None:
+        """Size-gated one-shot backfill of by_domain_counts from an existing
+        corpus. No-op once the table holds data (on a fresh install / after a
+        from-zero rebuild the live MV covers every INSERT from byte zero, so
+        the gate stays closed and nothing is ever full-scanned).
+
+        If by_domain_counts is empty but the source corpus is large
+        (> _BACKFILL_MAX_HOSTS distinct registrable hosts), we SKIP: the
+        full-corpus GROUP BY would OOM the per-query cap. The operator
+        repopulates by running a corpus reindex, which re-inserts every archive
+        through the MV with bounded per-block memory."""
+        rows = client.query(
+            f"SELECT 1 FROM {self._db}.by_domain_counts LIMIT 1"  # noqa: S608  # nosec B608
+        ).result_rows
+        if rows:
+            return
+        host_rows = client.query(
+            f"SELECT uniqExact(host_registrable) FROM {self._db}.extracted_records "  # noqa: S608  # nosec B608
+            "WHERE host_registrable != ''"
+        ).result_rows
+        distinct_hosts = int(host_rows[0][0]) if host_rows else 0
+        if distinct_hosts > _BACKFILL_MAX_HOSTS:
+            _log.warning(
+                "stealer.by_domain_counts_backfill_skipped",
+                distinct_hosts=distinct_hosts,
+                max_hosts=_BACKFILL_MAX_HOSTS,
+                remedy="run a corpus reindex to populate incrementally via the MV",
             )
-        for stmt in _BY_DOMAIN_VICTIM_COUNTS:
-            client.command(
-                stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()),
-                settings={"allow_experimental_refreshable_materialized_view": 1},
-            )
+            return
+        client.command(_BY_DOMAIN_COUNTS_BACKFILL.format(db=self._db))
 
     def _repair_victim_profiles_if_stale(self, client: Any) -> None:
         """Drop the pre-1.3.1 victim_profiles table + MV iff the MV body

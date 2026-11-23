@@ -56,7 +56,6 @@ class StealerStats:
     distinct_hosts: int
     by_scheme: list[Bucket] = field(default_factory=list)
     by_tld: list[Bucket] = field(default_factory=list)  # ccTLD of the service host (country-ish)
-    top_hosts: list[Bucket] = field(default_factory=list)
 
 
 def _is_unknown_table(exc: BaseException) -> bool:
@@ -76,7 +75,7 @@ def _is_unknown_table(exc: BaseException) -> bool:
 class CredRow:
     host: str
     url: str
-    login: str
+    user: str  # the DSL 'user' extraction field (SQL selects fields['user'])
     password: str
     scheme: str
     tld: str
@@ -178,33 +177,25 @@ class StealerCredsReader:
                     "stealer.extracted_records table does not exist yet"
                 ) from exc
             raise
-        # v1.3.12.2 spill guard: stats_rollup_host carries 6.5M+ rows on
-        # prod and the GROUP BY + ORDER BY + LIMIT builds a hash table
-        # large enough to blow the per-query cap (3.73 GiB). Force an
-        # external group-by at 200 MiB so the box never OOMs on a tab
-        # refresh. Same guard on the sibling scheme/tld queries for
-        # consistency even though their row counts are small today.
-        _SPILL = " SETTINGS max_bytes_before_external_group_by = 200000000"
-        by_scheme, by_tld, top_hosts = await asyncio.gather(
+        # v1.3.13: the global per-host leaderboard (top_hosts / stats_rollup_host)
+        # was dropped -- vanity number, and its backfill OOMed the cap
+        # (CH_ROLLUP_PLANES_REVISED D1). Only scheme/tld remain; both are tiny
+        # (http/https +/android; hundreds of ccTLDs). The external-group-by
+        # spill guard is kept for consistency, cheap on these row counts.
+        spill = " SETTINGS max_bytes_before_external_group_by = 200000000"
+        by_scheme, by_tld = await asyncio.gather(
             self._buckets(
                 f"SELECT scheme, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_scheme "
                 "GROUP BY scheme ORDER BY c DESC"
-                + _SPILL,
+                + spill,
                 {},
             ),
             self._buckets(
                 f"SELECT tld, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_tld "
                 "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}"
-                + _SPILL,
-                top_param,
-            ),
-            self._buckets(
-                f"SELECT host, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
-                f"FROM {self._db}.stats_rollup_host "
-                "GROUP BY host ORDER BY c DESC LIMIT {top:UInt32}"
-                + _SPILL,
+                + spill,
                 top_param,
             ),
         )
@@ -214,7 +205,6 @@ class StealerCredsReader:
             distinct_hosts=int(scalars[2]),
             by_scheme=by_scheme,
             by_tld=by_tld,
-            top_hosts=top_hosts,
         )
 
     async def count_host(self, host: str) -> int:
@@ -279,7 +269,7 @@ class StealerCredsReader:
                 ) from exc
             raise
         return [
-            CredRow(host=r[0], url=r[1], login=r[2], password=r[3], scheme=r[4], tld=r[5])
+            CredRow(host=r[0], url=r[1], user=r[2], password=r[3], scheme=r[4], tld=r[5])
             for r in rows
         ]
 
@@ -739,7 +729,7 @@ class StealerArtifactsReader:
         params["offset"] = offset
 
         total_rows = await self._rows(
-            f"SELECT count() FROM {self._db}.victim_counts FINAL WHERE {where_sql}",  # nosec B608  # noqa: S608
+            f"SELECT count() FROM {self._db}.victim_counts WHERE {where_sql}",  # nosec B608  # noqa: S608
             params,
         )
         total = int(total_rows[0][0]) if total_rows else 0
@@ -749,7 +739,7 @@ class StealerArtifactsReader:
             "  archive_sha256, victim_folder, country, traffic_affid, build_version, "
             "  creds_count, cookies_count, wallet_vaults_count, "
             "  has_corporate_marker, has_wallet, has_crypter_banner "
-            f"FROM {self._db}.victim_counts FINAL "  # nosec B608
+            f"FROM {self._db}.victim_counts "  # nosec B608
             f"WHERE {where_sql} "
             "ORDER BY archive_sha256, victim_folder "
             "LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
@@ -785,7 +775,7 @@ class StealerArtifactsReader:
             "  localstorage_jwt_count, wallet_vaults_count, "
             "  has_corporate_marker, has_webmail_leak, has_wallet, has_crypter_banner, "
             "  webmail_identity, first_corporate_marker, first_wallet_family "
-            f"FROM {self._db}.victim_counts FINAL "  # nosec B608
+            f"FROM {self._db}.victim_counts "  # nosec B608
             "WHERE archive_sha256 = {sha:FixedString(64)} "
             "  AND victim_folder = {vf:String} "
             "LIMIT 1",
@@ -885,7 +875,7 @@ class StealerArtifactsReader:
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
             "  SELECT file_path, n "
-            f"  FROM {self._db}.extracted_rows_per_file_counts FINAL "  # nosec B608
+            f"  FROM {self._db}.extracted_rows_per_file_counts "  # nosec B608
             "  WHERE archive_sha256 = {sha:FixedString(64)}"
             ") AS erf ON erf.file_path = fa.rel_path "
             "WHERE fa.archive_sha256 = {sha:FixedString(64)} "
@@ -973,7 +963,7 @@ class StealerArtifactsReader:
             f"FROM {self._db}.file_audit AS fa "  # nosec B608
             "LEFT JOIN ("
             "  SELECT file_path, n "
-            f"  FROM {self._db}.extracted_rows_per_file_counts FINAL "  # nosec B608
+            f"  FROM {self._db}.extracted_rows_per_file_counts "  # nosec B608
             "  WHERE archive_sha256 = {sha:FixedString(64)}"
             ") AS erf ON erf.file_path = fa.rel_path "
             "WHERE fa.archive_sha256 = {sha:FixedString(64)} "

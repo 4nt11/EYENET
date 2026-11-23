@@ -30,7 +30,6 @@ class StealerStatsResponse(ApiSchema):
     distinct_hosts: int
     by_scheme: list[StealerBucket]
     by_tld: list[StealerBucket]  # ccTLD of the service host (country-ish signal)
-    top_hosts: list[StealerBucket]
 
 
 class StealerCred(ApiSchema):

@@ -47,7 +47,6 @@ async def stealer_stats(
             distinct_hosts=0,
             by_scheme=[],
             by_tld=[],
-            top_hosts=[],
         )
     except Exception as exc:  # CH unreachable / stealer profile down
         raise HTTPException(status_code=503, detail=f"stealer corpus unavailable: {exc}") from exc
@@ -57,5 +56,4 @@ async def stealer_stats(
         distinct_hosts=s.distinct_hosts,
         by_scheme=_buckets(s.by_scheme),
         by_tld=_buckets(s.by_tld),
-        top_hosts=_buckets(s.top_hosts),
     )

@@ -18,7 +18,6 @@
   const PANEL_ROWS = 12;
   const byTld = $derived(bars((statsCtx.stats?.by_tld ?? []).slice(0, PANEL_ROWS)));
   const byScheme = $derived(bars((statsCtx.stats?.by_scheme ?? []).slice(0, PANEL_ROWS)));
-  const topHosts = $derived(bars(statsCtx.stats?.top_hosts));
 
   let host = $state('');
   const runSearch = () => searchStealer(host);
@@ -106,12 +105,6 @@
         <h3>By scheme</h3>
         {#each byScheme as b}
           <div class="row"><span class="k">{b.key || '—'}</span><span class="track"><span class="fill alt" style="width:{b.pct}%"></span></span><span class="n">{fmt(b.count)}</span></div>
-        {/each}
-      </div>
-      <div class="chart wide">
-        <h3>Top targeted hosts</h3>
-        {#each topHosts as b}
-          <div class="row"><span class="k host">{b.key}</span><span class="track"><span class="fill" style="width:{b.pct}%"></span></span><span class="n">{fmt(b.count)}</span></div>
         {/each}
       </div>
     </section>
