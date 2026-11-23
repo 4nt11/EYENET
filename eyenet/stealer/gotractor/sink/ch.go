@@ -164,11 +164,23 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 	// path. Omitting the callbacks would re-surface the
 	// "connection reset by peer" window.
 	//
-	// async_insert_busy_timeout_ms (2000) + async_insert_max_data_size
-	// (10 MiB) let CH batch our 500-row AsyncInserts into merge-sized
+	// async_insert_busy_timeout_ms (10s) + async_insert_max_data_size
+	// (100 MiB) let CH batch our 500-row AsyncInserts into merge-sized
 	// blocks before writing parts. async_insert_use_adaptive_busy_timeout
 	// lets CH shorten the busy timeout when throughput is high, so
 	// steady-state we see sub-second end-to-end latency.
+	//
+	// wait_for_async_insert: FIRE-AND-FORGET (0) is the design (see the
+	// ArchiveBatch doc). v1.4 fix: this had regressed to 1, which makes each
+	// gotractor insert block until CH finishes the server-side flush. On the
+	// Wasabi-primary prod the flush fans out to ~16 materialized views, each
+	// writing parts to S3; a 100 MiB block's flush routinely exceeds the 120s
+	// wait and trips "Wait for async insert timeout" (code 159), failing every
+	// archive and wedging the reindex. The flush is S3-wait-bound, not CPU, so
+	// blocking the producer buys nothing. With 0, gotractor acks on receipt and
+	// CH drains to S3 in the background; per-archive extraction pauses let the
+	// server catch up. Env-overridable for the rare batch-durable run that
+	// wants to pay the wait. Durability note in the Send() doc still applies.
 	//
 	// max_query_size is bumped to 100 MB because a 500-row VALUES
 	// insert with a fat fields map (say 50 KB per row of key:value
@@ -179,7 +191,7 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 		clickhouse.WithProfileEvents(func([]clickhouse.ProfileEvent) {}),
 		clickhouse.WithSettings(clickhouse.Settings{
 			"async_insert":                           uint8(1),
-			"wait_for_async_insert":                  uint8(1),
+			"wait_for_async_insert":                  uint8(envU64("EYENET_CH_WAIT_FOR_ASYNC_INSERT", 0)),
 			"async_insert_busy_timeout_ms":           envU64("EYENET_CH_ASYNC_BUSY_TIMEOUT_MS", 10_000),
 			"async_insert_max_data_size":             envU64("EYENET_CH_ASYNC_MAX_DATA_SIZE", 104_857_600),
 			"async_insert_use_adaptive_busy_timeout": uint8(1),
