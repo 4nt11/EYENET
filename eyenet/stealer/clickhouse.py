@@ -567,6 +567,55 @@ _BY_DOMAIN_COUNTS_BACKFILL = """
     SETTINGS max_bytes_before_external_group_by = 200000000
     """
 
+# v1.4 per-domain per-victim sibling, REBUILT as an incremental AggregatingMergeTree.
+# Backs the Domain-View Victims/Autofills/Antiviruses/Samples tabs: the victim POOL
+# for a domain (distinct archive+victim at host_registrable) plus per-victim
+# domain-scoped cred/cookie counts. The predecessor was a REFRESH-EVERY MV that
+# full-rescanned extracted_records JOIN victim_counts every 5 min = the firehose-
+# scale OOM (code 241 at 3.73 GiB). Proven on the 2.3B poc: the incremental MV
+# stays ~1.54 GiB/block under the 4 GiB cap and reads ~1100x faster than a live
+# scan. Populates from the reindex (MV exists day 0, NO backfill). Enrichment
+# (country/build_version/loader_md5) is JOINed from victim_counts (the view over
+# victim_profiles) at READ time -- an incremental MV cannot carry that cross-row
+# join, and keeping it out means no reprocess when enrichment logic changes.
+# Keyed/grouped on the victim_folder COLUMN, which equals splitByChar('/',
+# file_path)[2] (verified) so it matches victim_counts for the read-time join.
+_BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS {db}.by_domain_victim_counts
+    (
+        host_registrable   String,
+        archive_sha256     FixedString(64),
+        victim_folder      String,
+        cred_count_state   AggregateFunction(uniqHLL12, Tuple(String, String, String)),
+        cookie_count_state AggregateFunction(uniqHLL12, Tuple(String, String)),
+        first_seen_at      SimpleAggregateFunction(min, DateTime),
+        last_seen_at       SimpleAggregateFunction(max, DateTime)
+    )
+    ENGINE = AggregatingMergeTree
+    ORDER BY (host_registrable, archive_sha256, victim_folder)
+    {storage_policy_clause}
+    """,
+    """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_victim_counts_mv
+    TO {db}.by_domain_victim_counts
+    AS SELECT
+        host_registrable,
+        archive_sha256,
+        victim_folder,
+        uniqHLL12StateIf((fields['url'], fields['user'], fields['password']),
+          family IN ('browser_passwords','windows_credentials',
+                     'firefox_logins','combolist')) AS cred_count_state,
+        uniqHLL12StateIf((fields['url'], fields['name']),
+          family IN ('cookies','victim_cookies')) AS cookie_count_state,
+        min(ingested_at) AS first_seen_at,
+        max(ingested_at) AS last_seen_at
+    FROM {db}.extracted_records
+    WHERE host_registrable != ''
+    GROUP BY host_registrable, archive_sha256, victim_folder
+    """,
+)
+
 # v1.3.1 stats-rollup and extracted_rows_per_file switchover.
 # v1.3.12.1 bump: uniqExact -> uniqHLL12 (~2.5 KB fixed state, ~2.5% error).
 # v1.3.12.2 bump: stats_rollup_totals_mv's unique_creds tuple was reading
@@ -1280,13 +1329,23 @@ class ClickHouseRecordsSink:
         for stmt in _BY_DOMAIN_COUNTS:
             client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
         self._backfill_by_domain_counts(client)
-        # v1.4: KILLED by_domain_victim_counts + its REFRESH-EVERY MV. This
-        # was the worst offender: a 5-min full rescan JOIN of extracted_records
-        # (268M) against victim_counts -> the firehose-scale OOM. The Domain-View
-        # Victims tab rewires to a live/incremental per-host query later
-        # (CH_ROLLUP_PLANES_REVISED D2). Idempotent drop.
-        client.command(f"DROP VIEW IF EXISTS {self._db}.by_domain_victim_counts_refresh")
-        client.command(f"DROP TABLE IF EXISTS {self._db}.by_domain_victim_counts")
+        # v1.4: by_domain_victim_counts REBUILT as an incremental AggregatingMergeTree
+        # (was a REFRESH-EVERY MV that full-rescanned extracted_records JOIN
+        # victim_counts = the firehose-scale OOM, code 241 at 3.73 GiB). Proven on
+        # the 2.3B poc: incremental MV ~1.54 GiB/block under the 4 GiB cap, ~1100x
+        # faster reads. Populates from the reindex (MV exists day 0, no backfill).
+        # One-shot repair: if the OLD refresh MV is present (sentinel REFRESH EVERY)
+        # drop it + the old ReplacingMergeTree table so the CREATE below rebuilds the
+        # new shape. Not a blind drop -- a plain DROP every boot would wipe the AMT
+        # on every restart; the sentinel fires only on the schema migration.
+        self._repair_mv_if_stale(
+            client,
+            mv_name="by_domain_victim_counts_refresh",
+            target_name="by_domain_victim_counts",
+            sentinel="REFRESH EVERY",
+        )
+        for stmt in _BY_DOMAIN_VICTIM_COUNTS:
+            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
 
     def _backfill_by_domain_counts(self, client: Any) -> None:
         """Size-gated one-shot backfill of by_domain_counts from an existing

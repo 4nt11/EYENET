@@ -386,10 +386,11 @@ class DomainCorpusReader:
                 # once. See the autofills() tab method for the corresponding
                 # paginated view. Both numbers describe the same slice.
                 "SELECT toUInt64(coalesce(sum(vc.autofills_count), 0)) "  # noqa: S608
-                f"FROM {self._db}.by_domain_victim_counts AS bvc FINAL "  # nosec B608
-                f"INNER JOIN {self._db}.victim_counts AS vc FINAL "
-                "  USING (archive_sha256, victim_folder) "
-                "WHERE bvc.host_registrable = {d:String}",
+                "FROM (SELECT DISTINCT archive_sha256, victim_folder "  # nosec B608
+                f"      FROM {self._db}.by_domain_victim_counts "
+                "       WHERE host_registrable = {d:String}) AS bvc "
+                f"INNER JOIN {self._db}.victim_counts AS vc "
+                "  USING (archive_sha256, victim_folder)",
                 parameters=params,
             )
             # live_cookie_count computed at read time: the AggregatingMergeTree
@@ -492,11 +493,13 @@ class DomainCorpusReader:
     ) -> tuple[list[VictimRow], int]:
         """Victims affected, ordered by first_seen_at DESC.
 
-        v1.3.8: reads the by_domain_victim_counts sibling (ReplacingMergeTree,
-        keyed on (host_registrable, archive, victim), ~730k rows on prod).
-        Measured: single-stage original 574ms warm; two-stage interim 149ms;
-        this one-stage sibling lookup 12-16ms warm, 679ms cold. Counts are up
-        to 5 minutes stale because the sibling refreshes on that cadence.
+        v1.4: reads the by_domain_victim_counts sibling, now an incremental
+        AggregatingMergeTree keyed on (host_registrable, archive, victim). The
+        cred/cookie counts are finalized at read (uniqHLL12Merge + GROUP BY over
+        the host_registrable primary-key range), and country/build_version/
+        loader_md5 come from a LEFT JOIN on victim_counts (the view over
+        victim_profiles). Always fresh (the MV fires per INSERT, no refresh
+        cadence), and it never OOMs the way the old REFRESH-EVERY sibling did.
 
         Per-victim cred_count / cookie_count are DOMAIN-SCOPED unique triples
         (one victim's unique google.com creds). The hero's credential_count
@@ -513,19 +516,34 @@ class DomainCorpusReader:
         }
         try:
             total = await client.query(
-                "SELECT count() "  # noqa: S608
-                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
+                "SELECT uniqExact((archive_sha256, victim_folder)) "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts "  # nosec B608
                 "WHERE host_registrable = {d:String}",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
+            # v1.4: finalize the incremental AMT (uniqHLL12Merge + GROUP BY over the
+            # host_registrable primary-key range) then LEFT JOIN victim_counts (the
+            # view over victim_profiles) for enrichment -- country/build/loader_md5
+            # are no longer stored on this rollup.
             rows = await client.query(
-                "SELECT archive_sha256, victim_folder, country, build_version, "  # noqa: S608
-                "       cred_count, cookie_count, first_seen_at, "
-                "       nullIf(loader_md5, '') AS md5 "
-                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
-                "WHERE host_registrable = {d:String} "
-                "ORDER BY first_seen_at DESC "
+                "SELECT v.archive_sha256, v.victim_folder, "  # noqa: S608
+                "       coalesce(vc.country, '') AS country, "
+                "       coalesce(vc.build_version, '') AS build_version, "
+                "       v.cred_count, v.cookie_count, v.first_seen_at, "
+                "       nullIf(coalesce(vc.payload_md5, ''), '') AS md5 "
+                "FROM ( "
+                "  SELECT archive_sha256, victim_folder, "
+                "         uniqHLL12Merge(cred_count_state) AS cred_count, "
+                "         uniqHLL12Merge(cookie_count_state) AS cookie_count, "
+                "         min(first_seen_at) AS first_seen_at "
+                f"  FROM {self._db}.by_domain_victim_counts "  # nosec B608
+                "  WHERE host_registrable = {d:String} "
+                "  GROUP BY archive_sha256, victim_folder "
+                ") AS v "
+                f"LEFT JOIN {self._db}.victim_counts AS vc "
+                "  USING (archive_sha256, victim_folder) "
+                "ORDER BY v.first_seen_at DESC "
                 "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
                 parameters=params,
             )
@@ -687,10 +705,11 @@ class DomainCorpusReader:
             # below still works on distinct (form_key, form_value) rows.
             total = await client.query(
                 "SELECT toUInt64(coalesce(sum(vc.autofills_count), 0)) "  # noqa: S608
-                f"FROM {self._db}.by_domain_victim_counts AS bvc FINAL "  # nosec B608
-                f"INNER JOIN {self._db}.victim_counts AS vc FINAL "
-                "  USING (archive_sha256, victim_folder) "
-                "WHERE bvc.host_registrable = {d:String}",
+                "FROM (SELECT DISTINCT archive_sha256, victim_folder "  # nosec B608
+                f"      FROM {self._db}.by_domain_victim_counts "
+                "       WHERE host_registrable = {d:String}) AS bvc "
+                f"INNER JOIN {self._db}.victim_counts AS vc "
+                "  USING (archive_sha256, victim_folder)",
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
@@ -756,15 +775,16 @@ class DomainCorpusReader:
                 # consistent countIf matching.
                 #
                 # Victim pool reads from by_domain_victim_counts
-                # (ReplacingMergeTree ORDER BY (host_registrable, archive,
-                # victim), the same sibling the Victims tab uses). WHERE on
-                # host_registrable is a primary-key range scan: measured ~90ms
-                # on prod for google.com. Also keeps the Antiviruses tab's
-                # pool semantics identical to the Victims tab (same table),
-                # so operator counts never diverge between the two surfaces.
+                # (v1.4 incremental AggregatingMergeTree ORDER BY
+                # (host_registrable, archive, victim), the same sibling the
+                # Victims tab uses). SELECT DISTINCT dedups any unmerged AMT
+                # parts. WHERE on host_registrable is a primary-key range scan.
+                # Keeps the Antiviruses tab's pool semantics identical to the
+                # Victims tab (same table), so operator counts never diverge
+                # between the two surfaces.
                 "WITH victim_pool AS ("  # noqa: S608 # nosec B608
-                "  SELECT archive_sha256, victim_folder "
-                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  SELECT DISTINCT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts "
                 "  WHERE host_registrable = {d:String}"
                 "), "
                 "victim_av AS ("
@@ -796,8 +816,8 @@ class DomainCorpusReader:
                 # Victim pool size via the same sibling table. Mirrors the
                 # Victims tab counter query so the two surfaces always
                 # agree on the "N victims for this domain" number.
-                "SELECT count() "  # noqa: S608
-                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
+                "SELECT uniqExact((archive_sha256, victim_folder)) "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts "  # nosec B608
                 "WHERE host_registrable = {d:String}",
                 parameters=params,
             )
@@ -847,8 +867,8 @@ class DomainCorpusReader:
         try:
             res = await client.query(
                 "WITH victim_pool AS ("  # noqa: S608 # nosec B608
-                "  SELECT archive_sha256, victim_folder "
-                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  SELECT DISTINCT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts "
                 "  WHERE host_registrable = {d:String}"
                 "), "
                 "victim_sample AS ("
@@ -900,8 +920,8 @@ class DomainCorpusReader:
                 parameters=params,
             )
             total_res = await client.query(
-                "SELECT count() "  # noqa: S608
-                f"FROM {self._db}.by_domain_victim_counts FINAL "  # nosec B608
+                "SELECT uniqExact((archive_sha256, victim_folder)) "  # noqa: S608
+                f"FROM {self._db}.by_domain_victim_counts "  # nosec B608
                 "WHERE host_registrable = {d:String}",
                 parameters=params,
             )
@@ -945,8 +965,8 @@ class DomainCorpusReader:
         try:
             paths_res = await client.query(
                 "WITH victim_pool AS ("  # noqa: S608
-                "  SELECT archive_sha256, victim_folder "
-                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  SELECT DISTINCT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts "
                 "  WHERE host_registrable = {d:String}"
                 ") "
                 "SELECT er.fields['ui_payload_path'] AS p, "
@@ -963,8 +983,8 @@ class DomainCorpusReader:
             )
             av_res = await client.query(
                 "WITH victim_pool AS ("  # noqa: S608 # nosec B608
-                "  SELECT archive_sha256, victim_folder "
-                f"  FROM {self._db}.by_domain_victim_counts FINAL "
+                "  SELECT DISTINCT archive_sha256, victim_folder "
+                f"  FROM {self._db}.by_domain_victim_counts "
                 "  WHERE host_registrable = {d:String}"
                 "), vs AS ("
                 "  SELECT er.archive_sha256, er.victim_folder, "
