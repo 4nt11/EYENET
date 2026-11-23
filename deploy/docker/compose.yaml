@@ -332,7 +332,7 @@ services:
   # off by default:  docker compose --profile stealer up -d clickhouse stealer-processor
   clickhouse:
     profiles: ["stealer"]
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:26.10
     restart: unless-stopped
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
