@@ -37,6 +37,7 @@ import (
 
 	"eyenet.io/stealer/gotractor/daemon"
 	"eyenet.io/stealer/gotractor/engine"
+	"eyenet.io/stealer/gotractor/sink"
 	"eyenet.io/stealer/gotractor/wallets"
 )
 
@@ -75,8 +76,13 @@ func main() {
 	chDSN := flag.String(
 		"ch-dsn",
 		envOr("EYENET_GOTRACTOR_CH_DSN", ""),
-		"ClickHouse DSN (clickhouse-go URL form). Daemon only. Empty = legacy stdout-record mode.",
+		"ClickHouse DSN (clickhouse-go URL form). Daemon + extract-wallets. Empty = legacy stdout mode.",
 	)
+	// extract-wallets direct-to-CH identity. The one-shot wallet binary now
+	// writes vault records into extracted_records itself (no Python in the
+	// data plane); these two carry the archive identity the sink columns need.
+	archiveSha := flag.String("archive-sha256", "", "extract-wallets: archive_sha256 for direct CH insert")
+	sourceLabel := flag.String("source", "", "extract-wallets: source label for direct CH insert")
 	flag.Parse()
 
 	if *showVersion {
@@ -89,6 +95,17 @@ func main() {
 	if *mode == "extract-wallets" {
 		if *input == "" {
 			log.Fatal("--input is required for extract-wallets mode")
+		}
+		// Direct-to-CH when a DSN is present (prod): gotractor writes vault
+		// records into extracted_records itself, keeping Python out of the
+		// data plane. Falls back to legacy stdout JSON only when no DSN is
+		// set (dev / inspection runs).
+		if *chDSN != "" {
+			ctx := context.Background()
+			if err := runExtractWalletsToCH(ctx, *chDSN, *input, *archiveSha, *sourceLabel, os.Stdout); err != nil {
+				log.Fatalf("extract-wallets: %v", err)
+			}
+			return
 		}
 		if err := runExtractWallets(*input, os.Stdout); err != nil {
 			log.Fatalf("extract-wallets: %v", err)
@@ -302,6 +319,92 @@ func envOr(k, def string) string {
 //
 // Errors per directory go to stderr but do not abort the walk; a
 // stealer dump often has half-grabbed extension directories.
+// runExtractWalletsToCH is the direct-to-ClickHouse wallet path (prod). It
+// extracts the same vault records as runExtractWallets but inserts them into
+// extracted_records via the shared sink instead of printing JSON for Python to
+// parse and insert. Only a one-line {"vaults_inserted": N} summary goes to w so
+// the pipeline can log the count -- a metadata integer, never record data.
+//
+// archive_type: wallet vaults only exist inside stealer dumps (leveldb dirs
+// under victim folders), so every record classifies stealer_victim; we derive
+// it structurally from the record paths anyway to stay in lock-step with the
+// daemon's per-archive tag rather than asserting a constant.
+func runExtractWalletsToCH(
+	ctx context.Context, dsn, root, archiveSha, source string, w *os.File,
+) error {
+	hits, err := wallets.FindWalletDirs(root)
+	if err != nil {
+		return err
+	}
+	// Collect records first so archive_type is computed once per archive from
+	// the full path set (mirrors daemon.ClassifyArchiveType). Wallet runs are
+	// tiny (a handful of vaults), so buffering is cheap.
+	type vaultRow struct {
+		filePath, family, shape string
+		fields                  map[string]string
+	}
+	var rows []vaultRow
+	okCount, errCount := 0, 0
+	for _, h := range hits {
+		recs, xerr := wallets.ExtractVaults(h.Path, h.Extension, h.Kind)
+		if xerr != nil {
+			fmt.Fprintf(os.Stderr, "extract %s (%s): %v\n", h.Path, h.Extension.Name, xerr)
+			errCount++
+			continue
+		}
+		okCount++
+		for _, r := range recs {
+			rows = append(rows, vaultRow{
+				filePath: r.SourceDir,
+				family:   r.WalletFamily,
+				shape:    r.Shape,
+				fields: map[string]string{
+					"wallet_name":       r.WalletName,
+					"extension_id":      r.ExtensionID,
+					"extension_storage": string(h.Kind),
+					"vault_key":         r.VaultKey,
+					"vault_shape":       r.Shape,
+					"vault_payload":     string(r.Payload),
+				},
+			})
+		}
+	}
+	paths := make([]string, 0, len(rows))
+	for _, r := range rows {
+		paths = append(paths, r.filePath)
+	}
+	archiveType := daemon.ClassifyArchiveType(paths)
+
+	ch, err := sink.Open(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("open ch sink: %w", err)
+	}
+	defer func() { _ = ch.Close() }()
+	batch, err := ch.BeginArchive(ctx)
+	if err != nil {
+		return fmt.Errorf("begin ch batch: %w", err)
+	}
+	inserted := 0
+	for _, r := range rows {
+		ruleID := "wallet_vault_leveldb:" + r.family + ":" + r.shape
+		if aerr := batch.Append(
+			archiveSha, source, archiveType, daemon.ExtractVictimFolder(r.filePath),
+			r.filePath, ruleID, r.family, r.fields,
+		); aerr != nil {
+			_ = batch.Abort()
+			return fmt.Errorf("append vault: %w", aerr)
+		}
+		inserted++
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send ch batch: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "extract-wallets: %d wallet dirs found, %d opened ok, %d errored, %d vaults inserted\n",
+		len(hits), okCount, errCount, inserted)
+	enc := json.NewEncoder(w)
+	return enc.Encode(map[string]int{"vaults_inserted": inserted})
+}
+
 func runExtractWallets(root string, w *os.File) error {
 	hits, err := wallets.FindWalletDirs(root)
 	if err != nil {

@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS {db}.extracted_records
 (
     archive_sha256  FixedString(64),
     source          LowCardinality(String),
+    archive_type    LowCardinality(String) DEFAULT '',
     victim_folder   String,
     file_path       String,
     rule_id         LowCardinality(String),
@@ -112,7 +113,8 @@ CREATE TABLE IF NOT EXISTS {db}.extracted_records
     fields          Map(String, String),
     ingested_at     DateTime DEFAULT now(),
     INDEX idx_family family TYPE set(0) GRANULARITY 1,
-    INDEX idx_rule_id rule_id TYPE set(0) GRANULARITY 1
+    INDEX idx_rule_id rule_id TYPE set(0) GRANULARITY 1,
+    INDEX idx_archive_type archive_type TYPE set(0) GRANULARITY 1
 )
 ENGINE = ReplacingMergeTree(ingested_at)
 ORDER BY (archive_sha256, rule_id, file_path, cityHash64(toString(fields)))
@@ -123,12 +125,25 @@ ORDER BY (archive_sha256, rule_id, file_path, cityHash64(toString(fields)))
 _RECORDS_COLUMNS = [
     "archive_sha256",
     "source",
+    "archive_type",
     "victim_folder",
     "file_path",
     "rule_id",
     "family",
     "fields",
 ]
+
+# Plane tag for existing deployments (the fresh CREATE above carries it; a
+# populated extracted_records needs the ALTER). Written by gotractor per
+# archive: stealer_victim | flat_credlist (see classifyArchiveType in
+# daemon.go). Idempotent; a no-op after the first boot. Old rows default to
+# '' until the reindex restamps them, so readers treat '' as "unknown plane",
+# not stealer_victim. See development/CH_ROLLUP_PLANES_REVISED.md.
+_EXTRACTED_RECORDS_ARCHIVE_TYPE_COL = """
+ALTER TABLE {db}.extracted_records
+  ADD COLUMN IF NOT EXISTS archive_type LowCardinality(String) DEFAULT '' AFTER source,
+  ADD INDEX IF NOT EXISTS idx_archive_type archive_type TYPE set(0) GRANULARITY 1
+"""
 
 
 # v1.3.1 reindex-idempotent counter semantics. The ClickHouse MV contract is
@@ -1321,6 +1336,10 @@ class ClickHouseRecordsSink:
                 storage_policy_clause=_storage_policy_clause(),
             )
         )
+        # Plane tag column for existing deployments. Idempotent ADD COLUMN /
+        # ADD INDEX IF NOT EXISTS; fresh installs already have it from the
+        # CREATE above.
+        client.command(_EXTRACTED_RECORDS_ARCHIVE_TYPE_COL.format(db=self._db))
         # v1.3.3 per-victim profile roll-up (table + MV + idempotent backfill).
         # v1.3.1 one-shot repair: drop + rebuild if the old rule_id-based MV
         # is detected, then let the CREATE IF NOT EXISTS below re-make it
@@ -1456,7 +1475,11 @@ class ClickHouseRecordsSink:
         """Instance wrapper -- delegates to the module-level helper so
         FileAuditSink can call the same code without inheriting."""
         _repair_mv_if_stale(
-            client, db=self._db, mv_name=mv_name, target_name=target_name, sentinel=sentinel,
+            client,
+            db=self._db,
+            mv_name=mv_name,
+            target_name=target_name,
+            sentinel=sentinel,
         )
 
     def insert_rows(self, rows: Iterable[list[Any]]) -> int:

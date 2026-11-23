@@ -393,6 +393,10 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 	if err != nil {
 		return err
 	}
+	// Plane tag: computed ONCE per archive from its uncompressed structure,
+	// stamped on every row. Readers split the victim plane from the credlist
+	// firehose on this instead of guessing from path depth at query time.
+	archiveType := ClassifyArchiveType(paths)
 	snap := d.catalog.Load()
 	rules := snap.Rules
 
@@ -441,6 +445,14 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 	// slice. Per-rule emitted counts are tracked here (previously derived
 	// from len(h.Records)).
 	emittedByRule := make(map[string]int)
+	// emittedByRule is CUMULATIVE across every hit of a rule in this archive.
+	// onHit needs the per-hit emit count (TotalSeen is per-hit), so snapshot the
+	// cumulative value at each hit and use the delta. Without this, a later
+	// truncated hit computed `TotalSeen - cumulative_emitted` < 0 and the
+	// recordsRejected counter's .Add(negative) PANICKED ("counter cannot
+	// decrease in value"), aborting the file and truncating large multi-chunk
+	// archives to a handful of victims. See the per-hit delta in onHit below.
+	emittedAtLastHit := make(map[string]int)
 
 	onRecord := func(rule engine.Rule, filePath string, rec map[string]any) error {
 		if sinkOn {
@@ -451,7 +463,8 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 			if aerr := batch.Append(
 				cmd.ArchiveSha256,
 				cmd.SourceLabel,
-				extractVictimFolder(filePath),
+				archiveType,
+				ExtractVictimFolder(filePath),
 				filePath,
 				rule.ID,
 				rule.Family,
@@ -514,18 +527,29 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 			d.metrics.recordsRejected.WithLabelValues(h.Rule.ID).Inc()
 			return nil
 		}
+		// Per-hit emitted = cumulative-now minus cumulative-at-previous-hit.
+		// TotalSeen is per-hit, so rejected pairs per-hit counts. Guard against
+		// a negative (defensive: counters must never decrease; a bad accounting
+		// edge must degrade to 0, not panic the whole archive).
+		emittedThisHit := emittedByRule[h.Rule.ID] - emittedAtLastHit[h.Rule.ID]
 		if h.Truncated {
-			rejected := h.TotalSeen - emittedByRule[h.Rule.ID]
+			rejected := h.TotalSeen - emittedThisHit
+			if rejected < 0 {
+				rejected = 0
+			}
 			d.metrics.recordsRejected.WithLabelValues(h.Rule.ID).Add(float64(rejected))
 			w.emit(map[string]any{
 				"kind":       "truncated",
 				"req_id":     cmd.ReqID,
 				"rule_id":    h.Rule.ID,
 				"file_path":  h.FilePath,
-				"emitted":    emittedByRule[h.Rule.ID],
+				"emitted":    emittedThisHit,
 				"total_seen": h.TotalSeen,
 			})
 		}
+		// Snapshot after every hit (truncated or not) so the next hit's delta is
+		// measured from here.
+		emittedAtLastHit[h.Rule.ID] = emittedByRule[h.Rule.ID]
 		return nil
 	}
 
@@ -821,12 +845,43 @@ func readFolder(path string) (engine.VictimFolder, error) {
 	return engine.VictimFolder{RootName: filepath.Base(root), Files: files}, nil
 }
 
-// extractVictimFolder returns the per-victim path segment from a Khazan-
+// Archive plane tags. stealer_victim = a stealer dump whose files live under
+// per-victim folders (victim/content/file). flat_credlist = a loose credential
+// list (ULP / combolist): plain text files with no victim-folder nesting.
+const (
+	archiveTypeStealerVictim = "stealer_victim"
+	archiveTypeFlatCredlist  = "flat_credlist"
+)
+
+// ClassifyArchiveType decides an archive's PLANE from its uncompressed
+// structure, per the two-plane model (see development/CH_ROLLUP_PLANES_REVISED.md).
+// Rule: any file nested >=2 directories deep (victim/content/file) means
+// per-victim folders exist -> stealer_victim; otherwise the content is flat
+// text -> flat_credlist. Measured 2026-11-22: prod's 259.8M-row combolist
+// firehose is uniformly depth 1, real Khazan stealer archives are depth 2-13.
+// The pipeline's own `ulp/` passthrough wrapper (pipeline.py _extract) adds
+// exactly ONE level, so a loose ULP drop lands at `ulp/<sha>.txt` = depth 1 and
+// stays flat_credlist; a RAR full of flat cred files also extracts shallow and
+// reads flat_credlist, which is correct (archived != victim).
+// ponytail: per-archive, structure-only. A stealer archive whose victims hold
+// files DIRECTLY (no content subfolder) AND carries no own root folder would
+// read depth 1 and mislabel -- not seen in current data (Khazan is always 2+).
+// Go per-record on file_path depth if such a layout ever appears.
+func ClassifyArchiveType(paths []string) string {
+	for _, p := range paths {
+		if strings.Count(p, "/") >= 2 {
+			return archiveTypeStealerVictim
+		}
+	}
+	return archiveTypeFlatCredlist
+}
+
+// ExtractVictimFolder returns the per-victim path segment from a Khazan-
 // style archive path. Mirrors Python's _victim_folder_from_path in
 // eyenet/stealer/pipeline.py (segment [1] in 0-indexed split, i.e.
 // the segment AFTER the archive wrapper). Empty when the file sits at
 // archive root (victim_profiles MV filters those out).
-func extractVictimFolder(filePath string) string {
+func ExtractVictimFolder(filePath string) string {
 	// Split on '/', take segments[1]. A file at wrapper root ("foo.txt")
 	// has only one segment -> empty victim. A victim file
 	// ("TG @Khazan.../victim-id/Browsers/cookies.txt") has segments[1]

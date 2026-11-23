@@ -57,24 +57,6 @@ class ProcessResult:
     gotractor_families: list[str] = field(default_factory=list)
 
 
-_VICTIM_FOLDER_SEGMENT_IDX = 1
-
-
-def _victim_folder_from_path(file_path: str) -> str:
-    """Return the per-victim folder from a Khazan-style archive path.
-
-    Archives nest as ``<channel_wrapper>/<victim>/<content>``, so the
-    victim folder is path segment index 1. Matches the ClickHouse MV's
-    ``splitByChar('/', file_path)[2]`` (1-indexed) in
-    ``_VICTIM_PROFILES``. Returns "" when the file is at the archive
-    root; victim_profiles MV filters those out.
-    """
-    segments = file_path.split("/", 2)
-    if len(segments) <= _VICTIM_FOLDER_SEGMENT_IDX:
-        return ""
-    return segments[_VICTIM_FOLDER_SEGMENT_IDX]
-
-
 def _any_nonempty_file(root: Path) -> bool:
     """True if any extracted file has content. The success signal for a password:
     a WRONG password on an encrypted archive still writes the (unencrypted) names as
@@ -91,9 +73,16 @@ def _any_nonempty_file(root: Path) -> bool:
 #
 # Extensions kept tight to what gotractor's content rules target. Expand
 # only when a new text family lands.
-_TEXT_NORMALIZE_EXTS: frozenset[str] = frozenset((
-    ".txt", ".csv", ".tsv", ".log", ".ulp", ".list",
-))
+_TEXT_NORMALIZE_EXTS: frozenset[str] = frozenset(
+    (
+        ".txt",
+        ".csv",
+        ".tsv",
+        ".log",
+        ".ulp",
+        ".list",
+    )
+)
 
 
 def _detect_text_bom(blob_path: Path) -> str | None:
@@ -141,17 +130,19 @@ def _normalize_text_tree(root: Path) -> dict[str, int]:
             if bom in {"utf-16le", "utf-16be"}:
                 tmp = path.with_suffix(path.suffix + ".utf8.tmp")
                 with tmp.open("wb") as out:
-                    subprocess.run(  # noqa: S603
-                        ["iconv", "-f", bom.upper().replace("-", ""), "-t", "UTF-8", str(path)],
-                        stdout=out, check=True,
+                    subprocess.run(  # noqa: S603  # nosec
+                        ["iconv", "-f", bom.upper().replace("-", ""), "-t", "UTF-8", str(path)],  # noqa: S607
+                        stdout=out,
+                        check=True,
                     )
                 tmp.replace(path)
                 utf16 += 1
             # sed strips trailing \r on every line in-place. Safe no-op on
             # pure LF files; triggers once if CRLF is present anywhere.
-            res = subprocess.run(  # noqa: S603
-                ["sed", "-i", "s/\\r$//", str(path)],
-                check=False, capture_output=True,
+            res = subprocess.run(  # noqa: S603  # nosec
+                ["sed", "-i", "s/\\r$//", str(path)],  # noqa: S607
+                check=False,
+                capture_output=True,
             )
             if res.returncode != 0:
                 errors += 1
@@ -161,23 +152,33 @@ def _normalize_text_tree(root: Path) -> dict[str, int]:
             errors += 1
             _log.warning(
                 "stealer.text_normalize_failed",
-                path=str(path), error=str(exc), error_type=type(exc).__name__,
+                path=str(path),
+                error=str(exc),
+                error_type=type(exc).__name__,
             )
     return {"scanned": scanned, "utf16": utf16, "crlf": crlf, "errors": errors}
 
 
 _ARCHIVE_MAGICS: tuple[bytes, ...] = (
-    b"Rar!\x1a\x07",      # RAR 1.5 - 4
+    b"Rar!\x1a\x07",  # RAR 1.5 - 4
     b"Rar!\x1a\x07\x01",  # RAR 5
-    b"PK\x03\x04",        # ZIP / docx / jar
-    b"PK\x05\x06",        # ZIP (empty)
-    b"PK\x07\x08",        # ZIP (spanned)
+    b"PK\x03\x04",  # ZIP / docx / jar
+    b"PK\x05\x06",  # ZIP (empty)
+    b"PK\x07\x08",  # ZIP (spanned)
     b"7z\xbc\xaf\x27\x1c",  # 7z
-    b"\x1f\x8b",          # gzip / tar.gz
-    b"\xfd7zXZ\x00",      # xz
-    b"BZh",               # bzip2
-    b"ustar",             # tar POSIX (offset 257, but prefix check is fine as fallback)
+    b"\x1f\x8b",  # gzip / tar.gz
+    b"\xfd7zXZ\x00",  # xz
+    b"BZh",  # bzip2
+    b"ustar",  # tar POSIX (offset 257, but prefix check is fine as fallback)
 )
+
+
+# Byte classes for the plain-text heuristic below. Tab/LF/CR count as
+# printable whitespace; 0x20..0x7E is printable ASCII.
+_WHITESPACE_BYTES = (0x09, 0x0A, 0x0D)
+_ASCII_PRINTABLE_LO = 0x20
+_ASCII_PRINTABLE_HI = 0x7E
+_PLAINTEXT_MIN_PRINTABLE_RATIO = 0.95
 
 
 def _is_plain_text_blob(blob_path: Path) -> bool:
@@ -196,8 +197,10 @@ def _is_plain_text_blob(blob_path: Path) -> bool:
     for magic in _ARCHIVE_MAGICS:
         if head.startswith(magic):
             return False
-    printable = sum(1 for b in head if b in (0x09, 0x0A, 0x0D) or 0x20 <= b <= 0x7E)
-    return printable / len(head) >= 0.95
+    printable = sum(
+        1 for b in head if b in _WHITESPACE_BYTES or _ASCII_PRINTABLE_LO <= b <= _ASCII_PRINTABLE_HI
+    )
+    return printable / len(head) >= _PLAINTEXT_MIN_PRINTABLE_RATIO
 
 
 def _pick_tool(blob_path: Path) -> str:
@@ -394,7 +397,6 @@ def process_archive(
         if records_sink is not None:
             try:
                 wallet_recs = _gotractor_extract_wallets(
-                    records_sink,
                     dest,
                     blob_path,
                     source_label,
@@ -522,26 +524,50 @@ def _gotractor_insert_daemon(
 
 
 def _gotractor_extract_wallets(
-    sink: ClickHouseRecordsSink,
     dest: Path,
     blob_path: Path,
     source_label: str,
 ) -> int:
-    """Run ``gotractor --mode extract-wallets --input <dest>``, parse the
-    one-record-per-line JSON output, and insert into the same
-    ``stealer.extracted_records`` table as DSL records.
+    """Run ``gotractor --mode extract-wallets`` and let IT insert the vault
+    records into ``stealer.extracted_records`` directly via ClickHouse.
+
+    v1.4.x: Python is OUT of the wallet data plane. This used to parse the
+    binary's JSON stdout and insert the rows itself -- the exact
+    Go-data-through-Python antipattern deleted for DSL records in v1.3.4.1, just
+    never removed for this one-shot wallet sub-mode. gotractor now writes vault
+    records through the same sink the resident daemon uses; this function only
+    launches it (passing the archive identity the sink columns need) and reads
+    back a one-line ``{"vaults_inserted": N}`` metadata summary -- an integer,
+    never record data.
+
+    Direct insert needs EYENET_GOTRACTOR_CH_DSN in the environment (the same DSN
+    the daemon writes records with); the subprocess inherits it. Without it the
+    binary would fall back to legacy stdout JSON and persist nothing, so we
+    check first and log loudly instead of dropping wallets silently.
 
     Returns the number of vault records inserted.
-
-    Not routed through the resident daemon because wallet extraction
-    is a read-only, short-lived binary scan: no catalog, no watchers,
-    no reload loop. A one-shot subprocess per archive is cleaner than
-    extending the daemon protocol for a one-off mode.
     """
     archive_sha = blob_path.stem
+    if not os.environ.get("EYENET_GOTRACTOR_CH_DSN", "").strip():
+        _log.error(
+            "stealer.wallet_extract_no_dsn",
+            archive=archive_sha,
+            hint="EYENET_GOTRACTOR_CH_DSN unset; wallet vaults NOT persisted",
+        )
+        return 0
     try:
         proc = subprocess.run(  # noqa: S603  # nosec B603
-            [gotractor_path(), "--mode", "extract-wallets", "--input", str(dest)],
+            [
+                gotractor_path(),
+                "--mode",
+                "extract-wallets",
+                "--input",
+                str(dest),
+                "--archive-sha256",
+                archive_sha,
+                "--source",
+                source_label,
+            ],
             capture_output=True,
             check=False,
             text=True,
@@ -558,7 +584,8 @@ def _gotractor_extract_wallets(
             stderr=proc.stderr[:400],
         )
         return 0
-    batch: list[list[object]] = []
+    # Go emits exactly one {"vaults_inserted": N} metadata line on stdout.
+    inserted = 0
     for raw_line in proc.stdout.splitlines():
         line = raw_line.strip()
         if not line:
@@ -567,28 +594,16 @@ def _gotractor_extract_wallets(
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # Derive per-victim folder from file_path segment [1] as in the
-        # DSL records path above. Wallet extractor uses the LevelDB dir
-        # as file_path which already carries the full path under the
-        # archive root, so the same split produces the right victim.
-        file_path = msg.get("file_path", "")
-        victim_folder = _victim_folder_from_path(file_path)
-        batch.append(
-            [
-                archive_sha,
-                source_label,
-                victim_folder,
-                file_path,
-                msg.get("rule_id", ""),
-                msg.get("family", ""),
-                {k: str(v) for k, v in (msg.get("fields") or {}).items()},
-            ]
-        )
-    total = sink.insert_rows(batch) if batch else 0
+        if isinstance(msg, dict) and "vaults_inserted" in msg:
+            inserted = int(msg["vaults_inserted"])
+            break
     _log.info(
-        "stealer.wallet_extract_run", archive=archive_sha, records=total, stderr=proc.stderr[:200]
+        "stealer.wallet_extract_run",
+        archive=archive_sha,
+        records=inserted,
+        stderr=proc.stderr[:200],
     )
-    return total
+    return inserted
 
 
 def _write_file_audit(

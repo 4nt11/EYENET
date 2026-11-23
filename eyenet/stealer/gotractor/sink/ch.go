@@ -38,13 +38,14 @@ func envU64(k string, def uint64) uint64 {
 //
 //	archive_sha256 FixedString(64)
 //	source         LowCardinality(String)
+//	archive_type   LowCardinality(String)  -- plane tag: stealer_victim | flat_credlist
 //	victim_folder  String
 //	file_path      String
 //	rule_id        LowCardinality(String)
 //	family         LowCardinality(String)
 //	fields         Map(String, String)
 var RecordColumns = []string{
-	"archive_sha256", "source", "victim_folder",
+	"archive_sha256", "source", "archive_type", "victim_folder",
 	"file_path", "rule_id", "family", "fields",
 }
 
@@ -129,8 +130,8 @@ const asyncFlushRowsPer = 500
 // calls Flush / Send / Abort. Kept as a flat struct (not map) to
 // avoid per-row allocation churn on the hot path.
 type rowData struct {
-	archiveSha256, source, victimFolder, filePath, ruleID, family string
-	fields                                                        map[string]string
+	archiveSha256, source, archiveType, victimFolder, filePath, ruleID, family string
+	fields                                                                     map[string]string
 }
 
 // ArchiveBatch is one archive's INSERT-in-progress. v1.3.11.2 switched
@@ -201,6 +202,7 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 //
 //	archiveSha256 string (hex, 64 chars)
 //	source        string
+//	archiveType   string (stealer_victim | flat_credlist)
 //	victimFolder  string
 //	filePath      string
 //	ruleID        string
@@ -211,12 +213,12 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 // rejects the batch (schema mismatch, auth, offline). Transient
 // network errors surface at the next Flush / Send.
 func (ab *ArchiveBatch) Append(
-	archiveSha256, source, victimFolder, filePath, ruleID, family string,
+	archiveSha256, source, archiveType, victimFolder, filePath, ruleID, family string,
 	fields map[string]string,
 ) error {
 	ab.buffer = append(ab.buffer, rowData{
-		archiveSha256: archiveSha256, source: source, victimFolder: victimFolder,
-		filePath: filePath, ruleID: ruleID, family: family, fields: fields,
+		archiveSha256: archiveSha256, source: source, archiveType: archiveType,
+		victimFolder: victimFolder, filePath: filePath, ruleID: ruleID, family: family, fields: fields,
 	})
 	ab.count++
 	if len(ab.buffer) >= asyncFlushRowsPer {
@@ -260,7 +262,7 @@ func (ab *ArchiveBatch) Flush() error {
 		args := make([]any, 0, len(slice)*len(RecordColumns))
 		for _, row := range slice {
 			args = append(args,
-				row.archiveSha256, row.source, row.victimFolder,
+				row.archiveSha256, row.source, row.archiveType, row.victimFolder,
 				row.filePath, row.ruleID, row.family, row.fields,
 			)
 		}
