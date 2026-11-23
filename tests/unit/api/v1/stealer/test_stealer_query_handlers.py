@@ -50,14 +50,15 @@ async def test_stats_maps_reader_output(monkeypatch: pytest.MonkeyPatch) -> None
         distinct_hosts=9001,
         by_scheme=[Bucket("https", 59939), Bucket("android", 8646)],
         by_tld=[Bucket("com", 40000), Bucket("ru", 1200)],
-        top_hosts=[Bucket("accounts.google.com", 2744)],
     )
     monkeypatch.setattr(stats_mod._reader, "stats", _coro(fake))
     resp = await stats_mod.stealer_stats(_user())
     assert resp.total_creds == 110001
     assert resp.unique_creds == 53341
     assert [b.key for b in resp.by_scheme] == ["https", "android"]
-    assert resp.top_hosts[0].count == 2744
+    # v1.4: top_hosts (the vanity global leaderboard) was removed from the response.
+    assert [b.key for b in resp.by_tld] == ["com", "ru"]
+    assert not hasattr(resp, "top_hosts")
 
 
 async def test_stats_503_when_corpus_down(monkeypatch: pytest.MonkeyPatch) -> None:
