@@ -217,4 +217,11 @@ def match_glob(glob: str, path: str) -> bool:
     pattern = pattern.replace("*", "[^/]*")
     pattern = pattern.replace("?", "[^/]")
     pattern = pattern.replace("\x00GLOBSTAR\x00", ".*")
-    return re2.match("^" + pattern + "$", path) is not None
+    # A glob with no '/' is a FILENAME pattern -> match at ANY depth (root or
+    # nested), the true gitignore semantic. Without this, "pc_info.json" anchors
+    # to ^pc_info\.json$ and only matches a root-level file, silently dropping
+    # nested copies. Globs with a '/' stay path-anchored; use '**' for any-depth.
+    anchored = "^" + pattern + "$"
+    if "/" not in glob:
+        anchored = "^(?:.*/)?" + pattern + "$"
+    return re2.match(anchored, path) is not None

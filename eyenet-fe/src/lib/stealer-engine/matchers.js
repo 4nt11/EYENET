@@ -147,12 +147,17 @@ function lowerLegacyFolder(m) {
 // matchGlob lives in engine.js; this is the same algorithm reimplemented
 // here to avoid an import cycle. Behaviour is byte-parity with engine.matchGlob.
 function matchGlobLocal(glob, path) {
-  const re = '^' + glob
+  const body = glob
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*\*/g, '::GLOBSTAR::')
     .replace(/\*/g, '[^/]*')
     .replace(/\?/g, '[^/]')
-    .replace(/::GLOBSTAR::/g, '.*') + '$';
+    .replace(/::GLOBSTAR::/g, '.*');
+  // A glob with no '/' is a FILENAME pattern -> match at ANY depth (root or
+  // nested), the true gitignore semantic. Without this, "pc_info.json" anchors
+  // to ^pc_info\.json$ and only matches a root-level file, silently dropping
+  // nested copies. Globs with a '/' stay path-anchored; use '**' for any-depth.
+  const re = glob.includes('/') ? '^' + body + '$' : '^(?:.*/)?' + body + '$';
   return new RegExp(re).test(path);
 }
 

@@ -13,6 +13,7 @@ import (
 //   - '*'  becomes '[^/]*'
 //   - '?'  becomes '[^/]'
 //   - GLOBSTAR becomes '.*'
+//
 // Compiled regex is anchored start/end.
 //
 // Hot path: RunRules calls this for every rule x every file per archive.
@@ -45,7 +46,17 @@ func MatchGlob(glob, path string) bool {
 	pattern = strings.ReplaceAll(pattern, "*", "[^/]*")
 	pattern = strings.ReplaceAll(pattern, "?", "[^/]")
 	pattern = strings.ReplaceAll(pattern, "\x00GLOBSTAR\x00", ".*")
-	re, err := regexp.Compile("^" + pattern + "$")
+	// A glob with no '/' is a FILENAME pattern and matches at ANY depth (root
+	// or nested), the gitignore semantic. Without this, "pc_info.json" compiles
+	// to ^pc_info\.json$ and only matches a root-level file -- silently dropping
+	// every nested victim-folder copy (this is what left the whole json_v2
+	// pc_info.json / log_info.json fingerprint lane dark). Globs that contain a
+	// '/' stay path-anchored as written; use '**' for explicit any-depth there.
+	anchored := "^" + pattern + "$"
+	if !strings.Contains(glob, "/") {
+		anchored = "^(?:.*/)?" + pattern + "$"
+	}
+	re, err := regexp.Compile(anchored)
 	if err != nil {
 		globCache.LoadOrStore(glob, (*regexp.Regexp)(nil))
 		return false
