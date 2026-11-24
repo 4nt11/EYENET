@@ -95,6 +95,15 @@ class StealerProcessorService(ServiceBase):
             os.environ.get("EYENET_STEALER_WORK_DIR", "/var/lib/eyenet/stealer-work")
         )
         self._replay_task: asyncio.Task[None] | None = None
+        # Serializes process_archive across every path (captured / reindex /
+        # corpus / boot-replay). Bus handlers dispatch concurrently via
+        # create_task, but the sinks (audit, records) and the single gotractor
+        # daemon subprocess are shared singletons that are NOT safe for
+        # concurrent use -- two overlapping runs race the one CH client session
+        # ("concurrent queries within the same session") and interleave commands
+        # on the one gotractor process. The pipeline is single-thread-per-
+        # instance by design; this lock enforces it.
+        self._process_lock = asyncio.Lock()
 
     @property
     def name(self) -> str:
@@ -197,16 +206,19 @@ class StealerProcessorService(ServiceBase):
         msg = await self._storage.get_message(att.message_id)
         body = getattr(msg, "body", "") or ""
         candidates = password_candidates(parse_password(body))
-        result = await asyncio.to_thread(
-            process_archive,
-            blob_path=Path(att.storage_uri),
-            password_candidates=candidates,
-            work_root=self._work_root,
-            source_label=f"attachment:{attachment_id}",
-            audit_sink=self._audit_sink,
-            records_sink=self._records_sink,
-            gotractor=self._gotractor,
-        )
+        # Serialize: the sinks + gotractor daemon are shared singletons; only one
+        # extraction may touch them at a time (see self._process_lock).
+        async with self._process_lock:
+            result = await asyncio.to_thread(
+                process_archive,
+                blob_path=Path(att.storage_uri),
+                password_candidates=candidates,
+                work_root=self._work_root,
+                source_label=f"attachment:{attachment_id}",
+                audit_sink=self._audit_sink,
+                records_sink=self._records_sink,
+                gotractor=self._gotractor,
+            )
         if result.ok:
             # creds_extracted on StealerProcessingTable retains its
             # historical column name; it now stores the gotractor
