@@ -49,13 +49,30 @@ var RecordColumns = []string{
 	"file_path", "rule_id", "family", "fields",
 }
 
-const defaultTable = "stealer.extracted_records"
+// Plane base tables. The shared extracted_records table is retired in
+// favour of two physical planes so the victim-plane MVs never scan a
+// firehose block. See development/CH_PLANE_SEPARATION_SCOPE.md.
+const (
+	tableCredlist = "stealer.extracted_records_credlist" // flat_credlist firehose
+	tableVictim   = "stealer.extracted_records_victim"   // stealer_victim plane
+)
+
+// tableFor routes a row to its physical base table by plane tag. Unknown
+// tags fall to the firehose: the firehose is the safe dumping ground.
+// Misrouting INTO the small victim plane poisons its MVs; misrouting out
+// of it only dilutes the firehose it is 96.7% of anyway.
+// ponytail: two planes, two tables; a third plane = a third branch here.
+func tableFor(archiveType string) string {
+	if archiveType == "stealer_victim" {
+		return tableVictim
+	}
+	return tableCredlist
+}
 
 // CH is a per-process sink. One instance per daemon; a fresh batch is
 // opened per archive run via BeginArchive.
 type CH struct {
 	conn     driver.Conn
-	table    string
 	dialTime time.Time
 }
 
@@ -101,7 +118,7 @@ func Open(ctx context.Context, dsn string) (*CH, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("ping ch: %w", err)
 	}
-	return &CH{conn: conn, table: defaultTable, dialTime: time.Now()}, nil
+	return &CH{conn: conn, dialTime: time.Now()}, nil
 }
 
 // Close releases the connection pool. Safe to call on a nil receiver
@@ -145,7 +162,6 @@ type rowData struct {
 type ArchiveBatch struct {
 	ch     *CH
 	ctx    context.Context
-	sql    string // precomputed per-row INSERT template
 	buffer []rowData
 	count  int // total appended since Begin, never reset
 }
@@ -198,12 +214,9 @@ func (c *CH) BeginArchive(ctx context.Context) (*ArchiveBatch, error) {
 			"max_query_size":                         uint64(100_000_000),
 		}),
 	)
-	rowPlaceholder := "(" + strings.Repeat("?,", len(RecordColumns)-1) + "?)"
-	_ = rowPlaceholder // used dynamically in Flush
 	return &ArchiveBatch{
 		ch:     c,
 		ctx:    asyncCtx,
-		sql:    fmt.Sprintf("INSERT INTO %s (%s) VALUES ", c.table, strings.Join(RecordColumns, ", ")),
 		buffer: make([]rowData, 0, asyncFlushRowsPer*2),
 	}, nil
 }
@@ -253,36 +266,50 @@ func (ab *ArchiveBatch) Flush() error {
 	if len(ab.buffer) == 0 {
 		return nil
 	}
+	// Partition the buffer by target plane table, then chunk each
+	// partition into asyncFlushRowsPer-row AsyncInserts. In practice an
+	// archive is uniformly one plane so byTable has a single entry, but
+	// routing per row keeps a mixed archive (e.g. a loose combolist .txt
+	// inside a victim drop) correct without a per-archive assumption.
+	byTable := make(map[string][]rowData, 2)
+	for _, row := range ab.buffer {
+		t := tableFor(row.archiveType)
+		byTable[t] = append(byTable[t], row)
+	}
 	rowPlaceholder := "(" + strings.Repeat("?,", len(RecordColumns)-1) + "?)"
-	for start := 0; start < len(ab.buffer); start += asyncFlushRowsPer {
-		end := start + asyncFlushRowsPer
-		if end > len(ab.buffer) {
-			end = len(ab.buffer)
-		}
-		slice := ab.buffer[start:end]
-
-		var b strings.Builder
-		b.Grow(len(ab.sql) + len(slice)*(len(rowPlaceholder)+1))
-		b.WriteString(ab.sql)
-		for i := range slice {
-			if i > 0 {
-				b.WriteByte(',')
+	colList := strings.Join(RecordColumns, ", ")
+	for table, rows := range byTable {
+		insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES ", table, colList)
+		for start := 0; start < len(rows); start += asyncFlushRowsPer {
+			end := start + asyncFlushRowsPer
+			if end > len(rows) {
+				end = len(rows)
 			}
-			b.WriteString(rowPlaceholder)
-		}
+			slice := rows[start:end]
 
-		args := make([]any, 0, len(slice)*len(RecordColumns))
-		for _, row := range slice {
-			args = append(args,
-				row.archiveSha256, row.source, row.archiveType, row.victimFolder,
-				row.filePath, row.ruleID, row.family, row.fields,
-			)
-		}
+			var b strings.Builder
+			b.Grow(len(insertSQL) + len(slice)*(len(rowPlaceholder)+1))
+			b.WriteString(insertSQL)
+			for i := range slice {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				b.WriteString(rowPlaceholder)
+			}
 
-		if err := ab.ch.conn.AsyncInsert(ab.ctx, b.String(), false, args...); err != nil {
-			ab.buffer = ab.buffer[:0] // drop, caller abandons the run
-			return fmt.Errorf("async insert (rows %d-%d of %d): %w",
-				start, end, len(ab.buffer), err)
+			args := make([]any, 0, len(slice)*len(RecordColumns))
+			for _, row := range slice {
+				args = append(args,
+					row.archiveSha256, row.source, row.archiveType, row.victimFolder,
+					row.filePath, row.ruleID, row.family, row.fields,
+				)
+			}
+
+			if err := ab.ch.conn.AsyncInsert(ab.ctx, b.String(), false, args...); err != nil {
+				ab.buffer = ab.buffer[:0] // drop, caller abandons the run
+				return fmt.Errorf("async insert %s (rows %d-%d of %d): %w",
+					table, start, end, len(rows), err)
+			}
 		}
 	}
 	ab.buffer = ab.buffer[:0]

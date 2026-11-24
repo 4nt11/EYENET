@@ -3,9 +3,10 @@
 
 Thin wrapper over clickhouse-connect (HTTP). Owns two write paths:
 
-- ``ClickHouseRecordsSink`` + ``_RECORDS_CREATE``: gotractor's
-  ``stealer.extracted_records`` landing table (dedup key is a hash of
-  the fields Map). The primary corpus.
+- ``ClickHouseRecordsSink`` + ``_records_create``: gotractor's two plane
+  landing tables ``stealer.extracted_records_credlist`` (firehose) and
+  ``stealer.extracted_records_victim`` (dedup key is a hash of the fields
+  Map). The primary corpus. See development/CH_PLANE_SEPARATION_SCOPE.md.
 - ``FileAuditSink`` + ``_FILE_AUDIT_CREATE`` + its pre-aggregate MVs:
   the per-file observability side channel.
 
@@ -40,10 +41,12 @@ _CREATE_DB = "CREATE DATABASE IF NOT EXISTS {db}"
 # runs DROP TABLE <db>.creds by hand.
 
 
-def _storage_policy_clause() -> str:
-    """`SETTINGS storage_policy='<name>'` when EYENET_CLICKHOUSE_STORAGE_POLICY
-    is set, empty string otherwise. Kept dumb on purpose: CH itself validates
-    the name at CREATE TABLE and fails loud if the policy does not exist."""
+def _storage_policy_setting() -> str:
+    """`storage_policy='<name>'` SETTINGS fragment (no SETTINGS keyword) when
+    EYENET_CLICKHOUSE_STORAGE_POLICY is set, empty string otherwise. Kept dumb on
+    purpose: CH itself validates the name at CREATE TABLE and fails loud if the
+    policy does not exist. Callers that need other settings alongside the policy
+    compose this fragment into one SETTINGS clause (see _records_create)."""
     policy = os.environ.get("EYENET_CLICKHOUSE_STORAGE_POLICY", "").strip()
     if not policy:
         return ""
@@ -54,7 +57,14 @@ def _storage_policy_clause() -> str:
             f"EYENET_CLICKHOUSE_STORAGE_POLICY={policy!r} is not a valid policy name "
             "(alphanumeric + underscore only)"
         )
-    return f"SETTINGS storage_policy = '{policy}'"
+    return f"storage_policy = '{policy}'"
+
+
+def _storage_policy_clause() -> str:
+    """`SETTINGS storage_policy='<name>'` or empty. Used by the rollup/target
+    tables that carry no other table-level settings."""
+    s = _storage_policy_setting()
+    return f"SETTINGS {s}" if s else ""
 
 
 def clickhouse_db() -> str:
@@ -104,26 +114,86 @@ async def get_async_clickhouse_client() -> Any:
 #     instead of leaving them in the table.
 #   - LowCardinality on family + rule_id because both are enum-shaped
 #     (dozens of distinct values, millions of rows).
-_RECORDS_CREATE = """
-CREATE TABLE IF NOT EXISTS {db}.extracted_records
-(
-    archive_sha256  FixedString(64),
-    source          LowCardinality(String),
-    archive_type    LowCardinality(String) DEFAULT '',
-    victim_folder   String,
-    file_path       String,
-    rule_id         LowCardinality(String),
-    family          LowCardinality(String),
-    fields          Map(String, String),
-    ingested_at     DateTime DEFAULT now(),
-    INDEX idx_family family TYPE set(0) GRANULARITY 1,
-    INDEX idx_rule_id rule_id TYPE set(0) GRANULARITY 1,
-    INDEX idx_archive_type archive_type TYPE set(0) GRANULARITY 1
-)
-ENGINE = ReplacingMergeTree(ingested_at)
-ORDER BY (archive_sha256, rule_id, file_path, cityHash64(toString(fields)))
-{storage_policy_clause}
-"""
+# Plane base tables. The shared extracted_records is retired in favour of two
+# physical planes (credlist firehose / victim) so the victim-plane MVs never
+# scan a firehose insert block. Names match the Go sink
+# (gotractor/sink/ch.go tableFor). See development/CH_PLANE_SEPARATION_SCOPE.md.
+_RECORDS_CREDLIST = "extracted_records_credlist"
+_RECORDS_VICTIM = "extracted_records_victim"
+
+# Per-plane ORDER BY. The dedup identity (archive_sha256, rule_id, file_path,
+# fields-hash) is preserved in both; credlist PREPENDS rev_host so hierarchy
+# pivots (`rev_host LIKE 'cl.%'`) are native primary-key range seeks -- no
+# projection, no second copy. rev_host is a function of fields, so prepending it
+# changes no dedup grain. The victim plane leads with archive_sha256 for its
+# per-(archive, victim) seeks. See development/CH_PLANE_SEPARATION_SCOPE.md +
+# CH_NEW_SCHEMAS.md.
+_DEDUP_TAIL = "archive_sha256, rule_id, file_path, cityHash64(toString(fields))"
+_CREDLIST_ORDER_BY = f"rev_host, {_DEDUP_TAIL}"
+_VICTIM_ORDER_BY = _DEDUP_TAIL
+
+
+def _records_create(table: str, order_by: str) -> str:
+    """CREATE for one plane base table. Both planes carry the same columns, the
+    host_canon / host_registrable / rev_host MATERIALIZED columns, and the same
+    skip indexes (set, host_registrable bloom for EXACT host, 26.x text on
+    host_canon for SUBSTRING). Everything is folded into the one CREATE (no ALTER
+    migration).
+
+    HIERARCHY (rev_host prefix, all `*.cl`) is served NOT by a projection but by
+    the credlist table's own ORDER BY leading with rev_host -- a native
+    primary-key range seek at ZERO extra storage (measured strictly better than a
+    projection: no second copy, smaller base via rev_host-clustered compression,
+    2ms hierarchy count, non-key aggregates granule-pruned). The firehose is
+    queried by host, never by archive, so leading with rev_host costs nothing
+    there. The VICTIM plane keeps archive-leading order for its per-victim seeks
+    (hierarchy on the ~3.3% plane is a cheap scan). Hence the per-plane order_by.
+
+    rev_host is derived from fields, so prepending it to the credlist key never
+    changes which rows dedup. table / order_by / db are module-owned, never user
+    input."""
+    settings_clause = _storage_policy_clause()
+    return f"""
+    CREATE TABLE IF NOT EXISTS {{db}}.{table}
+    (
+        archive_sha256   FixedString(64),
+        source           LowCardinality(String),
+        archive_type     LowCardinality(String) DEFAULT '',
+        victim_folder    String,
+        file_path        String,
+        rule_id          LowCardinality(String),
+        family           LowCardinality(String),
+        fields           Map(String, String),
+        ingested_at      DateTime DEFAULT now(),
+        host_canon       String MATERIALIZED {_HOST_CANON_EXPR},
+        host_registrable String MATERIALIZED cutToFirstSignificantSubdomain({_HOST_CANON_EXPR}),
+        rev_host         String MATERIALIZED arrayStringConcat(arrayReverse(splitByChar('.', {_HOST_CANON_EXPR})), '.'),
+        INDEX idx_family family TYPE set(0) GRANULARITY 1,
+        INDEX idx_rule_id rule_id TYPE set(0) GRANULARITY 1,
+        INDEX idx_archive_type archive_type TYPE set(0) GRANULARITY 1,
+        INDEX idx_host_registrable host_registrable TYPE bloom_filter(0.01) GRANULARITY 4,
+        INDEX idx_host_text host_canon TYPE text(tokenizer = 'ngrams') GRANULARITY 1
+    )
+    ENGINE = ReplacingMergeTree(ingested_at)
+    ORDER BY ({order_by})
+    {settings_clause}
+    """  # nosec B608
+
+
+# Combined read view over BOTH planes. Readers that genuinely span both planes
+# (global /search, every by-domain credential/cookie/history/subdomain tab) keep
+# `FROM extracted_records` verbatim and still get per-branch bloom pruning on
+# host_registrable -- verified live: the predicate pushes down into each UNION
+# branch's skip index. It MUST list the MATERIALIZED host cols explicitly, because
+# SELECT * drops materialized columns (they would vanish from the view). Victim-
+# SCOPED readers deliberately BYPASS this view and read extracted_records_victim
+# directly so they never scan the firehose. See CH_PLANE_SEPARATION_SCOPE pt3.
+_RECORDS_UNION_VIEW = f"""
+    CREATE VIEW IF NOT EXISTS {{db}}.extracted_records AS
+    SELECT *, host_canon, host_registrable, rev_host FROM {{db}}.{_RECORDS_CREDLIST}
+    UNION ALL
+    SELECT *, host_canon, host_registrable, rev_host FROM {{db}}.{_RECORDS_VICTIM}
+    """  # noqa: S608  # nosec B608
 
 
 _RECORDS_COLUMNS = [
@@ -137,17 +207,10 @@ _RECORDS_COLUMNS = [
     "fields",
 ]
 
-# Plane tag for existing deployments (the fresh CREATE above carries it; a
-# populated extracted_records needs the ALTER). Written by gotractor per
-# archive: stealer_victim | flat_credlist (see classifyArchiveType in
-# daemon.go). Idempotent; a no-op after the first boot. Old rows default to
-# '' until the reindex restamps them, so readers treat '' as "unknown plane",
-# not stealer_victim. See development/CH_ROLLUP_PLANES_REVISED.md.
-_EXTRACTED_RECORDS_ARCHIVE_TYPE_COL = """
-ALTER TABLE {db}.extracted_records
-  ADD COLUMN IF NOT EXISTS archive_type LowCardinality(String) DEFAULT '' AFTER source,
-  ADD INDEX IF NOT EXISTS idx_archive_type archive_type TYPE set(0) GRANULARITY 1
-"""
+# Plane tag is written by gotractor per archive (stealer_victim | flat_credlist,
+# see classifyArchiveType in daemon.go) and is the sink's routing key into the
+# two plane base tables. Both _records_create tables carry the archive_type
+# column + index directly, so no ALTER migration is needed.
 
 
 # v1.3.1 reindex-idempotent counter semantics. The ClickHouse MV contract is
@@ -165,21 +228,15 @@ _IDENTITY_TUPLE_TYPE = "Tuple(FixedString(64), LowCardinality(String), String, U
 
 # f-strings are pre-built as module constants so ruff S608 noqa sits on one
 # line each; the "variable" they interpolate is a module constant above.
+# Dual MV template (both planes -> one AMT target; see plane-split pt1).
 _EXTRACTED_ROWS_PER_FILE_MV = f"""
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.extracted_rows_per_file_mv
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.extracted_rows_per_file_mv{{suffix}}
     TO {{db}}.extracted_rows_per_file AS
     SELECT
         archive_sha256,
         file_path,
         uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
-    GROUP BY archive_sha256, file_path
-    """  # noqa: S608  # nosec B608
-_EXTRACTED_ROWS_PER_FILE_BACKFILL = f"""
-    INSERT INTO {{db}}.extracted_rows_per_file
-    SELECT archive_sha256, file_path, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
-    WHERE NOT EXISTS (SELECT 1 FROM {{db}}.extracted_rows_per_file)
+    FROM {{db}}.{{src}}
     GROUP BY archive_sha256, file_path
     """  # noqa: S608  # nosec B608
 
@@ -234,7 +291,7 @@ _VICTIM_PROFILES_SELECT_CORE = f"""
         maxIf(fields['webmail_email'], rule_id = 'history_webmail_identity') AS webmail_identity,
         maxIf(fields['corporate_marker'], rule_id = 'software_corporate_marker') AS first_corporate_marker,
         maxIf(family, rule_id LIKE 'wallet_vault_leveldb:%') AS first_wallet_family
-    FROM {{db}}.extracted_records
+    FROM {{db}}.{_RECORDS_VICTIM}
 """  # noqa: S608  # nosec B608
 
 _VICTIM_PROFILES_MV = f"""
@@ -244,13 +301,6 @@ _VICTIM_PROFILES_MV = f"""
     WHERE splitByChar('/', file_path)[2] != ''
     GROUP BY archive_sha256, victim_folder
     """
-_VICTIM_PROFILES_BACKFILL = f"""
-    INSERT INTO {{db}}.victim_profiles
-    {_VICTIM_PROFILES_SELECT_CORE}
-    WHERE splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {{db}}.victim_profiles)
-    GROUP BY archive_sha256, victim_folder
-    """  # noqa: S608  # nosec B608
 
 
 # v1.3.3 per-victim profile roll-up. ONE row per (archive_sha256, victim_folder)
@@ -332,11 +382,6 @@ _VICTIM_PROFILES: tuple[str, ...] = (
     # dedups. Correctness is a schema property, not an operator procedure.
     # The "max" fields stay SAF(max) since the gotcha is specific to count.
     _VICTIM_PROFILES_MV,
-    # Idempotent backfill with NOT EXISTS gate. First-run on an existing
-    # extracted_records populates all historical rows; subsequent calls on
-    # each pipeline run are no-ops. v1.3.1: also fires after the one-shot
-    # repair (see _repair_victim_profiles_if_stale) rebuilds the table.
-    _VICTIM_PROFILES_BACKFILL,
 )
 
 # v1.4: victim_counts is now a plain VIEW that finalizes victim_profiles
@@ -429,26 +474,10 @@ _HOST_CANON_EXPR = (
     "''))"
 )
 
-_EXTRACTED_RECORDS_HOST_COLS: tuple[str, ...] = (
-    f"""
-    ALTER TABLE {{db}}.extracted_records
-      ADD COLUMN IF NOT EXISTS host_canon String MATERIALIZED
-        {_HOST_CANON_EXPR},
-      ADD COLUMN IF NOT EXISTS host_registrable String MATERIALIZED
-        cutToFirstSignificantSubdomain({_HOST_CANON_EXPR}),
-      ADD INDEX IF NOT EXISTS idx_host_registrable host_registrable
-        TYPE bloom_filter(0.01) GRANULARITY 4
-    """,
-    # For a deployment that already has the columns from v1.3.6, bring them
-    # up to the extended expression. CH silently no-ops MODIFY COLUMN when the
-    # new expression equals the stored one, so this is safe to run every boot.
-    f"""
-    ALTER TABLE {{db}}.extracted_records
-      MODIFY COLUMN host_canon String MATERIALIZED {_HOST_CANON_EXPR},
-      MODIFY COLUMN host_registrable String MATERIALIZED
-        cutToFirstSignificantSubdomain({_HOST_CANON_EXPR})
-    """,
-)
+# host_canon / host_registrable are MATERIALIZED columns + the bloom index are
+# folded directly into both plane base tables by _records_create (they used to be
+# added here via ALTER on the single table). _HOST_CANON_EXPR above is the shared
+# expression both tables compute.
 
 # v1.3.6 by-domain flat-counts sibling for /v1/stealer/by-domain/{domain}/summary.
 # Same ReplacingMergeTree + REFRESHABLE MV pattern as victim_counts and
@@ -458,19 +487,21 @@ _EXTRACTED_RECORDS_HOST_COLS: tuple[str, ...] = (
 # host_registrable + bloom filter. Dedup grains match the deep-tab queries
 # (url+login+password for creds, url+name for cookies, etc.) so hero numbers
 # agree with per-tab pagination totals.
-_BY_DOMAIN_COUNTS: tuple[str, ...] = (
-    # v1.3.12.2: converted from refreshable ReplacingMergeTree (full rebuild
-    # every 5 minutes, OOMed at 7.5 GiB over 157M rows) to incremental
-    # AggregatingMergeTree. Every INSERT block into extracted_records adds
-    # per-group HLL12 state deltas; CH merges them in background per
-    # host_registrable. Aggregation state is tiny (HLL12 is ~2.5 KB fixed)
-    # and bounded, so there is no corpus-wide memory pressure at any point.
-    # live_cookie_count / autofill_count / indicator_hit_count were dropped
-    # from the table -- the first is time-dependent (now() drifts) and the
-    # last two were constants. The summary endpoint computes live_cookie_count
-    # on demand against extracted_records with the host_registrable bloom
-    # filter (cheap, same row count as the paginated Cookies tab).
-    """
+# v1.3.12.2: converted from refreshable ReplacingMergeTree (full rebuild
+# every 5 minutes, OOMed at 7.5 GiB over 157M rows) to incremental
+# AggregatingMergeTree. Every INSERT block adds per-group HLL12 state deltas;
+# CH merges them in background per host_registrable. Aggregation state is tiny
+# (HLL12 ~2.5 KB fixed) and bounded, so there is no corpus-wide memory pressure.
+# live_cookie_count / autofill_count / indicator_hit_count were dropped from the
+# table -- the first is time-dependent (now() drifts) and the last two were
+# constants. The summary endpoint computes live_cookie_count on demand with the
+# host_registrable bloom filter.
+#
+# Plane split: this target spans BOTH planes (combolist = firehose creds AND
+# browser_passwords/windows_credentials = victim creds), so it is fed by a MV
+# PAIR, one per base table, into this one AggregatingMergeTree. Both MVs run the
+# byte-identical SELECT so their states merge. See CH_PLANE_SEPARATION_SCOPE pt1.
+_BY_DOMAIN_COUNTS_TABLE = """
     CREATE TABLE IF NOT EXISTS {db}.by_domain_counts
     (
         host_registrable             String,
@@ -486,9 +517,12 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
     ENGINE = AggregatingMergeTree
     ORDER BY host_registrable
     {storage_policy_clause}
-    """,
     """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_counts_mv
+# Dual-source MV template. {suffix} differentiates the per-plane MV names
+# ('' for credlist, '_victim' for victim); {src} is the base table. Body is
+# identical across both so AggregatingMergeTree merges the states.
+_BY_DOMAIN_COUNTS_MV = """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.by_domain_counts_mv{suffix}
     TO {db}.by_domain_counts
     AS SELECT
         host_registrable,
@@ -518,53 +552,9 @@ _BY_DOMAIN_COUNTS: tuple[str, ...] = (
           family IN ('victim_history','victim_downloads')) AS history_count_state,
         uniqHLL12StateIf(fields['value'],
           rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count_state
-    FROM {db}.extracted_records
+    FROM {db}.{src}
     WHERE host_registrable != ''
     GROUP BY host_registrable
-    """,
-)
-
-# One-shot backfill from an EXISTING corpus, GATED by size. The full-corpus
-# `GROUP BY host_registrable` builds ~8 HLL12 states across every
-# registrable-domain group at once; on the prod firehose that OOMed the 4 GiB
-# per-query cap (code 241) even WITH external_group_by, and aborted the
-# reindex. We no longer try to backfill a large corpus: on a fresh install (and
-# after a from-zero DB rebuild) the live MV populates by_domain_counts from byte
-# zero as rows ingest, so the backfill is only for a SMALL upgrade-in-place
-# where the corpus already exists and is not being re-ingested. Above the gate
-# we SKIP and log -- the operator repopulates by running a corpus reindex, which
-# re-inserts every archive through the MV with bounded per-block memory.
-# ponytail: single-pass fits the 4 GiB cap well under a few hundred k distinct
-# hosts; _BACKFILL_MAX_HOSTS is set conservatively so it never OOMs, and any
-# corpus large enough to matter populates incrementally via (re)ingest instead.
-_BACKFILL_MAX_HOSTS = 250_000
-_BY_DOMAIN_COUNTS_BACKFILL = """
-    INSERT INTO {db}.by_domain_counts
-    SELECT
-        host_registrable,
-        uniqHLL12StateIf((archive_sha256, victim_folder),
-          family IN ('browser_passwords','windows_credentials',
-                     'firefox_logins','combolist')) AS victim_count_state,
-        uniqHLL12StateIf(archive_sha256,
-          family IN ('browser_passwords','windows_credentials',
-                     'firefox_logins','combolist')
-          OR family IN ('cookies','victim_cookies')) AS archive_count_state,
-        min(ingested_at) AS first_seen_at,
-        max(ingested_at) AS last_seen_at,
-        uniqHLL12StateIf((fields['url'], fields['user'], fields['password']),
-          family IN ('browser_passwords','windows_credentials',
-                     'firefox_logins','combolist')) AS credential_count_state,
-        uniqHLL12StateIf((trim(LEADING '.' FROM fields['cookie_domain']),
-                          coalesce(nullIf(fields['cookie_name'], ''), fields['name'])),
-          family IN ('cookies','victim_cookies')) AS all_cookie_count_state,
-        uniqHLL12StateIf(coalesce(nullIf(fields['visit_url'], ''), fields['url']),
-          family IN ('victim_history','victim_downloads')) AS history_count_state,
-        uniqHLL12StateIf(fields['value'],
-          rule_id = 'localstorage_jwt_candidates') AS localstorage_jwt_count_state
-    FROM {db}.extracted_records
-    WHERE host_registrable != ''
-    GROUP BY host_registrable
-    SETTINGS max_bytes_before_external_group_by = 200000000
     """
 
 # v1.4 per-domain per-victim sibling, REBUILT as an incremental AggregatingMergeTree.
@@ -610,7 +600,7 @@ _BY_DOMAIN_VICTIM_COUNTS: tuple[str, ...] = (
           family IN ('cookies','victim_cookies')) AS cookie_count_state,
         min(ingested_at) AS first_seen_at,
         max(ingested_at) AS last_seen_at
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE host_registrable != ''
     GROUP BY host_registrable, archive_sha256, victim_folder
     """,
@@ -677,68 +667,43 @@ _STATS_WHERE = (
 # are MODULE constants (no external input) and _STATS_WHERE is composed from
 # them. ruff S608 flags f-strings that interpolate into SQL; the "variables"
 # here are compile-time literals the module owns, so per-f-string noqa.
+# Dual-source MV templates (one target each, fed by a credlist + victim MV
+# pair; see CH_PLANE_SEPARATION_SCOPE pt1). {suffix} differentiates the per-plane
+# MV name, {src} the base table; bodies are byte-identical so the AMT states merge.
 _STATS_ROLLUP_TOTALS_MV = f"""
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_totals_mv
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_totals_mv{{suffix}}
     TO {{db}}.stats_rollup_totals AS
     SELECT
         'all' AS bucket,
         uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS total_creds,
         uniqHLL12State(({_HOST_EXPR_DDL}, fields['user'], fields['password'])) AS unique_creds,
         uniqHLL12State({_HOST_EXPR_DDL}) AS distinct_hosts
-    FROM {{db}}.extracted_records
+    FROM {{db}}.{{src}}
     WHERE {_STATS_WHERE}
     GROUP BY bucket
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_SCHEME_MV = f"""
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_scheme_mv
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_scheme_mv{{suffix}}
     TO {{db}}.stats_rollup_scheme AS
     SELECT
         {_SCHEME_EXPR_DDL} AS scheme,
         uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
+    FROM {{db}}.{{src}}
     WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
     GROUP BY scheme
     """  # noqa: S608  # nosec B608
 _STATS_ROLLUP_TLD_MV = f"""
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_tld_mv
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {{db}}.stats_rollup_tld_mv{{suffix}}
     TO {{db}}.stats_rollup_tld AS
     SELECT
         {_TLD_EXPR_DDL} AS tld,
         uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
+    FROM {{db}}.{{src}}
     WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
     GROUP BY tld
     """  # noqa: S608  # nosec B608
-_STATS_ROLLUP_TOTALS_BACKFILL = f"""
-    INSERT INTO {{db}}.stats_rollup_totals
-    SELECT
-        'all' AS bucket,
-        uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS total_creds,
-        uniqHLL12State(({_HOST_EXPR_DDL}, fields['user'], fields['password'])) AS unique_creds,
-        uniqHLL12State({_HOST_EXPR_DDL}) AS distinct_hosts
-    FROM {{db}}.extracted_records
-    WHERE {_STATS_WHERE}
-      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_totals)
-    GROUP BY bucket
-    """  # noqa: S608  # nosec B608
-_STATS_ROLLUP_SCHEME_BACKFILL = f"""
-    INSERT INTO {{db}}.stats_rollup_scheme
-    SELECT {_SCHEME_EXPR_DDL} AS scheme, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
-    WHERE {_STATS_WHERE} AND notEmpty({_SCHEME_EXPR_DDL})
-      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_scheme)
-    GROUP BY scheme
-    """  # noqa: S608  # nosec B608
-_STATS_ROLLUP_TLD_BACKFILL = f"""
-    INSERT INTO {{db}}.stats_rollup_tld
-    SELECT {_TLD_EXPR_DDL} AS tld, uniqHLL12State({_IDENTITY_TUPLE_DDL}) AS cnt
-    FROM {{db}}.extracted_records
-    WHERE {_STATS_WHERE} AND notEmpty({_TLD_EXPR_DDL})
-      AND NOT EXISTS (SELECT 1 FROM {{db}}.stats_rollup_tld)
-    GROUP BY tld
-    """  # noqa: S608  # nosec B608
-
-_STATS_ROLLUP: tuple[str, ...] = (
+# Plane-agnostic target tables (one each; fed by the dual MV pairs above).
+_STATS_ROLLUP_TABLES: tuple[str, ...] = (
     f"""
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_totals
     (
@@ -751,7 +716,6 @@ _STATS_ROLLUP: tuple[str, ...] = (
     ORDER BY bucket
     {{storage_policy_clause}}
     """,
-    _STATS_ROLLUP_TOTALS_MV,
     f"""
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_scheme
     (
@@ -762,7 +726,6 @@ _STATS_ROLLUP: tuple[str, ...] = (
     ORDER BY scheme
     {{storage_policy_clause}}
     """,
-    _STATS_ROLLUP_SCHEME_MV,
     f"""
     CREATE TABLE IF NOT EXISTS {{db}}.stats_rollup_tld
     (
@@ -773,12 +736,12 @@ _STATS_ROLLUP: tuple[str, ...] = (
     ORDER BY tld
     {{storage_policy_clause}}
     """,
+)
+# Dual MV templates, applied once per plane (credlist + victim) in ensure_schema.
+_STATS_ROLLUP_MVS: tuple[str, ...] = (
+    _STATS_ROLLUP_TOTALS_MV,
+    _STATS_ROLLUP_SCHEME_MV,
     _STATS_ROLLUP_TLD_MV,
-    # One-shot backfill: NOT EXISTS gate so each only fires on the first
-    # ensure_schema() call against an existing corpus.
-    _STATS_ROLLUP_TOTALS_BACKFILL,
-    _STATS_ROLLUP_SCHEME_BACKFILL,
-    _STATS_ROLLUP_TLD_BACKFILL,
 )
 
 
@@ -789,6 +752,19 @@ _STATS_ROLLUP: tuple[str, ...] = (
 # tiny ReplacingMergeTree of the DISTINCT file_paths that have ever
 # emitted an extracted record. The reader anti-joins against this
 # instead of the raw records table.
+# Dual MV template (both planes -> one ReplacingMergeTree target; the file-path
+# inventory spans both planes). Applied per-plane in ensure_schema.
+_EXTRACTED_FILE_PATHS_MV = """
+    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_file_paths_mv{suffix}
+    TO {db}.extracted_file_paths AS
+    SELECT file_path
+    FROM {db}.{src}
+    """
+
+# Target tables (plane-agnostic) + the VICTIM-ONLY MVs for this group, applied
+# through the generic loop. The two DUAL MVs (extracted_file_paths_mv,
+# extracted_rows_per_file_mv) are applied per-plane separately in ensure_schema;
+# they are NOT in this tuple because the loop knows only db + storage_policy.
 _EXTRACTED_PATHS: tuple[str, ...] = (
     """
     CREATE TABLE IF NOT EXISTS {db}.extracted_file_paths
@@ -799,29 +775,9 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
     ORDER BY file_path
     {storage_policy_clause}
     """,
-    # MV fires on every INSERT into extracted_records. It writes every
-    # row's file_path; ReplacingMergeTree collapses dupes on background
-    # merge. Query-time dedup is handled by SELECT DISTINCT (cheap).
-    """
-    CREATE MATERIALIZED VIEW IF NOT EXISTS {db}.extracted_file_paths_mv
-    TO {db}.extracted_file_paths AS
-    SELECT file_path
-    FROM {db}.extracted_records
-    """,
-    # One-shot backfill. NOT EXISTS gate so this only fires on the first
-    # ensure_schema() call against an existing corpus.
-    """
-    INSERT INTO {db}.extracted_file_paths
-    SELECT DISTINCT file_path
-    FROM {db}.extracted_records
-    WHERE NOT EXISTS (SELECT 1 FROM {db}.extracted_file_paths)
-    """,
     # v1.3.1 per-archive per-file row counts. Backs file_tree() and the
-    # per-victim coverage computation. Before: both scanned extracted_records
-    # FINAL + GROUP BY file_path for ONE archive, which is still O(N) because
-    # the sort key is not (archive, file_path). After: a tiny
-    # AggregatingMergeTree keyed on exactly that tuple, so a per-archive
-    # lookup is a direct index seek.
+    # per-victim coverage computation. AggregatingMergeTree keyed on
+    # (archive, file_path) so a per-archive lookup is a direct index seek.
     f"""
     CREATE TABLE IF NOT EXISTS {{db}}.extracted_rows_per_file
     (
@@ -833,14 +789,9 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
     ORDER BY (archive_sha256, file_path)
     {{storage_policy_clause}}
     """,
-    _EXTRACTED_ROWS_PER_FILE_MV,
-    _EXTRACTED_ROWS_PER_FILE_BACKFILL,
-    # v1.3.1 per-victim rule-id set. Backs the artifact drawer's
-    # fired_rule_ids resolution (which feeds the MITRE ATT&CK technique
-    # list). Before: SELECT DISTINCT rule_id FROM extracted_records FINAL
-    # WHERE archive = X AND splitByChar('/', file_path)[2] = Y was a full
-    # scan because splitByChar is not indexable. After: ReplacingMergeTree
-    # keyed on (archive, victim_folder, rule_id); lookup is an index seek.
+    # v1.3.1 per-victim rule-id set. Backs the artifact drawer's fired_rule_ids
+    # resolution. ReplacingMergeTree keyed on (archive, victim_folder, rule_id).
+    # Victim-only MV: sources the victim plane.
     """
     CREATE TABLE IF NOT EXISTS {db}.extracted_rules_per_victim
     (
@@ -859,29 +810,14 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
         archive_sha256,
         splitByChar('/', file_path)[2] AS victim_folder,
         rule_id
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE splitByChar('/', file_path)[2] != ''
     """,
-    """
-    INSERT INTO {db}.extracted_rules_per_victim
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2] AS victim_folder,
-        rule_id
-    FROM {db}.extracted_records
-    WHERE splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.extracted_rules_per_victim)
-    GROUP BY archive_sha256, victim_folder, rule_id
-    """,
-    # v1.3.1 per-victim records index. Backs the artifact drawer's
-    # Credentials / Cookies / System tabs via StealerCredsReader.records().
-    # Before: WHERE archive=X AND splitByChar('/', file_path)[2]=Y scanned
-    # the archive's entire extracted_records slice because splitByChar is
-    # not indexable, 1s per query x 2 queries (count + page) in parallel
-    # = 2s observed. After: ORDER BY (archive, victim_folder, rule_id,
-    # file_path) makes the common filter a direct index seek. Full row
-    # payload duplicated so the drawer's rule_id / family / file_path /
-    # fields read is self-contained.
+    # v1.3.1 per-victim records index. Backs the artifact drawer's Credentials /
+    # Cookies / System tabs. ORDER BY (archive, victim_folder, rule_id, file_path)
+    # makes the common filter a direct index seek. Victim-only MV.
+    # (Open pt 2: on the split victim table this could become a projection; kept
+    # as a copy MV for the first cut -- ANTI deferred the projection.)
     """
     CREATE TABLE IF NOT EXISTS {db}.extracted_records_by_victim
     (
@@ -907,22 +843,8 @@ _EXTRACTED_PATHS: tuple[str, ...] = (
         family,
         file_path,
         fields
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE splitByChar('/', file_path)[2] != ''
-    """,
-    """
-    INSERT INTO {db}.extracted_records_by_victim
-        (archive_sha256, victim_folder, rule_id, family, file_path, fields)
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2] AS victim_folder,
-        rule_id,
-        family,
-        file_path,
-        fields
-    FROM {db}.extracted_records
-    WHERE splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.extracted_records_by_victim)
     """,
 )
 
@@ -971,7 +893,7 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         lowerUTF8(fields['cookie_domain']) AS domain,
         'cookie' AS source_kind,
         toUInt32(1) AS count
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE rule_id = 'cookies_netscape_tsv'
       AND fields['cookie_domain'] != ''
       AND splitByChar('/', file_path)[2] != ''
@@ -986,7 +908,7 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         lowerUTF8(domain(fields['host'])) AS domain,
         'credential' AS source_kind,
         toUInt32(1) AS count
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE rule_id LIKE 'passwords_%'
       AND domain(fields['host']) != ''
       AND splitByChar('/', file_path)[2] != ''
@@ -1001,7 +923,7 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         lowerUTF8(domain(fields['visit_url'])) AS domain,
         'history_visit' AS source_kind,
         toUInt32(1) AS count
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE rule_id = 'history_url_title_block'
       AND domain(fields['visit_url']) != ''
       AND splitByChar('/', file_path)[2] != ''
@@ -1016,7 +938,7 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         lowerUTF8(domain(fields['download_url'])) AS domain,
         'download' AS source_kind,
         toUInt32(1) AS count
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE rule_id = 'download_history_block'
       AND domain(fields['download_url']) != ''
       AND splitByChar('/', file_path)[2] != ''
@@ -1031,7 +953,7 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         lowerUTF8(domain(fields['ls_domain'])) AS domain,
         'localstorage' AS source_kind,
         toUInt32(1) AS count
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE rule_id IN ('localstorage_block', 'localstorage_jwt_candidates')
       AND fields['ls_domain'] != ''
       AND splitByChar('/', file_path)[2] != ''
@@ -1047,98 +969,10 @@ _VICTIM_DOMAINS: tuple[str, ...] = (
         lowerUTF8(splitByChar('@', fields['webmail_email'])[2]) AS domain,
         'email_webmail' AS source_kind,
         toUInt32(1) AS count
-    FROM {db}.extracted_records
+    FROM {db}.extracted_records_victim
     WHERE rule_id = 'history_webmail_identity'
       AND fields['webmail_email'] LIKE '%@%'
       AND splitByChar('/', file_path)[2] != ''
-    """,
-    # Idempotent backfill. One INSERT per source MV so a partial gate wins
-    # per source: if cookies already backfilled but passwords hasn't, we
-    # still pick up the gap. NOT EXISTS probe is per source_kind so adding
-    # a new source later only backfills the new one.
-    """
-    INSERT INTO {db}.victim_domains
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2] AS victim_folder,
-        lowerUTF8(fields['cookie_domain']) AS domain,
-        'cookie' AS source_kind,
-        toUInt32(1) AS count
-    FROM {db}.extracted_records
-    WHERE rule_id = 'cookies_netscape_tsv'
-      AND fields['cookie_domain'] != ''
-      AND splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'cookie')
-    """,
-    """
-    INSERT INTO {db}.victim_domains
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2],
-        lowerUTF8(domain(fields['host'])),
-        'credential',
-        toUInt32(1)
-    FROM {db}.extracted_records
-    WHERE rule_id LIKE 'passwords_%'
-      AND domain(fields['host']) != ''
-      AND splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'credential')
-    """,
-    """
-    INSERT INTO {db}.victim_domains
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2],
-        lowerUTF8(domain(fields['visit_url'])),
-        'history_visit',
-        toUInt32(1)
-    FROM {db}.extracted_records
-    WHERE rule_id = 'history_url_title_block'
-      AND domain(fields['visit_url']) != ''
-      AND splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'history_visit')
-    """,
-    """
-    INSERT INTO {db}.victim_domains
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2],
-        lowerUTF8(domain(fields['download_url'])),
-        'download',
-        toUInt32(1)
-    FROM {db}.extracted_records
-    WHERE rule_id = 'download_history_block'
-      AND domain(fields['download_url']) != ''
-      AND splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'download')
-    """,
-    """
-    INSERT INTO {db}.victim_domains
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2],
-        lowerUTF8(domain(fields['ls_domain'])),
-        'localstorage',
-        toUInt32(1)
-    FROM {db}.extracted_records
-    WHERE rule_id IN ('localstorage_block', 'localstorage_jwt_candidates')
-      AND fields['ls_domain'] != ''
-      AND splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'localstorage')
-    """,
-    """
-    INSERT INTO {db}.victim_domains
-    SELECT
-        archive_sha256,
-        splitByChar('/', file_path)[2],
-        lowerUTF8(splitByChar('@', fields['webmail_email'])[2]),
-        'email_webmail',
-        toUInt32(1)
-    FROM {db}.extracted_records
-    WHERE rule_id = 'history_webmail_identity'
-      AND fields['webmail_email'] LIKE '%@%'
-      AND splitByChar('/', file_path)[2] != ''
-      AND NOT EXISTS (SELECT 1 FROM {db}.victim_domains WHERE source_kind = 'email_webmail')
     """,
 )
 
@@ -1234,159 +1068,109 @@ class ClickHouseRecordsSink:
             self._client = get_clickhouse_client()
         return self._client
 
+    # Dual MV templates, applied once per base plane into their single shared
+    # target. Body is byte-identical across planes so the AMT merges the states.
+    _DUAL_MVS: tuple[str, ...] = (
+        _BY_DOMAIN_COUNTS_MV,
+        _EXTRACTED_FILE_PATHS_MV,
+        _EXTRACTED_ROWS_PER_FILE_MV,
+        *_STATS_ROLLUP_MVS,
+    )
+    _PLANES: tuple[tuple[str, str], ...] = (
+        (_RECORDS_CREDLIST, ""),
+        (_RECORDS_VICTIM, "_victim"),
+    )
+    # Every MV on the records plane -- dropped one-time when migrating a
+    # pre-split deployment so the new CREATEs bind to the plane tables instead
+    # of no-opping against the old MVs on extracted_records.
+    _OLD_PLANE_MVS: tuple[str, ...] = (
+        "victim_profiles_mv",
+        "by_domain_victim_counts_mv",
+        "extracted_rules_per_victim_mv",
+        "extracted_records_by_victim_mv",
+        "victim_domains_cookies_mv",
+        "victim_domains_creds_mv",
+        "victim_domains_history_mv",
+        "victim_domains_downloads_mv",
+        "victim_domains_localstorage_mv",
+        "victim_domains_webmail_mv",
+        "by_domain_counts_mv",
+        "stats_rollup_totals_mv",
+        "stats_rollup_scheme_mv",
+        "stats_rollup_tld_mv",
+        "extracted_file_paths_mv",
+        "extracted_rows_per_file_mv",
+    )
+
     def ensure_schema(self) -> None:
         client = self._connect()
-        client.command(_CREATE_DB.format(db=self._db))
-        client.command(
-            _RECORDS_CREATE.format(
-                db=self._db,
-                storage_policy_clause=_storage_policy_clause(),
-            )
-        )
-        # Plane tag column for existing deployments. Idempotent ADD COLUMN /
-        # ADD INDEX IF NOT EXISTS; fresh installs already have it from the
-        # CREATE above.
-        client.command(_EXTRACTED_RECORDS_ARCHIVE_TYPE_COL.format(db=self._db))
-        # v1.3.3 per-victim profile roll-up (table + MV + idempotent backfill).
-        # v1.3.1 one-shot repair: drop + rebuild if the old rule_id-based MV
-        # is detected, then let the CREATE IF NOT EXISTS below re-make it
-        # with the new family-based body, then the NOT EXISTS backfill fires.
-        self._repair_victim_profiles_if_stale(client)
+        db = self._db
+        spc = _storage_policy_clause()
+        client.command(_CREATE_DB.format(db=db))
+
+        # One-time plane-split migration. If the OLD single-plane
+        # extracted_records base table is present, this is a pre-split
+        # deployment: drop its MVs so the new per-plane MVs below bind to the
+        # plane tables (CREATE IF NOT EXISTS would otherwise no-op against the
+        # old MVs), then drop the old base table. Gated on the old table's
+        # existence so it fires exactly once -- NOT every boot (a blind drop
+        # every boot would wipe the tables on every restart). A from-zero
+        # reindex repopulates the plane tables; this is not a data migration.
+        # See development/CH_PLANE_SEPARATION_SCOPE.md.
+        self._migrate_old_single_plane(client, db)
+
+        # Two plane base tables. Same columns + indexes; per-plane ORDER BY
+        # (credlist leads with rev_host for free hierarchy range-seeks, victim
+        # leads with archive_sha256 for per-victim seeks).
+        client.command(_records_create(_RECORDS_CREDLIST, _CREDLIST_ORDER_BY).format(db=db))
+        client.command(_records_create(_RECORDS_VICTIM, _VICTIM_ORDER_BY).format(db=db))
+        # Combined read view for both-plane readers (search, by-domain tabs).
+        # Victim-scoped readers bypass it and hit extracted_records_victim.
+        client.command(_RECORDS_UNION_VIEW.format(db=db))
+
+        # Victim-plane rollups (targets + victim-only MVs, source the victim plane).
         for stmt in _VICTIM_PROFILES:
-            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.4: KILLED the REFRESH-EVERY victim_counts MV + its ReplacingMergeTree
-        # cache (the 5-min full rescan was the O(table) OOM shape). victim_counts
-        # is REPLACED IN PLACE by a same-named VIEW over victim_profiles
-        # (incremental AMT, kept) that finalizes at read -- readers keep working,
-        # always fresh, no rescan (CH_ROLLUP_PLANES_REVISED D2). Drop the old MV
-        # first, then the old table (so the name is free), then create the view.
-        client.command(f"DROP VIEW IF EXISTS {self._db}.victim_counts_refresh")
-        client.command(f"DROP TABLE IF EXISTS {self._db}.victim_counts")
-        client.command(_VICTIM_COUNTS_VIEW.format(db=self._db))
-        # v1.3.3 per-victim domain index (detection engine primitive).
+            client.command(stmt.format(db=db, storage_policy_clause=spc))
+        # victim_counts: a VIEW over victim_profiles (incremental AMT) finalized
+        # at read -- always fresh, no rescan (CH_ROLLUP_PLANES_REVISED D2).
+        client.command(_VICTIM_COUNTS_VIEW.format(db=db))
         for stmt in _VICTIM_DOMAINS:
-            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.3.4 monitored-domain watchlist (detection-engine input table).
+            client.command(stmt.format(db=db, storage_policy_clause=spc))
         for stmt in _MONITORED_DOMAINS:
-            client.command(stmt.format(db=self._db))
-        # v1.3.1 one-shot repair for the rollups whose counter type changed
-        # from SAF(sum, UInt64) to AggregateFunction(uniqHLL12, identity_tuple).
-        # The sentinel is the pre-1.3.1 MV body's `toUInt64(count())`; if present
-        # the MV + target are dropped and the CREATE IF NOT EXISTS below
-        # rebuilds them with the new body, then the NOT EXISTS backfill fires.
-        for mv in (
-            "stats_rollup_totals_mv",
-            "stats_rollup_scheme_mv",
-            "stats_rollup_tld_mv",
-            "extracted_rows_per_file_mv",
-        ):
-            self._repair_mv_if_stale(
-                client,
-                mv_name=mv,
-                target_name=mv.removesuffix("_mv"),
-                sentinel=_STATS_ROLLUP_STALE_SENTINEL,
-            )
-        # v1.4: drop the vanity global per-host leaderboard. Its backfill
-        # (GROUP BY host over the full corpus) OOMed the 4 GiB cap and the
-        # number is vanity (CH_ROLLUP_PLANES_REVISED D1). Idempotent: a no-op
-        # once the objects are gone.
-        client.command(f"DROP VIEW IF EXISTS {self._db}.stats_rollup_host_mv")
-        client.command(f"DROP TABLE IF EXISTS {self._db}.stats_rollup_host")
-        # v1.3.1 /stats pre-aggregation rollups (3 MVs + one-shot backfill).
-        for stmt in _STATS_ROLLUP:
-            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.3.1 parse-failures acceleration (1 MV + one-shot backfill).
+            client.command(stmt.format(db=db))
+
+        # Credential/shared-plane target tables (plane-agnostic).
+        for stmt in _STATS_ROLLUP_TABLES:
+            client.command(stmt.format(db=db, storage_policy_clause=spc))
+        # parse-failures + per-file/per-victim targets and victim-only MVs.
         for stmt in _EXTRACTED_PATHS:
-            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        # v1.4: KILLED the REFRESH-EVERY extracted_rows_per_file_counts MV + cache
-        # (O(table) rescan). REPLACED IN PLACE by a same-named VIEW over
-        # extracted_rows_per_file (incremental AMT, kept). Drop old MV + table,
-        # then create the view.
-        client.command(f"DROP VIEW IF EXISTS {self._db}.extracted_rows_per_file_counts_refresh")
-        client.command(f"DROP TABLE IF EXISTS {self._db}.extracted_rows_per_file_counts")
-        client.command(_EXTRACTED_ROWS_PER_FILE_COUNTS_VIEW.format(db=self._db))
-        # v1.3.6 Domain View: materialised host columns + bloom index on
-        # extracted_records, plus the by_domain_counts sibling. ALTERs are
-        # idempotent; MATERIALIZE COLUMN on an existing populated corpus is
-        # NOT run here (slow, operator decision) -- CH computes the
-        # expression on-the-fly until MATERIALIZE is kicked off manually.
-        for stmt in _EXTRACTED_RECORDS_HOST_COLS:
-            client.command(stmt.format(db=self._db))
-        # v1.3.12.2: by_domain_counts was converted from a refreshable
-        # ReplacingMergeTree (full rebuild every 5 min, OOMed at 7.5 GiB
-        # over 157M rows) to an incremental AggregatingMergeTree. The old
-        # MV was named by_domain_counts_refresh; the new one is
-        # by_domain_counts_mv and the target table schema changed too, so
-        # both must be dropped on upgrade. Sentinel `REFRESH EVERY` catches
-        # the old refreshable body; the follow-on CREATE TABLE +
-        # CREATE MATERIALIZED VIEW + backfill rebuild into the new shape.
-        self._repair_mv_if_stale(
-            client,
-            mv_name="by_domain_counts_refresh",
-            target_name="by_domain_counts",
-            sentinel="REFRESH EVERY",
-        )
-        for stmt in _BY_DOMAIN_COUNTS:
-            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
-        self._backfill_by_domain_counts(client)
-        # v1.4: by_domain_victim_counts REBUILT as an incremental AggregatingMergeTree
-        # (was a REFRESH-EVERY MV that full-rescanned extracted_records JOIN
-        # victim_counts = the firehose-scale OOM, code 241 at 3.73 GiB). Proven on
-        # the 2.3B poc: incremental MV ~1.54 GiB/block under the 4 GiB cap, ~1100x
-        # faster reads. Populates from the reindex (MV exists day 0, no backfill).
-        # One-shot repair: if the OLD refresh MV is present (sentinel REFRESH EVERY)
-        # drop it + the old ReplacingMergeTree table so the CREATE below rebuilds the
-        # new shape. Not a blind drop -- a plain DROP every boot would wipe the AMT
-        # on every restart; the sentinel fires only on the schema migration.
-        self._repair_mv_if_stale(
-            client,
-            mv_name="by_domain_victim_counts_refresh",
-            target_name="by_domain_victim_counts",
-            sentinel="REFRESH EVERY",
-        )
+            client.command(stmt.format(db=db, storage_policy_clause=spc))
+        # extracted_rows_per_file_counts: a VIEW finalizing the AMT at read.
+        client.command(_EXTRACTED_ROWS_PER_FILE_COUNTS_VIEW.format(db=db))
+        # by_domain_counts target (dual-sourced) + by_domain_victim_counts
+        # (victim-only, table + MV).
+        client.command(_BY_DOMAIN_COUNTS_TABLE.format(db=db, storage_policy_clause=spc))
         for stmt in _BY_DOMAIN_VICTIM_COUNTS:
-            client.command(stmt.format(db=self._db, storage_policy_clause=_storage_policy_clause()))
+            client.command(stmt.format(db=db, storage_policy_clause=spc))
 
-    def _backfill_by_domain_counts(self, client: Any) -> None:
-        """Size-gated one-shot backfill of by_domain_counts from an existing
-        corpus. No-op once the table holds data (on a fresh install / after a
-        from-zero rebuild the live MV covers every INSERT from byte zero, so
-        the gate stays closed and nothing is ever full-scanned).
+        # Dual-source MVs: each applied once per base plane into its one target.
+        for template in self._DUAL_MVS:
+            for src, suffix in self._PLANES:
+                client.command(template.format(db=db, src=src, suffix=suffix))
 
-        If by_domain_counts is empty but the source corpus is large
-        (> _BACKFILL_MAX_HOSTS distinct registrable hosts), we SKIP: the
-        full-corpus GROUP BY would OOM the per-query cap. The operator
-        repopulates by running a corpus reindex, which re-inserts every archive
-        through the MV with bounded per-block memory."""
+    def _migrate_old_single_plane(self, client: Any, db: str) -> None:
+        """Retire a pre-split deployment's shared extracted_records world, once.
+        No-op on a fresh install and on every boot after the migration."""
         rows = client.query(
-            f"SELECT 1 FROM {self._db}.by_domain_counts LIMIT 1"  # noqa: S608  # nosec B608
+            "SELECT 1 FROM system.tables "  # noqa: S608  # nosec B608
+            f"WHERE database = '{db}' AND name = 'extracted_records' "
+            "AND engine LIKE '%MergeTree%'"
         ).result_rows
-        if rows:
+        if not rows:
             return
-        host_rows = client.query(
-            f"SELECT uniqExact(host_registrable) FROM {self._db}.extracted_records "  # noqa: S608  # nosec B608
-            "WHERE host_registrable != ''"
-        ).result_rows
-        distinct_hosts = int(host_rows[0][0]) if host_rows else 0
-        if distinct_hosts > _BACKFILL_MAX_HOSTS:
-            _log.warning(
-                "stealer.by_domain_counts_backfill_skipped",
-                distinct_hosts=distinct_hosts,
-                max_hosts=_BACKFILL_MAX_HOSTS,
-                remedy="run a corpus reindex to populate incrementally via the MV",
-            )
-            return
-        client.command(_BY_DOMAIN_COUNTS_BACKFILL.format(db=self._db))
-
-    def _repair_victim_profiles_if_stale(self, client: Any) -> None:
-        """Drop the pre-1.3.1 victim_profiles table + MV iff the MV body
-        still contains the stale countIf expressions. Idempotent."""
-        self._repair_mv_if_stale(
-            client,
-            mv_name="victim_profiles_mv",
-            target_name="victim_profiles",
-            sentinel=_VICTIM_PROFILES_STALE_SENTINEL,
-        )
+        for mv in self._OLD_PLANE_MVS:
+            client.command(f"DROP VIEW IF EXISTS {db}.{mv}")
+        client.command(f"DROP TABLE IF EXISTS {db}.extracted_records")
 
     def _repair_mv_if_stale(
         self,
@@ -1410,11 +1194,17 @@ class ClickHouseRecordsSink:
         batch: list[list[Any]] = list(rows)
         if not batch:
             return 0
-        self._connect().insert(
-            f"{self._db}.extracted_records",
-            batch,
-            column_names=_RECORDS_COLUMNS,
-        )
+        client = self._connect()
+        # Route each row to its plane base table by archive_type (column index 2
+        # in _RECORDS_COLUMNS), matching the Go sink's tableFor. gotractor is the
+        # primary data plane ([[feedback-dont-pipe-go-data-through-python]]); this
+        # path is the legacy/fallback insert and stays correct by routing the same
+        # way. Unknown tags fall to the firehose, the safe bucket.
+        victim = [r for r in batch if r[2] == "stealer_victim"]
+        credlist = [r for r in batch if r[2] != "stealer_victim"]
+        for table, part in ((_RECORDS_CREDLIST, credlist), (_RECORDS_VICTIM, victim)):
+            if part:
+                client.insert(f"{self._db}.{table}", part, column_names=_RECORDS_COLUMNS)
         return len(batch)
 
     def close(self) -> None:

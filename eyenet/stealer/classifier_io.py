@@ -58,7 +58,7 @@ def collect_evidence_sync(client: Any, archive_sha256: str, victim_folder: str) 
 
     rec_rows = client.query(
         "SELECT DISTINCT er.rule_id, er.fields "  # noqa: S608  # nosec B608
-        f"FROM {db}.extracted_records AS er "
+        f"FROM {db}.extracted_records_victim AS er "
         "WHERE er.archive_sha256 = %(sha)s "
         "  AND er.victim_folder = %(vf)s",
         parameters={"sha": archive_sha256, "vf": victim_folder},
@@ -107,7 +107,7 @@ async def collect_evidence(client: Any, archive_sha256: str, victim_folder: str)
 
     rec_rows = await client.query(
         "SELECT DISTINCT er.rule_id, er.fields "  # noqa: S608  # nosec B608
-        f"FROM {db}.extracted_records AS er "
+        f"FROM {db}.extracted_records_victim AS er "
         "WHERE er.archive_sha256 = {sha:FixedString(64)} "
         "  AND er.victim_folder = {vf:String}",
         parameters={"sha": archive_sha256, "vf": victim_folder},

@@ -39,7 +39,7 @@ async def rule_coverage_gaps(
             f"FROM {db}.victim_family_verdict AS v FINAL "  # nosec B608
             "LEFT JOIN ("
             "  SELECT archive_sha256, victim_folder, 1 AS has_fp "
-            f"  FROM {db}.extracted_records "  # nosec B608
+            f"  FROM {db}.extracted_records_victim "  # nosec B608
             "  WHERE family = 'victim_fingerprint' "
             "  GROUP BY archive_sha256, victim_folder"
             ") AS er_fp USING (archive_sha256, victim_folder) "
@@ -67,8 +67,7 @@ async def rule_coverage_gaps(
     total_victims = sum(it.total_victims for it in items)
     total_missing = sum(it.missing_fingerprint for it in items)
     coverage_pct = (
-        round(100.0 * (total_victims - total_missing) / total_victims, 1)
-        if total_victims else 0.0
+        round(100.0 * (total_victims - total_missing) / total_victims, 1) if total_victims else 0.0
     )
     return RuleCoverageGapsResponse(
         items=items,

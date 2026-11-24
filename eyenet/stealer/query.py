@@ -187,15 +187,13 @@ class StealerCredsReader:
             self._buckets(
                 f"SELECT scheme, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_scheme "
-                "GROUP BY scheme ORDER BY c DESC"
-                + spill,
+                "GROUP BY scheme ORDER BY c DESC" + spill,
                 {},
             ),
             self._buckets(
                 f"SELECT tld, uniqHLL12Merge(cnt) c "  # noqa: S608  # nosec B608
                 f"FROM {self._db}.stats_rollup_tld "
-                "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}"
-                + spill,
+                "GROUP BY tld ORDER BY c DESC LIMIT {top:UInt32}" + spill,
                 top_param,
             ),
         )
@@ -240,8 +238,14 @@ class StealerCredsReader:
             host_filter = f" AND {host_expr} = {{host:String}}"
             params["host"] = host
         elif host:
-            host_filter = f" AND {host_expr} ILIKE {{pat:String}}"
-            params["pat"] = f"%{host}%"
+            # Substring search is served by the 26.x text index on the host_canon
+            # MATERIALIZED column (TYPE text, ngrams tokenizer). The index only
+            # applies when the predicate is on the column itself, not the coalesce
+            # expr -- so filter host_canon, not host_expr. host_canon is lower()ed
+            # at materialization, so lower the pattern and use case-sensitive LIKE.
+            # Measured ~13ms vs ~1.4s for the old ILIKE scan. See CH_NEW_SCHEMAS.md.
+            host_filter = " AND host_canon LIKE {pat:String}"
+            params["pat"] = f"%{host.lower()}%"
         try:
             client = await self._c()
             # v1.3.4.4: dropped FINAL. extracted_records is 100M rows x 11
