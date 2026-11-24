@@ -264,9 +264,17 @@ class StealerProcessorService(ServiceBase):
                 )
                 for att in rows:
                     try:
-                        await self._storage.set_stealer_processing(
-                            att.id, state=STEALER_RUNNING, error=None
-                        )
+                        if not env.resume:
+                            # Full replay (from-zero rebuild): force RUNNING so the
+                            # STEALER_DONE idempotency guard in _process_attachment is
+                            # defeated and every archive is re-extracted.
+                            await self._storage.set_stealer_processing(
+                                att.id, state=STEALER_RUNNING, error=None
+                            )
+                        # Resume: leave state untouched -- _process_attachment returns
+                        # early on STEALER_DONE, so only not-done (pending / failed /
+                        # the one RUNNING at the crash) attachments are processed. The
+                        # per-attachment state is the cursor; no restore file needed.
                         await self._process_attachment(att.id)
                     except Exception as exc:
                         _log.error(
@@ -274,7 +282,11 @@ class StealerProcessorService(ServiceBase):
                             attachment=str(att.id),
                             error=str(exc),
                         )
-                _log.info("stealer_processor.corpus_reindex_done", processed=len(rows))
+                _log.info(
+                    "stealer_processor.corpus_reindex_done",
+                    processed=len(rows),
+                    resume=env.resume,
+                )
             except Exception as exc:
                 _log.error("stealer_processor.corpus_reindex_failed", error=str(exc))
 

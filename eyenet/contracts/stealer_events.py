@@ -61,6 +61,15 @@ class StealerCorpusReindexEnvelope(BusEnvelope):
 
     requested_by: UUID | None = Field(default=None)
     limit: int = Field(default=0, description="0 == no cap (sweep everything)")
+    resume: bool = Field(
+        default=False,
+        description="Resume an interrupted sweep: skip attachments already "
+        "STEALER_DONE (the per-attachment state is the cursor) and process only "
+        "not-done ones. Default False = full replay, force-reprocess every "
+        "attachment (correct for a from-zero rebuild). Resume continues an "
+        "interrupted run; it does NOT apply a changed ruleset -- use a full "
+        "replay (or stealer-reclassify) for that.",
+    )
 
 
 class StealerCorpusReclassifyEnvelope(BusEnvelope):

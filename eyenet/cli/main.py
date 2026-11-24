@@ -941,6 +941,15 @@ def stealer_reindex(  # pragma: no cover
     limit: int = typer.Option(
         0, "--limit", help="Cap on the corpus-reindex envelope (0 = sweep everything)."
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        "-R",
+        help="Resume an interrupted corpus sweep: skip attachments already"
+        " STEALER_DONE, process only not-done ones. Default is a full replay"
+        " (re-extracts everything). Resume CONTINUES a run; it does not apply a"
+        " changed ruleset -- full replay or stealer-reclassify for that.",
+    ),
 ) -> None:
     """Request a stealer reindex via the bus and exit.
 
@@ -998,9 +1007,13 @@ def stealer_reindex(  # pragma: no cover
                 await publisher.publish(subject, env)
                 typer.echo(f"published {subject} attachment={attachment}")
                 return 1
-            env2 = StealerCorpusReindexEnvelope(limit=limit, trace_context=tc)
+            env2 = StealerCorpusReindexEnvelope(limit=limit, resume=resume, trace_context=tc)
             await publisher.publish(SUBJECT_STEALER_CORPUS_REINDEX, env2)
-            typer.echo(f"published {SUBJECT_STEALER_CORPUS_REINDEX} limit={limit or 'unbounded'}")
+            mode = "resume" if resume else "full-replay"
+            typer.echo(
+                f"published {SUBJECT_STEALER_CORPUS_REINDEX} "
+                f"limit={limit or 'unbounded'} mode={mode}"
+            )
             return 1
         finally:
             await storage.close()
