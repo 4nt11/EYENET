@@ -53,6 +53,7 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "stealer.attachment.reindex.urgent",
     "stealer.corpus.reindex",
     "stealer.corpus.reclassify",
+    "stealer.rule.reindex",
     "entity.",
     "eyenet.audit.",
     "eyenet.control.",

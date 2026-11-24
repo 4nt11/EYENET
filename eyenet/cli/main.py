@@ -950,6 +950,15 @@ def stealer_reindex(  # pragma: no cover
         " (re-extracts everything). Resume CONTINUES a run; it does not apply a"
         " changed ruleset -- full replay or stealer-reclassify for that.",
     ),
+    rules: str = typer.Option(
+        "",
+        "--rules",
+        help="Reindex-by-RULE: comma-separated rule ids to re-extract across the"
+        " corpus. Per-member-extracts only files matching each rule's path_glob and"
+        " runs gotractor with the rule subset -- cheap backfill for a new/fixed rule"
+        " (e.g. json_v2_pc_info), no full re-extract. Mutually exclusive with"
+        " --attachment.",
+    ),
 ) -> None:
     """Request a stealer reindex via the bus and exit.
 
@@ -973,8 +982,10 @@ def stealer_reindex(  # pragma: no cover
         SUBJECT_STEALER_ATTACHMENT_REINDEX,
         SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT,
         SUBJECT_STEALER_CORPUS_REINDEX,
+        SUBJECT_STEALER_RULE_REINDEX,
         StealerAttachmentReindexEnvelope,
         StealerCorpusReindexEnvelope,
+        StealerRuleReindexEnvelope,
     )
     from eyenet.telemetry.propagation import ZERO_TRACEPARENT  # noqa: PLC0415
 
@@ -982,6 +993,11 @@ def stealer_reindex(  # pragma: no cover
 
     if urgent and attachment is None:
         typer.echo("error: --urgent requires --attachment", err=True)
+        raise typer.Exit(code=2)
+    if rules and attachment is not None:
+        typer.echo(
+            "error: --rules (corpus-wide by rule) is mutually exclusive with --attachment", err=True
+        )
         raise typer.Exit(code=2)
 
     async def _main() -> int:
@@ -1006,6 +1022,17 @@ def stealer_reindex(  # pragma: no cover
                 env = StealerAttachmentReindexEnvelope(attachment_id=attachment, trace_context=tc)
                 await publisher.publish(subject, env)
                 typer.echo(f"published {subject} attachment={attachment}")
+                return 1
+            if rules:
+                rule_ids = [r.strip() for r in rules.split(",") if r.strip()]
+                env_r = StealerRuleReindexEnvelope(
+                    rule_ids=rule_ids, limit=limit, resume=resume, trace_context=tc
+                )
+                await publisher.publish(SUBJECT_STEALER_RULE_REINDEX, env_r)
+                typer.echo(
+                    f"published {SUBJECT_STEALER_RULE_REINDEX} "
+                    f"rules={rule_ids} limit={limit or 'unbounded'}"
+                )
                 return 1
             env2 = StealerCorpusReindexEnvelope(limit=limit, resume=resume, trace_context=tc)
             await publisher.publish(SUBJECT_STEALER_CORPUS_REINDEX, env2)

@@ -24,17 +24,19 @@ from eyenet.contracts.stealer_events import (
     SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT,
     SUBJECT_STEALER_CORPUS_RECLASSIFY,
     SUBJECT_STEALER_CORPUS_REINDEX,
+    SUBJECT_STEALER_RULE_REINDEX,
     StealerAttachmentCapturedEnvelope,
     StealerAttachmentReindexEnvelope,
     StealerCorpusReclassifyEnvelope,
     StealerCorpusReindexEnvelope,
+    StealerRuleReindexEnvelope,
 )
 from eyenet.models.stealer import STEALER_DONE, STEALER_FAILED, STEALER_RUNNING
 from eyenet.service import ServiceBase
 from eyenet.stealer.clickhouse import ClickHouseRecordsSink, FileAuditSink
 from eyenet.stealer.gotractor_client import GotractorDaemon
 from eyenet.stealer.password import parse_password, password_candidates
-from eyenet.stealer.pipeline import process_archive
+from eyenet.stealer.pipeline import process_archive, reindex_archive_by_rules
 from eyenet.telemetry.logging import get_logger
 from eyenet.telemetry.propagation import attach_from_headers
 
@@ -142,6 +144,9 @@ class StealerProcessorService(ServiceBase):
         async def _on_corpus_reclassify(_s: str, p: bytes, h: dict[str, str]) -> None:
             asyncio.create_task(self._process_corpus_reclassify(p, h))  # noqa: RUF006
 
+        async def _on_rule_reindex(_s: str, p: bytes, h: dict[str, str]) -> None:
+            asyncio.create_task(self._process_rule_reindex(p, h))  # noqa: RUF006
+
         await self._bus.subscribe(
             SUBJECT_STEALER_ATTACHMENT_CAPTURED, _on_captured, queue_group="stealer"
         )
@@ -162,6 +167,9 @@ class StealerProcessorService(ServiceBase):
         )
         await self._bus.subscribe(
             SUBJECT_STEALER_CORPUS_RECLASSIFY, _on_corpus_reclassify, queue_group="stealer"
+        )
+        await self._bus.subscribe(
+            SUBJECT_STEALER_RULE_REINDEX, _on_rule_reindex, queue_group="stealer"
         )
         # Boot replay: archives captured while down, or channels marked after capture.
         self._replay_task = asyncio.create_task(self._replay_unprocessed())
@@ -318,6 +326,88 @@ class StealerProcessorService(ServiceBase):
                 _log.info("stealer_processor.corpus_reclassify_done", victims=count)
             except Exception as exc:
                 _log.error("stealer_processor.corpus_reclassify_failed", error=str(exc))
+
+    def _rule_path_globs(self, rule_ids: list[str]) -> list[str]:
+        """Read the rule catalog YAMLs and return the path_globs for the given
+        rule ids. Used to decide which archive members a rule-reindex extracts.
+        rules_dir is operator config, not user input."""
+        import yaml  # noqa: PLC0415
+
+        wanted = set(rule_ids)
+        globs: list[str] = []
+        for yf in sorted(self._rules_dir.glob("*.yaml")):
+            try:
+                doc = yaml.safe_load(yf.read_text(encoding="utf-8"))
+            except Exception as exc:
+                _log.warning(
+                    "stealer_processor.rule_glob_parse_failed", file=str(yf), error=str(exc)
+                )
+                continue
+            if isinstance(doc, dict) and doc.get("id") in wanted:
+                globs.append(str(doc.get("path_glob", "**/*")))
+        return globs
+
+    async def _process_rule_reindex(self, payload: bytes, headers: dict[str, str]) -> None:
+        """Reindex-by-rule: re-extract only env.rule_ids across the corpus by
+        per-member-extracting just the files matching their path_globs (RAR) and
+        running gotractor with the rule subset. Cheap backfill for a new/fixed
+        rule; dedup-safe, other rules untouched."""
+        with attach_from_headers(headers):
+            try:
+                env = StealerRuleReindexEnvelope.model_validate_json(payload)
+                path_globs = self._rule_path_globs(env.rule_ids)
+                if not path_globs:
+                    _log.warning("stealer_processor.rule_reindex_no_globs", rule_ids=env.rule_ids)
+                    return
+                if self._gotractor is None:
+                    _log.error("stealer_processor.rule_reindex_no_gotractor")
+                    return
+                limit = env.limit if env.limit > 0 else _REPLAY_LIMIT
+                _log.info(
+                    "stealer_processor.rule_reindex_start",
+                    rule_ids=env.rule_ids,
+                    path_globs=path_globs,
+                    limit=limit,
+                )
+                rows = await self._storage.list_stealer_attachments_for_reindex(
+                    STEALER_LOG_CATEGORY, limit=limit
+                )
+                touched = 0
+                for att in rows:
+                    if not att.storage_uri:
+                        continue
+                    try:
+                        msg = await self._storage.get_message(att.message_id)
+                        body = getattr(msg, "body", "") or ""
+                        candidates = password_candidates(parse_password(body))
+                        # Shared gotractor daemon + sinks -> serialize (see lock).
+                        async with self._process_lock:
+                            res = await asyncio.to_thread(
+                                reindex_archive_by_rules,
+                                blob_path=Path(att.storage_uri),
+                                password_candidates=candidates,
+                                rule_ids=env.rule_ids,
+                                path_globs=path_globs,
+                                work_root=self._work_root,
+                                source_label=f"attachment:{att.id}",
+                                gotractor=self._gotractor,
+                            )
+                        if res.matched_files:
+                            touched += 1
+                    except Exception as exc:
+                        _log.error(
+                            "stealer_processor.rule_reindex_item_failed",
+                            attachment=str(att.id),
+                            error=str(exc),
+                        )
+                _log.info(
+                    "stealer_processor.rule_reindex_done",
+                    rule_ids=env.rule_ids,
+                    archives_touched=touched,
+                    scanned=len(rows),
+                )
+            except Exception as exc:
+                _log.error("stealer_processor.rule_reindex_failed", error=str(exc))
 
     async def shutdown(self) -> None:
         self._audit_sink.close()

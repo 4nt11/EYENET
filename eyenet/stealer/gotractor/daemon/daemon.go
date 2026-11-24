@@ -4,36 +4,39 @@
 // in, zero or more lines out per command, framed by a terminating line.
 //
 // Commands:
-//   {"cmd":"run","req_id":"...","input":"/path/to/folder","source_label":"..."}
-//   {"cmd":"reload","req_id":"..."}
-//   {"cmd":"stats","req_id":"..."}
-//   {"cmd":"shutdown","req_id":"..."}
+//
+//	{"cmd":"run","req_id":"...","input":"/path/to/folder","source_label":"..."}
+//	{"cmd":"reload","req_id":"..."}
+//	{"cmd":"stats","req_id":"..."}
+//	{"cmd":"shutdown","req_id":"..."}
 //
 // Responses (every line carries the req_id so the caller can demultiplex
 // if it pipelines commands):
-//   {"kind":"verdict","req_id":"...","family":"...","root":"...","files":N}
-//   {"kind":"record","req_id":"...","rule_id":"...","family":"...","file_path":"...","fields":{...}}
-//   {"kind":"truncated","req_id":"...","rule_id":"...","file_path":"...","emitted":N,"total_seen":N}
-//   {"kind":"parse_error","req_id":"...","rule_id":"...","file_path":"...","error":"...","kind_code":"panic|timeout|decode"}
-//   {"kind":"run_done","req_id":"...","records":N,"wall_ms":N,"rules_fired":{"<rule_id>":N}}
-//   {"kind":"reloaded","req_id":"...","rules":N,"families":N,"trigger":"cmd|fs"}
-//   {"kind":"stats","req_id":"...","uptime_ms":N,"archives":N,"records":N,"catalog":{"rules":N,"families":N,"loaded_at":"..."}}
-//   {"kind":"shutdown_ack","req_id":"..."}
-//   {"kind":"error","req_id":"...","error":"..."}
+//
+//	{"kind":"verdict","req_id":"...","family":"...","root":"...","files":N}
+//	{"kind":"record","req_id":"...","rule_id":"...","family":"...","file_path":"...","fields":{...}}
+//	{"kind":"truncated","req_id":"...","rule_id":"...","file_path":"...","emitted":N,"total_seen":N}
+//	{"kind":"parse_error","req_id":"...","rule_id":"...","file_path":"...","error":"...","kind_code":"panic|timeout|decode"}
+//	{"kind":"run_done","req_id":"...","records":N,"wall_ms":N,"rules_fired":{"<rule_id>":N}}
+//	{"kind":"reloaded","req_id":"...","rules":N,"families":N,"trigger":"cmd|fs"}
+//	{"kind":"stats","req_id":"...","uptime_ms":N,"archives":N,"records":N,"catalog":{"rules":N,"families":N,"loaded_at":"..."}}
+//	{"kind":"shutdown_ack","req_id":"..."}
+//	{"kind":"error","req_id":"...","error":"..."}
 //
 // Catalog is reloaded automatically when any *.yaml file under rules-dir
 // or families-dir changes (fsnotify watcher goroutine). Writes are
 // debounced so a batch of editor saves ends in one reload.
 //
 // Prometheus HTTP endpoint on --metrics-port. Metrics:
-//   gotractor_archives_total               counter
-//   gotractor_records_emitted_total        counter{rule_id,family}
-//   gotractor_records_rejected_total       counter{rule_id}
-//   gotractor_archive_duration_seconds     histogram
-//   gotractor_catalog_rules                gauge
-//   gotractor_catalog_families              gauge
-//   gotractor_catalog_reloads_total        counter{trigger}
-//   gotractor_catalog_reload_errors_total  counter
+//
+//	gotractor_archives_total               counter
+//	gotractor_records_emitted_total        counter{rule_id,family}
+//	gotractor_records_rejected_total       counter{rule_id}
+//	gotractor_archive_duration_seconds     histogram
+//	gotractor_catalog_rules                gauge
+//	gotractor_catalog_families              gauge
+//	gotractor_catalog_reloads_total        counter{trigger}
+//	gotractor_catalog_reload_errors_total  counter
 package daemon
 
 import (
@@ -330,6 +333,11 @@ type commandEnv struct {
 	// arrive on the run command. Both empty when the sink is disabled
 	// (stdout-record mode) -- Python still owns labeling on that path.
 	ArchiveSha256 string `json:"archive_sha256,omitempty"`
+	// v1.4: reindex-by-rule. When non-empty, ONLY content rules whose id is in
+	// this set run (container rules always run so the family winner stays
+	// correct). Lets a rule-scoped reindex re-extract one rule's output over
+	// per-member-extracted files without re-running the whole catalog.
+	Rules []string `json:"rules,omitempty"`
 }
 
 func (d *Daemon) dispatch(ctx context.Context, line string, w *lockedWriter) (commandEnv, error) {
@@ -399,6 +407,25 @@ func (d *Daemon) cmdRun(_ context.Context, cmd commandEnv, w *lockedWriter) erro
 	archiveType := ClassifyArchiveType(paths)
 	snap := d.catalog.Load()
 	rules := snap.Rules
+	// Reindex-by-rule: keep every container rule (so the family winner is still
+	// computed correctly) plus only the content rules the caller asked for.
+	if len(cmd.Rules) > 0 {
+		want := make(map[string]struct{}, len(cmd.Rules))
+		for _, id := range cmd.Rules {
+			want[id] = struct{}{}
+		}
+		filtered := make([]engine.Rule, 0, len(rules))
+		for _, r := range rules {
+			if r.Layer == "container" {
+				filtered = append(filtered, r)
+				continue
+			}
+			if _, ok := want[r.ID]; ok {
+				filtered = append(filtered, r)
+			}
+		}
+		rules = filtered
+	}
 
 	// v1.4.0: direct-to-ClickHouse ingestion. With the sink enabled,
 	// records flow into CH via a prepared batch (Flush every 10k rows);
@@ -678,16 +705,16 @@ func (d *Daemon) watchLoop(ctx context.Context, w *fsnotify.Watcher, writer *loc
 // goroutine so the N parallel run workers never contend on a mutex or
 // on the stdout syscall. Design:
 //
-//   1. Workers marshal to a pooled bytes.Buffer in parallel. All the
-//      reflection cost of encoding/json moves off the serial writer
-//      goroutine and onto the N parallel matchers (where it scales).
-//   2. The channel carries *bytes.Buffer, not `any`. No interface
-//      boxing per record (300k/s hot path).
-//   3. The writer goroutine owns stdout and a 64KB bufio.Writer. Its
-//      only work per record is `bw.Write(buf.Bytes())` + Put the buf
-//      back to the pool.
-//   4. Time-based flush every 10ms for latency; byte-triggered flush
-//      amortises syscalls.
+//  1. Workers marshal to a pooled bytes.Buffer in parallel. All the
+//     reflection cost of encoding/json moves off the serial writer
+//     goroutine and onto the N parallel matchers (where it scales).
+//  2. The channel carries *bytes.Buffer, not `any`. No interface
+//     boxing per record (300k/s hot path).
+//  3. The writer goroutine owns stdout and a 64KB bufio.Writer. Its
+//     only work per record is `bw.Write(buf.Bytes())` + Put the buf
+//     back to the pool.
+//  4. Time-based flush every 10ms for latency; byte-triggered flush
+//     amortises syscalls.
 type lockedWriter struct {
 	ch   chan *bytes.Buffer
 	done chan struct{}

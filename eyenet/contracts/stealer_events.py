@@ -36,6 +36,13 @@ SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT: str = "stealer.attachment.reindex.urg
 # just re-scores every (archive, victim) pair under the current family
 # catalog. Cheap compared to reindex (CH-only).
 SUBJECT_STEALER_CORPUS_RECLASSIFY: str = "stealer.corpus.reclassify"
+# Reindex-by-RULE: re-extract only specific rule_ids across the corpus without
+# re-running the whole catalog. The processor per-member-extracts just the files
+# matching each rule's path_glob and runs gotractor with the rule subset. Cheap
+# way to backfill a newly-added or newly-fixed rule (e.g. the json_v2 pc_info.json
+# fingerprint lane) without a full re-extract. See
+# development/PCINFO_JSON_GAP_AND_REINDEX_BY_RULE_SCOPE.md.
+SUBJECT_STEALER_RULE_REINDEX: str = "stealer.rule.reindex"
 
 
 class StealerAttachmentCapturedEnvelope(BusEnvelope):
@@ -80,14 +87,36 @@ class StealerCorpusReclassifyEnvelope(BusEnvelope):
     requested_by: UUID | None = Field(default=None)
 
 
+class StealerRuleReindexEnvelope(BusEnvelope):
+    """Operator-requested reindex of specific RULE ids across the corpus. The
+    processor walks attachments (resume-aware), and per attachment lists the
+    archive, keeps only members matching the target rules' path_globs,
+    per-member-extracts those, and runs gotractor with the rule subset. Only the
+    target rules' rows are (re)emitted; ReplacingMergeTree dedups, other rules'
+    rows are untouched. Re-decrypts per archive but skips the whole-catalog walk
+    + heavy-rule re-insert. For a newly added/fixed rule, not a from-zero rebuild."""
+
+    rule_ids: list[str] = Field(description="Content rule ids to (re)extract")
+    requested_by: UUID | None = Field(default=None)
+    limit: int = Field(default=0, description="0 == no cap (sweep everything)")
+    resume: bool = Field(
+        default=False,
+        description="Skip attachments already done for THIS rule set (cursor keyed "
+        "on the rule reindex). Default False = sweep all archives that have "
+        "matching members.",
+    )
+
+
 __all__ = [
     "SUBJECT_STEALER_ATTACHMENT_CAPTURED",
     "SUBJECT_STEALER_ATTACHMENT_REINDEX",
     "SUBJECT_STEALER_ATTACHMENT_REINDEX_URGENT",
     "SUBJECT_STEALER_CORPUS_RECLASSIFY",
     "SUBJECT_STEALER_CORPUS_REINDEX",
+    "SUBJECT_STEALER_RULE_REINDEX",
     "StealerAttachmentCapturedEnvelope",
     "StealerAttachmentReindexEnvelope",
     "StealerCorpusReclassifyEnvelope",
     "StealerCorpusReindexEnvelope",
+    "StealerRuleReindexEnvelope",
 ]  # grouped by subject constants then envelopes

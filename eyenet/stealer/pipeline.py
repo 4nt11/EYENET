@@ -19,9 +19,11 @@ import subprocess  # nosec B404: fixed tools (7zz/unrar/unar), list argv, never 
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from queue import Empty as QueueEmpty
 from typing import TYPE_CHECKING
 
 from eyenet.stealer.extractor import gotractor_path
+from eyenet.stealer.rules.engine import match_glob
 from eyenet.telemetry.logging import get_logger
 
 if TYPE_CHECKING:
@@ -706,4 +708,130 @@ def _classify_archive_victims(archive_sha: str) -> None:
         _log.warning("stealer.classifier_failed", error=str(exc), error_type=type(exc).__name__)
 
 
-__all__ = ["ProcessResult", "process_archive"]
+@dataclass
+class RuleReindexResult:
+    """Outcome of a per-archive reindex-by-rule pass."""
+
+    ok: bool
+    matched_files: int = 0
+    records: int = 0
+    tool: str = ""
+    error: str | None = None
+
+
+def _rar_password(blob_path: Path, candidates: list[str]) -> str | None:
+    """Find the password that LISTS a RAR archive. `unrar lb` reads only headers
+    (no data inflate), so this is cheap. Returns the working password ('' = none),
+    or None if nothing opens it."""
+    for pw in [*candidates, ""]:
+        pw_arg = f"-p{pw}" if pw else "-p-"
+        argv = ["unrar", "lb", pw_arg, str(blob_path)]
+        res = subprocess.run(  # noqa: S603  # nosec B603 - fixed tool, list argv
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+            stdin=subprocess.DEVNULL,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return pw
+    return None
+
+
+def _rar_members_matching(blob_path: Path, pw: str, path_globs: list[str]) -> list[str]:
+    """Bare-list the RAR members and keep those matching any target path_glob."""
+    pw_arg = f"-p{pw}" if pw else "-p-"
+    argv = ["unrar", "lb", pw_arg, str(blob_path)]
+    res = subprocess.run(  # noqa: S603  # nosec B603 - fixed tool, list argv
+        argv,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=600,
+        stdin=subprocess.DEVNULL,
+    )
+    members = [m for m in res.stdout.splitlines() if m]
+    return [m for m in members if any(match_glob(g, m) for g in path_globs)]
+
+
+def _rar_extract_members(blob_path: Path, pw: str, members: list[str], dest: Path) -> None:
+    """Extract ONLY the named members, preserving in-archive paths, via an @listfile
+    so spaces/unicode in member paths never hit shell quoting."""
+    dest.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".lst", delete=False, encoding="utf-8", dir=str(dest.parent)
+    ) as fh:
+        fh.write("\n".join(members) + "\n")
+        listpath = fh.name
+    try:
+        pw_arg = f"-p{pw}" if pw else "-p-"
+        argv = ["unrar", "x", "-o+", "-inul", pw_arg, str(blob_path), f"@{listpath}", f"{dest}/"]
+        subprocess.run(  # noqa: S603  # nosec B603 - fixed tool, list argv
+            argv,
+            capture_output=True,
+            check=False,
+            timeout=3600,
+            stdin=subprocess.DEVNULL,
+        )
+    finally:
+        Path(listpath).unlink(missing_ok=True)
+
+
+def reindex_archive_by_rules(
+    *,
+    blob_path: Path,
+    password_candidates: list[str],
+    rule_ids: list[str],
+    path_globs: list[str],
+    work_root: Path,
+    source_label: str,
+    gotractor: GotractorDaemon,
+) -> RuleReindexResult:
+    """Re-extract ONLY ``rule_ids`` from one archive, cheaply. For RAR (the common
+    stealer case) we list the archive, keep only members matching the rules'
+    ``path_globs``, and per-member-extract just those -- no whole-archive inflate,
+    no whole-catalog walk. gotractor runs with the rule subset and inserts via its
+    own CH sink; ReplacingMergeTree dedups so other rules' rows are untouched.
+    archive_sha256 = blob stem, so the new rows share the victims' archive id.
+    Non-RAR archives fall back to a full extract (still rule-filtered at gotractor).
+    Caller holds the shared-gotractor lock."""
+    archive_sha = blob_path.stem
+    work_root.mkdir(parents=True, exist_ok=True)
+    dest = Path(tempfile.mkdtemp(dir=str(work_root), prefix="rule-reindex-"))
+    try:
+        tool = _pick_tool(blob_path)
+        matched = 0
+        if tool == "unrar":
+            pw = _rar_password(blob_path, password_candidates)
+            if pw is None:
+                return RuleReindexResult(
+                    ok=False, tool=tool, error="no password opened the archive"
+                )
+            targets = _rar_members_matching(blob_path, pw, path_globs)
+            matched = len(targets)
+            if not targets:
+                # No member matches these rules -> nothing to do, no data inflate.
+                return RuleReindexResult(ok=True, matched_files=0, records=0, tool=tool)
+            _rar_extract_members(blob_path, pw, targets, dest)
+        # Non-RAR: no cheap per-member path here; full extract, gotractor's
+        # rule filter still scopes what is emitted.
+        elif _extract(blob_path, password_candidates, dest) is None:
+            return RuleReindexResult(ok=False, tool=tool, error="no password opened the archive")
+        _normalize_text_tree(dest)
+        stream, done_q = gotractor.run(
+            dest, source_label=source_label, archive_sha256=archive_sha, rules=rule_ids
+        )
+        records = sum(1 for _ in stream)
+        try:
+            done_q.get(timeout=3600)
+        except QueueEmpty:
+            # Terminal run_done never arrived (daemon wedged?); records already
+            # counted off the drained stream. Log, do not swallow silently.
+            _log.warning("stealer.rule_reindex_done_timeout", archive=archive_sha)
+        return RuleReindexResult(ok=True, matched_files=matched, records=records, tool=tool)
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)
+
+
+__all__ = ["ProcessResult", "RuleReindexResult", "process_archive", "reindex_archive_by_rules"]

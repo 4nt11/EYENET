@@ -172,6 +172,7 @@ class GotractorDaemon:
         *,
         source_label: str = "",
         archive_sha256: str = "",
+        rules: list[str] | None = None,
     ) -> tuple[Iterator[dict[str, Any]], Queue[RunDone]]:
         """Dispatch a 'run' command. Returns an iterator that yields each
         ``record`` line's ``fields`` dict as gotractor emits it, plus a
@@ -202,6 +203,9 @@ class GotractorDaemon:
                         "input": str(input_path),
                         "source_label": source_label,
                         "archive_sha256": archive_sha256,
+                        # Reindex-by-rule: restrict to these content rule ids.
+                        # Empty/omitted = full catalog (normal extraction).
+                        **({"rules": rules} if rules else {}),
                     }
                 )
                 + "\n"
