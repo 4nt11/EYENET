@@ -326,20 +326,33 @@ class DomainCorpusReader:
         return self._client
 
     def _host_predicate(self) -> str:
-        """SQL predicate: equality on the MATERIALIZED host_registrable column.
+        """SQL predicate selecting a registrable domain + its subdomains.
 
-        v1.3.6: the column is populated at insert time via
-        ``cutToFirstSignificantSubdomain(lower(coalesce(domain(url), ...)))``
-        and backed by a bloom_filter(0.01) GRANULARITY 4 skip index. One
-        equality check prunes to ~0.3% of granules (measured 749/12315 on
-        prod for google.com) + 0.16% empirical false-positive rate (measured,
-        6x tighter than the configured target). Subdomain match comes for
-        free because host_registrable is already the registrable form.
+        Two redundant conditions that select the SAME rows, each so a
+        different plane uses its best index after the plane split:
+
+          host_registrable = {d}  -- victim plane (archive-sorted): the
+                                     bloom_filter(0.01) skip index is the
+                                     only host pruner it has (~5x).
+          rev_host range          -- credlist plane (326M firehose): rev_host
+                                     LEADS the ORDER BY, so this is a
+                                     primary-key range SEEK, not a scan
+                                     (measured ~7ms / 131k rows vs the bloom's
+                                     ~34M rows + OOM on google.com). This is
+                                     exactly what rev_host was built for.
+
+        rev_host is the label-reversed host_canon, so 'consalud.cl' ->
+        'cl.consalud' and a subdomain 'www.consalud.cl' -> 'cl.consalud.www'.
+        The trailing dot on {revdot} stops 'cl.consaludX' from matching.
         """
-        return "host_registrable = {d:String}"
+        return (
+            "host_registrable = {d:String} "
+            "AND (rev_host = {rev:String} OR startsWith(rev_host, {revdot:String}))"
+        )
 
     def _base_params(self, canonical: str) -> dict[str, object]:
-        return {"d": canonical}
+        rev = ".".join(reversed(canonical.split(".")))
+        return {"d": canonical, "rev": rev, "revdot": rev + "."}
 
     async def summary(self, canonical: str) -> DomainSummaryRow:
         """Hero card numbers.
@@ -401,7 +414,7 @@ class DomainCorpusReader:
                 "SELECT uniqHLL12((trim(LEADING '.' FROM fields['cookie_domain']), "  # noqa: S608
                 "       coalesce(nullIf(fields['cookie_name'], ''), fields['name']))) "
                 f"FROM {self._db}.extracted_records "  # nosec B608
-                "WHERE host_registrable = {d:String} "
+                f"WHERE {self._host_predicate()} "
                 "  AND family IN ('cookies','victim_cookies') "
                 "  AND fromUnixTimestamp(toUInt32OrZero(coalesce("
                 "        nullIf(fields['cookie_expires_epoch'], ''), "
@@ -459,14 +472,28 @@ class DomainCorpusReader:
                 parameters=params,
             )
             total_n = int(total.result_rows[0][0]) if total.result_rows else 0
+            # GROUP BY (url,user,password) + argMax, NOT DISTINCT over all 8
+            # columns: (1) it matches the total's uniqHLL12((url,user,password))
+            # dedup key, so pages*limit == total; (2) GROUP BY spills to disk
+            # under max_bytes_before_external_group_by, where a wide DISTINCT
+            # materialises every matched row's `fields` Map in RAM and OOMs on
+            # mega-domains (google.com: 14.8M rows, DISTINCT=3.73 GiB OOM vs
+            # GROUP BY=1.16 GiB spilled). argMax picks the most-recent row's
+            # display columns per credential.
             rows = await client.query(
-                f"SELECT DISTINCT {self._HOST_EXPR} h, fields['url'] u, fields['user'] l, "  # noqa: S608
-                f"       fields['password'] p, {self._SCHEME_EXPR} s, "
-                "       archive_sha256, victim_folder, ingested_at "
+                f"SELECT argMax({self._HOST_EXPR}, ingested_at) h, "  # noqa: S608
+                "       fields['url'] u, fields['user'] l, fields['password'] p, "
+                f"       argMax({self._SCHEME_EXPR}, ingested_at) s, "
+                "       argMax(archive_sha256, ingested_at) archive_sha256, "
+                "       argMax(victim_folder, ingested_at) victim_folder, "
+                "       max(ingested_at) ingested_at "
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp} "
+                "GROUP BY u, l, p "
                 "ORDER BY ingested_at DESC "
-                "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                "LIMIT {lim:UInt32} OFFSET {off:UInt32} "
+                "SETTINGS max_bytes_before_external_group_by = '1G', "
+                "         max_bytes_before_external_sort = '1G'",
                 parameters=params,
             )
         except Exception as exc:

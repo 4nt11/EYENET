@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """GET /v1/stealer/search — credential search over the ULP corpus (read:stealer).
 
-Substring search on host (ILIKE, parameterized), paginated. Returns full credential
+Substring search on host (host_canon LIKE, text-index-backed, parameterized),
+paginated. Returns full credential
 content — that's the point of the corpus, and read:stealer (an expiring clearance scope)
 is the gate. A corpus that's down is a 503.
 """
