@@ -19,10 +19,31 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+import tldextract
+
 from eyenet.stealer.clickhouse import (
     clickhouse_db,
     get_async_clickhouse_client,
 )
+
+
+def _domain_to_rev(raw: str) -> str | None:
+    """Label-reversed host IF ``raw`` is a real domain, else None.
+
+    'google.com' -> 'com.google', 'accounts.google.com' ->
+    'com.google.accounts'. None for a bare fragment ('oogle', 'paypal') with
+    no public suffix, which stays on the ngrams substring path. rev_host
+    (label-reversed host_canon) LEADS the credlist ORDER BY, so a domain term
+    becomes a primary-key SEEK -- and the ngrams index is useless for a domain
+    anyway: any term ending in a common TLD (the trigram 'com' is in nearly
+    every host) prunes ~nothing and scans the whole firehose.
+    See development/STEALER_SEARCH_REVHOST_KEYSET_SCOPE.md.
+    """
+    cleaned = raw.strip().lower().rstrip(".")
+    ext = tldextract.extract(cleaned)
+    if ext.suffix and ext.domain:
+        return ".".join(reversed(cleaned.split(".")))
+    return None
 
 # ClickHouse's error code for "table does not exist". Used to distinguish
 # "corpus not initialized yet" (no stealer channels collected from, so
@@ -237,32 +258,42 @@ class StealerCredsReader:
         if host and exact:
             host_filter = f" AND {host_expr} = {{host:String}}"
             params["host"] = host
+        elif host and (rev := _domain_to_rev(host)) is not None:
+            # A full domain is a rev_host primary-key SEEK on the credlist
+            # firehose, NOT an ngrams substring. Same predicate shape as the
+            # by-domain reader; the trailing-dot revdot stops 'cl.consaludX'
+            # from matching. The non-exact SELECT already displays host_expr
+            # but filters host_canon-derived columns, so rev_host (also
+            # host_canon-derived) is a basis-consistent swap.
+            host_filter = " AND (rev_host = {rev:String} OR startsWith(rev_host, {revdot:String}))"
+            params["rev"] = rev
+            params["revdot"] = rev + "."
         elif host:
-            # Substring search is served by the 26.x text index on the host_canon
-            # MATERIALIZED column (TYPE text, ngrams tokenizer). The index only
-            # applies when the predicate is on the column itself, not the coalesce
-            # expr -- so filter host_canon, not host_expr. host_canon is lower()ed
-            # at materialization, so lower the pattern and use case-sensitive LIKE.
-            # Measured ~13ms vs ~1.4s for the old ILIKE scan. See CH_NEW_SCHEMAS.md.
+            # Bare fragment, no public suffix: ngrams substring on host_canon.
+            # hasToken does NOT bind the ngrams index (silent full scan); LIKE
+            # does. host_canon is lower()ed at materialization.
             host_filter = " AND host_canon LIKE {pat:String}"
             params["pat"] = f"%{host.lower()}%"
         try:
             client = await self._c()
-            # v1.3.4.4: dropped FINAL. extracted_records is 100M rows x 11
-            # parts of ReplacingMergeTree; FINAL merged across all parts in
-            # memory to collapse reindex duplicates and took 58s on prod
-            # for a 200-row page. Without FINAL the same query is 750ms.
-            # DISTINCT replaces FINAL's dedup for the paged result: a
-            # cred's (host, url, login, password) tuple is identical across
-            # all reindex copies (by the identity tuple DDL), so DISTINCT
-            # post-filter returns at most one row per unique cred, which is
-            # what the operator sees.
+            # LIMIT 1 BY (dedup grain) + NO global ORDER BY: CH streams and
+            # STOPS as soon as it has `limit` distinct creds, instead of
+            # DISTINCT-materialising every matched row's fields Map in RAM (the
+            # old DISTINCT OOM'd at 3.7 GiB / 60-90s on google.com = 6.38M
+            # unique). Dedup grain (host,url,user,password) matches count_host's
+            # uniqHLL12 so the total and the list agree. Physical (rev_host/PK)
+            # order; for a single-domain search host is ~constant so the old
+            # ORDER BY h only forced a full materialisation.
+            # ponytail: OFFSET still re-streams from zero -> deep pages slow (not
+            # OOM). Keyset cursor pagination is the deep-page fix (Part C,
+            # development/STEALER_SEARCH_REVHOST_KEYSET_SCOPE.md).
             result = await client.query(
-                f"SELECT DISTINCT {host_expr} h, fields['url'] u, fields['user'] l, "  # noqa: S608  # nosec B608
+                f"SELECT {host_expr} h, fields['url'] u, fields['user'] l, "  # noqa: S608  # nosec B608
                 f"       fields['password'] p, {scheme_expr} s, {tld_expr} t "
                 f"FROM {self._db}.extracted_records "
                 f"WHERE {self._WHERE_ANY_URL}{host_filter} "
-                "ORDER BY h LIMIT {lim:UInt32} OFFSET {off:UInt32}",
+                f"LIMIT 1 BY ({host_expr}, fields['url'], fields['user'], fields['password']) "
+                "LIMIT {lim:UInt32} OFFSET {off:UInt32}",
                 parameters=params,
             )
             rows = result.result_rows
