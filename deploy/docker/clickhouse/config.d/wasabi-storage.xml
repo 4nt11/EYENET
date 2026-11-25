@@ -35,8 +35,11 @@
                 <type>cache</type>
                 <disk>wasabi_s3</disk>
                 <path>/var/lib/clickhouse/wasabi-cache/</path>
-                <!-- 10 GiB. Bump when the SSD has headroom + hot-set grows. -->
-                <max_size>10737418240</max_size>
+                <!-- 20 GiB. Raised from 10 GiB 2026-11-25 after reclaiming 50G
+                     of orphaned ulp-* extraction temp dirs. Kept at 20 (not
+                     higher) because the attachments blobs (~74G) still live on
+                     the same vda2 and need their own offload first. -->
+                <max_size>21474836480</max_size>
             </wasabi_cache>
         </disks>
 
