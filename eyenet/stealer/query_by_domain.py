@@ -486,11 +486,14 @@ class DomainCorpusReader:
                 f"       argMax({self._SCHEME_EXPR}, ingested_at) s, "
                 "       argMax(archive_sha256, ingested_at) archive_sha256, "
                 "       argMax(victim_folder, ingested_at) victim_folder, "
-                "       max(ingested_at) ingested_at "
+                # alias must NOT be `ingested_at`: the argMax(..., ingested_at)
+                # ordering columns would resolve to this aggregate alias and CH
+                # rejects an aggregate inside an aggregate (code 184).
+                "       max(ingested_at) last_ingested "
                 f"FROM {self._db}.extracted_records "  # nosec B608
                 f"WHERE family IN {{fams:Array(String)}} AND {hp} "
                 "GROUP BY u, l, p "
-                "ORDER BY ingested_at DESC "
+                "ORDER BY last_ingested DESC "
                 "LIMIT {lim:UInt32} OFFSET {off:UInt32} "
                 "SETTINGS max_bytes_before_external_group_by = '1G', "
                 "         max_bytes_before_external_sort = '1G'",
