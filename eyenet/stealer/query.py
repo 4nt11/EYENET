@@ -1054,6 +1054,11 @@ class StealerArtifactsReader:
             "stealer_info_yaml",
             "information_v29_shape",
             "software_corporate_marker",
+            # json_v2 pc_info.json machine-profile rules (lit up by the
+            # slash-less path_glob fix 13d2118); without these the System tab
+            # was empty for every victim whose profile is a pc_info.json.
+            "json_v2_pc_info",
+            "userinfo_json_v2_shape",
         ],
         "software": [
             "software_installed_list",
